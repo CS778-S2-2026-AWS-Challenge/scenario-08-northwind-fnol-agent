@@ -12,6 +12,7 @@ from backend.core.auth import Principal, require_staff
 from backend.core.errors import ApiError
 from backend.domain.assets import ClaimAssetSnapshotListResponse, project_snapshot
 from backend.domain.models import (
+    AbandonClaimRequest,
     AcceptHandoffRequest,
     AgentAction,
     CollaborationMutationResponse,
@@ -33,6 +34,7 @@ from backend.domain.models import (
     UpdateStaffActionRequest,
     WorkflowState,
 )
+from backend.domain.retention import StaffRetentionProjection
 from backend.domain.workbench import (
     WorkbenchClaimDetail,
     WorkbenchClaimFilterMetadata,
@@ -62,6 +64,7 @@ from backend.services.ownership import (
     decide_collaboration_request,
     requeue_claim,
 )
+from backend.services.retention import project_staff_retention
 from backend.services.review_writeback import (
     decide_review_signal,
     get_review_connected_workbench_detail,
@@ -77,7 +80,10 @@ from backend.services.staff_actions import (
     update_staff_action,
 )
 from backend.services.support import decode_cursor, encode_cursor
-from backend.services.terminal_claims import reopen_claim
+from backend.services.terminal_claims import (
+    abandon_incomplete_claim,
+    reopen_claim,
+)
 from backend.services.workbench import (
     get_workbench_claim_filter_metadata,
     list_workbench_claims,
@@ -209,6 +215,32 @@ def read_workbench_claim_filter_metadata(
     return get_workbench_claim_filter_metadata(principal)
 
 
+@router.get(
+    '/{claim_id}/retention',
+    response_model=StaffRetentionProjection,
+)
+def read_workbench_retention(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+) -> StaffRetentionProjection:
+    del principal
+
+    projection = project_staff_retention(
+        repository_for(request),
+        claim_id,
+    )
+
+    if projection is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The claim was not found.',
+        )
+
+    return projection
+
+
 @router.get('/{claim_id}', response_model=WorkbenchClaimDetail)
 def read_workbench_claim(
     claim_id: str,
@@ -245,6 +277,25 @@ def read_workbench_claim_asset_snapshots(
     page = PageInfo(next_cursor=encode_cursor(offset + len(records)) if has_more else None)
     return ClaimAssetSnapshotListResponse(
         items=[project_snapshot(item) for item in records], page=page
+    )
+
+
+@router.post('/{claim_id}/abandon', response_model=WorkbenchClaimDetail)
+def abandon_workbench_claim(
+    claim_id: str,
+    payload: AbandonClaimRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> WorkbenchClaimDetail:
+    return abandon_incomplete_claim(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
     )
 
 

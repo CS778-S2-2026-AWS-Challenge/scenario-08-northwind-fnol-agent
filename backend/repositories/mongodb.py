@@ -51,6 +51,19 @@ from backend.domain.external_services import (
     assert_result_matches_task,
     assert_task_transition_is_permitted,
 )
+from backend.domain.follow_up_execution import (
+    FollowUpContactWithdrawalRejected,
+    FollowUpDueExecutionRejected,
+    FollowUpExpiryExecutionRejected,
+    FollowUpStaffAbandonmentRejected,
+    reduce_due_follow_up,
+    reduce_expired_follow_up,
+    reduce_follow_up_contact_withdrawal,
+    reduce_follow_up_staff_abandonment,
+)
+from backend.domain.follow_up_migration import (
+    backfill_legacy_follow_up_record,
+)
 from backend.domain.message import (
     DuplicateClientMessage,
     order_messages,
@@ -72,13 +85,14 @@ from backend.domain.models import (
     EvidenceClaimLink,
     EvidenceRecord,
     FollowUpOperation,
+    FollowUpOperationStatus,
+    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
     MessageVisibility,
     MotorOtherDriverRecord,
-    RetentionOperation,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -86,6 +100,7 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     WorkingClaim,
+    assert_follow_up_operation_transition,
 )
 from backend.domain.realtime import (
     AgentTurnProgressPublication,
@@ -99,6 +114,37 @@ from backend.domain.realtime import (
     realtime_event_from_publication,
     realtime_publication_for,
     realtime_resources_for_records,
+)
+from backend.domain.retention import (
+    RETENTION_STORAGE_TARGETS,
+    RETENTION_TARGET_STORAGE_TYPE,
+    ResourceAccessClosed,
+    RetentionClassification,
+    RetentionCleanupTarget,
+    RetentionDatabaseStepError,
+    RetentionEligibilityReason,
+    RetentionEligibilityRejected,
+    RetentionHoldRecord,
+    RetentionOperation,
+    RetentionOperationStatus,
+    RetentionRecordTombstone,
+    RetentionStepEvidence,
+    RetentionStepStatus,
+    RetentionTargetFreezeReason,
+    RetentionTargetFreezeRejected,
+    RetentionTargetKind,
+    build_retention_cleanup_target,
+    retention_access_closed,
+    retention_candidate_after_step,
+    retention_next_attempt,
+    retention_record_identity,
+    retention_step_evidence_id,
+    retention_target_statuses,
+    retention_tombstone_authority,
+    validate_retention_eligibility_source,
+    validate_retention_hold_transition,
+    validate_retention_operation_transition,
+    validate_retention_source_authority,
 )
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
@@ -159,6 +205,7 @@ from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
     IdempotencyRecord,
+    RecoveryDeadlineConflict,
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
@@ -456,6 +503,55 @@ class MongoDBRepository:
             },
         )
         self._collection.create_index(
+            [('record_type', 1), ('operation_id', 1)],
+            unique=True,
+            name='follow_up_operation_id_unique',
+            partialFilterExpression={
+                'record_type': 'follow_up_operation'
+            },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('follow_up_id', 1),
+                ('sequence', 1),
+            ],
+            unique=True,
+            name='follow_up_operation_sequence_unique',
+            partialFilterExpression={
+                'record_type': 'follow_up_operation'
+            },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('due_at', 1),
+                ('follow_up_id', 1),
+            ],
+            name='follow_up_due_order',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': FollowUpStatus.PENDING.value,
+            },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('deadline_at', 1),
+                ('follow_up_id', 1),
+            ],
+            name='follow_up_deadline_order',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': {
+                    '$in': [
+                        FollowUpStatus.PENDING.value,
+                        FollowUpStatus.BLOCKED.value,
+                    ]
+                },
+            },
+        )
+        self._collection.create_index(
             [('record_type', 1), ('status', 1), ('due_at', 1), ('_id', 1)],
             name='follow_up_due_ordered',
             partialFilterExpression={
@@ -470,12 +566,6 @@ class MongoDBRepository:
                 'record_type': 'follow_up',
                 'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
             },
-        )
-        self._collection.create_index(
-            [('record_type', 1), ('follow_up_id', 1), ('sequence', 1)],
-            unique=True,
-            name='follow_up_operation_sequence_unique',
-            partialFilterExpression={'record_type': 'follow_up_operation'},
         )
         self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('updated_at', 1), ('_id', 1)],
@@ -522,6 +612,28 @@ class MongoDBRepository:
             )
         self._backfill_staff_search_projections()
 
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1)],
+            unique=True,
+            name='retention_operation_claim_unique',
+            partialFilterExpression={
+                'record_type': 'retention_operation',
+            },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('claim_id', 1),
+                ('released_at', 1),
+                ('applied_at', 1),
+                ('_id', 1),
+            ],
+            name='retention_hold_claim_state',
+            partialFilterExpression={
+                'record_type': 'retention_hold',
+            },
+        )
+
     def connection_status(self) -> str:
         try:
             self._client.admin.command('ping')
@@ -531,6 +643,1777 @@ class MongoDBRepository:
 
     def close(self) -> None:
         self._client.close()
+
+    def get_retention_operation(
+        self,
+        operation_id: str,
+    ) -> RetentionOperation | None:
+        return self._get(
+            'retention_operation',
+            operation_id,
+            RetentionOperation,
+        )
+
+    def get_retention_operation_for_claim(
+        self,
+        claim_id: str,
+    ) -> RetentionOperation | None:
+        document = self._collection.find_one(
+            {
+                'record_type': 'retention_operation',
+                'claim_id': claim_id,
+            }
+        )
+
+        return self._model_from_document(
+            document,
+            RetentionOperation,
+        )
+
+    def reserve_eligible_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> RetentionOperation:
+        """Atomically validate P17 retention authority and close claimant access."""
+
+        def reserve(
+            mongo_session: Any,
+        ) -> RetentionOperation:
+            existing_document = (
+                self._collection.find_one(
+                    {
+                        'record_type': (
+                            'retention_operation'
+                        ),
+                        'claim_id': operation.claim_id,
+                    },
+                    session=mongo_session,
+                )
+            )
+
+            existing = self._model_from_document(
+                existing_document,
+                RetentionOperation,
+            )
+
+            if existing is not None:
+                same_logical_operation = (
+                    existing.operation_id
+                    == operation.operation_id
+                    and existing.claim_id
+                    == operation.claim_id
+                    and existing.source_terminal_ref
+                    == operation.source_terminal_ref
+                    and existing.source_claim_revision
+                    == operation.source_claim_revision
+                    and existing.policy_id
+                    == operation.policy_id
+                    and existing.policy_version
+                    == operation.policy_version
+                    and existing.source_refs
+                    == operation.source_refs
+                )
+
+                if not same_logical_operation:
+                    raise IdempotencyConflict(
+                        operation.operation_id
+                    )
+
+                return existing
+
+            claim = self._get(
+                'claim',
+                operation.claim_id,
+                WorkingClaim,
+                session=mongo_session,
+            )
+
+            if claim is None:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.CLAIM_NOT_FOUND,
+                    operation.claim_id,
+                )
+
+            validate_retention_eligibility_source(
+                claim,
+                operation,
+            )
+
+            recovery_open = (
+                self._collection.find_one(
+                    {
+                        'record_type': (
+                            'follow_up_operation'
+                        ),
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'scheduled',
+                                'committed',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if recovery_open:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.RECOVERY_OPERATION_OPEN,
+                    operation.claim_id,
+                )
+
+            external_unknown = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'external_task',
+                        'claim_id': operation.claim_id,
+                        'status': 'unknown_outcome',
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if external_unknown:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.EXTERNAL_OUTCOME_UNKNOWN,
+                    operation.claim_id,
+                )
+
+            open_runtime_work = (
+                self._collection.find_one(
+                    {
+                        'record_type': (
+                            'runtime_work_item'
+                        ),
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'open',
+                                'in_progress',
+                            ]
+                        },
+                        'owner': {
+                            '$in': [
+                                'staff',
+                                'system',
+                                'external',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            open_handoff = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'handoff',
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'requested',
+                                'queued',
+                                'accepted',
+                                'in_progress',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if open_runtime_work or open_handoff:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.STAFF_RESPONSIBILITY_OPEN,
+                    operation.claim_id,
+                )
+
+            hold_documents = list(
+                self._collection.find(
+                    {
+                        'record_type': 'retention_hold',
+                        'claim_id': operation.claim_id,
+                        'released_at': None,
+                    },
+                    session=mongo_session,
+                )
+            )
+
+            active_hold_ids = sorted(
+                str(document['hold_id'])
+                for document in hold_documents
+            )
+
+            candidate = operation
+
+            if active_hold_ids:
+                payload = operation.model_dump(
+                    mode='python'
+                )
+                payload.update(
+                    {
+                        'status': (
+                            RetentionOperationStatus.HELD
+                        ),
+                        'hold_refs': sorted(
+                            set(operation.hold_refs).union(
+                                active_hold_ids
+                            )
+                        ),
+                    }
+                )
+                candidate = (
+                    RetentionOperation.model_validate(
+                        payload
+                    )
+                )
+
+            self._put(
+                'retention_operation',
+                candidate.operation_id,
+                candidate,
+                claim_id=candidate.claim_id,
+                session=mongo_session,
+            )
+
+            self._collection.update_many(
+                {
+                    'record_type': 'idempotency',
+                    'actor_id': claim.customer_id,
+                    'payload.claim_id': candidate.claim_id,
+                    'payload.retired': {
+                        '$ne': True,
+                    },
+                },
+                {
+                    '$set': {
+                        'payload.retired': True,
+                    }
+                },
+                session=mongo_session,
+            )
+
+            return candidate
+
+        return self._atomic(reserve)
+
+    def reserve_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> bool:
+        if (
+            operation.revision != 1
+            or operation.status
+            is not RetentionOperationStatus.RESERVED
+        ):
+            raise ValueError(
+                'Initial retention reservation must be revision 1 '
+                'and reserved.'
+            )
+
+        def persist(mongo_session: Any) -> bool:
+            document = self._collection.find_one(
+                {
+                    'record_type': 'retention_operation',
+                    'claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+
+            existing = self._model_from_document(
+                document,
+                RetentionOperation,
+            )
+
+            if existing is not None:
+                if (
+                    existing.operation_id
+                    == operation.operation_id
+                    and existing == operation
+                ):
+                    return False
+
+                raise IdempotencyConflict(
+                    operation.operation_id
+                )
+
+            self._put(
+                'retention_operation',
+                operation.operation_id,
+                operation,
+                claim_id=operation.claim_id,
+                session=mongo_session,
+            )
+
+            claim = self._get(
+                'claim',
+                operation.claim_id,
+                WorkingClaim,
+                session=mongo_session,
+            )
+
+            if claim is not None:
+                self._collection.update_many(
+                    {
+                        'record_type': 'idempotency',
+                        'actor_id': claim.customer_id,
+                        'payload.claim_id': operation.claim_id,
+                        'payload.retired': {'$ne': True},
+                    },
+                    {
+                        '$set': {
+                            'payload.retired': True,
+                        }
+                    },
+                    session=mongo_session,
+                )
+
+            return True
+
+        return self._atomic(persist)
+
+    def freeze_retention_targets(
+        self,
+        operation_id: str,
+        expected_revision: int,
+        *,
+        frozen_at: datetime,
+    ) -> RetentionOperation:
+        """Freeze the exact selected Mongo/object inventory in one transaction."""
+
+        def freeze(
+            mongo_session: Any,
+        ) -> RetentionOperation:
+            operation = self._get(
+                'retention_operation',
+                operation_id,
+                RetentionOperation,
+                session=mongo_session,
+            )
+
+            if operation is None:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.OPERATION_NOT_FOUND,
+                    operation_id,
+                )
+
+            if operation.revision != expected_revision:
+                raise RevisionConflict(operation.revision)
+
+            if operation.targets_frozen_at is not None:
+                return operation
+
+            claim = self._get(
+                'claim',
+                operation.claim_id,
+                WorkingClaim,
+                session=mongo_session,
+            )
+
+            if claim is None:
+                raise RetentionEligibilityRejected(
+                    RetentionEligibilityReason.CLAIM_NOT_FOUND,
+                    operation.claim_id,
+                )
+
+            validate_retention_source_authority(
+                claim,
+                operation,
+            )
+
+            if (
+                operation.status
+                not in {
+                    RetentionOperationStatus.RESERVED,
+                    RetentionOperationStatus.HELD,
+                }
+                or operation.targets
+                or operation.step_evidence
+                or operation.completed_at is not None
+            ):
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.INVALID_OPERATION_SHAPE,
+                    operation.claim_id,
+                )
+
+            active_hold = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'retention_hold',
+                        'claim_id': operation.claim_id,
+                        'released_at': None,
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if active_hold:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.ACTIVE_HOLD,
+                    operation.claim_id,
+                )
+
+            recovery_open = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'follow_up_operation',
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'scheduled',
+                                'committed',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if recovery_open:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.RECOVERY_OPERATION_OPEN,
+                    operation.claim_id,
+                )
+
+            external_unknown = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'external_task',
+                        'claim_id': operation.claim_id,
+                        'status': 'unknown_outcome',
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if external_unknown:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.EXTERNAL_OUTCOME_UNKNOWN,
+                    operation.claim_id,
+                )
+
+            open_work = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'runtime_work_item',
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'open',
+                                'in_progress',
+                            ]
+                        },
+                        'owner': {
+                            '$in': [
+                                'staff',
+                                'system',
+                                'external',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            open_handoff = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'handoff',
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'requested',
+                                'queued',
+                                'accepted',
+                                'in_progress',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if open_work or open_handoff:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.STAFF_RESPONSIBILITY_OPEN,
+                    operation.claim_id,
+                )
+
+            targets: dict[str, RetentionCleanupTarget] = {}
+
+            identifier_fields = {
+                'claim': 'claim_id',
+                'session': 'session_id',
+                'message': 'message_id',
+                'follow_up': 'follow_up_id',
+                'follow_up_operation': 'operation_id',
+                'runtime_work_item': 'work_item_id',
+                'handoff': 'handoff_id',
+                'evidence': 'evidence_id',
+                'external_task': 'task_id',
+                'external_task_request': 'request_id',
+                'external_task_attempt': 'attempt_id',
+                'external_task_result': 'result_id',
+                'retention_hold': 'hold_id',
+                'audit_event': 'event_id',
+            }
+
+            def add_target(
+                storage_type: str,
+                record_id: str,
+                *,
+                source_refs: tuple[str, ...] = (),
+            ) -> None:
+                selected = RETENTION_STORAGE_TARGETS.get(
+                    storage_type
+                )
+
+                if selected is None:
+                    raise RetentionTargetFreezeRejected(
+                        RetentionTargetFreezeReason.INVALID_RECORD_IDENTITY,
+                        operation.claim_id,
+                    )
+
+                logical_type, classification = selected
+
+                target = build_retention_cleanup_target(
+                    operation=operation,
+                    record_type=logical_type,
+                    record_id=record_id,
+                    classification=classification,
+                    source_refs=source_refs,
+                )
+
+                targets[target.target_id] = target
+
+            regular_storage_types = [
+                item
+                for item in RETENTION_STORAGE_TARGETS
+                if item
+                not in {
+                    'idempotency',
+                    'audit_event',
+                    'external_task_evidence_link',
+                }
+            ]
+
+            for storage_type in regular_storage_types:
+                field = identifier_fields.get(
+                    storage_type
+                )
+
+                if field is None:
+                    continue
+
+                documents = self._collection.find(
+                    {
+                        'record_type': storage_type,
+                        'claim_id': operation.claim_id,
+                    },
+                    session=mongo_session,
+                )
+
+                for document in documents:
+                    value = document.get(field)
+
+                    if not isinstance(value, str) or not value:
+                        raise RetentionTargetFreezeRejected(
+                            RetentionTargetFreezeReason.INVALID_RECORD_IDENTITY,
+                            operation.claim_id,
+                        )
+
+                    add_target(
+                        storage_type,
+                        value,
+                        source_refs=(
+                            f'{storage_type}:{value}',
+                        ),
+                    )
+
+                    if storage_type != 'evidence':
+                        continue
+
+                    provenance = document.get(
+                        'provenance'
+                    )
+
+                    if not isinstance(provenance, dict):
+                        continue
+
+                    storage_key = provenance.get(
+                        'storage_key'
+                    )
+
+                    if storage_key is None:
+                        continue
+
+                    if (
+                        not isinstance(storage_key, str)
+                        or not storage_key.strip()
+                    ):
+                        raise RetentionTargetFreezeRejected(
+                            RetentionTargetFreezeReason.INVALID_STORAGE_REFERENCE,
+                            operation.claim_id,
+                        )
+
+                    object_target = build_retention_cleanup_target(
+                        operation=operation,
+                        record_type='EvidenceObjectBytes',
+                        record_id=value,
+                        classification=RetentionClassification.DELETE,
+                        kind=RetentionTargetKind.OBJECT_BYTES,
+                        storage_key=storage_key,
+                        source_refs=(
+                            f'evidence:{value}',
+                        ),
+                    )
+
+                    targets[
+                        object_target.target_id
+                    ] = object_target
+
+            evidence_claim_links = self._collection.find(
+                {
+                    'record_type': 'evidence_claim_link',
+                    '$or': [
+                        {
+                            'source_claim_id': operation.claim_id,
+                        },
+                        {
+                            'target_claim_id': operation.claim_id,
+                        },
+                    ],
+                },
+                session=mongo_session,
+            )
+
+            for document in evidence_claim_links:
+                link_id = document.get('link_id')
+                evidence_id = document.get('evidence_id')
+                source_claim_id = document.get('source_claim_id')
+                target_claim_id = document.get('target_claim_id')
+
+                if (
+                    not isinstance(link_id, str)
+                    or not link_id
+                    or not isinstance(evidence_id, str)
+                    or not evidence_id
+                    or not isinstance(source_claim_id, str)
+                    or not source_claim_id
+                    or not isinstance(target_claim_id, str)
+                    or not target_claim_id
+                ):
+                    raise RetentionTargetFreezeRejected(
+                        RetentionTargetFreezeReason.INVALID_RECORD_IDENTITY,
+                        operation.claim_id,
+                    )
+
+                add_target(
+                    'evidence_claim_link',
+                    link_id,
+                    source_refs=(
+                        f'evidence:{evidence_id}',
+                        f'claim:{source_claim_id}',
+                        f'claim:{target_claim_id}',
+                    ),
+                )
+
+            external_links = self._collection.find(
+                {
+                    'record_type': 'external_task_evidence_link',
+                    'claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+
+            for document in external_links:
+                task_id = document.get('task_id')
+                evidence_id = document.get('evidence_id')
+
+                if (
+                    not isinstance(task_id, str)
+                    or not task_id
+                    or not isinstance(evidence_id, str)
+                    or not evidence_id
+                ):
+                    raise RetentionTargetFreezeRejected(
+                        RetentionTargetFreezeReason.INVALID_RECORD_IDENTITY,
+                        operation.claim_id,
+                    )
+
+                link_id = retention_record_identity(
+                    'external_link',
+                    task_id,
+                    evidence_id,
+                )
+
+                add_target(
+                    'external_task_evidence_link',
+                    link_id,
+                    source_refs=(
+                        f'external-task:{task_id}',
+                        f'evidence:{evidence_id}',
+                    ),
+                )
+
+            idempotency_documents = self._collection.find(
+                {
+                    'record_type': 'idempotency',
+                    'actor_id': claim.customer_id,
+                    'payload.claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+
+            for document in idempotency_documents:
+                actor_id = document.get('actor_id')
+                route = document.get('route')
+                key = document.get('key')
+
+                if (
+                    not isinstance(actor_id, str)
+                    or not actor_id
+                    or not isinstance(route, str)
+                    or not route
+                    or not isinstance(key, str)
+                    or not key
+                ):
+                    raise RetentionTargetFreezeRejected(
+                        RetentionTargetFreezeReason.INVALID_RECORD_IDENTITY,
+                        operation.claim_id,
+                    )
+
+                record_id = retention_record_identity(
+                    'idempotency',
+                    actor_id,
+                    route,
+                    key,
+                )
+
+                add_target(
+                    'idempotency',
+                    record_id,
+                    source_refs=(
+                        f'idempotency:{record_id}',
+                    ),
+                )
+
+            audit_documents = self._collection.find(
+                {
+                    'record_type': 'audit_event',
+                    'subject.claim_id': operation.claim_id,
+                },
+                session=mongo_session,
+            )
+
+            for document in audit_documents:
+                event_id = document.get('event_id')
+
+                if not isinstance(event_id, str) or not event_id:
+                    raise RetentionTargetFreezeRejected(
+                        RetentionTargetFreezeReason.INVALID_RECORD_IDENTITY,
+                        operation.claim_id,
+                    )
+
+                add_target(
+                    'audit_event',
+                    event_id,
+                    source_refs=(
+                        f'audit:{event_id}',
+                    ),
+                )
+
+            selected_targets = sorted(
+                targets.values(),
+                key=lambda target: (
+                    target.kind.value,
+                    target.record_type,
+                    target.record_id,
+                    target.target_id,
+                ),
+            )
+
+            if len(selected_targets) > 500:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.TARGET_LIMIT_EXCEEDED,
+                    operation.claim_id,
+                )
+
+            payload = operation.model_dump(
+                mode='python'
+            )
+            payload.update(
+                {
+                    'revision': operation.revision + 1,
+                    'status': RetentionOperationStatus.RESERVED,
+                    'targets_frozen_at': frozen_at,
+                    'targets': selected_targets,
+                    'updated_at': frozen_at,
+                    'completed_at': None,
+                }
+            )
+
+            candidate = RetentionOperation.model_validate(
+                payload
+            )
+
+            validate_retention_operation_transition(
+                operation,
+                candidate,
+            )
+
+            document = candidate.model_dump(
+                mode='json'
+            )
+            document.update(
+                {
+                    '_id': self._record_id(
+                        'retention_operation',
+                        candidate.operation_id,
+                    ),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': candidate.claim_id,
+                }
+            )
+
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'retention_operation',
+                    'revision': expected_revision,
+                },
+                document,
+                session=mongo_session,
+            )
+
+            if result.modified_count != 1:
+                latest = self._get(
+                    'retention_operation',
+                    operation_id,
+                    RetentionOperation,
+                    session=mongo_session,
+                )
+
+                if latest is None:
+                    raise KeyError(operation_id)
+
+                raise RevisionConflict(
+                    latest.revision
+                )
+
+            return candidate
+
+        return self._atomic(freeze)
+
+    def get_retention_tombstone(
+        self,
+        target_id: str,
+    ) -> RetentionRecordTombstone | None:
+        return self._get(
+            'retention_tombstone',
+            target_id,
+            RetentionRecordTombstone,
+        )
+
+    def record_retention_step_failure(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        status: RetentionStepStatus,
+        diagnostic_code: str,
+        now: datetime,
+    ) -> RetentionOperation:
+        def record(
+            mongo_session: Any,
+        ) -> RetentionOperation:
+            operation = self._get(
+                'retention_operation',
+                operation_id,
+                RetentionOperation,
+                session=mongo_session,
+            )
+
+            if operation is None:
+                raise KeyError(operation_id)
+
+            if operation.revision != expected_revision:
+                raise RevisionConflict(
+                    operation.revision
+                )
+
+            if status not in {
+                RetentionStepStatus.FAILED,
+                RetentionStepStatus.UNKNOWN,
+            }:
+                raise ValueError(
+                    'Retention failure evidence must be failed or unknown.'
+                )
+
+            target = next(
+                (
+                    item
+                    for item in operation.targets
+                    if item.target_id == target_id
+                ),
+                None,
+            )
+
+            if target is None:
+                raise KeyError(target_id)
+
+            if (
+                target.kind
+                is not RetentionTargetKind.MONGO_RECORD
+            ):
+                raise ValueError(
+                    'Database failure evidence requires a MONGO_RECORD target.'
+                )
+
+            statuses = retention_target_statuses(
+                operation.targets,
+                operation.step_evidence,
+            )
+
+            if (
+                statuses[target_id]
+                is RetentionStepStatus.SATISFIED
+            ):
+                return operation
+
+            attempt = retention_next_attempt(
+                operation,
+                target_id,
+            )
+
+            evidence = RetentionStepEvidence(
+                evidence_id=retention_step_evidence_id(
+                    operation.operation_id,
+                    target_id,
+                    attempt,
+                ),
+                target_id=target_id,
+                attempt=attempt,
+                status=status,
+                diagnostic_code=diagnostic_code,
+                source_refs=list(target.source_refs),
+                recorded_at=now,
+            )
+
+            candidate = retention_candidate_after_step(
+                operation,
+                evidence,
+                now=now,
+            )
+
+            validate_retention_operation_transition(
+                operation,
+                candidate,
+            )
+
+            document = candidate.model_dump(
+                mode='json'
+            )
+
+            document.update(
+                {
+                    '_id': self._record_id(
+                        'retention_operation',
+                        candidate.operation_id,
+                    ),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': candidate.claim_id,
+                }
+            )
+
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'retention_operation',
+                    'revision': expected_revision,
+                },
+                document,
+                session=mongo_session,
+            )
+
+            if result.modified_count != 1:
+                latest = self._get(
+                    'retention_operation',
+                    operation_id,
+                    RetentionOperation,
+                    session=mongo_session,
+                )
+
+                if latest is None:
+                    raise KeyError(operation_id)
+
+                raise RevisionConflict(
+                    latest.revision
+                )
+
+            return candidate
+
+        return self._atomic(record)
+
+    def apply_retention_record_target(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        now: datetime,
+    ) -> RetentionOperation:
+        """Mutate one database target and append evidence in the same transaction."""
+
+        def apply(
+            mongo_session: Any,
+        ) -> RetentionOperation:
+            operation = self._get(
+                'retention_operation',
+                operation_id,
+                RetentionOperation,
+                session=mongo_session,
+            )
+
+            if operation is None:
+                raise KeyError(operation_id)
+
+            if operation.revision != expected_revision:
+                raise RevisionConflict(
+                    operation.revision
+                )
+
+            if (
+                operation.status
+                is RetentionOperationStatus.COMPLETED
+            ):
+                return operation
+
+            active_hold = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'retention_hold',
+                        'claim_id': operation.claim_id,
+                        'released_at': None,
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if active_hold:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.ACTIVE_HOLD,
+                    operation.claim_id,
+                )
+
+            statuses = retention_target_statuses(
+                operation.targets,
+                operation.step_evidence,
+            )
+
+            target = next(
+                (
+                    item
+                    for item in operation.targets
+                    if item.target_id == target_id
+                ),
+                None,
+            )
+
+            if target is None:
+                raise KeyError(target_id)
+
+            if (
+                target.kind
+                is not RetentionTargetKind.MONGO_RECORD
+            ):
+                raise ValueError(
+                    'Database cleanup may execute only frozen MONGO_RECORD targets.'
+                )
+
+            if (
+                statuses[target.target_id]
+                is RetentionStepStatus.SATISFIED
+            ):
+                return operation
+
+            object_incomplete = any(
+                item.kind
+                is RetentionTargetKind.OBJECT_BYTES
+                and statuses[item.target_id]
+                is not RetentionStepStatus.SATISFIED
+                for item in operation.targets
+            )
+
+            if object_incomplete:
+                raise ValueError(
+                    'Database cleanup cannot begin before every object target is satisfied.'
+                )
+
+            recovery_open = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'follow_up_operation',
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'scheduled',
+                                'committed',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            external_unknown = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'external_task',
+                        'claim_id': operation.claim_id,
+                        'status': 'unknown_outcome',
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            staff_open = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'runtime_work_item',
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'open',
+                                'in_progress',
+                            ]
+                        },
+                        'owner': {
+                            '$in': [
+                                'staff',
+                                'system',
+                                'external',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            handoff_open = (
+                self._collection.find_one(
+                    {
+                        'record_type': 'handoff',
+                        'claim_id': operation.claim_id,
+                        'status': {
+                            '$in': [
+                                'requested',
+                                'queued',
+                                'accepted',
+                                'in_progress',
+                            ]
+                        },
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            )
+
+            if recovery_open:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.RECOVERY_OPERATION_OPEN,
+                    operation.claim_id,
+                )
+
+            if external_unknown:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.EXTERNAL_OUTCOME_UNKNOWN,
+                    operation.claim_id,
+                )
+
+            if staff_open or handoff_open:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.STAFF_RESPONSIBILITY_OPEN,
+                    operation.claim_id,
+                )
+
+            def source_query() -> dict[str, Any] | None:
+                storage_type = RETENTION_TARGET_STORAGE_TYPE.get(
+                    target.record_type
+                )
+
+                if storage_type is None:
+                    return None
+
+                identifier_fields = {
+                    'claim': 'claim_id',
+                    'session': 'session_id',
+                    'message': 'message_id',
+                    'follow_up': 'follow_up_id',
+                    'follow_up_operation': 'operation_id',
+                    'runtime_work_item': 'work_item_id',
+                    'handoff': 'handoff_id',
+                    'evidence': 'evidence_id',
+                    'external_task': 'task_id',
+                    'external_task_request': 'request_id',
+                    'external_task_attempt': 'attempt_id',
+                    'external_task_result': 'result_id',
+                    'retention_hold': 'hold_id',
+                    'audit_event': 'event_id',
+                }
+
+                if storage_type == 'evidence_claim_link':
+                    return {
+                        'record_type': storage_type,
+                        'link_id': target.record_id,
+                        '$or': [
+                            {
+                                'source_claim_id': operation.claim_id,
+                            },
+                            {
+                                'target_claim_id': operation.claim_id,
+                            },
+                        ],
+                    }
+
+                field = identifier_fields.get(
+                    storage_type
+                )
+
+                if field is None:
+                    return None
+
+                return {
+                    'record_type': storage_type,
+                    field: target.record_id,
+                    'claim_id': operation.claim_id,
+                }
+
+            source_document = None
+            idempotency_document = None
+            tombstone = self._get(
+                'retention_tombstone',
+                target.target_id,
+                RetentionRecordTombstone,
+                session=mongo_session,
+            )
+
+            if target.record_type == 'IdempotencyRecord':
+                documents = list(
+                    self._collection.find(
+                        {
+                            'record_type': 'idempotency',
+                            'payload.claim_id': operation.claim_id,
+                        },
+                        session=mongo_session,
+                    )
+                )
+
+                for document in documents:
+                    actor_id = document.get('actor_id')
+                    route = document.get('route')
+                    key = document.get('key')
+
+                    if (
+                        isinstance(actor_id, str)
+                        and actor_id
+                        and isinstance(route, str)
+                        and route
+                        and isinstance(key, str)
+                        and key
+                        and retention_record_identity(
+                            'idempotency',
+                            actor_id,
+                            route,
+                            key,
+                        )
+                        == target.record_id
+                    ):
+                        idempotency_document = document
+                        break
+            else:
+                query = source_query()
+
+                if query is not None:
+                    source_document = (
+                        self._collection.find_one(
+                            query,
+                            session=mongo_session,
+                        )
+                    )
+
+            step_status = (
+                RetentionStepStatus.SATISFIED
+            )
+            diagnostic_code = None
+            tombstone_candidate = None
+            sanitised_idempotency = None
+
+            if (
+                target.classification
+                is RetentionClassification.RETAIN
+            ):
+                if source_document is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'RETAINED_RECORD_MISSING'
+                    )
+
+            elif (
+                target.record_type
+                == 'IdempotencyRecord'
+            ):
+                if idempotency_document is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'IDEMPOTENCY_RECORD_MISSING'
+                    )
+                else:
+                    record = IdempotencyRecord(
+                        **idempotency_document['payload']
+                    )
+
+                    sanitised_idempotency = replace(
+                        record,
+                        message_id=None,
+                        agent_message_id=None,
+                        decision_id=None,
+                        runtime_trace_id=None,
+                        runtime_result_id=None,
+                        handoff_id=None,
+                        follow_up_id=None,
+                        action_registry_version=None,
+                        action_code=None,
+                        target_ref=None,
+                        staff_agent_session_id=None,
+                        staff_agent_message_id=None,
+                        staff_agent_draft_id=None,
+                        staff_agent_execution_id=None,
+                        message_turn_kind=None,
+                        message_turn_revision=None,
+                        response_payload=None,
+                        revision_before_message=None,
+                        confirmation_checkpoint=None,
+                        inbound_checkpoint=False,
+                        response_status=None,
+                        retired=True,
+                    )
+
+            elif (
+                target.classification
+                is RetentionClassification.DELETE
+            ):
+                if source_document is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'DELETE_SOURCE_RECORD_MISSING'
+                    )
+
+            elif target.classification in {
+                RetentionClassification.ANONYMISE,
+                RetentionClassification.TOMBSTONE,
+            }:
+                if tombstone is not None:
+                    if (
+                        tombstone.operation_id
+                        != operation.operation_id
+                        or tombstone.target_id
+                        != target.target_id
+                    ):
+                        raise IdempotencyConflict(
+                            target.target_id
+                        )
+                elif source_document is None:
+                    step_status = RetentionStepStatus.UNKNOWN
+                    diagnostic_code = (
+                        'ANONYMISE_SOURCE_RECORD_MISSING'
+                    )
+                else:
+                    payload = {
+                        key: value
+                        for key, value in source_document.items()
+                        if key
+                        not in {
+                            '_id',
+                            'record_type',
+                            'customer_id',
+                            'claim_id',
+                            'staff_search',
+                        }
+                    }
+
+                    tombstone_candidate = (
+                        RetentionRecordTombstone(
+                            tombstone_id=(
+                                'rts_'
+                                + target.target_id[4:]
+                            ),
+                            operation_id=operation.operation_id,
+                            target_id=target.target_id,
+                            claim_id=operation.claim_id,
+                            source_record_type=target.record_type,
+                            source_record_id=target.record_id,
+                            classification=target.classification,
+                            authority=retention_tombstone_authority(
+                                target.record_type,
+                                payload,
+                            ),
+                            source_refs=list(
+                                target.source_refs
+                            ),
+                            created_at=now,
+                        )
+                    )
+
+            else:
+                step_status = RetentionStepStatus.UNKNOWN
+                diagnostic_code = (
+                    'UNSUPPORTED_RETENTION_CLASSIFICATION'
+                )
+
+            attempt = retention_next_attempt(
+                operation,
+                target.target_id,
+            )
+
+            evidence = RetentionStepEvidence(
+                evidence_id=retention_step_evidence_id(
+                    operation.operation_id,
+                    target.target_id,
+                    attempt,
+                ),
+                target_id=target.target_id,
+                attempt=attempt,
+                status=step_status,
+                diagnostic_code=diagnostic_code,
+                source_refs=list(target.source_refs),
+                recorded_at=now,
+            )
+
+            candidate = retention_candidate_after_step(
+                operation,
+                evidence,
+                now=now,
+            )
+
+            validate_retention_operation_transition(
+                operation,
+                candidate,
+            )
+
+            if (
+                step_status
+                is RetentionStepStatus.SATISFIED
+            ):
+                if (
+                    sanitised_idempotency is not None
+                    and idempotency_document is not None
+                ):
+                    self._collection.update_one(
+                        {
+                            '_id': idempotency_document['_id'],
+                            'record_type': 'idempotency',
+                        },
+                        {
+                            '$set': {
+                                'payload': (
+                                    sanitised_idempotency.__dict__
+                                )
+                            }
+                        },
+                        session=mongo_session,
+                    )
+
+                elif (
+                    target.classification
+                    is RetentionClassification.DELETE
+                ):
+                    assert source_document is not None
+
+                    self._collection.delete_one(
+                        {
+                            '_id': source_document['_id'],
+                        },
+                        session=mongo_session,
+                    )
+
+                elif tombstone_candidate is not None:
+                    self._put(
+                        'retention_tombstone',
+                        target.target_id,
+                        tombstone_candidate,
+                        claim_id=operation.claim_id,
+                        session=mongo_session,
+                    )
+
+                    assert source_document is not None
+
+                    self._collection.delete_one(
+                        {
+                            '_id': source_document['_id'],
+                        },
+                        session=mongo_session,
+                    )
+
+            document = candidate.model_dump(
+                mode='json'
+            )
+
+            document.update(
+                {
+                    '_id': self._record_id(
+                        'retention_operation',
+                        candidate.operation_id,
+                    ),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': candidate.claim_id,
+                }
+            )
+
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'retention_operation',
+                    'revision': expected_revision,
+                },
+                document,
+                session=mongo_session,
+            )
+
+            if result.modified_count != 1:
+                latest = self._get(
+                    'retention_operation',
+                    operation_id,
+                    RetentionOperation,
+                    session=mongo_session,
+                )
+
+                if latest is None:
+                    raise KeyError(operation_id)
+
+                raise RevisionConflict(
+                    latest.revision
+                )
+
+            return candidate
+
+        try:
+            return self._atomic(apply)
+        except PyMongoError as error:
+            raise RetentionDatabaseStepError(
+                target_id,
+                commit_unknown=True,
+                diagnostic_code='DATABASE_TRANSACTION_UNKNOWN',
+            ) from error
+
+    def save_retention_operation(
+        self,
+        operation: RetentionOperation,
+        expected_revision: int,
+    ) -> None:
+        def persist(mongo_session: Any) -> None:
+            current = self._get(
+                'retention_operation',
+                operation.operation_id,
+                RetentionOperation,
+                session=mongo_session,
+            )
+
+            if current is None:
+                raise KeyError(operation.operation_id)
+
+            if current == operation:
+                return
+
+            if current.revision != expected_revision:
+                raise RevisionConflict(current.revision)
+
+            validate_retention_operation_transition(
+                current,
+                operation,
+            )
+
+            document = operation.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id(
+                        'retention_operation',
+                        operation.operation_id,
+                    ),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': operation.claim_id,
+                }
+            )
+
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'retention_operation',
+                    'claim_id': operation.claim_id,
+                    'revision': expected_revision,
+                },
+                document,
+                session=mongo_session,
+            )
+
+            if result.matched_count != 1:
+                latest = self._get(
+                    'retention_operation',
+                    operation.operation_id,
+                    RetentionOperation,
+                    session=mongo_session,
+                )
+
+                if latest is None:
+                    raise KeyError(operation.operation_id)
+
+                if latest == operation:
+                    return
+
+                raise RevisionConflict(latest.revision)
+
+        self._atomic(persist)
+
+    def save_retention_hold(
+        self,
+        hold: RetentionHoldRecord,
+    ) -> None:
+        def persist(mongo_session: Any) -> None:
+            current = self._get(
+                'retention_hold',
+                hold.hold_id,
+                RetentionHoldRecord,
+                session=mongo_session,
+            )
+
+            if current is None:
+                if hold.released_at is not None:
+                    raise ValueError(
+                        'A retention hold must be persisted before release.'
+                    )
+
+                self._put(
+                    'retention_hold',
+                    hold.hold_id,
+                    hold,
+                    claim_id=hold.claim_id,
+                    session=mongo_session,
+                )
+                return
+
+            if current == hold:
+                return
+
+            validate_retention_hold_transition(
+                current,
+                hold,
+            )
+
+            document = hold.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id(
+                        'retention_hold',
+                        hold.hold_id,
+                    ),
+                    'record_type': 'retention_hold',
+                    'customer_id': None,
+                    'claim_id': hold.claim_id,
+                }
+            )
+
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'retention_hold',
+                    'claim_id': hold.claim_id,
+                    'released_at': (
+                        current.model_dump(
+                            mode='json'
+                        )['released_at']
+                    ),
+                },
+                document,
+                session=mongo_session,
+            )
+
+            if result.matched_count != 1:
+                latest = self._get(
+                    'retention_hold',
+                    hold.hold_id,
+                    RetentionHoldRecord,
+                    session=mongo_session,
+                )
+
+                if latest == hold:
+                    return
+
+                raise IdempotencyConflict(
+                    hold.hold_id
+                )
+
+        self._atomic(persist)
+
+    def list_retention_holds(
+        self,
+        claim_id: str,
+    ) -> list[RetentionHoldRecord]:
+        documents = self._collection.find(
+            {
+                'record_type': 'retention_hold',
+                'claim_id': claim_id,
+            }
+        ).sort(
+            [
+                ('applied_at', 1),
+                ('_id', 1),
+            ]
+        )
+
+        return [
+            hold
+            for hold in (
+                self._model_from_document(
+                    document,
+                    RetentionHoldRecord,
+                )
+                for document in documents
+            )
+            if hold is not None
+        ]
 
     def append_realtime_publication(
         self,
@@ -1878,14 +3761,116 @@ class MongoDBRepository:
             mongo_session=mongo_session,
         )
 
-    def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
-        return self._get('claim', claim_id, WorkingClaim, customer_id=customer_id)
+    def _claim_access_closed(
+        self,
+        claim_id: str,
+        *,
+        mongo_session: Any = None,
+    ) -> bool:
+        document = self._collection.find_one(
+            {
+                'record_type': 'retention_operation',
+                'claim_id': claim_id,
+            },
+            projection={'_id': 1},
+            session=mongo_session,
+        )
+
+        return document is not None
+
+    def claimant_resource_access_open(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> bool:
+        claim = self._get(
+            'claim',
+            claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+        )
+
+        return (
+            claim is not None
+            and not self._claim_access_closed(claim_id)
+        )
+
+    def _ensure_claim_access_open(
+        self,
+        claim_id: str,
+        *,
+        mongo_session: Any,
+    ) -> None:
+        if self._claim_access_closed(
+            claim_id,
+            mongo_session=mongo_session,
+        ):
+            raise ResourceAccessClosed(claim_id)
+
+    def _claimant_actor_access_closed(
+        self,
+        claim_id: str,
+        actor_id: str,
+        *,
+        mongo_session: Any = None,
+    ) -> bool:
+        claim = self._get(
+            'claim',
+            claim_id,
+            WorkingClaim,
+            session=mongo_session,
+        )
+
+        return (
+            claim is not None
+            and claim.customer_id == actor_id
+            and self._claim_access_closed(
+                claim_id,
+                mongo_session=mongo_session,
+            )
+        )
+
+    def get_claim(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> WorkingClaim | None:
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
+            return None
+
+        return self._get(
+            'claim',
+            claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+        )
+
 
     def get_claim_internal(self, claim_id: str) -> WorkingClaim | None:
         return self._get('claim', claim_id, WorkingClaim)
 
-    def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
-        return self._list('claim', WorkingClaim, {'customer_id': customer_id}, '-updated_at')
+    def list_claims_for_customer(
+        self,
+        customer_id: str,
+    ) -> list[WorkingClaim]:
+        claims = self._list(
+            'claim',
+            WorkingClaim,
+            {'customer_id': customer_id},
+            '-updated_at',
+        )
+
+        return [
+            claim
+            for claim in claims
+            if not self._claim_access_closed(
+                claim.claim_id
+            )
+        ]
+
 
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
@@ -1958,6 +3943,10 @@ class MongoDBRepository:
         customer_id: str,
         mongo_session: Any,
     ) -> WorkingClaim | None:
+        self._ensure_claim_access_open(
+            claim_id,
+            mongo_session=mongo_session,
+        )
         claim = self._get(
             'claim',
             claim_id,
@@ -2222,8 +4211,26 @@ class MongoDBRepository:
         session_id: str,
         customer_id: str,
     ) -> SessionRecord | None:
-        record = self._get('session', session_id, SessionRecord, customer_id=customer_id)
-        return record if record is not None and record.claim_id == claim_id else None
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
+            return None
+
+        record = self._get(
+            'session',
+            session_id,
+            SessionRecord,
+            customer_id=customer_id,
+        )
+
+        return (
+            record
+            if record is not None
+            and record.claim_id == claim_id
+            else None
+        )
+
 
     def save_session(self, session: SessionRecord) -> None:
         if self.get_claim(session.claim_id, session.customer_id) is None:
@@ -2243,30 +4250,1180 @@ class MongoDBRepository:
         follow_up_id: str,
         customer_id: str,
     ) -> FollowUpRecord | None:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
+
         record = self._get(
             'follow_up',
             follow_up_id,
             FollowUpRecord,
             customer_id=customer_id,
         )
-        if record is None or record.claim_id != claim_id:
+
+        if (
+            record is None
+            or record.claim_id != claim_id
+        ):
             return None
+
         return record
+
 
     def list_follow_ups(
         self,
         claim_id: str,
         customer_id: str,
     ) -> list[FollowUpRecord]:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return []
+
         return self._list(
             'follow_up',
             FollowUpRecord,
-            {'claim_id': claim_id, 'customer_id': customer_id},
+            {
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+            },
             'created_at',
+        )
+
+
+    def backfill_incomplete_claim_recovery(
+        self,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> tuple[int, int]:
+        migration_time = recorded_at or datetime.now(UTC)
+
+        if migration_time.tzinfo is None:
+            raise ValueError(
+                'Backfill audit time must be timezone-aware.'
+            )
+
+        candidates = list(
+            self._collection.find(
+                {
+                    'record_type': 'follow_up',
+                    'status': {
+                        '$in': [
+                            FollowUpStatus.PENDING.value,
+                            FollowUpStatus.BLOCKED.value,
+                        ]
+                    },
+                    '$or': [
+                        {'policy_id': {'$exists': False}},
+                        {'policy_version': {'$exists': False}},
+                        {'deadline_at': {'$exists': False}},
+                        {'reason_code': {'$exists': False}},
+                    ],
+                },
+                projection={'_id': 1},
+            )
+        )
+
+        bound_count = 0
+        failed_count = 0
+
+        for candidate in candidates:
+            record_id_value = candidate.get('_id')
+
+            if not isinstance(record_id_value, str):
+                continue
+
+            record_id: str = record_id_value
+
+            def persist_record(
+                mongo_session: Any,
+                *,
+                target_record_id: str = record_id,
+            ) -> str:
+                return self._backfill_incomplete_claim_recovery_record(
+                    target_record_id,
+                    migration_time,
+                    mongo_session,
+                )
+
+            outcome = self._atomic(persist_record)
+
+            if outcome == 'bound':
+                bound_count += 1
+            elif outcome == 'failed':
+                failed_count += 1
+
+        return bound_count, failed_count
+
+    def _backfill_incomplete_claim_recovery_record(
+        self,
+        record_id: str,
+        recorded_at: datetime,
+        mongo_session: Any,
+    ) -> str:
+        document = self._collection.find_one(
+            {
+                '_id': record_id,
+                'record_type': 'follow_up',
+            },
+            session=mongo_session,
+        )
+
+        follow_up = self._model_from_document(
+            document,
+            FollowUpRecord,
+        )
+
+        if follow_up is None or document is None:
+            return 'noop'
+
+        customer_id = document.get('customer_id')
+
+        if not isinstance(customer_id, str):
+            source_session = None
+        else:
+            source_session = self._get(
+                'session',
+                follow_up.source_session_id,
+                SessionRecord,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+
+        decision = backfill_legacy_follow_up_record(
+            follow_up,
+            source_session,
+            recorded_at=recorded_at,
+        )
+
+        if decision.outcome == 'noop':
+            return 'noop'
+
+        assert decision.audit_event is not None
+
+        migrated = {
+            **decision.record.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'follow_up',
+            'customer_id': document.get('customer_id'),
+            'claim_id': follow_up.claim_id,
+        }
+
+        result = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'follow_up',
+                'customer_id': document.get('customer_id'),
+                'claim_id': follow_up.claim_id,
+            },
+            migrated,
+            session=mongo_session,
+        )
+
+        if result.matched_count != 1:
+            raise IdempotencyConflict(
+                follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            decision.audit_event,
+            mongo_session=mongo_session,
+        )
+
+        return decision.outcome
+
+    def commit_recovery_staff_abandonment(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_recovery_staff_abandonment(
+                expected_claim_revision,
+                expected_follow_up,
+                updated_claim,
+                updated_follow_up,
+                reconciled_operation,
+                customer_id,
+                idempotency,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_recovery_staff_abandonment(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        if claim.revision != expected_claim_revision:
+            raise RevisionConflict(claim.revision)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._reject_existing_idempotency(
+            idempotency,
+            mongo_session=mongo_session,
+        )
+
+        documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': claim.claim_id,
+                'follow_up_id': current_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+
+        operations = sorted(
+            (
+                operation
+                for document in documents
+                if (
+                    operation := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda operation: (
+                operation.sequence,
+                operation.operation_id,
+            ),
+        )
+
+        terminal = updated_claim.terminal_disposition
+        if terminal is None:
+            raise KeyError(claim.claim_id)
+
+        try:
+            transition = reduce_follow_up_staff_abandonment(
+                claim,
+                source_session,
+                current_follow_up,
+                operations,
+                terminal.recorded_at,
+                terminal.recorded_by,
+            )
+        except FollowUpStaffAbandonmentRejected as error:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            ) from error
+
+        if (
+            transition.claim != updated_claim
+            or transition.follow_up != updated_follow_up
+            or transition.reconciled_operation
+            != reconciled_operation
+        ):
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        prepared_audit = self._prepare_audit_events(
+            updated_claim,
+            (audit_event,),
+            mongo_session=mongo_session,
+        )
+
+        if reconciled_operation is not None:
+            stored_operation = next(
+                (
+                    operation
+                    for operation in operations
+                    if operation.operation_id
+                    == reconciled_operation.operation_id
+                ),
+                None,
+            )
+
+            if stored_operation is None:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_operation,
+                    reconciled_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                ) from error
+
+            operation_result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                    'status': stored_operation.status.value,
+                },
+                {
+                    **reconciled_operation.model_dump(mode='json'),
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        reconciled_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                },
+                session=mongo_session,
+            )
+
+            if operation_result.matched_count != 1:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+        claim_result = self._collection.replace_one(
+            {
+                '_id': self._record_id('claim', claim.claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'revision': expected_claim_revision,
+            },
+            {
+                **updated_claim.model_dump(mode='json'),
+                '_id': self._record_id('claim', updated_claim.claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'claim_id': updated_claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if claim_result.matched_count != 1:
+            raise RevisionConflict(expected_claim_revision)
+
+        follow_up_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    current_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+                'status': current_follow_up.status.value,
+                'attempt_count': current_follow_up.attempt_count,
+            },
+            {
+                **updated_follow_up.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up',
+                    updated_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if follow_up_result.matched_count != 1:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._save_idempotency(
+            idempotency,
+            mongo_session,
+        )
+
+        for event in prepared_audit:
+            self._insert_audit_event(
+                event,
+                mongo_session=mongo_session,
+            )
+
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
+            updated_claim,
+            mongo_session=mongo_session,
+            operation_correlation=idempotency.key,
+        )
+
+    def commit_follow_up_contact_withdrawal(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_follow_up_contact_withdrawal(
+                expected_claim_revision,
+                expected_follow_up,
+                updated_follow_up,
+                reconciled_operation,
+                customer_id,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_follow_up_contact_withdrawal(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        if claim.revision != expected_claim_revision:
+            raise RevisionConflict(claim.revision)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(
+                expected_follow_up.follow_up_id
+            )
+
+        documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': claim.claim_id,
+                'follow_up_id': current_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+
+        operations = sorted(
+            (
+                operation
+                for document in documents
+                if (
+                    operation := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda operation: (
+                operation.sequence,
+                operation.operation_id,
+            ),
+        )
+
+        try:
+            transition = reduce_follow_up_contact_withdrawal(
+                claim,
+                source_session,
+                current_follow_up,
+                operations,
+                updated_follow_up.updated_at,
+            )
+        except FollowUpContactWithdrawalRejected as error:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            ) from error
+
+        if (
+            transition.follow_up != updated_follow_up
+            or transition.reconciled_operation
+            != reconciled_operation
+        ):
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._ensure_new_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        if reconciled_operation is not None:
+            stored_operation = next(
+                (
+                    operation
+                    for operation in operations
+                    if operation.operation_id
+                    == reconciled_operation.operation_id
+                ),
+                None,
+            )
+            if stored_operation is None:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_operation,
+                    reconciled_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                ) from error
+
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                    'status': stored_operation.status.value,
+                },
+                {
+                    **reconciled_operation.model_dump(mode='json'),
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        reconciled_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                },
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+        result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    current_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+                'status': current_follow_up.status.value,
+                'attempt_count': current_follow_up.attempt_count,
+            },
+            {
+                **updated_follow_up.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up',
+                    updated_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if result.matched_count != 1:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
+            claim,
+            mongo_session=mongo_session,
+            operation_correlation=(
+                f'follow-up-contact:{updated_follow_up.follow_up_id}'
+            ),
+        )
+
+    def commit_recovery_expiry(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_recovery_expiry(
+                expected_claim_revision,
+                expected_follow_up,
+                updated_claim,
+                updated_follow_up,
+                reconciled_operation,
+                customer_id,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_recovery_expiry(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        if claim.revision != expected_claim_revision:
+            raise RevisionConflict(claim.revision)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(
+                expected_follow_up.follow_up_id
+            )
+
+        documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': claim.claim_id,
+                'follow_up_id': current_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+        operations = sorted(
+            (
+                operation
+                for document in documents
+                if (
+                    operation := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda operation: (
+                operation.sequence,
+                operation.operation_id,
+            ),
+        )
+
+        terminal = updated_claim.terminal_disposition
+        if terminal is None:
+            raise KeyError(claim.claim_id)
+
+        try:
+            transition = reduce_expired_follow_up(
+                claim,
+                source_session,
+                current_follow_up,
+                operations,
+                terminal.recorded_at,
+            )
+        except FollowUpExpiryExecutionRejected as error:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            ) from error
+
+        if (
+            transition.claim != updated_claim
+            or transition.follow_up != updated_follow_up
+            or transition.reconciled_operation
+            != reconciled_operation
+        ):
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._ensure_new_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        if reconciled_operation is not None:
+            stored_operation = next(
+                (
+                    operation
+                    for operation in operations
+                    if operation.operation_id
+                    == reconciled_operation.operation_id
+                ),
+                None,
+            )
+            if stored_operation is None:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_operation,
+                    reconciled_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                ) from error
+
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                    'status': stored_operation.status.value,
+                },
+                {
+                    **reconciled_operation.model_dump(mode='json'),
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        reconciled_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                },
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+        claim_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'claim',
+                    claim.claim_id,
+                ),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'revision': expected_claim_revision,
+            },
+            {
+                **updated_claim.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'claim',
+                    updated_claim.claim_id,
+                ),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'claim_id': updated_claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if claim_result.matched_count != 1:
+            raise RevisionConflict(expected_claim_revision)
+
+        follow_up_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    current_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+                'status': current_follow_up.status.value,
+                'attempt_count': current_follow_up.attempt_count,
+            },
+            {
+                **updated_follow_up.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up',
+                    updated_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if follow_up_result.matched_count != 1:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
+            updated_claim,
+            mongo_session=mongo_session,
+            operation_correlation=(
+                f'recovery-expiry:{updated_follow_up.follow_up_id}'
+            ),
+        )
+
+    def commit_due_follow_up_attempt(
+        self,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        operation: FollowUpOperation,
+        settled_previous_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_due_follow_up_attempt(
+                expected_follow_up,
+                updated_follow_up,
+                operation,
+                settled_previous_operation,
+                customer_id,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_due_follow_up_attempt(
+        self,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        operation: FollowUpOperation,
+        settled_previous_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        existing_operation = self._get(
+            'follow_up_operation',
+            operation.operation_id,
+            FollowUpOperation,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if existing_operation is not None:
+            if (
+                existing_operation == operation
+                and current_follow_up.attempt_count
+                >= updated_follow_up.attempt_count
+                and current_follow_up.updated_at
+                >= updated_follow_up.updated_at
+            ):
+                return
+            raise IdempotencyConflict(operation.operation_id)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(expected_follow_up.follow_up_id)
+
+        prior_documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': expected_follow_up.claim_id,
+                'follow_up_id': expected_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+        prior_operations = sorted(
+            (
+                stored
+                for document in prior_documents
+                if (
+                    stored := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda stored: (
+                stored.sequence,
+                stored.operation_id,
+            ),
+        )
+
+        committed_at = operation.committed_at
+        if committed_at is None:
+            raise IdempotencyConflict(operation.operation_id)
+
+        try:
+            transition = reduce_due_follow_up(
+                claim,
+                source_session,
+                current_follow_up,
+                prior_operations,
+                committed_at,
+            )
+        except FollowUpDueExecutionRejected as error:
+            raise IdempotencyConflict(
+                operation.operation_id
+            ) from error
+
+        if (
+            transition.operation != operation
+            or transition.follow_up != updated_follow_up
+            or transition.settled_previous_operation
+            != settled_previous_operation
+        ):
+            raise IdempotencyConflict(operation.operation_id)
+
+        self._ensure_new_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        if settled_previous_operation is not None:
+            stored_previous = next(
+                (
+                    stored
+                    for stored in prior_operations
+                    if stored.operation_id
+                    == settled_previous_operation.operation_id
+                ),
+                None,
+            )
+            if stored_previous is None:
+                raise IdempotencyConflict(
+                    settled_previous_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_previous,
+                    settled_previous_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    settled_previous_operation.operation_id
+                ) from error
+
+            previous_document = {
+                **settled_previous_operation.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up_operation',
+                    settled_previous_operation.operation_id,
+                ),
+                'record_type': 'follow_up_operation',
+                'customer_id': customer_id,
+                'claim_id': settled_previous_operation.claim_id,
+            }
+
+            previous_result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_previous.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': stored_previous.claim_id,
+                    'status': stored_previous.status.value,
+                },
+                previous_document,
+                session=mongo_session,
+            )
+            if previous_result.matched_count != 1:
+                raise IdempotencyConflict(
+                    settled_previous_operation.operation_id
+                )
+
+        operation_document = {
+            **operation.model_dump(mode='json'),
+            '_id': self._record_id(
+                'follow_up_operation',
+                operation.operation_id,
+            ),
+            'record_type': 'follow_up_operation',
+            'customer_id': customer_id,
+            'claim_id': operation.claim_id,
+        }
+
+        try:
+            self._collection.insert_one(
+                operation_document,
+                session=mongo_session,
+            )
+        except DuplicateKeyError as error:
+            raise IdempotencyConflict(
+                operation.operation_id
+            ) from error
+
+        expected_payload = expected_follow_up.model_dump(mode='json')
+        updated_document = {
+            **updated_follow_up.model_dump(mode='json'),
+            '_id': self._record_id(
+                'follow_up',
+                updated_follow_up.follow_up_id,
+            ),
+            'record_type': 'follow_up',
+            'customer_id': customer_id,
+            'claim_id': updated_follow_up.claim_id,
+        }
+
+        follow_up_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    expected_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': expected_follow_up.claim_id,
+                'status': expected_follow_up.status.value,
+                'attempt_count': expected_follow_up.attempt_count,
+                'updated_at': expected_payload['updated_at'],
+            },
+            updated_document,
+            session=mongo_session,
+        )
+
+        if follow_up_result.matched_count != 1:
+            raise IdempotencyConflict(
+                expected_follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
         )
 
     def list_due_follow_ups(
@@ -2274,131 +5431,431 @@ class MongoDBRepository:
         due_before: datetime,
         *,
         limit: int,
-        cursor: tuple[datetime, str] | None = None,
-    ) -> list[FollowUpRecord]:
-        if limit < 1:
-            raise ValueError('Follow-up query limit must be positive.')
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        from backend.repositories.pagination import (
+            FOLLOW_UP_DISCOVERY_MAX_LIMIT,
+            FollowUpDiscoveryCursor,
+            decode_follow_up_discovery_cursor,
+            encode_follow_up_discovery_cursor,
+            repository_datetime_value,
+        )
+
+        if due_before.tzinfo is None:
+            raise ValueError(
+                'Follow-up discovery boundary must be timezone-aware.'
+            )
+        if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
+            raise ValueError(
+                'Follow-up discovery limit must be between '
+                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+            )
+
+        after = (
+            decode_follow_up_discovery_cursor(
+                cursor,
+                scope='due',
+                boundary=due_before,
+            )
+            if cursor is not None
+            else None
+        )
+
+        boundary = repository_datetime_value(due_before)
+
         query: dict[str, Any] = {
             'record_type': 'follow_up',
             'status': FollowUpStatus.PENDING.value,
-            'due_at': {'$lte': self._audit_timestamp(due_before)},
+            'due_at': {'$lte': boundary},
+            'deadline_at': {'$gt': boundary},
         }
-        if cursor is not None:
+
+        if after is not None:
+            ordered_at = repository_datetime_value(
+                after.ordered_at
+            )
             query['$or'] = [
                 {
                     'due_at': {
-                        '$gt': self._audit_timestamp(cursor[0]),
-                        '$lte': self._audit_timestamp(due_before),
+                        '$gt': ordered_at,
+                        '$lte': boundary,
                     }
                 },
                 {
-                    'due_at': self._audit_timestamp(cursor[0]),
-                    '_id': {'$gt': self._record_id('follow_up', cursor[1])},
+                    'due_at': ordered_at,
+                    'follow_up_id': {
+                        '$gt': after.follow_up_id,
+                    },
                 },
             ]
-        records = []
-        for document in self._collection.find(query).sort([('due_at', 1), ('_id', 1)]).limit(limit):
-            record = self._model_from_document(document, FollowUpRecord)
-            if record is not None:
-                records.append(record)
-        return records
+
+        documents = (
+            self._collection.find(query)
+            .sort([
+                ('due_at', 1),
+                ('follow_up_id', 1),
+            ])
+            .limit(limit + 1)
+        )
+
+        records = [
+            record
+            for document in documents
+            if (
+                record := self._model_from_document(
+                    document,
+                    FollowUpRecord,
+                )
+            )
+            is not None
+        ]
+
+        selected = records[:limit]
+        next_cursor = None
+
+        if len(records) > limit:
+            final = selected[-1]
+            assert final.due_at is not None
+
+            next_cursor = encode_follow_up_discovery_cursor(
+                FollowUpDiscoveryCursor(
+                    scope='due',
+                    boundary=due_before,
+                    ordered_at=final.due_at,
+                    follow_up_id=final.follow_up_id,
+                )
+            )
+
+        return selected, next_cursor
 
     def list_expiring_follow_ups(
         self,
         deadline_before: datetime,
         *,
         limit: int,
-        cursor: tuple[datetime, str] | None = None,
-    ) -> list[FollowUpRecord]:
-        if limit < 1:
-            raise ValueError('Follow-up query limit must be positive.')
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        from backend.repositories.pagination import (
+            FOLLOW_UP_DISCOVERY_MAX_LIMIT,
+            FollowUpDiscoveryCursor,
+            decode_follow_up_discovery_cursor,
+            encode_follow_up_discovery_cursor,
+            repository_datetime_value,
+        )
+
+        if deadline_before.tzinfo is None:
+            raise ValueError(
+                'Follow-up discovery boundary must be timezone-aware.'
+            )
+        if not 1 <= limit <= FOLLOW_UP_DISCOVERY_MAX_LIMIT:
+            raise ValueError(
+                'Follow-up discovery limit must be between '
+                f'1 and {FOLLOW_UP_DISCOVERY_MAX_LIMIT}.'
+            )
+
+        after = (
+            decode_follow_up_discovery_cursor(
+                cursor,
+                scope='deadline',
+                boundary=deadline_before,
+            )
+            if cursor is not None
+            else None
+        )
+
+        boundary = repository_datetime_value(deadline_before)
+
         query: dict[str, Any] = {
             'record_type': 'follow_up',
-            'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
-            'deadline_at': {'$lte': self._audit_timestamp(deadline_before)},
+            'status': {
+                '$in': [
+                    FollowUpStatus.PENDING.value,
+                    FollowUpStatus.BLOCKED.value,
+                ]
+            },
+            'deadline_at': {'$lte': boundary},
         }
-        if cursor is not None:
+
+        if after is not None:
+            ordered_at = repository_datetime_value(
+                after.ordered_at
+            )
             query['$or'] = [
                 {
                     'deadline_at': {
-                        '$gt': self._audit_timestamp(cursor[0]),
-                        '$lte': self._audit_timestamp(deadline_before),
+                        '$gt': ordered_at,
+                        '$lte': boundary,
                     }
                 },
                 {
-                    'deadline_at': self._audit_timestamp(cursor[0]),
-                    '_id': {'$gt': self._record_id('follow_up', cursor[1])},
+                    'deadline_at': ordered_at,
+                    'follow_up_id': {
+                        '$gt': after.follow_up_id,
+                    },
                 },
             ]
-        records = []
-        for document in (
-            self._collection.find(query).sort([('deadline_at', 1), ('_id', 1)]).limit(limit)
+
+        documents = (
+            self._collection.find(query)
+            .sort([
+                ('deadline_at', 1),
+                ('follow_up_id', 1),
+            ])
+            .limit(limit + 1)
+        )
+
+        records = [
+            record
+            for document in documents
+            if (
+                record := self._model_from_document(
+                    document,
+                    FollowUpRecord,
+                )
+            )
+            is not None
+        ]
+
+        selected = records[:limit]
+        next_cursor = None
+
+        if len(records) > limit:
+            final = selected[-1]
+            assert final.deadline_at is not None
+
+            next_cursor = encode_follow_up_discovery_cursor(
+                FollowUpDiscoveryCursor(
+                    scope='deadline',
+                    boundary=deadline_before,
+                    ordered_at=final.deadline_at,
+                    follow_up_id=final.follow_up_id,
+                )
+            )
+
+        return selected, next_cursor
+
+    def get_follow_up_operation(
+        self,
+        claim_id: str,
+        operation_id: str,
+        customer_id: str,
+    ) -> FollowUpOperation | None:
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
         ):
-            record = self._model_from_document(document, FollowUpRecord)
-            if record is not None:
-                records.append(record)
-        return records
+            return None
 
-    def get_follow_up_operation(self, operation_id: str) -> FollowUpOperation | None:
-        return self._get('follow_up_operation', operation_id, FollowUpOperation)
+        operation = self._get(
+            'follow_up_operation',
+            operation_id,
+            FollowUpOperation,
+            customer_id=customer_id,
+        )
 
-    def list_follow_up_operations(self, follow_up_id: str) -> list[FollowUpOperation]:
-        records = []
-        for document in self._collection.find(
-            {'record_type': 'follow_up_operation', 'follow_up_id': follow_up_id}
-        ).sort([('sequence', 1), ('_id', 1)]):
-            record = self._model_from_document(document, FollowUpOperation)
-            if record is not None:
-                records.append(record)
-        return records
+        if operation is None or operation.claim_id != claim_id:
+            return None
 
-    def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
-        follow_up = self._get('follow_up', operation.follow_up_id, FollowUpRecord)
-        if follow_up is None or follow_up.claim_id != operation.claim_id:
-            raise KeyError(operation.follow_up_id)
+        return operation
+
+    def list_follow_up_operations(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> list[FollowUpOperation]:
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
+            return []
+
+        follow_up = self._get(
+            'follow_up',
+            follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+        )
+
+        if follow_up is None or follow_up.claim_id != claim_id:
+            return []
+
+        return self._list(
+            'follow_up_operation',
+            FollowUpOperation,
+            {
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+                'follow_up_id': follow_up_id,
+            },
+            'sequence',
+        )
+
+    def save_follow_up_operation(
+        self,
+        operation: FollowUpOperation,
+        customer_id: str,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._save_follow_up_operation(
+                operation,
+                customer_id,
+                mongo_session,
+            )
+        )
+
+    def _save_follow_up_operation(
+        self,
+        operation: FollowUpOperation,
+        customer_id: str,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            operation.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        follow_up = self._get(
+            'follow_up',
+            operation.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
         if (
-            follow_up.policy_id != operation.policy_id
-            or follow_up.policy_version != operation.policy_version
+            claim is None
+            or follow_up is None
+            or follow_up.claim_id != operation.claim_id
+            or follow_up.policy_id is None
+            or follow_up.policy_version is None
+            or follow_up.deadline_at is None
+            or operation.policy_id != follow_up.policy_id
+            or operation.policy_version != follow_up.policy_version
+            or operation.scheduled_at < follow_up.created_at
+            or operation.scheduled_at >= follow_up.deadline_at
+            or operation.based_on_claim_revision > claim.revision
         ):
-            raise ValueError('Follow-up operation policy does not match its obligation.')
-        existing = self.get_follow_up_operation(operation.operation_id)
+            raise KeyError(operation.operation_id)
+
+        existing = self._get(
+            'follow_up_operation',
+            operation.operation_id,
+            FollowUpOperation,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        document = {
+            **operation.model_dump(mode='json'),
+            '_id': self._record_id(
+                'follow_up_operation',
+                operation.operation_id,
+            ),
+            'record_type': 'follow_up_operation',
+            'customer_id': customer_id,
+            'claim_id': operation.claim_id,
+        }
+
         if existing is not None:
-            if existing != operation:
+            if existing == operation:
+                return
+
+            if (
+                operation.status is FollowUpOperationStatus.COMMITTED
+                and operation.based_on_claim_revision != claim.revision
+            ):
                 raise IdempotencyConflict(operation.operation_id)
-            return
-        duplicate = self._collection.find_one(
+
+            try:
+                assert_follow_up_operation_transition(
+                    existing,
+                    operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    operation.operation_id
+                ) from error
+
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': operation.claim_id,
+                    'status': existing.status.value,
+                },
+                document,
+                session=mongo_session,
+            )
+
+            if result.matched_count == 1:
+                return
+
+            winner = self._get(
+                'follow_up_operation',
+                operation.operation_id,
+                FollowUpOperation,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+
+            if winner == operation:
+                return
+
+            raise IdempotencyConflict(operation.operation_id)
+
+        if operation.status is not FollowUpOperationStatus.SCHEDULED:
+            raise IdempotencyConflict(operation.operation_id)
+
+        if operation.based_on_claim_revision != claim.revision:
+            raise IdempotencyConflict(operation.operation_id)
+
+        latest = self._collection.find_one(
             {
                 'record_type': 'follow_up_operation',
                 'follow_up_id': operation.follow_up_id,
-                'sequence': operation.sequence,
             },
+            projection={'sequence': 1},
+            sort=[('sequence', -1), ('_id', -1)],
+            session=mongo_session,
         )
-        if duplicate is not None:
+
+        expected_sequence = (
+            int(latest['sequence']) + 1
+            if latest is not None
+            else 1
+        )
+
+        if operation.sequence != expected_sequence:
             raise IdempotencyConflict(operation.operation_id)
-        self._put(
-            'follow_up_operation',
-            operation.operation_id,
-            operation,
-            claim_id=operation.claim_id,
-        )
 
-    def get_retention_operation(self, operation_id: str) -> RetentionOperation | None:
-        return self._get('retention_operation', operation_id, RetentionOperation)
+        try:
+            self._collection.insert_one(
+                document,
+                session=mongo_session,
+            )
+        except DuplicateKeyError as error:
+            winner = self._get(
+                'follow_up_operation',
+                operation.operation_id,
+                FollowUpOperation,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
 
-    def save_retention_operation(self, operation: RetentionOperation) -> None:
-        if self._get('claim', operation.claim_id, WorkingClaim) is None:
-            raise KeyError(operation.claim_id)
-        existing = self.get_retention_operation(operation.operation_id)
-        if existing is not None:
-            if existing != operation:
-                raise IdempotencyConflict(operation.operation_id)
-            return
-        self._put(
-            'retention_operation',
-            operation.operation_id,
-            operation,
-            claim_id=operation.claim_id,
-        )
+            if winner == operation:
+                return
+
+            raise IdempotencyConflict(
+                operation.operation_id
+            ) from error
 
     def _reject_session_identity_conflict(
         self,
@@ -2431,10 +5888,23 @@ class MongoDBRepository:
         mongo_session: Any = None,
     ) -> SessionRecord | None:
         claim = self._get(
-            'claim', claim_id, WorkingClaim, customer_id=customer_id, session=mongo_session
+            'claim',
+            claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
         )
-        if claim is None or claim.active_session_id is None:
+
+        if (
+            claim is None
+            or claim.active_session_id is None
+            or self._claim_access_closed(
+                claim_id,
+                mongo_session=mongo_session,
+            )
+        ):
             return None
+
         record = self._get(
             'session',
             claim.active_session_id,
@@ -2442,15 +5912,36 @@ class MongoDBRepository:
             customer_id=customer_id,
             session=mongo_session,
         )
-        return record if record is not None and record.claim_id == claim_id else None
 
-    def list_sessions_for_claim(self, claim_id: str, customer_id: str) -> list[SessionRecord]:
+        return (
+            record
+            if record is not None
+            and record.claim_id == claim_id
+            else None
+        )
+
+
+    def list_sessions_for_claim(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[SessionRecord]:
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
+            return []
+
         return self._list(
             'session',
             SessionRecord,
-            {'claim_id': claim_id, 'customer_id': customer_id},
+            {
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+            },
             'started_at',
         )
+
 
     def search_sessions_internal(
         self,
@@ -2554,6 +6045,10 @@ class MongoDBRepository:
         customer_id: str,
         mongo_session: Any,
     ) -> None:
+        self._ensure_claim_access_open(
+            message.claim_id,
+            mongo_session=mongo_session,
+        )
         claim = self._get(
             'claim',
             message.claim_id,
@@ -2659,12 +6154,28 @@ class MongoDBRepository:
         message_id: str,
         customer_id: str,
     ) -> MessageRecord | None:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
-        record = self._get('message', message_id, MessageRecord, customer_id=customer_id)
-        if record is None or record.claim_id != claim_id or record.session_id != session_id:
+
+        record = self._get(
+            'message',
+            message_id,
+            MessageRecord,
+            customer_id=customer_id,
+        )
+
+        if (
+            record is None
+            or record.claim_id != claim_id
+            or record.session_id != session_id
+        ):
             return None
+
         return record
+
 
     def find_message_by_client_id(
         self,
@@ -2672,8 +6183,12 @@ class MongoDBRepository:
         client_message_id: str,
         customer_id: str,
     ) -> MessageRecord | None:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
+
         document = self._collection.find_one(
             {
                 'record_type': 'message',
@@ -2682,7 +6197,12 @@ class MongoDBRepository:
                 'client_message_id': client_message_id,
             }
         )
-        return self._model_from_document(document, MessageRecord)
+
+        return self._model_from_document(
+            document,
+            MessageRecord,
+        )
+
 
     def list_messages(
         self,
@@ -2690,16 +6210,25 @@ class MongoDBRepository:
         session_id: str,
         customer_id: str,
     ) -> list[MessageRecord]:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return []
+
         return order_messages(
             self._list(
                 'message',
                 MessageRecord,
-                {'claim_id': claim_id, 'session_id': session_id, 'customer_id': customer_id},
+                {
+                    'claim_id': claim_id,
+                    'session_id': session_id,
+                    'customer_id': customer_id,
+                },
                 'created_at',
             )
         )
+
 
     def list_recent_messages(
         self,
@@ -3598,20 +7127,48 @@ class MongoDBRepository:
         evidence_id: str,
         customer_id: str,
     ) -> EvidenceRecord | None:
-        if not self._claim_owned(claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
-        record = self._get('evidence', evidence_id, EvidenceRecord, customer_id=customer_id)
-        return record if record is not None and record.claim_id == claim_id else None
 
-    def list_evidence(self, claim_id: str, customer_id: str) -> list[EvidenceRecord]:
-        if not self._claim_owned(claim_id, customer_id):
+        record = self._get(
+            'evidence',
+            evidence_id,
+            EvidenceRecord,
+            customer_id=customer_id,
+        )
+
+        return (
+            record
+            if record is not None
+            and record.claim_id == claim_id
+            else None
+        )
+
+
+    def list_evidence(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[EvidenceRecord]:
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return []
+
         return self._list(
             'evidence',
             EvidenceRecord,
-            {'claim_id': claim_id, 'customer_id': customer_id},
+            {
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+            },
             'created_at',
         )
+
 
     def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
         documents = self._collection.find(
@@ -3620,9 +7177,17 @@ class MongoDBRepository:
         return [
             evidence
             for evidence in (
-                self._model_from_document(document, EvidenceRecord) for document in documents
+                self._model_from_document(
+                    document,
+                    EvidenceRecord,
+                )
+                for document in documents
             )
             if evidence is not None
+            and self.claimant_resource_access_open(
+                evidence.claim_id,
+                customer_id,
+            )
         ]
 
     def get_motor_other_driver(
@@ -3815,26 +7380,77 @@ class MongoDBRepository:
             raise IdempotencyConflict(association.association_id) from error
 
     def get_evidence_claim_link(
-        self, target_claim_id: str, evidence_id: str, customer_id: str
+        self,
+        target_claim_id: str,
+        evidence_id: str,
+        customer_id: str,
     ) -> EvidenceClaimLink | None:
-        if not self._claim_owned(target_claim_id, customer_id):
+        if not self.claimant_resource_access_open(
+            target_claim_id,
+            customer_id,
+        ):
             return None
-        return self._get(
+
+        link = self._get(
             'evidence_claim_link',
             f'{target_claim_id}:{evidence_id}',
             EvidenceClaimLink,
             customer_id=customer_id,
         )
 
+        if (
+            link is None
+            or not self.claimant_resource_access_open(
+                link.source_claim_id,
+                customer_id,
+            )
+        ):
+            return None
+
+        return link
+
+
     def list_evidence_claim_links(
-        self, customer_id: str, target_claim_id: str | None = None
+        self,
+        customer_id: str,
+        target_claim_id: str | None = None,
     ) -> list[EvidenceClaimLink]:
-        filters: dict[str, Any] = {'customer_id': customer_id}
+        if (
+            target_claim_id is not None
+            and not self.claimant_resource_access_open(
+                target_claim_id,
+                customer_id,
+            )
+        ):
+            return []
+
+        filters: dict[str, Any] = {
+            'customer_id': customer_id,
+        }
+
         if target_claim_id is not None:
-            if not self._claim_owned(target_claim_id, customer_id):
-                return []
             filters['target_claim_id'] = target_claim_id
-        return self._list('evidence_claim_link', EvidenceClaimLink, filters, 'created_at')
+
+        links = self._list(
+            'evidence_claim_link',
+            EvidenceClaimLink,
+            filters,
+            'created_at',
+        )
+
+        return [
+            link
+            for link in links
+            if self.claimant_resource_access_open(
+                link.source_claim_id,
+                customer_id,
+            )
+            and self.claimant_resource_access_open(
+                link.target_claim_id,
+                customer_id,
+            )
+        ]
+
 
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
         """Create or conditionally advance one claim-owned external task.
@@ -5670,10 +9286,44 @@ class MongoDBRepository:
         return [
             item
             for item in (
-                self._model_from_document(document, RuntimeWorkItemRecord) for document in documents
+                self._model_from_document(document, RuntimeWorkItemRecord)
+                for document in documents
             )
             if item is not None
         ]
+
+    def save_runtime_work_item(
+        self,
+        item: RuntimeWorkItemRecord,
+        customer_id: str,
+    ) -> None:
+        if not self._claim_owned(item.claim_id, customer_id):
+            raise KeyError(item.claim_id)
+
+        def persist(mongo_session: Any) -> None:
+            existing = self._get(
+                'runtime_work_item',
+                item.work_item_id,
+                RuntimeWorkItemRecord,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+
+            if existing is not None:
+                if existing != item:
+                    raise IdempotencyConflict(item.work_item_id)
+                return
+
+            self._put(
+                'runtime_work_item',
+                item.work_item_id,
+                item,
+                customer_id=customer_id,
+                claim_id=item.claim_id,
+                session=mongo_session,
+            )
+
+        self._atomic(persist)
 
     def _save_agent_turn_records(
         self,
@@ -6226,6 +9876,10 @@ class MongoDBRepository:
         *,
         mongo_session: Any,
     ) -> None:
+        self._ensure_claim_access_open(
+            claim.claim_id,
+            mongo_session=mongo_session,
+        )
         current = self._collection.find_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
@@ -6249,6 +9903,10 @@ class MongoDBRepository:
         *,
         mongo_session: Any,
     ) -> int:
+        self._ensure_claim_access_open(
+            claim.claim_id,
+            mongo_session=mongo_session,
+        )
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
@@ -6296,13 +9954,58 @@ class MongoDBRepository:
         if existing is not None:
             raise IdempotencyConflict(record.key)
 
-    def find_idempotency(self, actor_id: str, route: str, key: str) -> IdempotencyRecord | None:
+    def find_idempotency(
+        self,
+        actor_id: str,
+        route: str,
+        key: str,
+    ) -> IdempotencyRecord | None:
         document = self._collection.find_one(
-            {'record_type': 'idempotency', 'actor_id': actor_id, 'route': route, 'key': key}
+            {
+                'record_type': 'idempotency',
+                'actor_id': actor_id,
+                'route': route,
+                'key': key,
+            }
         )
+
         if document is None:
             return None
-        return IdempotencyRecord(**document['payload'])
+
+        record = IdempotencyRecord(
+            **document['payload']
+        )
+
+        # WorkingClaim may already be gone. The retired claimant retry record
+        # and durable RetentionOperation are sufficient closure evidence.
+        if record.retired:
+            operation_document = (
+                self._collection.find_one(
+                    {
+                        'record_type': (
+                            'retention_operation'
+                        ),
+                        'claim_id': record.claim_id,
+                    }
+                )
+            )
+
+            operation = self._model_from_document(
+                operation_document,
+                RetentionOperation,
+            )
+
+            if retention_access_closed(
+                operation
+            ):
+                raise ResourceAccessClosed(
+                    record.claim_id
+                )
+
+        return record
+
+
+
 
     def find_message_turn_idempotency(
         self,
@@ -6311,7 +10014,16 @@ class MongoDBRepository:
         claim_id: str,
         message_id: str,
     ) -> IdempotencyRecord | None:
-        from backend.repositories.protocols import message_turn_result_priority
+        from backend.repositories.protocols import (
+            message_turn_result_priority,
+        )
+
+        if self._claimant_actor_access_closed(
+            claim_id,
+            actor_id,
+        ):
+            raise ResourceAccessClosed(claim_id)
+
 
         documents = self._collection.find(
             {
@@ -6323,8 +10035,21 @@ class MongoDBRepository:
                 'payload.retired': {'$ne': True},
             },
         )
-        records = [IdempotencyRecord(**document['payload']) for document in documents]
-        return max(records, key=message_turn_result_priority) if records else None
+
+        records = [
+            IdempotencyRecord(**document['payload'])
+            for document in documents
+        ]
+
+        return (
+            max(
+                records,
+                key=message_turn_result_priority,
+            )
+            if records
+            else None
+        )
+
 
     def reserve_message_turn_idempotency_alias(
         self,
@@ -6338,6 +10063,12 @@ class MongoDBRepository:
         from backend.repositories.protocols import message_turn_result_priority
 
         def reserve(mongo_session: Any) -> IdempotencyRecord | None:
+            if self._claimant_actor_access_closed(
+                claim_id,
+                actor_id,
+                mongo_session=mongo_session,
+            ):
+                raise ResourceAccessClosed(claim_id)
             original_documents = list(
                 self._collection.find(
                     {
@@ -6397,6 +10128,14 @@ class MongoDBRepository:
         return self._atomic(reserve)
 
     def save_idempotency(self, record: IdempotencyRecord) -> None:
+        if (
+            record.claim_id
+            and self._claimant_actor_access_closed(
+                record.claim_id,
+                record.actor_id,
+            )
+        ):
+            raise ResourceAccessClosed(record.claim_id)
         query = {
             'record_type': 'idempotency',
             'actor_id': record.actor_id,
@@ -6419,22 +10158,48 @@ class MongoDBRepository:
                 raise IdempotencyConflict(record.key) from None
 
     def find_message_checkpoint(
-        self, claim_id: str, message_id: str, customer_id: str
+        self,
+        claim_id: str,
+        message_id: str,
+        customer_id: str,
     ) -> IdempotencyRecord | None:
-        if not self._claim_owned(claim_id, customer_id):
+        if self._claimant_actor_access_closed(
+            claim_id,
+            customer_id,
+        ):
+            raise ResourceAccessClosed(claim_id)
+
+        if not self.claimant_resource_access_open(
+            claim_id,
+            customer_id,
+        ):
             return None
+
         document = self._collection.find_one(
             {
                 'record_type': 'idempotency',
                 'actor_id': customer_id,
                 'payload.claim_id': claim_id,
                 'payload.message_id': message_id,
-                'payload.revision_before_message': {'$ne': None},
+                'payload.revision_before_message': {
+                    '$ne': None,
+                },
                 'payload.inbound_checkpoint': True,
             },
-            sort=[('payload.revision_before_message', 1)],
+            sort=[
+                (
+                    'payload.revision_before_message',
+                    1,
+                )
+            ],
         )
-        return IdempotencyRecord(**document['payload']) if document is not None else None
+
+        return (
+            IdempotencyRecord(**document['payload'])
+            if document is not None
+            else None
+        )
+
 
     def save_message_recovery(
         self,
@@ -6444,6 +10209,10 @@ class MongoDBRepository:
         agent_message: MessageRecord | None = None,
     ) -> None:
         def write(mongo_session: Any) -> None:
+            self._ensure_claim_access_open(
+                message.claim_id,
+                mongo_session=mongo_session,
+            )
             stored = self._get(
                 'message',
                 message.message_id,
@@ -6536,6 +10305,10 @@ class MongoDBRepository:
         self, idempotency: IdempotencyRecord, response_payload: dict[str, Any]
     ) -> dict[str, Any]:
         def freeze(mongo_session: Any) -> dict[str, Any]:
+            self._ensure_claim_access_open(
+                idempotency.claim_id,
+                mongo_session=mongo_session,
+            )
             query = {
                 'record_type': 'idempotency',
                 'actor_id': idempotency.actor_id,
@@ -6702,7 +10475,9 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        reconciled_follow_up_operation: FollowUpOperation | None = None,
         replaced_active_session: SessionRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
     ) -> None:
         self._validate_session_mutation(
             claim,
@@ -6720,7 +10495,9 @@ class MongoDBRepository:
                 idempotency,
                 branch_evaluation,
                 resolved_follow_up,
+                reconciled_follow_up_operation,
                 replaced_active_session,
+                audit_event,
                 mongo_session,
             )
         )
@@ -6763,7 +10540,9 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None,
         resolved_follow_up: FollowUpRecord | None,
+        reconciled_follow_up_operation: FollowUpOperation | None,
         replaced_active_session: SessionRecord | None,
+        audit_event: AuditEventEnvelope | None,
         mongo_session: Any,
     ) -> None:
         stored_claim_document = self._collection.find_one(
@@ -6848,6 +10627,8 @@ class MongoDBRepository:
                 or open_follow_up.follow_up_id != resolved_follow_up.follow_up_id
                 or resolved_follow_up.status is not FollowUpStatus.RESOLVED
                 or resolved_follow_up.outcome != 'claimant_resumed'
+                or resolved_follow_up.reason_code
+                is not FollowUpReasonCode.CLAIMANT_RESUMED
                 or resolved_follow_up.updated_at < open_follow_up.updated_at
             ):
                 raise KeyError(claim.claim_id)
@@ -6855,11 +10636,78 @@ class MongoDBRepository:
                 update={
                     'status': FollowUpStatus.RESOLVED,
                     'outcome': resolved_follow_up.outcome,
+                    'reason_code': resolved_follow_up.reason_code,
+                    'due_at': None,
                     'updated_at': resolved_follow_up.updated_at,
                 }
             )
             if resolved_follow_up != expected_follow_up:
                 raise KeyError(claim.claim_id)
+
+            if (
+                open_follow_up.deadline_at is not None
+                and resolved_follow_up.updated_at
+                >= open_follow_up.deadline_at
+            ):
+                raise RecoveryDeadlineConflict(
+                    open_follow_up.follow_up_id
+                )
+
+            open_operation_document = self._collection.find_one(
+                {
+                    'record_type': 'follow_up_operation',
+                    'claim_id': claim.claim_id,
+                    'follow_up_id': open_follow_up.follow_up_id,
+                    'customer_id': claim.customer_id,
+                    'status': {
+                        '$in': [
+                            FollowUpOperationStatus.SCHEDULED.value,
+                            FollowUpOperationStatus.COMMITTED.value,
+                        ]
+                    },
+                },
+                session=mongo_session,
+            )
+            open_operation = self._model_from_document(
+                open_operation_document,
+                FollowUpOperation,
+            )
+
+            if reconciled_follow_up_operation is None:
+                if open_operation is not None:
+                    raise KeyError(claim.claim_id)
+            else:
+                if (
+                    open_operation is None
+                    or open_operation.operation_id
+                    != reconciled_follow_up_operation.operation_id
+                ):
+                    raise KeyError(claim.claim_id)
+
+                try:
+                    assert_follow_up_operation_transition(
+                        open_operation,
+                        reconciled_follow_up_operation,
+                    )
+                except ValueError as error:
+                    raise KeyError(claim.claim_id) from error
+
+        elif reconciled_follow_up_operation is not None:
+            raise KeyError(claim.claim_id)
+
+        if resolved_follow_up is not None:
+            if audit_event is None:
+                raise KeyError(claim.claim_id)
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                (audit_event,),
+                mongo_session=mongo_session,
+            )
+        else:
+            if audit_event is not None:
+                raise KeyError(claim.claim_id)
+            prepared_audit = ()
+
         if branch_evaluation is not None:
             self._reject_branch_evaluation_identity_conflict(
                 branch_evaluation,
@@ -6914,6 +10762,15 @@ class MongoDBRepository:
                 claim_id=claim.claim_id,
                 session=mongo_session,
             )
+        if reconciled_follow_up_operation is not None:
+            self._put(
+                'follow_up_operation',
+                reconciled_follow_up_operation.operation_id,
+                reconciled_follow_up_operation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
         if branch_evaluation is not None:
             self._put(
                 'branch_evaluation',
@@ -6924,6 +10781,13 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(record=idempotency, session=mongo_session)
+
+        for event in prepared_audit:
+            self._insert_audit_event(
+                event,
+                mongo_session=mongo_session,
+            )
+
         self._append_realtime_mutation(
             RealtimeMutation.SESSION_CHANGED,
             claim,

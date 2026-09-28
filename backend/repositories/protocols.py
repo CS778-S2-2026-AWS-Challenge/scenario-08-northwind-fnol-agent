@@ -37,7 +37,6 @@ from backend.domain.models import (
     HandoffRecord,
     MessageRecord,
     MotorOtherDriverRecord,
-    RetentionOperation,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -50,6 +49,12 @@ from backend.domain.realtime import (
     RealtimeCursor,
     RealtimeEvent,
     RealtimePublication,
+)
+from backend.domain.retention import (
+    RetentionHoldRecord,
+    RetentionOperation,
+    RetentionRecordTombstone,
+    RetentionStepStatus,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import RuntimeTurnRecords, RuntimeWorkItemRecord
@@ -74,6 +79,12 @@ class RevisionConflict(RepositoryConflict):
     def __init__(self, current_revision: int) -> None:
         super().__init__(f'Current revision is {current_revision}.')
         self.current_revision = current_revision
+
+
+
+class RecoveryDeadlineConflict(RuntimeError):
+    """A recovery mutation lost to the authoritative absolute deadline."""
+
 
 
 class IdempotencyConflict(RepositoryConflict):
@@ -366,6 +377,14 @@ class ClaimRepository(Protocol):
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         raise NotImplementedError
 
+    def claimant_resource_access_open(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> bool:
+        """Return claimant resource eligibility without exposing existence details."""
+        raise NotImplementedError
+
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         raise NotImplementedError
 
@@ -432,7 +451,9 @@ class ClaimRepository(Protocol):
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        reconciled_follow_up_operation: FollowUpOperation | None = None,
         replaced_active_session: SessionRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
     ) -> None:
         """Atomically replace/activate a session and resolve recovery work when supplied."""
         raise NotImplementedError
@@ -452,14 +473,113 @@ class ClaimRepository(Protocol):
     ) -> list[FollowUpRecord]:
         raise NotImplementedError
 
+    def get_follow_up_operation(
+        self,
+        claim_id: str,
+        operation_id: str,
+        customer_id: str,
+    ) -> FollowUpOperation | None:
+        raise NotImplementedError
+
+    def list_follow_up_operations(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> list[FollowUpOperation]:
+        raise NotImplementedError
+
+    def save_follow_up_operation(
+        self,
+        operation: FollowUpOperation,
+        customer_id: str,
+    ) -> None:
+        """Create or advance one durable P17 execution identity.
+
+        Exact replay is idempotent. Identity/sequence rewrites and invalid
+        lifecycle transitions are conflicts.
+        """
+        raise NotImplementedError
+
+    def backfill_incomplete_claim_recovery(
+        self,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> tuple[int, int]:
+        """Deterministically bind open legacy P17.1 Follow-ups.
+
+        Returns ``(bound_count, failed_closed_count)``.
+        """
+        raise NotImplementedError
+
+    def commit_recovery_staff_abandonment(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically abandon one P17 recovery obligation and its Claim."""
+        raise NotImplementedError
+
+    def commit_follow_up_contact_withdrawal(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically block automatic P17 contact and record immutable Audit."""
+        raise NotImplementedError
+
+    def commit_recovery_expiry(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically terminalise one open P17 obligation at its deadline."""
+        raise NotImplementedError
+
+    def commit_due_follow_up_attempt(
+        self,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        operation: FollowUpOperation,
+        settled_previous_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically commit one in-app P17 attempt and its Follow-up aggregate.
+
+        Candidate discovery is not authority. Implementations must reload and
+        revalidate Claim, Session, Follow-up, deadline, contact authority,
+        operation history, and Claim revision before committing.
+        """
+        raise NotImplementedError
+
     def list_due_follow_ups(
         self,
         due_before: datetime,
         *,
         limit: int,
-        cursor: tuple[datetime, str] | None = None,
-    ) -> list[FollowUpRecord]:
-        """Return bounded executable Follow-ups ordered by due time and ID."""
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        """Return one bounded page of executable P17 Follow-ups.
+
+        This is candidate discovery only. Execution must revalidate the
+        authoritative Follow-up, Claim revision, contact authority and deadline.
+        """
         raise NotImplementedError
 
     def list_expiring_follow_ups(
@@ -467,26 +587,13 @@ class ClaimRepository(Protocol):
         deadline_before: datetime,
         *,
         limit: int,
-        cursor: tuple[datetime, str] | None = None,
-    ) -> list[FollowUpRecord]:
-        """Return bounded open Follow-ups ordered by deadline and ID."""
-        raise NotImplementedError
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        """Return one bounded page of open P17 obligations by deadline.
 
-    def get_follow_up_operation(self, operation_id: str) -> FollowUpOperation | None:
-        raise NotImplementedError
-
-    def list_follow_up_operations(self, follow_up_id: str) -> list[FollowUpOperation]:
-        raise NotImplementedError
-
-    def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
-        """Persist one immutable logical operation with duplicate identity protection."""
-        raise NotImplementedError
-
-    def get_retention_operation(self, operation_id: str) -> RetentionOperation | None:
-        raise NotImplementedError
-
-    def save_retention_operation(self, operation: RetentionOperation) -> None:
-        """Persist one restart-safe cross-store retention operation."""
+        Deadline discovery is deliberately separate from due discovery so a
+        blocked obligation with no ``due_at`` remains globally discoverable.
+        """
         raise NotImplementedError
 
     def save_incomplete_checkpoint(
@@ -556,6 +663,99 @@ class ClaimRepository(Protocol):
 
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
+
+    def get_retention_operation(
+        self,
+        operation_id: str,
+    ) -> RetentionOperation | None:
+        raise NotImplementedError
+
+    def get_retention_operation_for_claim(
+        self,
+        claim_id: str,
+    ) -> RetentionOperation | None:
+        """Read the monotonic resource-access closure for one Claim."""
+        raise NotImplementedError
+
+    def reserve_eligible_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> RetentionOperation:
+        """Atomically revalidate terminal authority and commit access closure."""
+        raise NotImplementedError
+
+    def reserve_retention_operation(
+        self,
+        operation: RetentionOperation,
+    ) -> bool:
+        """Reserve one logical destructive cleanup operation.
+
+        Returns True only for the first successful reservation. Exact replay
+        returns False. A different operation for the same Claim fails closed.
+        """
+        raise NotImplementedError
+
+    def freeze_retention_targets(
+        self,
+        operation_id: str,
+        expected_revision: int,
+        *,
+        frozen_at: datetime,
+    ) -> RetentionOperation:
+        """Atomically freeze the exact approved cleanup inventory."""
+        raise NotImplementedError
+
+    def get_retention_tombstone(
+        self,
+        target_id: str,
+    ) -> RetentionRecordTombstone | None:
+        """Return minimum retained evidence for one anonymised record."""
+        raise NotImplementedError
+
+    def record_retention_step_failure(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        status: RetentionStepStatus,
+        diagnostic_code: str,
+        now: datetime,
+    ) -> RetentionOperation:
+        """Persist bounded failure/unknown evidence without repeating destruction."""
+        raise NotImplementedError
+
+    def apply_retention_record_target(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        now: datetime,
+    ) -> RetentionOperation:
+        """Atomically mutate one frozen database target and append step evidence."""
+        raise NotImplementedError
+
+    def save_retention_operation(
+        self,
+        operation: RetentionOperation,
+        expected_revision: int,
+    ) -> None:
+        """CAS-persist one valid retention execution transition."""
+        raise NotImplementedError
+
+    def save_retention_hold(
+        self,
+        hold: RetentionHoldRecord,
+    ) -> None:
+        """Persist or monotonically release one source-linked retention hold."""
+        raise NotImplementedError
+
+    def list_retention_holds(
+        self,
+        claim_id: str,
+    ) -> list[RetentionHoldRecord]:
+        raise NotImplementedError
 
     def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Persist the graph, returning an existing idempotent result on replay."""
@@ -1018,6 +1218,19 @@ class PersistenceRepository(ClaimRepository, Protocol):
         customer_id: str,
     ) -> list[RuntimeWorkItemRecord]:
         """Return immutable Runtime WorkItem records for one authorised Claim."""
+        raise NotImplementedError
+
+    def save_runtime_work_item(
+        self,
+        item: RuntimeWorkItemRecord,
+        customer_id: str,
+    ) -> None:
+        """Persist one immutable Runtime responsibility record.
+
+        This is used when an existing authority such as ExternalTask creates
+        responsibility outside an Agent-turn transaction. Exact replay is
+        idempotent; identity reuse with changed content fails closed.
+        """
         raise NotImplementedError
 
     def save_runtime_turn(

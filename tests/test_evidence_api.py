@@ -230,18 +230,38 @@ def test_claimant_can_read_evidence_history_across_owned_claims(
 
     response = client.get('/api/v1/evidence?limit=1', headers=auth_headers)
     assert response.status_code == 200
-    assert len(response.json()['items']) == 1
-    assert response.json()['items'][0]['source_claim_id'] == first_id
-    assert response.json()['items'][0]['evidence_id'] == evidence_ids[0]
-    assert 'storage_key' not in response.json()['items'][0]
-    assert response.json()['page']['next_cursor'] is not None
+
+    first_page = response.json()
+    assert len(first_page['items']) == 1
+    assert 'storage_key' not in first_page['items'][0]
+    assert first_page['page']['next_cursor'] is not None
 
     second_page = client.get(
-        f'/api/v1/evidence?cursor={response.json()["page"]["next_cursor"]}',
+        f'/api/v1/evidence?cursor={first_page["page"]["next_cursor"]}',
         headers=auth_headers,
     )
     assert second_page.status_code == 200
-    assert second_page.json()['items'][0]['source_claim_id'] == second_id
+
+    second_body = second_page.json()
+    assert len(second_body['items']) == 1
+    assert 'storage_key' not in second_body['items'][0]
+
+    observed = {
+        (
+            first_page['items'][0]['source_claim_id'],
+            first_page['items'][0]['evidence_id'],
+        ),
+        (
+            second_body['items'][0]['source_claim_id'],
+            second_body['items'][0]['evidence_id'],
+        ),
+    }
+
+    assert observed == {
+        (first_id, evidence_ids[0]),
+        (second_id, evidence_ids[1]),
+    }
+    assert second_body['page']['next_cursor'] is None
 
 
 def _make_ready_evidence(

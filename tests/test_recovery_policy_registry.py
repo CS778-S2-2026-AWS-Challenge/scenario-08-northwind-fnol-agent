@@ -5,16 +5,181 @@ import pytest
 from backend.domain.recovery_policy_registry import (
     EXTERNAL_UNKNOWN_RULE,
     INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
+    RECOVERY_POLICY_REGISTRY_VERSION,
     RETENTION_ELIGIBLE_RULE,
     RecoveryEvent,
     RecoverySnapshot,
     RecoveryTrigger,
     UnknownRecoveryTransition,
     UnknownRecoveryTrigger,
+    claimant_recovery_projection,
     classify_recovery,
     recovery_policy_manifest,
     reduce_recovery,
 )
+
+
+def test_model_timeout_uses_specific_published_rule() -> None:
+    rule = classify_recovery(
+        RecoveryTrigger(
+            source='model',
+            outcome_code='timeout',
+            retryable=True,
+        )
+    )
+
+    assert rule.rule_id == 'claimant_turn.model_timeout'
+    assert rule.resume_entrypoint == 'submit_message'
+    assert rule.preservation == 'inbound_message_and_checkpoint'
+    assert rule.claim_effect == 'revision_unchanged_no_unapproved_write'
+
+
+def test_invalid_model_output_is_distinct_from_timeout() -> None:
+    rule = classify_recovery(
+        RecoveryTrigger(
+            source='model',
+            outcome_code='malformed_response',
+            retryable=False,
+        )
+    )
+
+    assert rule.rule_id == 'claimant_turn.model_invalid_response'
+    assert rule.required_actions == (
+        'message.preserve_checkpoint',
+        'claim.preserve_revision',
+        'audit.append',
+    )
+
+
+def test_provider_retryability_is_part_of_the_policy_coordinate() -> None:
+    retryable = classify_recovery(
+        RecoveryTrigger(
+            source='model',
+            outcome_code='provider',
+            retryable=True,
+        )
+    )
+    terminal = classify_recovery(
+        RecoveryTrigger(
+            source='model',
+            outcome_code='provider',
+            retryable=False,
+        )
+    )
+
+    assert retryable.rule_id == 'claimant_turn.model_provider_retryable'
+    assert retryable.retry_mode == 'claimant_initiated'
+
+    assert terminal.rule_id == 'claimant_turn.model_provider_terminal'
+    assert terminal.retry_mode == 'none'
+    assert terminal.responsibility == 'system'
+
+
+def test_tool_and_retrieval_rules_require_blocking_semantics() -> None:
+    non_blocking = classify_recovery(
+        RecoveryTrigger(
+            source='tool',
+            outcome_code='unavailable',
+            blocking=False,
+        )
+    )
+    blocking = classify_recovery(
+        RecoveryTrigger(
+            source='tool',
+            outcome_code='unavailable',
+            blocking=True,
+        )
+    )
+
+    assert non_blocking.continuation == 'runtime.continue'
+    assert blocking.continuation == 'runtime.fail_safe'
+    assert blocking.work_item_kind == 'system'
+
+    with pytest.raises(UnknownRecoveryTrigger):
+        classify_recovery(
+            RecoveryTrigger(
+                source='retrieval',
+                outcome_code='unavailable',
+            )
+        )
+
+
+def test_external_unknown_requires_explicit_delivery_evidence() -> None:
+    rule = classify_recovery(
+        RecoveryTrigger(
+            source='external',
+            outcome_code='unknown_outcome',
+            delivery_state='submitted',
+        )
+    )
+
+    assert rule.rule_id == 'external.submitted_unknown'
+    assert rule.requires_reconciliation is True
+    assert rule.requires_operation_identity is True
+    assert rule.retry_mode == 'reconcile_before_retry'
+
+    with pytest.raises(UnknownRecoveryTrigger):
+        classify_recovery(
+            RecoveryTrigger(
+                source='external',
+                outcome_code='unknown_outcome',
+            )
+        )
+
+
+def test_p17_rules_use_the_existing_follow_up_authority() -> None:
+    due = classify_recovery(
+        RecoveryTrigger(
+            source='timer',
+            outcome_code='follow_up_due',
+        )
+    )
+    exhausted = classify_recovery(
+        RecoveryTrigger(
+            source='timer',
+            outcome_code='attempt_limit_reached',
+        )
+    )
+
+    assert 'follow_up' in due.authoritative_records
+    assert due.required_actions == ('follow_up.execute', 'audit.append')
+    assert exhausted.decision_code == 'block_follow_up'
+    assert 'claim.expire' not in exhausted.required_actions
+
+
+def test_legacy_model_policy_coordinate_remains_projectable() -> None:
+    projection = claimant_recovery_projection('claimant_turn.model_dependency_failure')
+
+    assert projection is not None
+    assert projection.rule_id == 'claimant_turn.model_dependency_failure'
+    assert projection.resume_entrypoint == 'submit_message'
+
+
+def test_registry_manifest_is_deterministic_and_versioned() -> None:
+    first = recovery_policy_manifest()
+    second = recovery_policy_manifest()
+
+    assert first == second
+    assert first['registry_version'] == RECOVERY_POLICY_REGISTRY_VERSION
+
+    rules = first['rules']
+    assert isinstance(rules, list)
+    assert len(rules) >= 15
+
+
+def test_unknown_recovery_sources_fail_closed() -> None:
+    with pytest.raises(UnknownRecoveryTrigger):
+        classify_recovery(
+            RecoveryTrigger(
+                source='external',
+                outcome_code='invented_outcome',
+                delivery_state='unknown',
+            )
+        )
+
+
+# Backend persistence and policy compatibility regression cases.
+
 
 
 @pytest.mark.parametrize(
@@ -25,9 +190,12 @@ from backend.domain.recovery_policy_registry import (
             RecoveryTrigger(source='model', outcome_code='malformed_response'),
             'recovery.model_malformed_response',
         ),
-        (RecoveryTrigger(source='tool', outcome_code='unavailable'), 'recovery.tool_unavailable'),
         (
-            RecoveryTrigger(source='retrieval', outcome_code='unavailable'),
+            RecoveryTrigger(source='tool', outcome_code='unavailable', blocking=True),
+            'recovery.tool_unavailable',
+        ),
+        (
+            RecoveryTrigger(source='retrieval', outcome_code='unavailable', blocking=True),
             'recovery.retrieval_unavailable',
         ),
         (
@@ -36,9 +204,7 @@ from backend.domain.recovery_policy_registry import (
         ),
         (
             RecoveryTrigger(
-                source='external',
-                outcome_code='retryable_failure',
-                delivery_certain=False,
+                source='external', outcome_code='retryable_failure', delivery_certain=False
             ),
             'recovery.external_not_submitted_retryable',
         ),
@@ -57,31 +223,28 @@ from backend.domain.recovery_policy_registry import (
         ),
     ],
 )
-def test_registered_failure_matrix_classifies_to_one_policy(
-    trigger: RecoveryTrigger,
-    policy_id: str,
+def test_backend_contract_registered_failure_matrix_classifies_to_one_policy(
+    trigger: RecoveryTrigger, policy_id: str
 ) -> None:
     rule = classify_recovery(trigger)
-
     assert rule.policy_id == policy_id
     assert rule.version == 'v1'
 
 
-def test_model_failure_keeps_existing_claimant_projection_identity() -> None:
+def test_backend_contract_model_failure_keeps_existing_claimant_projection_identity() -> None:
     rule = classify_recovery(RecoveryTrigger(source='model', outcome_code='timeout'))
-
-    assert rule.rule_id == 'claimant_turn.model_dependency_failure'
+    assert rule.rule_id == 'claimant_turn.model_timeout'
     assert rule.resume_entrypoint == 'submit_message'
     assert rule.preservation == 'inbound_message_and_checkpoint'
     assert rule.claim_effect == 'revision_unchanged_no_unapproved_write'
 
 
-def test_unknown_recovery_sources_fail_closed() -> None:
+def test_backend_contract_unknown_recovery_sources_fail_closed() -> None:
     with pytest.raises(UnknownRecoveryTrigger):
         classify_recovery(RecoveryTrigger(source='timer', outcome_code='not_registered'))
 
 
-def _p17_snapshot(
+def backend_contract__p17_snapshot(
     *,
     now: datetime,
     attempts: int = 0,
@@ -100,7 +263,7 @@ def _p17_snapshot(
     )
 
 
-def test_p17_deadline_equality_has_expiry_precedence() -> None:
+def test_backend_contract_p17_deadline_equality_has_expiry_precedence() -> None:
     deadline = datetime(2026, 9, 29, 0, 0, tzinfo=UTC)
     snapshot = RecoverySnapshot(
         claim_revision=4,
@@ -109,7 +272,6 @@ def test_p17_deadline_equality_has_expiry_precedence() -> None:
         due_at=deadline,
         deadline_at=deadline,
     )
-
     transition = reduce_recovery(
         INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
         snapshot,
@@ -117,16 +279,14 @@ def test_p17_deadline_equality_has_expiry_precedence() -> None:
         snapshot,
         deadline,
     )
-
     assert transition.decision == 'expire'
     assert transition.resolution_code == 'recovery_expired'
     assert transition.operation_action == 'cancel_pending'
 
 
-def test_p17_due_attempt_is_planned_without_executing_side_effect() -> None:
+def test_backend_contract_p17_due_attempt_is_planned_without_executing_side_effect() -> None:
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
-    snapshot = _p17_snapshot(now=now)
-
+    snapshot = backend_contract__p17_snapshot(now=now)
     transition = reduce_recovery(
         INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
         snapshot,
@@ -134,17 +294,15 @@ def test_p17_due_attempt_is_planned_without_executing_side_effect() -> None:
         snapshot,
         now,
     )
-
     assert transition.decision == 'execute_follow_up'
     assert transition.operation_action == 'reserve_and_commit'
     assert transition.attempt_count_delta == 0
     assert transition.preserve_claim_revision == 3
 
 
-def test_p17_committed_no_response_reschedules_from_policy_schedule() -> None:
+def test_backend_contract_p17_committed_no_response_reschedules_from_policy_schedule() -> None:
     due_at = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
-    snapshot = _p17_snapshot(now=due_at, attempts=1)
-
+    snapshot = backend_contract__p17_snapshot(now=due_at, attempts=1)
     transition = reduce_recovery(
         INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
         snapshot,
@@ -152,17 +310,17 @@ def test_p17_committed_no_response_reschedules_from_policy_schedule() -> None:
         snapshot,
         due_at,
     )
-
     assert transition.decision == 'retry'
     assert transition.attempt_count_delta == 1
     assert transition.next_due_at == due_at + timedelta(hours=24)
     assert transition.next_follow_up_status == 'pending'
 
 
-def test_p17_third_committed_attempt_stops_contact_without_abandoning_claim() -> None:
+def test_backend_contract_p17_third_committed_attempt_stops_contact_without_abandoning_claim() -> (
+    None
+):
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
-    snapshot = _p17_snapshot(now=now, attempts=2)
-
+    snapshot = backend_contract__p17_snapshot(now=now, attempts=2)
     transition = reduce_recovery(
         INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
         snapshot,
@@ -170,7 +328,6 @@ def test_p17_third_committed_attempt_stops_contact_without_abandoning_claim() ->
         snapshot,
         now,
     )
-
     assert transition.decision == 'block_follow_up'
     assert transition.blocked_reason == 'attempt_limit_reached'
     assert transition.next_follow_up_status == 'blocked'
@@ -178,10 +335,9 @@ def test_p17_third_committed_attempt_stops_contact_without_abandoning_claim() ->
     assert transition.attempt_count_delta == 1
 
 
-def test_p17_contact_withdrawal_does_not_resolve_or_abandon() -> None:
+def test_backend_contract_p17_contact_withdrawal_does_not_resolve_or_abandon() -> None:
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
-    snapshot = _p17_snapshot(now=now, contact_authorised=False)
-
+    snapshot = backend_contract__p17_snapshot(now=now, contact_authorised=False)
     transition = reduce_recovery(
         INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
         snapshot,
@@ -189,17 +345,15 @@ def test_p17_contact_withdrawal_does_not_resolve_or_abandon() -> None:
         snapshot,
         now,
     )
-
     assert transition.decision == 'block_follow_up'
     assert transition.blocked_reason == 'contact_not_authorised'
     assert transition.resolution_code is None
 
 
-def test_stale_revision_reloads_instead_of_replaying_transition() -> None:
+def test_backend_contract_stale_revision_reloads_instead_of_replaying_transition() -> None:
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
-    loaded = _p17_snapshot(now=now, revision=3)
+    loaded = backend_contract__p17_snapshot(now=now, revision=3)
     authoritative = loaded.model_copy(update={'claim_revision': 4})
-
     transition = reduce_recovery(
         INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
         loaded,
@@ -207,20 +361,20 @@ def test_stale_revision_reloads_instead_of_replaying_transition() -> None:
         authoritative,
         now,
     )
-
     assert transition.policy_id == 'recovery.revision_conflict'
     assert transition.decision == 'reload'
     assert transition.preserve_claim_revision == 4
 
 
-def test_submitted_external_unknown_requires_same_operation_reconciliation() -> None:
+def test_backend_contract_submitted_external_unknown_requires_same_operation_reconciliation() -> (
+    None
+):
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
     snapshot = RecoverySnapshot(
         claim_revision=5,
         external_operation_state='submitted_unknown',
         source_refs=['external_task:ext_test'],
     )
-
     transition = reduce_recovery(
         EXTERNAL_UNKNOWN_RULE,
         snapshot,
@@ -228,41 +382,29 @@ def test_submitted_external_unknown_requires_same_operation_reconciliation() -> 
         snapshot,
         now,
     )
-
     assert transition.decision == 'reconcile'
     assert transition.operation_action == 'reconcile_same'
     assert transition.blocks_action == 'external.retry'
 
 
-def test_retention_hold_blocks_destructive_transition() -> None:
+def test_backend_contract_retention_hold_blocks_destructive_transition() -> None:
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
     snapshot = RecoverySnapshot(
-        claim_revision=8,
-        retention_hold=True,
-        source_refs=['terminal:td_test', 'hold:hold_test'],
+        claim_revision=8, retention_hold=True, source_refs=['terminal:td_test', 'hold:hold_test']
     )
-
     transition = reduce_recovery(
-        RETENTION_ELIGIBLE_RULE,
-        snapshot,
-        RecoveryEvent(code='retention_execute'),
-        snapshot,
-        now,
+        RETENTION_ELIGIBLE_RULE, snapshot, RecoveryEvent(code='retention_execute'), snapshot, now
     )
-
     assert transition.policy_id == 'retention.hold'
     assert transition.decision == 'wait'
     assert transition.responsibility == 'staff'
 
 
-def test_access_closure_denies_a_stale_recovery_event() -> None:
+def test_backend_contract_access_closure_denies_a_stale_recovery_event() -> None:
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
     snapshot = RecoverySnapshot(
-        claim_revision=9,
-        access_closed=True,
-        source_refs=['retention:rop_test'],
+        claim_revision=9, access_closed=True, source_refs=['retention:rop_test']
     )
-
     transition = reduce_recovery(
         INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
         snapshot,
@@ -270,15 +412,13 @@ def test_access_closure_denies_a_stale_recovery_event() -> None:
         snapshot,
         now,
     )
-
     assert transition.policy_id == 'retention.old_session_denied'
     assert transition.decision == 'deny'
 
 
-def test_unregistered_event_for_policy_fails_closed() -> None:
+def test_backend_contract_unregistered_event_for_policy_fails_closed() -> None:
     now = datetime(2026, 9, 29, 1, 0, tzinfo=UTC)
-    snapshot = _p17_snapshot(now=now)
-
+    snapshot = backend_contract__p17_snapshot(now=now)
     with pytest.raises(UnknownRecoveryTransition):
         reduce_recovery(
             INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
@@ -289,11 +429,10 @@ def test_unregistered_event_for_policy_fails_closed() -> None:
         )
 
 
-def test_manifest_is_generated_from_unique_typed_policy_coordinates() -> None:
+def test_backend_contract_manifest_is_generated_from_unique_typed_policy_coordinates() -> None:
     manifest = recovery_policy_manifest()
     policies = manifest['policies']
     assert isinstance(policies, list)
-
     coordinates = [(item['policy_id'], item['version']) for item in policies]
     assert len(coordinates) == len(set(coordinates))
     assert ('incomplete_claim_follow_up', 'v1') in coordinates

@@ -335,6 +335,7 @@ class WorkbenchIncompleteContext(ContractModel):
     resume_point: str
     follow_up_due_at: datetime | None = None
     follow_up_status: str
+    follow_up_reason: str | None = None
     follow_up_attempts: int = Field(default=0, ge=0)
     expires_at: datetime | None = None
     retention_hold: bool = False
