@@ -1,9 +1,7 @@
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import mongomock
 import pytest
-from pymongo.collection import Collection
 
 from backend.domain.models import (
     Channel,
@@ -32,7 +30,6 @@ from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
 )
-from scripts.backfill_follow_up_policy import backfill_follow_ups
 
 
 def _repository(kind: str) -> FixtureRepository | MongoDBRepository:
@@ -480,91 +477,6 @@ def test_backend_contract_fixture_due_and_deadline_queries_are_bounded_and_order
     assert [item.follow_up_id for item in expiring] == [first.follow_up_id]
     page_two, _ = repository.list_expiring_follow_ups(second.deadline_at, limit=10, cursor=cursor)
     assert [item.follow_up_id for item in page_two] == [second.follow_up_id]
-
-
-def test_backend_contract_follow_up_policy_backfill_is_read_only_until_apply() -> None:
-    collection: Collection[dict[str, Any]] = mongomock.MongoClient().db.records
-    now = datetime(2026, 9, 9, 1, 0, tzinfo=UTC)
-    collection.insert_many(
-        [
-            {
-                '_id': 'session:ses_migration',
-                'record_type': 'session',
-                'session_id': 'ses_migration',
-                'claim_id': 'clm_migration',
-                'recovery_context': {'interrupted_at': now.isoformat()},
-            },
-            {
-                '_id': 'follow_up:fup_migration',
-                'record_type': 'follow_up',
-                'follow_up_id': 'fup_migration',
-                'claim_id': 'clm_migration',
-                'source_session_id': 'ses_migration',
-                'status': 'blocked',
-                'contact_permission': 'not_authorised',
-            },
-        ]
-    )
-    dry_run = backfill_follow_ups(collection)
-    assert dry_run['eligible'] == ['fup_migration']
-    stored_before = collection.find_one({'_id': 'follow_up:fup_migration'})
-    assert stored_before is not None
-    assert 'deadline_at' not in stored_before
-    applied = backfill_follow_ups(collection, apply=True)
-    assert applied['applied'] == ['fup_migration']
-    stored = collection.find_one({'_id': 'follow_up:fup_migration'})
-    assert stored is not None
-    assert stored['policy_id'] == 'incomplete_claim_follow_up'
-    assert stored['deadline_at'] == (now + timedelta(days=7)).isoformat()
-    assert stored['blocked_reason'] == 'contact_not_authorised'
-
-
-def test_follow_up_policy_backfill_missing_interruption_fails_closed_on_apply() -> None:
-    collection: Collection[dict[str, Any]] = mongomock.MongoClient().db.records
-    old_due = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
-    collection.insert_many(
-        [
-            {
-                '_id': 'session:ses_missing_interruption',
-                'record_type': 'session',
-                'session_id': 'ses_missing_interruption',
-                'claim_id': 'clm_missing_interruption',
-                'recovery_context': {},
-            },
-            {
-                '_id': 'follow_up:fup_missing_interruption',
-                'record_type': 'follow_up',
-                'follow_up_id': 'fup_missing_interruption',
-                'claim_id': 'clm_missing_interruption',
-                'source_session_id': 'ses_missing_interruption',
-                'status': 'pending',
-                'contact_permission': 'authorised',
-                'channel': 'in_app',
-                'due_at': old_due.isoformat(),
-            },
-        ]
-    )
-
-    dry_run = backfill_follow_ups(collection)
-    assert dry_run['eligible'] == []
-    assert dry_run['fail_closed'] == []
-    assert [item['follow_up_id'] for item in dry_run['rejected']] == ['fup_missing_interruption']
-    before = collection.find_one({'_id': 'follow_up:fup_missing_interruption'})
-    assert before is not None
-    assert before['due_at'] == old_due.isoformat()
-
-    applied = backfill_follow_ups(collection, apply=True)
-    assert applied['fail_closed'] == ['fup_missing_interruption']
-    stored = collection.find_one({'_id': 'follow_up:fup_missing_interruption'})
-    assert stored is not None
-    assert stored['policy_id'] == 'incomplete_claim_follow_up'
-    assert stored['policy_version'] == 1
-    assert stored['status'] == 'blocked'
-    assert stored['due_at'] == old_due.isoformat()
-    assert stored['blocked_reason'] == 'policy_binding_invalid'
-    assert stored['contact_permission'] == 'authorised'
-    assert stored['channel'] == 'in_app'
-    assert 'deadline_at' not in stored
 
 
 def test_attempt_limit_block_preserves_contact_authority_without_due_work() -> None:

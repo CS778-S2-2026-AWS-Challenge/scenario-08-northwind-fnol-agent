@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any, NoReturn, TypeVar, cast
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
@@ -4088,6 +4088,61 @@ class MongoDBRepository:
             'created_at',
         )
 
+    def _follow_up_backfill_candidate_ids(self) -> list[str]:
+        candidates = self._collection.find(
+            {
+                'record_type': 'follow_up',
+                'status': {
+                    '$in': [
+                        FollowUpStatus.PENDING.value,
+                        FollowUpStatus.BLOCKED.value,
+                    ]
+                },
+                # ``None`` matches both an absent field and an explicit null;
+                # the two encodings are equally unbound for migration.
+                '$or': [
+                    {'policy_id': None},
+                    {'policy_version': None},
+                    {'deadline_at': None},
+                    {
+                        'status': FollowUpStatus.BLOCKED.value,
+                        'blocked_reason': None,
+                    },
+                ],
+            },
+            projection={'_id': 1},
+        ).sort('_id', 1)
+        return [item['_id'] for item in candidates if isinstance(item.get('_id'), str)]
+
+    def plan_incomplete_claim_recovery_backfill(
+        self,
+        *,
+        recorded_at: datetime,
+    ) -> dict[str, str]:
+        """Report the backfill decision per candidate without writing.
+
+        Args:
+            recorded_at: Timezone-aware audit time the apply run would use.
+
+        Returns:
+            Follow-up identifier mapped to ``noop``, ``bound``, ``failed`` or
+            ``unreadable`` (stored shape cannot be validated; never written).
+
+        Raises:
+            ValueError: ``recorded_at`` is naive.
+        """
+        if recorded_at.tzinfo is None:
+            raise ValueError('Backfill audit time must be timezone-aware.')
+        plan: dict[str, str] = {}
+        for record_id in self._follow_up_backfill_candidate_ids():
+            try:
+                plan[record_id] = self._backfill_incomplete_claim_recovery_record(
+                    record_id, recorded_at, None, dry_run=True
+                )
+            except ValidationError:
+                plan[record_id] = 'unreadable'
+        return plan
+
     def backfill_incomplete_claim_recovery(
         self,
         *,
@@ -4098,37 +4153,10 @@ class MongoDBRepository:
         if migration_time.tzinfo is None:
             raise ValueError('Backfill audit time must be timezone-aware.')
 
-        candidates = list(
-            self._collection.find(
-                {
-                    'record_type': 'follow_up',
-                    'status': {
-                        '$in': [
-                            FollowUpStatus.PENDING.value,
-                            FollowUpStatus.BLOCKED.value,
-                        ]
-                    },
-                    '$or': [
-                        {'policy_id': {'$exists': False}},
-                        {'policy_version': {'$exists': False}},
-                        {'deadline_at': {'$exists': False}},
-                        {'reason_code': {'$exists': False}},
-                    ],
-                },
-                projection={'_id': 1},
-            )
-        )
-
         bound_count = 0
         failed_count = 0
 
-        for candidate in candidates:
-            record_id_value = candidate.get('_id')
-
-            if not isinstance(record_id_value, str):
-                continue
-
-            record_id: str = record_id_value
+        for record_id in self._follow_up_backfill_candidate_ids():
 
             def persist_record(
                 mongo_session: Any,
@@ -4141,7 +4169,12 @@ class MongoDBRepository:
                     mongo_session,
                 )
 
-            outcome = self._atomic(persist_record)
+            try:
+                outcome = self._atomic(persist_record)
+            except ValidationError:
+                # An unreadable stored shape has no typed fail-closed encoding;
+                # it is left untouched and reported by the planning pass.
+                continue
 
             if outcome == 'bound':
                 bound_count += 1
@@ -4155,6 +4188,8 @@ class MongoDBRepository:
         record_id: str,
         recorded_at: datetime,
         mongo_session: Any,
+        *,
+        dry_run: bool = False,
     ) -> str:
         document = self._collection.find_one(
             {
@@ -4173,17 +4208,19 @@ class MongoDBRepository:
             return 'noop'
 
         customer_id = document.get('customer_id')
+        source_document: dict[str, Any] | None = None
 
-        if not isinstance(customer_id, str):
-            source_session = None
-        else:
-            source_session = self._get(
-                'session',
-                follow_up.source_session_id,
-                SessionRecord,
-                customer_id=customer_id,
+        if isinstance(customer_id, str):
+            source_document = self._collection.find_one(
+                {
+                    '_id': self._record_id('session', follow_up.source_session_id),
+                    'record_type': 'session',
+                    'customer_id': customer_id,
+                },
                 session=mongo_session,
             )
+
+        source_session = self._model_from_document(source_document, SessionRecord)
 
         decision = backfill_legacy_follow_up_record(
             follow_up,
@@ -4191,8 +4228,8 @@ class MongoDBRepository:
             recorded_at=recorded_at,
         )
 
-        if decision.outcome == 'noop':
-            return 'noop'
+        if decision.outcome == 'noop' or dry_run:
+            return decision.outcome
 
         assert decision.audit_event is not None
 
@@ -4204,13 +4241,31 @@ class MongoDBRepository:
             'claim_id': follow_up.claim_id,
         }
 
+        # The interruption source is read, not written, so a transaction alone
+        # would not conflict with a concurrent Session change.  The fence write
+        # matches the exact Session snapshot that produced the decision; the
+        # fence field is adapter metadata that no domain model reads.
+        if source_document is not None:
+            source_predicate: dict[str, Any] = dict(source_document)
+            for field in SessionRecord.model_fields:
+                if field not in source_document:
+                    source_predicate[field] = {'$exists': False}
+            fence = self._collection.update_one(
+                source_predicate,
+                {'$inc': {'recovery_backfill_fence': 1}},
+                session=mongo_session,
+            )
+            if fence.matched_count != 1:
+                raise IdempotencyConflict(follow_up.follow_up_id)
+
+        # Exact-document CAS: any concurrent Follow-up write since discovery,
+        # including a competing policy binding, makes this migration a no-op.
+        predicate: dict[str, Any] = dict(document)
+        for field in FollowUpRecord.model_fields:
+            if field not in document:
+                predicate[field] = {'$exists': False}
         result = self._collection.replace_one(
-            {
-                '_id': record_id,
-                'record_type': 'follow_up',
-                'customer_id': document.get('customer_id'),
-                'claim_id': follow_up.claim_id,
-            },
+            predicate,
             migrated,
             session=mongo_session,
         )

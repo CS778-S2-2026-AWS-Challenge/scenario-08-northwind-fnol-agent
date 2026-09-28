@@ -24,6 +24,7 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import IdempotencyConflict
 
 NOW = datetime(2026, 9, 28, 6, 0, tzinfo=UTC)
 MIGRATION_TIME = NOW + timedelta(days=10)
@@ -517,3 +518,132 @@ def test_migrated_open_recovery_remains_deadline_discoverable(
         FollowUpStatus.PENDING,
         FollowUpStatus.BLOCKED,
     }
+
+
+def _set_stored_binding(
+    repository: FixtureRepository | MongoDBRepository,
+    follow_up: FollowUpRecord,
+    fields: dict[str, object],
+) -> None:
+    if isinstance(repository, FixtureRepository):
+        repository._follow_ups[follow_up.follow_up_id] = FollowUpRecord.model_validate(
+            {**follow_up.model_dump(), **fields}
+        )
+        return
+    repository._collection.update_one(
+        {'_id': repository._record_id('follow_up', follow_up.follow_up_id)},
+        {'$set': fields},
+    )
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongodb'])
+@pytest.mark.parametrize(
+    ('fields', 'bound'),
+    [
+        # Compatible partial binding: only the missing fields are filled.
+        ({'policy_id': 'incomplete_claim_follow_up'}, True),
+        ({'policy_version': 1}, True),
+        # Explicit null is the same unbound state as an absent field.
+        ({'policy_id': None, 'policy_version': None}, True),
+        # Contradictory immutable coordinates are never rewritten.
+        ({'policy_id': 'some_other_policy', 'policy_version': 7}, False),
+        ({'policy_version': 7}, False),
+        ({'policy_id': 'some_other_policy'}, False),
+    ],
+)
+def test_backfill_fills_only_compatible_bindings_and_fails_closed_on_contradiction(
+    kind: str,
+    fields: dict[str, object],
+    bound: bool,
+) -> None:
+    repository = _repository(kind)
+    label = f'binding-{kind}-{len(fields)}-{bound}'
+    legacy = _seed_legacy(repository, label)
+    _set_stored_binding(repository, legacy, fields)
+
+    counts = repository.backfill_incomplete_claim_recovery(recorded_at=MIGRATION_TIME)
+
+    migrated = repository.get_follow_up(legacy.claim_id, legacy.follow_up_id, f'cus_{label}')
+    assert migrated is not None
+    assert migrated.due_at == legacy.due_at
+    assert migrated.created_at == legacy.created_at
+    assert migrated.attempt_count == legacy.attempt_count
+    if bound:
+        assert counts == (1, 0)
+        assert (migrated.policy_id, migrated.policy_version) == ('incomplete_claim_follow_up', 1)
+        # Interruption time, never migration time, is the clock origin.
+        assert migrated.deadline_at == NOW + timedelta(days=7)
+        assert migrated.status is FollowUpStatus.PENDING
+        return
+    assert counts == (0, 1)
+    assert migrated.status is FollowUpStatus.BLOCKED
+    assert migrated.reason_code is FollowUpReasonCode.POLICY_BINDING_INVALID
+    assert migrated.policy_id == fields.get('policy_id')
+    assert migrated.policy_version == fields.get('policy_version')
+    assert migrated.deadline_at is None
+    # A policy-blocked record keeps the claimant's real contact authority.
+    assert migrated.contact_permission is FollowUpContactPermission.AUTHORISED
+
+
+@pytest.mark.parametrize('changed', ['source_session', 'follow_up'])
+def test_mongo_backfill_detects_concurrent_source_or_target_change(changed: str) -> None:
+    repository = _repository('mongodb')
+    assert isinstance(repository, MongoDBRepository)
+    legacy = _seed_legacy(repository, f'concurrent-{changed}')
+    collection = repository._collection
+    original_find_one = collection.find_one
+    reads = {'count': 0}
+
+    def racing_find_one(*args, **kwargs):  # type: ignore[no-untyped-def]
+        result = original_find_one(*args, **kwargs)
+        reads['count'] += 1
+        # After both authoritative reads (Follow-up, then Session) a competing
+        # writer commits before this record's conditional writes.
+        if reads['count'] == 2:
+            if changed == 'source_session':
+                collection.update_one(
+                    {'_id': repository._record_id('session', legacy.source_session_id)},
+                    {'$set': {'recovery_context.interrupted_at': MIGRATION_TIME.isoformat()}},
+                )
+            else:
+                collection.update_one(
+                    {'_id': repository._record_id('follow_up', legacy.follow_up_id)},
+                    {'$set': {'policy_version': 7}},
+                )
+        return result
+
+    collection.find_one = racing_find_one  # type: ignore[method-assign]
+    try:
+        with pytest.raises(IdempotencyConflict):
+            repository.backfill_incomplete_claim_recovery(recorded_at=MIGRATION_TIME)
+    finally:
+        collection.find_one = original_find_one  # type: ignore[method-assign]
+
+    stored = collection.find_one({'_id': repository._record_id('follow_up', legacy.follow_up_id)})
+    assert stored is not None
+    assert stored.get('deadline_at') is None
+    assert stored.get('policy_id') is None
+    assert repository.list_audit_events_internal(follow_up_backfill_subject(legacy)) == []
+
+
+def test_operator_backfill_script_delegates_to_repository_contract() -> None:
+    from scripts.backfill_follow_up_policy import backfill_follow_ups
+
+    repository = _repository('mongodb')
+    assert isinstance(repository, MongoDBRepository)
+    valid = _seed_legacy(repository, 'script-valid')
+    conflicting = _seed_legacy(repository, 'script-conflicting')
+    _set_stored_binding(repository, conflicting, {'policy_version': 7})
+
+    dry_run = backfill_follow_ups(repository, recorded_at=MIGRATION_TIME)
+    assert dry_run['bound'] == [repository._record_id('follow_up', valid.follow_up_id)]
+    assert dry_run['fail_closed'] == [repository._record_id('follow_up', conflicting.follow_up_id)]
+    untouched = repository.get_follow_up(valid.claim_id, valid.follow_up_id, 'cus_script-valid')
+    assert untouched is not None and untouched.deadline_at is None
+
+    applied = backfill_follow_ups(repository, apply=True, recorded_at=MIGRATION_TIME)
+    assert applied['applied'] == {'bound': 1, 'fail_closed': 1}
+    kept = repository.get_follow_up(
+        conflicting.claim_id, conflicting.follow_up_id, 'cus_script-conflicting'
+    )
+    assert kept is not None and kept.policy_version == 7
