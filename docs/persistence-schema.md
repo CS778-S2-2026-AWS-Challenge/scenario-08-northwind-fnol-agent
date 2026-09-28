@@ -1343,6 +1343,51 @@ retention decisions remain outside this persistence contract.
 
 ## P17.3 Durable Follow-up execution contract
 
+### Operation creation and advancement
+
+The backend slice owns conditional persistence, existing pause/resume compatibility,
+and migration safety. It does not execute a Runtime worker, deliver notifications,
+or delete retained data. The following table defines the consumer boundary.
+
+| Record | Immutable identity | Permitted advancement | Concurrency and replay |
+| --- | --- | --- | --- |
+| FollowUpOperation | ID, Follow-up/Claim, sequence, policy, source revision, schedule, sources, creation time | Reserved to committed or cancelled; terminal evidence cannot change | Insert-only create; exact replay succeeds; advancement compares the complete expected prior record |
+| RetentionOperation | ID, Claim, policy, source revision/references, target set, creation time | Eligible/held to executing; executing to reconciliation/completed; reconciliation to executing; completed is immutable | Insert-only create; complete prior-record compare-and-set; successful step evidence is append-only |
+| FollowUpRecord | Claim/source Session, policy, original deadline | Resume clears blocked reason and schedule, records claimant_resumed | Existing Claim revision and session activation transaction remain authoritative |
+
+Creation never replaces a conflicting identity. Conditional advancement rejects stale
+state and immutable-field changes; exact retries return the stored result. A blocked
+obligation has no executable schedule, but only contact_not_authorised (including
+legacy reason-less blocked records) requires absent contact authority. Exhaustion
+preserves the actual contact permission and the original deadline.
+
+Retention persistence records approved execution coordinates and per-target outcomes
+only. It does not authorize cleanup, determine eligibility, or close resource access.
+Those actions require the separate retention execution boundary.
+
+The callable operation boundary is:
+
+- `save_follow_up_operation` creates only a reserved identity (or replays an exact stored record).
+- `advance_follow_up_operation` conditionally cancels a reservation without a Claim mutation.
+- `commit_follow_up_operation` settles a reservation together with the Follow-up aggregate,
+  Claim revision increment, immutable audit events, idempotency response and realtime event,
+  under the Fixture lock or one Mongo transaction. It compares the prior Follow-up and
+  operation, revalidates Claim revision, paused Session, contact-authorised pending state,
+  due time, original deadline and terminal absence. It rejects unrelated Claim edits.
+- The commit idempotency key equals operation ID; its request fingerprint is produced by
+  `follow_up_commit_fingerprint` over the complete expected/result bundle and audit evidence.
+  Exact retries replay the final operation without incrementing attempts/revision again;
+  conflicting bundles, stale expected state and terminal rewrites conflict.
+- `save_retention_operation` inserts eligible/held identity at revision 1;
+  `advance_retention_operation` requires the complete prior record and revision + 1.
+  Identity includes required policy ID/version, based-on Claim revision, non-empty source
+  references and exact targets. Step outcomes are deleted/already_absent/failed/unknown;
+  successful evidence cannot be rewritten and completed requires success for every target.
+
+These methods provide durable bookkeeping, not proof of in-app delivery or object deletion.
+The downstream executor must produce the selected in-app effect inside its atomic business
+mutation boundary; it must not mark a separately delivered provider action committed here.
+
 The recovery Follow-up binds to policy `incomplete_claim_follow_up` version `1`. New records
 persist an absolute `deadline_at`, derived once from the original
 `SessionRecoveryContext.interrupted_at` (seven days in the prototype policy). The deadline is
@@ -1361,14 +1406,22 @@ reconciliation authority.
 
 The claimant and Workbench projections expose the persisted Follow-up deadline; Workbench also
 exposes the authoritative attempt count. Retention cleanup remains a separate cross-store
-operation and is not inferred from this Follow-up record. Its durable schema must be added only
-after the approved data-classification and retention-hold inputs are available.
+operation and is not inferred from this Follow-up record. The bounded RetentionOperation
+schema records the approved policy/source coordinates and execution progress only. Its
+consumer supplies the approved classification/hold decisions; this slice does not choose
+retention policy or implement destructive cleanup and access closure.
 
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
 read-only by default, derives the deadline only from the source Session's persisted interruption
 time, conditionally updates records with missing policy/deadline fields under `--apply`, and
 reports records with missing or contradictory source state instead of guessing. It never derives
 a deadline from the migration execution time, deployment time, or current wall clock.
+Missing and explicit-null fields are eligible; compatible non-null bindings are preserved,
+and contradictory bindings/deadlines are rejected unchanged. Apply requires Mongo transactions:
+an exact-source conditional write fence and target CAS commit together. The Session's
+adapter-only `recovery_backfill_fence` counter changes no domain revision or interruption
+evidence; it forces a write conflict if the source changes concurrently. Unsupported
+transaction deployments fail without a non-atomic fallback. Dry-run performs no writes.
 
 ## P17.2 Bounded Terminal Disposition and Reopen Slice
 

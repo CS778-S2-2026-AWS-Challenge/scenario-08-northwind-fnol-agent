@@ -36,9 +36,9 @@ def backfill_follow_ups(
             {
                 'record_type': 'follow_up',
                 '$or': [
-                    {'policy_id': {'$exists': False}},
-                    {'policy_version': {'$exists': False}},
-                    {'deadline_at': {'$exists': False}},
+                    {'policy_id': None},
+                    {'policy_version': None},
+                    {'deadline_at': None},
                 ],
             }
         ).sort('_id', 1)
@@ -59,7 +59,6 @@ def backfill_follow_ups(
                 'session_id': follow_up.get('source_session_id'),
                 'claim_id': follow_up.get('claim_id'),
             },
-            projection={'recovery_context.interrupted_at': 1},
         )
         try:
             interrupted_at = (session or {}).get('recovery_context', {}).get('interrupted_at')
@@ -67,6 +66,16 @@ def backfill_follow_ups(
             if interrupted_at.tzinfo is None or interrupted_at.utcoffset() is None:
                 raise ValueError('interrupted_at must include a timezone offset.')
             deadline_at = interrupted_at + timedelta(days=7)
+            for field, expected in (
+                ('policy_id', 'incomplete_claim_follow_up'),
+                ('policy_version', 1),
+            ):
+                if follow_up.get(field) is not None and follow_up[field] != expected:
+                    raise ValueError('Existing policy binding contradicts the approved policy.')
+            if follow_up.get('deadline_at') is not None and (
+                _DATETIME.validate_python(follow_up['deadline_at']) != deadline_at
+            ):
+                raise ValueError('Existing deadline contradicts the original interruption.')
         except (AttributeError, TypeError, ValidationError, ValueError) as error:
             report['rejected'].append({'follow_up_id': follow_up_id, 'reason': str(error)})
             continue
@@ -76,32 +85,57 @@ def backfill_follow_ups(
             'policy_version': 1,
             'deadline_at': deadline_at.isoformat(),
         }
+        update = {key: value for key, value in update.items() if follow_up.get(key) is None}
         if (
             follow_up.get('status') == 'blocked'
             and follow_up.get('contact_permission') == 'not_authorised'
-            and 'blocked_reason' not in follow_up
+            and follow_up.get('blocked_reason') is None
         ):
             update['blocked_reason'] = 'contact_not_authorised'
         report['eligible'].append(follow_up_id)
         if not apply:
             continue
-        result = collection.update_one(
-            {
-                '_id': follow_up.get('_id'),
-                'record_type': 'follow_up',
-                '$or': [
-                    {'policy_id': {'$exists': False}},
-                    {'policy_version': {'$exists': False}},
-                    {'deadline_at': {'$exists': False}},
-                ],
-            },
-            {'$set': update},
-        )
-        if result.matched_count != 1 or result.modified_count != 1:
+        assert session is not None
+        if not _apply_backfill(collection, follow_up, session, update):
             report['conflicts'].append(follow_up_id)
         else:
             report['applied'].append(follow_up_id)
     return report
+
+
+class BackfillConflictError(ValueError):
+    """A migration source or target changed after discovery."""
+
+
+def _apply_backfill(
+    collection: Collection[dict[str, Any]],
+    original: dict[str, Any],
+    source: dict[str, Any],
+    update: dict[str, Any],
+) -> bool:
+    # Apply requires a transaction-capable Mongo deployment. The source fence is
+    # adapter metadata, not a Session revision or a change to recovery evidence.
+    predicate: dict[str, Any] = dict(original)
+    for field in ('policy_id', 'policy_version', 'deadline_at', 'blocked_reason'):
+        if field not in original:
+            predicate[field] = {'$exists': False}
+
+    def apply(mongo_session: Any) -> None:
+        guard = collection.update_one(
+            dict(source), {'$inc': {'recovery_backfill_fence': 1}}, session=mongo_session
+        )
+        if guard.matched_count != 1:
+            raise BackfillConflictError('Source changed during backfill.')
+        result = collection.update_one(predicate, {'$set': update}, session=mongo_session)
+        if result.matched_count != 1 or result.modified_count != 1:
+            raise BackfillConflictError('Target changed during backfill.')
+
+    try:
+        with collection.database.client.start_session() as mongo_session:
+            mongo_session.with_transaction(apply)
+    except BackfillConflictError:
+        return False
+    return True
 
 
 def main() -> int:

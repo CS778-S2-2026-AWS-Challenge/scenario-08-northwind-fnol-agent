@@ -883,7 +883,12 @@ The recovery Follow-up persists purpose, source references, responsible party, c
 
 After that checkpoint, claimant Claim detail and Claim list projections may include `incomplete_context` containing the interruption time, last meaningful activity, bounded resume point, and the claimant-safe open Follow-up state. Pause is accepted only when the authoritative Claim is not `created` and `customer_next_step.can_resume=true`; terminal or explicitly non-resumable Claims return `409 INVALID_STATE_TRANSITION`. Claimant and Workbench projections use the same incomplete predicate: an eligible resumable non-terminal Claim, no authoritative active Session, a relevant paused recovery checkpoint, and an open recovery Follow-up. This applies to every resumable non-terminal workflow state, not only `collecting`. The persisted checkpoint also records the exact durable source reference for the latest qualifying claimant message or accepted claimant business action.
 
-When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
+When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. Resolution records `claimant_resumed`, clears the blocked reason and executable due time, and preserves the original policy/deadline and contact facts. This applies to authenticated and anonymous claimants in both persistence adapters. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
+
+A blocked Follow-up with `attempt_limit_reached` keeps its original contact-permission fact
+and deadline while removing executable scheduling. It is not equivalent to contact withdrawal
+or Claim abandonment. Legacy blocked records without a reason retain their previous
+not-authorised/no-channel interpretation. No new recovery or retention HTTP endpoint is added.
 
 Only one active claimant session per claim is permitted.
 

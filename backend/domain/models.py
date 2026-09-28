@@ -1142,14 +1142,18 @@ class FollowUpRecord(ContractModel):
                 raise ValueError('A pending Follow-up requires an authorised channel and due time.')
             if self.blocked_reason is not None or self.resolution_code is not None:
                 raise ValueError('A pending Follow-up cannot have a blocked or resolution reason.')
-        elif self.status is FollowUpStatus.BLOCKED and (
-            self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
-            or self.channel is not None
-            or self.due_at is not None
-        ):
-            raise ValueError(
-                'A blocked Follow-up must not claim an authorised channel or schedule.'
-            )
+            if self.deadline_at is not None and self.due_at >= self.deadline_at:
+                raise ValueError('An executable due time must precede the deadline.')
+        elif self.status is FollowUpStatus.BLOCKED:
+            if self.due_at is not None:
+                raise ValueError('A blocked Follow-up cannot have an executable schedule.')
+            if self.blocked_reason in {None, FollowUpReasonCode.CONTACT_NOT_AUTHORISED} and (
+                self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
+                or self.channel is not None
+            ):
+                raise ValueError(
+                    'A contact-blocked Follow-up must not claim an authorised channel or schedule.'
+                )
         if self.status is FollowUpStatus.BLOCKED and self.resolution_code is not None:
             raise ValueError('A blocked Follow-up cannot have a resolution code.')
         if self.status is FollowUpStatus.RESOLVED:
@@ -1222,11 +1226,15 @@ class RetentionOperation(ContractModel):
 
     operation_id: str = Field(pattern=r'^rop_[a-f0-9]{20}$')
     claim_id: str = Field(min_length=1, max_length=120)
+    policy_id: str = Field(min_length=1, max_length=120)
+    policy_version: int = Field(ge=1)
+    based_on_claim_revision: int = Field(ge=1)
+    revision: int = Field(default=1, ge=1)
     target_refs: list[str] = Field(min_length=1, max_length=50)
     status: RetentionOperationStatus
     hold_reason: str | None = Field(default=None, max_length=500)
     step_results: dict[str, str] = Field(default_factory=dict, max_length=50)
-    source_refs: list[str] = Field(default_factory=list, max_length=20)
+    source_refs: list[str] = Field(min_length=1, max_length=20)
     created_at: datetime
     updated_at: datetime
 
@@ -1236,6 +1244,21 @@ class RetentionOperation(ContractModel):
             raise ValueError('Retention operation update cannot precede creation.')
         if self.status is RetentionOperationStatus.HELD and not self.hold_reason:
             raise ValueError('A held retention operation requires a hold reason.')
+        if self.status is not RetentionOperationStatus.HELD and self.hold_reason is not None:
+            raise ValueError('Only a held operation can have a hold reason.')
+        if len(set(self.target_refs)) != len(self.target_refs):
+            raise ValueError('Retention targets must be unique.')
+        if not set(self.step_results).issubset(self.target_refs):
+            raise ValueError('Retention results must refer to the immutable target set.')
+        if not set(self.step_results.values()).issubset(
+            {'deleted', 'already_absent', 'failed', 'unknown'}
+        ):
+            raise ValueError('Unknown retention step outcome.')
+        if self.status is RetentionOperationStatus.COMPLETED and (
+            set(self.step_results) != set(self.target_refs)
+            or not set(self.step_results.values()).issubset({'deleted', 'already_absent'})
+        ):
+            raise ValueError('Completion requires success evidence for every target.')
         return self
 
 

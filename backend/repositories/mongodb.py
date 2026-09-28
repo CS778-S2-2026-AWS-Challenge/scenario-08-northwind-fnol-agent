@@ -72,13 +72,16 @@ from backend.domain.models import (
     EvidenceClaimLink,
     EvidenceRecord,
     FollowUpOperation,
+    FollowUpOperationStatus,
     FollowUpRecord,
+    FollowUpResolutionCode,
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
     MessageVisibility,
     MotorOtherDriverRecord,
     RetentionOperation,
+    RetentionOperationStatus,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -99,6 +102,12 @@ from backend.domain.realtime import (
     realtime_event_from_publication,
     realtime_publication_for,
     realtime_resources_for_records,
+)
+from backend.domain.recovery import (
+    follow_up_commit_fingerprint,
+    validate_follow_up_commit,
+    validate_follow_up_transition,
+    validate_retention_transition,
 )
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
@@ -2353,6 +2362,11 @@ class MongoDBRepository:
         return records
 
     def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
+        operation = FollowUpOperation.model_validate(operation.model_dump())
+        if operation.status is not FollowUpOperationStatus.RESERVED:
+            if self.get_follow_up_operation(operation.operation_id) == operation:
+                return
+            raise ValueError('Create a reservation before committing or cancelling it.')
         follow_up = self._get('follow_up', operation.follow_up_id, FollowUpRecord)
         if follow_up is None or follow_up.claim_id != operation.claim_id:
             raise KeyError(operation.follow_up_id)
@@ -2374,18 +2388,35 @@ class MongoDBRepository:
             },
         )
         if duplicate is not None:
+            if self._model_from_document(duplicate, FollowUpOperation) == operation:
+                return
             raise IdempotencyConflict(operation.operation_id)
-        self._put(
-            'follow_up_operation',
-            operation.operation_id,
-            operation,
-            claim_id=operation.claim_id,
-        )
+        try:
+            self._collection.insert_one(
+                {
+                    **operation.model_dump(mode='json'),
+                    '_id': self._record_id('follow_up_operation', operation.operation_id),
+                    'record_type': 'follow_up_operation',
+                }
+            )
+        except DuplicateKeyError as error:
+            if self.get_follow_up_operation(operation.operation_id) != operation:
+                raise IdempotencyConflict(operation.operation_id) from error
 
     def get_retention_operation(self, operation_id: str) -> RetentionOperation | None:
         return self._get('retention_operation', operation_id, RetentionOperation)
 
     def save_retention_operation(self, operation: RetentionOperation) -> None:
+        operation = RetentionOperation.model_validate(operation.model_dump())
+        if (
+            operation.revision != 1
+            or operation.status
+            not in {RetentionOperationStatus.ELIGIBLE, RetentionOperationStatus.HELD}
+            or operation.step_results
+        ):
+            if self.get_retention_operation(operation.operation_id) == operation:
+                return
+            raise ValueError('Create eligible/held retention identity before executing steps.')
         if self._get('claim', operation.claim_id, WorkingClaim) is None:
             raise KeyError(operation.claim_id)
         existing = self.get_retention_operation(operation.operation_id)
@@ -2393,12 +2424,158 @@ class MongoDBRepository:
             if existing != operation:
                 raise IdempotencyConflict(operation.operation_id)
             return
-        self._put(
-            'retention_operation',
-            operation.operation_id,
-            operation,
-            claim_id=operation.claim_id,
+        try:
+            self._collection.insert_one(
+                {
+                    **operation.model_dump(mode='json'),
+                    '_id': self._record_id('retention_operation', operation.operation_id),
+                    'record_type': 'retention_operation',
+                }
+            )
+        except DuplicateKeyError as error:
+            if self.get_retention_operation(operation.operation_id) != operation:
+                raise IdempotencyConflict(operation.operation_id) from error
+
+    def advance_follow_up_operation(
+        self, expected: FollowUpOperation, operation: FollowUpOperation
+    ) -> FollowUpOperation:
+        validate_follow_up_transition(expected, operation)
+        if operation.status is FollowUpOperationStatus.COMMITTED:
+            raise ValueError('Committed operations require commit_follow_up_operation.')
+        self._advance_recovery_operation('follow_up_operation', expected, operation)
+        return operation.model_copy(deep=True)
+
+    def commit_follow_up_operation(
+        self,
+        expected: FollowUpOperation,
+        operation: FollowUpOperation,
+        expected_follow_up: FollowUpRecord,
+        follow_up: FollowUpRecord,
+        claim: WorkingClaim,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+    ) -> FollowUpOperation:
+        validate_follow_up_transition(expected, operation)
+        fingerprint = follow_up_commit_fingerprint(
+            expected, operation, expected_follow_up, follow_up, claim, audit_events
         )
+        if (
+            idempotency.request_fingerprint != fingerprint
+            or idempotency.key != operation.operation_id
+        ):
+            raise IdempotencyConflict(operation.operation_id)
+
+        def commit(mongo_session: Any) -> FollowUpOperation:
+            stored = self._get(
+                'follow_up_operation',
+                operation.operation_id,
+                FollowUpOperation,
+                session=mongo_session,
+            )
+            if stored == operation:
+                saved = self._collection.find_one(
+                    {
+                        'record_type': 'idempotency',
+                        'actor_id': idempotency.actor_id,
+                        'route': idempotency.route,
+                        'key': idempotency.key,
+                    },
+                    session=mongo_session,
+                )
+                if saved is None or saved['payload'] != idempotency.__dict__ or not audit_events:
+                    raise IdempotencyConflict(operation.operation_id)
+                for event in audit_events:
+                    if (
+                        self._get(
+                            'audit_event', event.event_id, AuditEventEnvelope, session=mongo_session
+                        )
+                        != event
+                    ):
+                        raise IdempotencyConflict(operation.operation_id)
+                return operation.model_copy(deep=True)
+            previous = self._get(
+                'follow_up', follow_up.follow_up_id, FollowUpRecord, session=mongo_session
+            )
+            if stored != expected or previous != expected_follow_up:
+                raise IdempotencyConflict(operation.operation_id)
+            current = self._get('claim', claim.claim_id, WorkingClaim, session=mongo_session)
+            if current is None:
+                raise KeyError(claim.claim_id)
+            if current.revision != expected.based_on_claim_revision:
+                raise RevisionConflict(current.revision)
+            if claim.model_dump(exclude={'revision', 'updated_at'}) != current.model_dump(
+                exclude={'revision', 'updated_at'}
+            ):
+                raise ValueError('Follow-up commit cannot rewrite unrelated Claim state.')
+            source = self._get(
+                'session', follow_up.source_session_id, SessionRecord, session=mongo_session
+            )
+            validate_follow_up_commit(
+                expected, operation, expected_follow_up, follow_up, current, source
+            )
+            if (
+                not audit_events
+                or any(event.correlation_id != operation.operation_id for event in audit_events)
+                or idempotency.follow_up_id != follow_up.follow_up_id
+            ):
+                raise ValueError('Recovery commit requires linked audit and replay evidence.')
+            if (
+                claim.revision != current.revision + 1
+                or claim.customer_id != current.customer_id
+                or claim.active_session_id != current.active_session_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+            ):
+                raise KeyError(claim.claim_id)
+            self._save_claim_mutation_with_audit(
+                claim, current.revision, idempotency, audit_events, None, mongo_session
+            )
+            result = self._collection.update_one(
+                {
+                    '_id': self._record_id('follow_up', follow_up.follow_up_id),
+                    'record_type': 'follow_up',
+                    **expected_follow_up.model_dump(mode='json'),
+                },
+                {'$set': follow_up.model_dump(mode='json')},
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                raise IdempotencyConflict(operation.operation_id)
+            self._advance_recovery_operation(
+                'follow_up_operation', expected, operation, mongo_session=mongo_session
+            )
+            return operation.model_copy(deep=True)
+
+        return self._atomic(commit)
+
+    def advance_retention_operation(
+        self, expected: RetentionOperation, operation: RetentionOperation
+    ) -> RetentionOperation:
+        validate_retention_transition(expected, operation)
+        self._advance_recovery_operation('retention_operation', expected, operation)
+        return operation.model_copy(deep=True)
+
+    def _advance_recovery_operation(
+        self,
+        kind: str,
+        expected: FollowUpOperation | RetentionOperation,
+        operation: FollowUpOperation | RetentionOperation,
+        *,
+        mongo_session: Any = None,
+    ) -> None:
+        identity = {'_id': self._record_id(kind, operation.operation_id), 'record_type': kind}
+        # Full prior-state CAS also protects immutable fields and optional legacy values.
+        predicate = {**identity, **expected.model_dump(mode='json')}
+        result = self._collection.replace_one(
+            predicate,
+            {**identity, **operation.model_dump(mode='json')},
+            upsert=False,
+            session=mongo_session,
+        )
+        if result.matched_count == 0:
+            stored = self._get(kind, operation.operation_id, type(operation), session=mongo_session)
+            if stored != operation:
+                raise IdempotencyConflict(operation.operation_id)
 
     def _reject_session_identity_conflict(
         self,
@@ -6855,6 +7032,9 @@ class MongoDBRepository:
                 update={
                     'status': FollowUpStatus.RESOLVED,
                     'outcome': resolved_follow_up.outcome,
+                    'resolution_code': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                    'blocked_reason': None,
+                    'due_at': None,
                     'updated_at': resolved_follow_up.updated_at,
                 }
             )

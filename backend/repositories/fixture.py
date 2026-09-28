@@ -59,13 +59,16 @@ from backend.domain.models import (
     EvidenceClaimLink,
     EvidenceRecord,
     FollowUpOperation,
+    FollowUpOperationStatus,
     FollowUpRecord,
+    FollowUpResolutionCode,
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
     MessageVisibility,
     MotorOtherDriverRecord,
     RetentionOperation,
+    RetentionOperationStatus,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -86,6 +89,12 @@ from backend.domain.realtime import (
     realtime_event_from_publication,
     realtime_publication_for,
     realtime_resources_for_records,
+)
+from backend.domain.recovery import (
+    follow_up_commit_fingerprint,
+    validate_follow_up_commit,
+    validate_follow_up_transition,
+    validate_retention_transition,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
@@ -1497,6 +1506,11 @@ class FixtureRepository(PersistenceRepository):
         return sorted(records, key=lambda operation: (operation.sequence, operation.operation_id))
 
     def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
+        operation = FollowUpOperation.model_validate(operation.model_dump())
+        if operation.status is not FollowUpOperationStatus.RESERVED:
+            if self.get_follow_up_operation(operation.operation_id) == operation:
+                return
+            raise ValueError('Create a reservation before committing or cancelling it.')
         with self._claim_mutation_lock:
             existing = self._follow_up_operations.get(operation.operation_id)
             if existing is not None:
@@ -1528,6 +1542,16 @@ class FixtureRepository(PersistenceRepository):
         return deepcopy(self._retention_operations.get(operation_id))
 
     def save_retention_operation(self, operation: RetentionOperation) -> None:
+        operation = RetentionOperation.model_validate(operation.model_dump())
+        if (
+            operation.revision != 1
+            or operation.status
+            not in {RetentionOperationStatus.ELIGIBLE, RetentionOperationStatus.HELD}
+            or operation.step_results
+        ):
+            if self.get_retention_operation(operation.operation_id) == operation:
+                return
+            raise ValueError('Create eligible/held retention identity before executing steps.')
         with self._claim_mutation_lock:
             existing = self._retention_operations.get(operation.operation_id)
             if existing is not None:
@@ -1537,6 +1561,97 @@ class FixtureRepository(PersistenceRepository):
             if operation.claim_id not in self._claims:
                 raise KeyError(operation.claim_id)
             self._retention_operations[operation.operation_id] = deepcopy(operation)
+
+    def advance_follow_up_operation(
+        self, expected: FollowUpOperation, operation: FollowUpOperation
+    ) -> FollowUpOperation:
+        validate_follow_up_transition(expected, operation)
+        if operation.status is FollowUpOperationStatus.COMMITTED:
+            raise ValueError('Committed operations require commit_follow_up_operation.')
+        with self._claim_mutation_lock:
+            stored = self._follow_up_operations.get(operation.operation_id)
+            if stored == operation:
+                return deepcopy(stored)
+            if stored != expected:
+                raise IdempotencyConflict(operation.operation_id)
+            self._follow_up_operations[operation.operation_id] = deepcopy(operation)
+            return deepcopy(operation)
+
+    def commit_follow_up_operation(
+        self,
+        expected: FollowUpOperation,
+        operation: FollowUpOperation,
+        expected_follow_up: FollowUpRecord,
+        follow_up: FollowUpRecord,
+        claim: WorkingClaim,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+    ) -> FollowUpOperation:
+        validate_follow_up_transition(expected, operation)
+        fingerprint = follow_up_commit_fingerprint(
+            expected, operation, expected_follow_up, follow_up, claim, audit_events
+        )
+        if (
+            idempotency.request_fingerprint != fingerprint
+            or idempotency.key != operation.operation_id
+        ):
+            raise IdempotencyConflict(operation.operation_id)
+        with self._claim_mutation_lock:
+            stored = self._follow_up_operations.get(operation.operation_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if stored == operation:
+                if (
+                    self._idempotency.get(lookup) != idempotency
+                    or not audit_events
+                    or any(
+                        self._audit_events.get(event.event_id) != event for event in audit_events
+                    )
+                ):
+                    raise IdempotencyConflict(operation.operation_id)
+                return deepcopy(stored)
+            if (
+                stored != expected
+                or self._follow_ups.get(follow_up.follow_up_id) != expected_follow_up
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+            current = self._validate_claim_mutation(claim, expected.based_on_claim_revision)
+            if claim.model_dump(exclude={'revision', 'updated_at'}) != current.model_dump(
+                exclude={'revision', 'updated_at'}
+            ):
+                raise ValueError('Follow-up commit cannot rewrite unrelated Claim state.')
+            validate_follow_up_commit(
+                expected,
+                operation,
+                expected_follow_up,
+                follow_up,
+                current,
+                self._sessions.get(follow_up.source_session_id),
+            )
+            if (
+                not audit_events
+                or any(event.correlation_id != operation.operation_id for event in audit_events)
+                or idempotency.follow_up_id != follow_up.follow_up_id
+            ):
+                raise ValueError('Recovery commit requires linked audit and replay evidence.')
+            self.save_claim_mutation_with_audit(
+                claim, expected.based_on_claim_revision, idempotency, audit_events
+            )
+            self._follow_ups[follow_up.follow_up_id] = deepcopy(follow_up)
+            self._follow_up_operations[operation.operation_id] = deepcopy(operation)
+            return deepcopy(operation)
+
+    def advance_retention_operation(
+        self, expected: RetentionOperation, operation: RetentionOperation
+    ) -> RetentionOperation:
+        validate_retention_transition(expected, operation)
+        with self._claim_mutation_lock:
+            stored = self._retention_operations.get(operation.operation_id)
+            if stored == operation:
+                return deepcopy(stored)
+            if stored != expected:
+                raise IdempotencyConflict(operation.operation_id)
+            self._retention_operations[operation.operation_id] = deepcopy(operation)
+            return deepcopy(operation)
 
     def save_incomplete_checkpoint(
         self,
@@ -1721,7 +1836,9 @@ class FixtureRepository(PersistenceRepository):
                     update={
                         'status': FollowUpStatus.RESOLVED,
                         'outcome': resolved_follow_up.outcome,
-                        'resolution_code': resolved_follow_up.resolution_code,
+                        'resolution_code': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                        'blocked_reason': None,
+                        'due_at': None,
                         'updated_at': resolved_follow_up.updated_at,
                     }
                 )
