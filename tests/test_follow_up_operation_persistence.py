@@ -12,7 +12,9 @@ from backend.domain.models import (
     FollowUpContactPermission,
     FollowUpOperation,
     FollowUpOperationStatus,
+    FollowUpReasonCode,
     FollowUpRecord,
+    FollowUpResolutionCode,
     FollowUpStatus,
     PreferredChannel,
     ResponsibleParty,
@@ -206,3 +208,82 @@ def test_mongo_retention_operation_is_replay_safe() -> None:
     repository.save_retention_operation(operation)
     repository.save_retention_operation(operation)
     assert repository.get_retention_operation(operation.operation_id) == operation
+
+
+def test_model_guards_cover_invalid_lifecycle_combinations() -> None:
+    follow_up = _follow_up()
+    with pytest.raises(ValueError):
+        FollowUpRecord.model_validate(
+            follow_up.model_copy(
+                update={'blocked_reason': FollowUpReasonCode.CONTACT_NOT_AUTHORISED}
+            ).model_dump()
+        )
+    with pytest.raises(ValueError):
+        FollowUpRecord.model_validate(
+            follow_up.model_copy(
+                update={
+                    'status': FollowUpStatus.BLOCKED,
+                    'contact_permission': FollowUpContactPermission.NOT_AUTHORISED,
+                    'channel': None,
+                    'due_at': None,
+                    'resolution_code': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                }
+            ).model_dump()
+        )
+    with pytest.raises(ValueError):
+        follow_up.model_copy(
+            update={
+                'status': FollowUpStatus.RESOLVED,
+                'contact_permission': FollowUpContactPermission.NOT_AUTHORISED,
+                'channel': None,
+                'due_at': None,
+            }
+        )
+        FollowUpRecord.model_validate(
+            follow_up.model_copy(
+                update={
+                    'status': FollowUpStatus.RESOLVED,
+                    'contact_permission': FollowUpContactPermission.NOT_AUTHORISED,
+                    'channel': None,
+                    'due_at': None,
+                }
+            ).model_dump()
+        )
+    now = follow_up.created_at
+    with pytest.raises(ValueError):
+        FollowUpOperation.model_validate(
+            _operation().model_copy(update={'updated_at': now - timedelta(seconds=1)}).model_dump()
+        )
+    with pytest.raises(ValueError):
+        FollowUpOperation.model_validate(_operation(FollowUpOperationStatus.COMMITTED).model_dump())
+    with pytest.raises(ValueError):
+        FollowUpOperation.model_validate(_operation(FollowUpOperationStatus.CANCELLED).model_dump())
+    with pytest.raises(ValueError):
+        RetentionOperation(
+            operation_id='rop_0123456789abcdef0123',
+            claim_id='claim',
+            target_refs=['target'],
+            status=RetentionOperationStatus.HELD,
+            created_at=now,
+            updated_at=now,
+        )
+
+
+def test_fixture_query_and_operation_rejection_paths() -> None:
+    repository = FixtureRepository()
+    with pytest.raises(ValueError):
+        repository.list_due_follow_ups(datetime.now(UTC), limit=0)
+    with pytest.raises(ValueError):
+        repository.list_expiring_follow_ups(datetime.now(UTC), limit=0)
+    with pytest.raises(KeyError):
+        repository.save_follow_up_operation(_operation())
+    retention = RetentionOperation(
+        operation_id='rop_abcdef0123456789abcd',
+        claim_id='missing',
+        target_refs=['target'],
+        status=RetentionOperationStatus.ELIGIBLE,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    with pytest.raises(KeyError):
+        repository.save_retention_operation(retention)
