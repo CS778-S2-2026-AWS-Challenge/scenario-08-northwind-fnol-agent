@@ -2,6 +2,7 @@ import { formatDate, formatDateTime, formatTime, words } from '../format.js'
 import { HandoffResolution, StaffActions } from './ReviewActions.jsx'
 import { findProjectedAction } from '../projected-action.js'
 import ResourceBoundary from './ResourceBoundary.jsx'
+import { translate as t } from '../i18n.js'
 
 export default function Activity({ detail, resources, onResolve, onUpdateAction, onRetry }) {
   const openHandoff = [...(resources.handoffs?.items || [])].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
@@ -16,8 +17,8 @@ export default function Activity({ detail, resources, onResolve, onUpdateAction,
       <ResourceBoundary resource={resources.events} onRetry={onRetry}>
         <section className="resource-view activity-section" aria-labelledby="claim-activity-title">
           <header className="content-header activity-section__header">
-            <p className="eyebrow">Audit trail</p>
-            <h2 id="claim-activity-title">Claim activity</h2>
+            <p className="eyebrow">{t('Audit trail')}</p>
+            <h2 id="claim-activity-title">{t('Claim activity')}</h2>
             <span className="activity-section__count">{resourceCountLabel(events.length, 'event', Boolean(resources.events?.page?.next_cursor))}</span>
           </header>
           <EventTimeline events={events} sourceItems={sourceItems} />
@@ -26,8 +27,8 @@ export default function Activity({ detail, resources, onResolve, onUpdateAction,
       <ResourceBoundary resource={resources.customerUpdates} onRetry={onRetry}>
         <section className="resource-view activity-section" aria-labelledby="customer-updates-title">
           <header className="content-header activity-section__header">
-            <p className="eyebrow">Claimant-visible</p>
-            <h2 id="customer-updates-title">Customer updates</h2>
+            <p className="eyebrow">{t('Claimant-visible')}</p>
+            <h2 id="customer-updates-title">{t('Customer updates')}</h2>
             <span className="activity-section__count">{resourceCountLabel(updates.length, 'update', Boolean(resources.customerUpdates?.page?.next_cursor))}</span>
           </header>
           <CustomerUpdateList updates={updates} />
@@ -43,8 +44,8 @@ function EventTimeline({ events = [], sourceItems = [] }) {
       <div className="activity-empty activity-empty--compact">
         <span className="activity-empty__marker" aria-hidden="true" />
         <div>
-          <strong>No claim activity yet</strong>
-          <p>Audit events will appear here as this claim progresses.</p>
+          <strong>{t('No claim activity yet')}</strong>
+          <p>{t('Audit events will appear here as this claim progresses.')}</p>
         </div>
       </div>
     )
@@ -89,8 +90,8 @@ function CustomerUpdateList({ updates = [] }) {
       <div className="activity-empty">
         <span className="activity-empty__marker" aria-hidden="true" />
         <div>
-          <strong>No customer updates yet</strong>
-          <p>Claimant-visible updates will appear here after they are recorded.</p>
+          <strong>{t('No customer updates yet')}</strong>
+          <p>{t('Claimant-visible updates will appear here after they are recorded.')}</p>
         </div>
       </div>
     )
@@ -122,21 +123,21 @@ function EventContext({ event, sourceItems, title }) {
   return (
     <>
       {(actor || event.resulting_revision != null || sourceLabels.length) ? (
-        <dl className="audit-event__context" aria-label="Event context">
-          {actor ? <div><dt>Recorded by</dt><dd>{actor}</dd></div> : null}
-          {sourceLabels.length ? <div><dt>{sourceRefs.length === 1 ? 'Related record' : 'Related records'}</dt><dd>{sourceLabels.join(' · ')}</dd></div> : null}
-          {event.resulting_revision != null ? <div><dt>Claim version</dt><dd>{event.resulting_revision}</dd></div> : null}
+        <dl className="audit-event__context" aria-label={t('Event context')}>
+          {actor ? <div><dt>{t('Recorded by')}</dt><dd>{actor}</dd></div> : null}
+          {sourceLabels.length ? <div><dt>{t(sourceRefs.length === 1 ? 'Related record' : 'Related records')}</dt><dd>{sourceLabels.join(' · ')}</dd></div> : null}
+          {event.resulting_revision != null ? <div><dt>{t('Claim version')}</dt><dd>{event.resulting_revision}</dd></div> : null}
         </dl>
       ) : null}
       <details className="audit-event__technical">
-        <summary>Technical details<span className="sr-only"> for {title}</span></summary>
+        <summary>{t('Technical details')}<span className="sr-only"> {t('for {title}', { title })}</span></summary>
         <dl>
-          <div><dt>Event reference</dt><dd><code>{event.event_id}</code></dd></div>
-          <div><dt>Event code</dt><dd><code>{event.event_type}</code></dd></div>
-          {event.actor_id ? <div><dt>Actor reference</dt><dd><code>{event.actor_id}</code></dd></div> : null}
+          <div><dt>{t('Event reference')}</dt><dd><code>{event.event_id}</code></dd></div>
+          <div><dt>{t('Event code')}</dt><dd><code>{event.event_type}</code></dd></div>
+          {event.actor_id ? <div><dt>{t('Actor reference')}</dt><dd><code>{event.actor_id}</code></dd></div> : null}
           {sourceRefs.length ? (
             <div>
-              <dt>Source references</dt>
+              <dt>{t('Source references')}</dt>
               <dd>
                 <ul className="audit-event__reference-list">
                   {sourceRefs.map((reference, index) => (
@@ -157,11 +158,11 @@ function EventContext({ event, sourceItems, title }) {
 
 function actorLabel(actorId) {
   const actor = String(actorId || '').toLowerCase()
-  if (actor === 'claimant' || actor.startsWith('cus_')) return 'Claimant'
-  if (actor === 'agent') return 'Agent'
-  if (actor === 'staff' || actor.startsWith('stf_')) return 'Claims professional'
-  if (actor === 'system') return 'System'
-  if (actor.startsWith('adm_')) return 'Administrator'
+  if (actor === 'claimant' || actor.startsWith('cus_')) return t('Claimant')
+  if (actor === 'agent') return t('Agent')
+  if (actor === 'staff' || actor.startsWith('stf_')) return t('Claims professional')
+  if (actor === 'system') return t('System')
+  if (actor.startsWith('adm_')) return t('Administrator')
   return null
 }
 
@@ -173,24 +174,24 @@ function sourceReferenceLabel(event, reference, index, sourceItems) {
   if (projectedLabel) return projectedLabel
 
   const matchedPrefix = REFERENCE_LABELS.find(([prefix]) => String(reference).startsWith(prefix))
-  return matchedPrefix?.[1] || 'Supporting record'
+  return t(matchedPrefix?.[1] || 'Supporting record')
 }
 
 function projectedSourceLabel(eventType, index) {
   const type = String(eventType || '')
-  if (type === 'claim.created' && index === 0) return 'Claim record'
-  if (type === 'message.appended' && index === 0) return 'Message'
-  if (type === 'message.appended' && index === 1) return 'Conversation'
-  if (type.startsWith('handoff.') && index === 0) return 'Handoff record'
-  if (type.startsWith('work_item.') && index === 0) return 'Staff work item'
-  if (type === 'customer_update.recorded' && index === 0) return 'Customer update'
+  if (type === 'claim.created' && index === 0) return t('Claim record')
+  if (type === 'message.appended' && index === 0) return t('Message')
+  if (type === 'message.appended' && index === 1) return t('Conversation')
+  if (type.startsWith('handoff.') && index === 0) return t('Handoff record')
+  if (type.startsWith('work_item.') && index === 0) return t('Staff work item')
+  if (type === 'customer_update.recorded' && index === 0) return t('Customer update')
   if (type.startsWith('ownership.') && index === 0) {
     const requestKind = type.split('.')[1]
-    return {
+    return t({
       cowork: 'Cowork request',
       transfer: 'Transfer request',
       requeue: 'Queue return',
-    }[requestKind] || 'Ownership request'
+    }[requestKind] || 'Ownership request')
   }
   return null
 }
@@ -243,5 +244,5 @@ function eventTitle(eventType) {
 
 function resourceCountLabel(count, singular, hasMore = false) {
   const noun = count === 1 && !hasMore ? singular : `${singular}s`
-  return `${count}${hasMore ? '+' : ''} ${noun}`
+  return t('{count} {noun}', { count: `${count}${hasMore ? '+' : ''}`, noun: t(noun) })
 }

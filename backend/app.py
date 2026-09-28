@@ -35,6 +35,8 @@ from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
 from backend.api.evidence import account_router as evidence_account_router
 from backend.api.evidence import router as evidence_router
+from backend.api.feedback import admin_router as admin_feedback_router
+from backend.api.feedback import staff_router as staff_feedback_router
 from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
 from backend.api.identity import router as identity_router
@@ -81,6 +83,7 @@ from backend.repositories.configuration import (
     SQLiteConfigurationRepository,
 )
 from backend.repositories.evaluations import EvaluationRepository, SQLiteEvaluationRepository
+from backend.repositories.feedback import FeedbackRepository, SQLiteFeedbackRepository
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.integration_health import (
@@ -154,6 +157,7 @@ def create_app(
     integration_health_repository: IntegrationHealthRepository | None = None,
     operation_repository: OperationRepository | None = None,
     evaluation_repository: EvaluationRepository | None = None,
+    feedback_repository: FeedbackRepository | None = None,
     knowledge_admin_repository: KnowledgeAdminRepository | None = None,
     external_capability_dispatcher: ExternalCapabilityDispatcher | None = None,
     protected_value_adapter: ProtectedValueAdapter | None = None,
@@ -304,6 +308,11 @@ def create_app(
         EvaluationRepository()
         if resolved_settings.developer_mode
         else SQLiteEvaluationRepository(resolved_settings.control_plane_db_path)
+    )
+    app.state.feedback_repository = feedback_repository or (
+        FeedbackRepository()
+        if resolved_settings.developer_mode
+        else SQLiteFeedbackRepository(resolved_settings.control_plane_db_path)
     )
     app.state.knowledge_admin_repository = resolved_knowledge_admin_repository
     app.state.release_set_repository = resolved_release_set_repository
@@ -470,6 +479,7 @@ def create_app(
     app.include_router(health_router)
     app.include_router(identity_router)
     app.include_router(staff_identity_router)
+    app.include_router(staff_feedback_router)
     app.include_router(staff_presence_router)
     app.include_router(staff_agent_router)
     app.include_router(legacy_router)
@@ -494,6 +504,7 @@ def create_app(
     app.include_router(admin_evaluations_router)
     app.include_router(admin_knowledge_router)
     app.include_router(admin_release_sets_router)
+    app.include_router(admin_feedback_router)
     return app
 
 

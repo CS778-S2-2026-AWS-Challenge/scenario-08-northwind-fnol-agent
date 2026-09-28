@@ -9,6 +9,7 @@ import NavigationRail from '../components/NavigationRail.jsx'
 import QueuePanel from '../components/QueuePanel.jsx'
 import StaffAgent from '../components/StaffAgent.jsx'
 import { usePersistentTabs } from '../hooks/usePersistentTabs.js'
+import { translate as t, useLanguage } from '../i18n.js'
 import { actionFailureMessage, failureReason, failureReference } from '../failure.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import { revisionNotice as buildRevisionNotice } from '../revision.js'
@@ -18,6 +19,7 @@ const MAX_MESSAGE_READBACK_PAGES = 100
 const MESSAGE_DELIVERY_READBACK_TIMEOUT_MS = 15_000
 
 export default function WorkbenchPage() {
+  useLanguage()
   const { token, profile, logout } = useAuth()
   const { claimId, section: routeSection, agentSessionId: routeAgentSessionId, conversationSessionId } = useParams()
   const location = useLocation()
@@ -1793,25 +1795,25 @@ export default function WorkbenchPage() {
       <NavigationRail profile={profile} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
       <div className="workbench-stage">
         <header className="workbench-topbar">
-          <button className="icon-button mobile-menu" type="button" aria-label="Open navigation"><Menu size={19} /></button>
-          <div><strong>Claims Workbench</strong><span>Source-linked operational view</span></div>
+          <button className="icon-button mobile-menu" type="button" aria-label={t('Open navigation')}><Menu size={19} /></button>
+          <div><strong>{t('Claims Workbench')}</strong><span>{t('Source-linked operational view')}</span></div>
           <div className="topbar-actions">
-            {!isConversations && <button className="icon-button" type="button" onClick={() => setQueueVisible((value) => !value)} aria-label={queueVisible ? 'Hide Claim queue' : 'Show Claim queue'}>{queueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>}
-            <button className="icon-button" type="button" onClick={filterMetadata ? loadClaims : () => setFilterMetadataAttempt((attempt) => attempt + 1)} aria-label="Refresh Workbench projection"><RefreshCw size={17} /></button>
+            {!isConversations && <button className="icon-button" type="button" onClick={() => setQueueVisible((value) => !value)} aria-label={queueVisible ? t('Hide Claim queue') : t('Show Claim queue')}>{queueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>}
+            <button className="icon-button" type="button" onClick={filterMetadata ? loadClaims : () => setFilterMetadataAttempt((attempt) => attempt + 1)} aria-label={t('Refresh Workbench projection')}><RefreshCw size={17} /></button>
           </div>
         </header>
         {queueNotice && <div className="global-error" role="status">{queueNotice}</div>}
         {movementNotice && (
           <div className={`movement-notice${movementNotice.kind === 'error' ? ' movement-notice--error' : ''}`} role={movementNotice.kind === 'error' ? 'alert' : 'status'}>
             <span>{movementNotice.message}</span>
-            <button type="button" className="icon-button icon-button--small" aria-label="Dismiss Claim movement notice" onClick={() => setMovementNotice(null)}>×</button>
+            <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss Claim movement notice')} onClick={() => setMovementNotice(null)}>×</button>
           </div>
         )}
         {revisionNotice && revisionNotice.claimId === claimId && (
           <div className="revision-notice" role="status">
-            <span>This Claim changed in another session (revision {revisionNotice.revision}).</span>
-            <button type="button" onClick={() => { setRevisionNotice(null); loadDetail(claimId) }}>Review the latest version</button>
-            <button type="button" className="icon-button icon-button--small" aria-label="Dismiss revision notice" onClick={() => setRevisionNotice(null)}>×</button>
+            <span>{t('This Claim changed in another session (revision {revision}).', { revision: revisionNotice.revision })}</span>
+            <button type="button" onClick={() => { setRevisionNotice(null); loadDetail(claimId) }}>{t('Review the latest version')}</button>
+            <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss revision notice')} onClick={() => setRevisionNotice(null)}>×</button>
           </div>
         )}
         {isConversations ? (
@@ -1906,18 +1908,18 @@ function reopenFailureNotice(error, latest, queueLabel) {
 
 function QueueViewUnavailable({ view, onOpenAll }) {
   return (
-    <aside className="queue-panel" aria-label="Claim queue">
+    <aside className="queue-panel" aria-label={t('Claim queue')}>
       <header className="queue-panel__header">
         <div>
-          <p className="eyebrow">My work</p>
-          <h2>Claim queue</h2>
+          <p className="eyebrow">{t('My work')}</p>
+          <h2>{t('Claim queue')}</h2>
         </div>
       </header>
       <div className="queue-list">
         <div className="queue-state" role="alert">
-          <strong>This queue view is no longer available</strong>
-          <p>The view “{view}” is not published by the Workbench service. Choose a current server-published queue to continue.</p>
-          <button className="button button--quiet" type="button" onClick={onOpenAll}>Open all active work</button>
+          <strong>{t('This queue view is no longer available')}</strong>
+          <p>{t('The view “{view}” is not published by the Workbench service. Choose a current server-published queue to continue.', { view })}</p>
+          <button className="button button--quiet" type="button" onClick={onOpenAll}>{t('Open all active work')}</button>
         </div>
       </div>
     </aside>
@@ -1926,22 +1928,22 @@ function QueueViewUnavailable({ view, onOpenAll }) {
 
 function QueueMetadataState({ loading, error, onRetry }) {
   return (
-    <aside className="queue-panel" aria-label="Claim queue">
+    <aside className="queue-panel" aria-label={t('Claim queue')}>
       <header className="queue-panel__header">
         <div>
-          <p className="eyebrow">My work</p>
-          <h2>Claim queue</h2>
+          <p className="eyebrow">{t('My work')}</p>
+          <h2>{t('Claim queue')}</h2>
         </div>
       </header>
       <div className="queue-list" aria-live="polite" aria-busy={loading}>
-        {loading && <p className="queue-state" role="status">Loading queue filters...</p>}
+        {loading && <p className="queue-state" role="status">{t('Loading queue filters...')}</p>}
         {!loading && error && (
           <div className="queue-state" role="alert">
-            <strong>Claim queue unavailable</strong>
-            <p>The Workbench could not load the server-published queue controls. The current URL has been preserved; retry when the service is available.</p>
+            <strong>{t('Claim queue unavailable')}</strong>
+            <p>{t('The Workbench could not load the server-published queue controls. The current URL has been preserved; retry when the service is available.')}</p>
             <p>{failureReason(error)}</p>
             {failureReference(error) && <small>{failureReference(error)}</small>}
-            <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
+            <button className="button button--quiet" type="button" onClick={onRetry}>{t('Retry')}</button>
           </div>
         )}
       </div>

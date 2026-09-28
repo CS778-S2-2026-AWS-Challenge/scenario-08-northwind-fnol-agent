@@ -2,6 +2,7 @@ import { AlertTriangle, Clock3, FileSearch } from 'lucide-react'
 import { claimIdentity } from '../claim-identity.js'
 import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
+import { translate as t } from '../i18n.js'
 import Activity from './Activity.jsx'
 import Conversation from './Conversation.jsx'
 import EvidenceRecords from './EvidenceRecords.jsx'
@@ -23,7 +24,7 @@ const SECTIONS = [
 ]
 
 export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, externalActionNotices = [], section, conversationSessionId, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetry, onRetrySection, onRetryExternalActionContext }) {
-  if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>Loading Claim...</p></main>
+  if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>{t('Loading Claim...')}</p></main>
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
   const baseInteractionDetail = stale || error ? { ...detail, allowed_actions: [] } : detail
@@ -50,22 +51,22 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
       {(loading || stale || error) && <ClaimSyncNotice loading={loading} error={error} onRetry={onRetry} />}
       {externalActionNotices.map((notice) => (
         <section className="claim-sync-notice" role="alert" aria-live="assertive" key={`${notice.claimId}:${notice.taskId}`}>
-          <strong>External-service action outcome not confirmed</strong>
+          <strong>{t('External-service action outcome not confirmed')}</strong>
           <p>{notice.message}</p>
-          <p><strong>External task:</strong> {notice.taskId}</p>
+          <p><strong>{t('External task:')}</strong> {notice.taskId}</p>
           <button
             className="button button--quiet"
             type="button"
             disabled={notice.recovering}
             onClick={() => onRetryExternalActionContext(notice.taskId)}
           >
-            {notice.recovering ? 'Refreshing Claim and External Services...' : 'Refresh Claim and External Services'}
+            {t(notice.recovering ? 'Refreshing Claim and External Services...' : 'Refresh Claim and External Services')}
           </button>
         </section>
       ))}
       {section !== 'conversation' && <ClaimHeader detail={detail} />}
-      <nav className="section-tabs" aria-label="Claim sections" role="tablist">
-        {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{label}</button>)}
+      <nav className="section-tabs" aria-label={t('Claim sections')} role="tablist">
+        {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{t(label)}</button>)}
       </nav>
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
         {section === 'summary' && <Overview key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} supportingState={[resources.handoffs, resources.collaborationRequests]} profile={profile} onAccept={onAccept} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} onRetry={onRetry} />}
@@ -101,28 +102,28 @@ function ClaimHeader({ detail }) {
           ? <p className="claim-heading__summary">{identity.incidentSummary}</p>
           : null}
         <div className="claim-heading__meta">
-          {detail.terminal_disposition && <span>Terminal: {words(detail.terminal_disposition.value)}</span>}
+          {detail.terminal_disposition && <span>{t('Terminal')}: {words(detail.terminal_disposition.value)}</span>}
           <span>{words(detail.lifecycle_state)}</span>
-          <span>Revision {detail.revision}</span>
-          <span className="claim-heading__reference">Claim {identity.referenceLabel}</span>
+          <span>{t('Revision')} {detail.revision}</span>
+          <span className="claim-heading__reference">{t('Claim')} {identity.referenceLabel}</span>
         </div>
         {(identity.reference || detail.claimant?.customer_id) ? (
           <details className="claim-heading__references">
-            <summary>Record references<span className="sr-only"> for {identity.title}</span></summary>
+            <summary>{t('Record references')}<span className="sr-only"> {t('for {title}', { title: identity.title })}</span></summary>
             <dl>
-              {identity.reference ? <div><dt>Claim reference</dt><dd><code>{identity.reference}</code></dd></div> : null}
+              {identity.reference ? <div><dt>{t('Claim reference')}</dt><dd><code>{identity.reference}</code></dd></div> : null}
               {identity.claimId && identity.claimId !== identity.reference
-                ? <div><dt>Working Claim ID</dt><dd><code>{identity.claimId}</code></dd></div>
+                ? <div><dt>{t('Working Claim ID')}</dt><dd><code>{identity.claimId}</code></dd></div>
                 : null}
               {detail.claimant?.customer_id
-                ? <div><dt>Claimant reference</dt><dd><code>{detail.claimant.customer_id}</code></dd></div>
+                ? <div><dt>{t('Claimant reference')}</dt><dd><code>{detail.claimant.customer_id}</code></dd></div>
                 : null}
             </dl>
           </details>
         ) : null}
       </div>
       <div className="claim-heading__status">
-        <span className="status-indicator"><Clock3 size={16} /> Updated {formatDateTime(detail.updated_at)}</span>
+        <span className="status-indicator"><Clock3 size={16} /> {t('Updated')} {formatDateTime(detail.updated_at)}</span>
       </div>
     </header>
   )
@@ -141,7 +142,7 @@ function moveTabFocus(event, currentIndex, onSection) {
 }
 
 function EmptyWorkspace() {
-  return <main className="empty-workspace"><div className="empty-workspace__symbol"><FileSearch size={28} /></div><p className="eyebrow">Workbench</p><h1>Select a Claim to begin.</h1><p>The queue keeps the work order visible. Opening a Claim does not accept or change it.</p></main>
+  return <main className="empty-workspace"><div className="empty-workspace__symbol"><FileSearch size={28} /></div><p className="eyebrow">{t('Workbench')}</p><h1>{t('Select a Claim to begin.')}</h1><p>{t('The queue keeps the work order visible. Opening a Claim does not accept or change it.')}</p></main>
 }
 
 function ClaimUnavailable({ error, onRetry }) {
@@ -152,13 +153,13 @@ function ClaimUnavailable({ error, onRetry }) {
   return (
     <main className="claim-state claim-state--error" role="alert">
       <AlertTriangle />
-      <h2>{inaccessible ? 'This Claim is not available' : 'This Claim could not be opened'}</h2>
+      <h2>{t(inaccessible ? 'This Claim is not available' : 'This Claim could not be opened')}</h2>
       <p>{inaccessible
-        ? 'It may have been removed or is no longer visible to this staff account. Return to the queue and refresh current work.'
-        : 'The Claim service did not return a usable projection. Retry without leaving this route.'}</p>
+        ? t('It may have been removed or is no longer visible to this staff account. Return to the queue and refresh current work.')
+        : t('The Claim service did not return a usable projection. Retry without leaving this route.')}</p>
       <p>{failureReason(error)}</p>
       {failureReference(error) && <small>{failureReference(error)}</small>}
-      {!inaccessible && <button className="button button--quiet" type="button" onClick={onRetry}>Retry Claim</button>}
+      {!inaccessible && <button className="button button--quiet" type="button" onClick={onRetry}>{t('Retry Claim')}</button>}
     </main>
   )
 }
@@ -167,29 +168,29 @@ function ClaimSyncNotice({ loading, error, onRetry }) {
   return (
     <div className={`claim-sync-notice${error ? ' claim-sync-notice--error' : ''}`} role={error ? 'alert' : 'status'}>
       <div>
-        <strong>{loading ? 'Refreshing this Claim' : 'Showing a saved Claim snapshot'}</strong>
+        <strong>{t(loading ? 'Refreshing this Claim' : 'Showing a saved Claim snapshot')}</strong>
         <p>{loading
-          ? 'The current projection remains visible while the latest revision is loaded.'
-          : 'The background refresh failed, so this Claim may be out of date. Review a refreshed projection before acting.'}</p>
+          ? t('The current projection remains visible while the latest revision is loaded.')
+          : t('The background refresh failed, so this Claim may be out of date. Review a refreshed projection before acting.')}</p>
         {error && <small>{failureReason(error)}</small>}
         {failureReference(error) && <small>{failureReference(error)}</small>}
       </div>
-      {!loading && <button className="button button--quiet" type="button" onClick={onRetry}>Refresh Claim</button>}
+      {!loading && <button className="button button--quiet" type="button" onClick={onRetry}>{t('Refresh Claim')}</button>}
     </div>
   )
 }
 
 function ClaimFields({ resource, onRetry }) {
-  return <ResourceBoundary resource={resource} onRetry={onRetry}><section className="resource-view"><header className="content-header"><div><p className="eyebrow">Source-linked data</p><h2>Claim information</h2></div><span>{resource?.items?.length || 0} fields</span></header><FieldLedger items={resource?.items} /></section></ResourceBoundary>
+  return <ResourceBoundary resource={resource} onRetry={onRetry}><section className="resource-view"><header className="content-header"><div><p className="eyebrow">{t('Source-linked data')}</p><h2>{t('Claim information')}</h2></div><span>{t('{count} fields', { count: resource?.items?.length || 0 })}</span></header><FieldLedger items={resource?.items} /></section></ResourceBoundary>
 }
 
 function FieldLedger({ items = [] }) {
-  if (!items.length) return <p className="empty-note">No structured Claim Context is recorded.</p>
+  if (!items.length) return <p className="empty-note">{t('No structured Claim Context is recorded.')}</p>
   return <dl className="fact-list">{items.map(({ code, field }) => <div key={code}><dt>{words(code.replaceAll('.', ' '))}</dt><dd><strong>{formatValue(field.value)}</strong><small>{words(field.status)} · {words(field.source)} · {words(field.needed_for)}</small></dd></div>)}</dl>
 }
 
 function formatValue(value) {
-  if (value === null || value === undefined || value === '') return 'Not recorded'
+  if (value === null || value === undefined || value === '') return t('Not recorded')
   if (Array.isArray(value)) return value.join(', ')
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)

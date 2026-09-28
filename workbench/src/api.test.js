@@ -179,6 +179,33 @@ describe('Workbench realtime stream', () => {
   })
 })
 
+describe('Workbench feedback API', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    vi.unstubAllGlobals()
+  })
+
+  it('submits feedback with staff authentication and an idempotency key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, {
+      feedback_id: 'fdb_test',
+      created_at: '2026-09-28T00:00:00Z',
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(workbenchApi.submitFeedback('staff-token', 'A clear suggestion.'))
+      .resolves.toMatchObject({ feedback_id: 'fdb_test' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/staff/feedback',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    const options = fetchMock.mock.calls[0][1]
+    expect(options.headers.Authorization).toBe('Bearer staff-token')
+    expect(options.headers['Idempotency-Key']).toBeTruthy()
+    expect(JSON.parse(options.body)).toEqual({ message: 'A clear suggestion.' })
+  })
+})
+
 
 describe('Workbench API failures', () => {
   beforeEach(() => {

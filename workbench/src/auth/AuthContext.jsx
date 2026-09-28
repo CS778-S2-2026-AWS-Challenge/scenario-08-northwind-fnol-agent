@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { applyAppearanceSettings, browserStaffSettingsGateway } from '../account/settings-gateway.js'
 import { clearStoredSession, readStoredSession, storeSession, workbenchApi } from '../api.js'
 import { AuthContext } from './auth-context.js'
 
@@ -34,6 +35,15 @@ export function AuthProvider({ children }) {
       active = false
     }
   }, [clear, session])
+
+  useEffect(() => {
+    if (!profile) return undefined
+    let active = true
+    browserStaffSettingsGateway.load(profile).then((settings) => {
+      if (active) applyAppearanceSettings(settings.appearance)
+    }).catch(() => null)
+    return () => { active = false }
+  }, [profile])
 
   const login = useCallback(async (email, password) => {
     const nextSession = await workbenchApi.login(email, password)
