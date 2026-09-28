@@ -24,6 +24,7 @@ claim-lifecycle states, work statuses, or risk conclusions.
 | `registered` | Present in the current backend registry/API subset. |
 | `candidate` | VP design field needing a later contract decision. |
 | `record` | Separate durable record, not a Dynamic Form field. |
+| `alias` | Catalogue-only name mapped to a canonical executable code; never submit or register it. |
 
 ### Current implementation reconciliation
 
@@ -60,7 +61,7 @@ privacy, authority, or professional review.
 
 The `safe/now/status` tuple contains three independent dimensions: whether the field can
 affect a safe action, whether it can be selected as `required_now` for a particular claim,
-and its catalogue/implementation status (`registered`, `candidate`, `record`, or
+and its catalogue/implementation status (`registered`, `candidate`, `record`, `alias`, or
 `system-owned`). Runtime fact status (`proposed`, `confirmed`, `disputed`, `missing`, or
 `pending_generation`) must be stored separately. Applicability is explicit in the index
 below; `common` means stable meaning across all three paths, while `conditional` means the
@@ -172,7 +173,7 @@ make their boundary explicit.
 | `road.conditions` | Surface, intersection, controls | object/no | C,E/y/y/y | review/c/candidate | Not implemented; requires a bounded value and review contract | S; review |
 | `weather.visibility` | Weather, lighting, visibility | object/no | C,E/y/y/y | safety/c/candidate | Not implemented; requires a bounded value and consumer contract | S; privacy |
 | `authority.police_status` | Police contacted/required/pending | enum/no | C,S/y/y/y | authority/y/candidate | Partial: Police branch and reference/Evidence handling exist; no unified status value | C/S; authority |
-| `authority.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/c/registered | Catalogue alias for registered `authorities.police_report_reference`; do not add a duplicate code | C/S; privacy/authority |
+| `authority.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/c/alias | Catalogue alias for registered `authorities.police_report_reference`; submit only the canonical code | C/S; privacy/authority |
 | `repairer.details` | Repairer and quote status | object/no | C,S,P/y/y/y | external/pending/candidate | Partial: quote Evidence and integration/WorkItem flows exist; no canonical repairer-details value | S; consent |
 | `motor.evidence_refs` | Vehicle photo/video/estimate refs | list/yes | E,C/y/y/y | evidence/y/record | Evidence API + item links | C/S; privacy |
 
@@ -219,7 +220,7 @@ item facts belong to typed item records, not a flat claim form.
 | `contents.item.estimated_value` | Claimant estimate, not settlement value | money/no | C,E/y/y/y | evidence/c/record | Optional currency-qualified money value; not settlement authority | C/S; review |
 | `contents.item.replacement_need` | Replace, repair, substitute | enum/no | C/y/y/y | next action/c/candidate | Not implemented; requires approved item and WorkItem semantics | C/S; privacy |
 | `contents.item.loss_type` | Damaged, lost, stolen, destroyed | enum/no | C,E/y/y/y | routing/y/record | Typed item enum; theft conditional behavior remains a separate branch | C/S; authority |
-| `contents.discovery_at` | When loss was discovered | date-time/no | C/y/y/y | safety/c/registered | Catalogue alias for registered `incident.discovered_at`; do not add a duplicate code | C/S; privacy |
+| `contents.discovery_at` | When loss was discovered | date-time/no | C/y/y/y | safety/c/alias | Catalogue alias for registered `incident.discovered_at`; submit only the canonical code | C/S; privacy |
 | `theft.entry_context` | Forced entry/access/unknown | enum/scalar/no | C,E/y/y/y | authority/y/registered | Theft branch; required now; forced_entry, unlocked, unknown, not_applicable | C/S; authority/privacy |
 | `contents.receipt_availability` | Receipt/invoice status | enum/no | C,E/y/y/y | evidence/y/record | Covered by receipt Evidence lifecycle/status projection; not a form field | C/S; privacy |
 | `contents.proof_of_ownership` | Ownership evidence references | list/yes | E,C/y/y/y | evidence/c/record | Item/evidence mapping | C/S; privacy |
