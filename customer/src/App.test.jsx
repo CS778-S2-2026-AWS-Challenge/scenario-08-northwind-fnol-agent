@@ -153,6 +153,43 @@ function initialTurn() {
   }
 }
 
+function deferredRequest() {
+  const request = {}
+  request.promise = new Promise((resolve, reject) => Object.assign(request, { reject, resolve }))
+  return request
+}
+
+function pausedClaim() {
+  return {
+    ...initialClaim,
+    revision: 3,
+    active_session_id: null,
+    incomplete_context: { interrupted_at: '2026-09-16T01:05:00Z',
+      resume_point: 'Describe what happened', follow_up_status: 'blocked' },
+  }
+}
+
+async function startActiveClaim(user) {
+  await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+  await user.click(screen.getByRole('button', { name: 'Start claim' }))
+  await screen.findByText(agentMessage.content.text)
+}
+
+function testAccount(customerId, displayName) {
+  return { customer_id: customerId,
+    profile: { display_name: displayName, email: `${customerId}@example.test`, phone: '' },
+    preferences: { email: true, sms: false } }
+}
+
+function mockAuthenticatedAccounts(...accounts) {
+  let authenticated = true
+  api.hasClaimantAccessToken.mockImplementation(() => authenticated)
+  api.setClaimantAccessToken.mockImplementation((token) => { authenticated = Boolean(token) })
+  api.logoutClaimant.mockImplementation(() => { authenticated = false })
+  accounts.forEach((account) => api.getAuthenticatedAccount.mockResolvedValueOnce(account))
+  api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+}
+
 function realtimeChange(revision, resources = ['claim', 'messages']) {
   return realtimeChangeFor(initialClaim.claim_id, revision, resources)
 }
@@ -269,16 +306,7 @@ describe('claimant intake projection', () => {
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
     api.pauseClaimSession.mockResolvedValue({
-      claim: {
-        ...initialClaim,
-        revision: 3,
-        active_session_id: null,
-        incomplete_context: {
-          interrupted_at: '2026-09-16T01:05:00Z',
-          resume_point: 'Describe what happened',
-          follow_up_status: 'blocked',
-        },
-      },
+      claim: pausedClaim(),
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     })
   })
@@ -1557,23 +1585,12 @@ describe('claimant intake projection', () => {
         { code: 'DEPENDENCY_UNAVAILABLE', status: 503, retryable: true },
       ))
       .mockResolvedValueOnce({
-        claim: {
-          ...initialClaim,
-          revision: 3,
-          active_session_id: null,
-          incomplete_context: {
-            interrupted_at: '2026-09-16T01:05:00Z',
-            resume_point: 'Describe what happened',
-            follow_up_status: 'blocked',
-          },
-        },
+        claim: pausedClaim(),
         session: { session_id: 'ses_ui_vp', status: 'paused' },
       })
 
     render(<App />)
-    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
-    await user.click(screen.getByRole('button', { name: 'Start claim' }))
-    await screen.findByText(agentMessage.content.text)
+    await startActiveClaim(user)
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
@@ -1594,16 +1611,12 @@ describe('claimant intake projection', () => {
 
   it('prevents duplicate interruption saves while New chat is pending', async () => {
     const user = userEvent.setup()
-    let finishPause
+    const pause = deferredRequest()
     api.submitClaimMessage.mockResolvedValue(initialTurn())
-    api.pauseClaimSession.mockImplementation(() => new Promise((resolve) => {
-      finishPause = resolve
-    }))
+    api.pauseClaimSession.mockReturnValue(pause.promise)
 
     render(<App />)
-    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
-    await user.click(screen.getByRole('button', { name: 'Start claim' }))
-    await screen.findByText(agentMessage.content.text)
+    await startActiveClaim(user)
 
     const newChat = screen.getByRole('button', { name: 'New chat' })
     fireEvent.click(newChat)
@@ -1612,17 +1625,8 @@ describe('claimant intake projection', () => {
     expect(api.pauseClaimSession).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
 
-    await act(async () => finishPause({
-      claim: {
-        ...initialClaim,
-        revision: 3,
-        active_session_id: null,
-        incomplete_context: {
-          interrupted_at: '2026-09-16T01:05:00Z',
-          resume_point: 'Describe what happened',
-          follow_up_status: 'blocked',
-        },
-      },
+    await act(async () => pause.resolve({
+      claim: pausedClaim(),
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
 
@@ -1631,32 +1635,89 @@ describe('claimant intake projection', () => {
 
   it('uses authoritative Claim readback when the pause response is lost', async () => {
     const user = userEvent.setup()
-    const pausedClaim = {
-      ...initialClaim,
-      revision: 3,
-      active_session_id: null,
-      incomplete_context: {
-        interrupted_at: '2026-09-16T01:05:00Z',
-        resume_point: 'Describe what happened',
-        follow_up_status: 'blocked',
-      },
-    }
     api.submitClaimMessage.mockResolvedValue(initialTurn())
     api.pauseClaimSession.mockRejectedValueOnce(
       new api.ApiRequestError('We could not reach the claim service.'),
     )
-    api.getClaim.mockResolvedValue(pausedClaim)
+    api.getClaim.mockResolvedValue(pausedClaim())
 
     render(<App />)
-    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
-    await user.click(screen.getByRole('button', { name: 'Start claim' }))
-    await screen.findByText(agentMessage.content.text)
+    await startActiveClaim(user)
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
     expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
     expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['sign-out', false],
+    ['account switch', true],
+  ])('ignores an old pause readback after %s', async (_scenario, switchAccount) => {
+    const user = userEvent.setup()
+    const readback = deferredRequest()
+    mockAuthenticatedAccounts(
+      testAccount('cus_pause_a', 'Account A'),
+      ...(switchAccount ? [testAccount('cus_pause_b', 'Account B')] : []),
+    )
+    api.loginClaimant.mockResolvedValue({ access_token: 'account-b-token' })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockRejectedValueOnce(new api.ApiRequestError('Response lost.'))
+    api.getClaim.mockReturnValueOnce(readback.promise)
+
+    render(<App />)
+    await startActiveClaim(user)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id))
+    await user.click(screen.getByRole('button', { name: /Open Profile for Account A/ }))
+    await user.click(await screen.findByRole('button', { name: 'Log out' }))
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Log in' }))
+      await user.type(screen.getByLabelText('Email address'), 'b@example.test')
+      await user.type(screen.getByLabelText('Password'), 'account-b-password')
+      await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
+      await screen.findByRole('button', { name: 'Profile' })
+    }
+    await act(async () => readback.resolve(pausedClaim()))
+
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+      expect(await screen.findByText('No saved conversations yet')).toBeVisible()
+    } else {
+      expect(globalThis.sessionStorage.getItem(
+        'northwind.anonymousConversationHistory.v1.anonymous-session-test',
+      )).toBeNull()
+    }
+    expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('ignores an old pause failure after a newer workspace pause starts', async () => {
+    const user = userEvent.setup()
+    const oldPause = deferredRequest()
+    const newerPause = deferredRequest()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession
+      .mockReturnValueOnce(oldPause.promise)
+      .mockReturnValueOnce(newerPause.promise)
+
+    render(<App />)
+    await startActiveClaim(user)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await act(async () => oldPause.reject(new api.ApiRequestError('Old pause failed.')))
+
+    expect(api.pauseClaimSession).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await act(async () => newerPause.resolve({
+      claim: pausedClaim(),
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
+    }))
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
   })
 
   it('uses the homepage rail to return to the existing empty conversation workspace', async () => {

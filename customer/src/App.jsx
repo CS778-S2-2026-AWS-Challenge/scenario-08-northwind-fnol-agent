@@ -480,11 +480,14 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const pendingSessionPause = useRef(null)
+  const sessionPauseGeneration = useRef(0)
+  const claimantIdentityGeneration = useRef(0)
   const latestRevision = useRef(0)
   const latestRevisionClaimId = useRef(null)
   const activeClaimRef = useRef(claim)
   const activeSessionIdRef = useRef(sessionId)
   const accountRef = useRef(account)
+  const workspaceViewRef = useRef(workspaceView)
   const realtimeCursor = useRef(null)
   const realtimeSeenEventIds = useRef(new Set())
   const messagesRequestGeneration = useRef(0)
@@ -514,6 +517,7 @@ function App() {
   activeClaimRef.current = claim
   activeSessionIdRef.current = sessionId
   accountRef.current = account
+  workspaceViewRef.current = workspaceView
   messagesRef.current = messages
   const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const realtimeSyncNotice = realtimeHealth === 'stale'
@@ -539,6 +543,45 @@ function App() {
   const documentOutstandingCount = evidenceLoadStatus === 'ready'
     ? documentAttentionCount(evidenceItems)
     : null
+
+  function currentPauseContextKey() {
+    const authenticated = hasClaimantAccessToken()
+    let identityKey = `account:${accountRef.current?.customer_id || ''}`
+    if (!authenticated) {
+      try {
+        identityKey = `anonymous:${globalThis.sessionStorage?.getItem('northwind.anonymousSession') || ''}`
+      } catch { identityKey = 'anonymous:' }
+    }
+    return [
+      claimantIdentityGeneration.current,
+      identityKey,
+      globalThis.location?.pathname || '/',
+      workspaceViewRef.current,
+      activeClaimRef.current?.claim_id || '',
+      activeSessionIdRef.current || '',
+    ].join(':')
+  }
+
+  function isSessionPauseCurrent(operation) {
+    return operation
+      && pendingSessionPause.current === operation
+      && sessionPauseGeneration.current === operation.generation
+      && currentPauseContextKey() === operation.contextKey
+  }
+
+  function invalidateSessionPause({ identityChanged = false } = {}) {
+    if (identityChanged) claimantIdentityGeneration.current += 1
+    sessionPauseGeneration.current += 1
+    const hadPendingPause = Boolean(pendingSessionPause.current)
+    pendingSessionPause.current = null
+    if (hadPendingPause) setStatus((current) => current === 'pausing-session' ? 'idle' : current)
+  }
+
+  useEffect(() => {
+    const operation = pendingSessionPause.current
+    if (operation && !isSessionPauseCurrent(operation)) invalidateSessionPause()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.customer_id, claim?.claim_id, draftWorkspaceActive, page, sessionId, workspaceActive, workspaceView])
 
   function rememberClaimInHistory(createdClaim) {
     if (!hasClaimantAccessToken()) {
@@ -959,7 +1002,8 @@ function App() {
     transition.resolve()
   }
 
-  function replaceActiveClaimContext(currentClaim, currentSessionId) {
+  function replaceActiveClaimContext(currentClaim, currentSessionId, { preserveSessionPause = false } = {}) {
+    if (!preserveSessionPause) invalidateSessionPause()
     activeClaimRef.current = currentClaim
     activeSessionIdRef.current = currentSessionId
     latestRevisionClaimId.current = currentClaim?.claim_id || null
@@ -1910,8 +1954,12 @@ function App() {
     }
   }
 
-  function resetForNewChat(stayInWorkspace) {
-    pendingSessionPause.current = null
+  function resetForNewChat(stayInWorkspace, pauseOperation = null) {
+    if (pauseOperation && !isSessionPauseCurrent(pauseOperation)) return
+    if (pauseOperation) {
+      pendingSessionPause.current = null
+      sessionPauseGeneration.current += 1
+    } else invalidateSessionPause()
     clearComposerAttachments()
     pendingSubmission.current = null
     pendingConfirmation.current = null
@@ -1922,7 +1970,7 @@ function App() {
     latestEvidenceItems.current = []
     evidenceHasLocalMutation.current = false
     evidenceClaimId.current = null
-    replaceActiveClaimContext(null, null)
+    replaceActiveClaimContext(null, null, { preserveSessionPause: true })
     commitMessages([])
     setForm({})
     setContentsItems([])
@@ -1986,11 +2034,21 @@ function App() {
     }
 
     const fingerprint = `${currentClaim.claim_id}:${currentSessionId}:${currentClaim.revision}`
+    const contextKey = currentPauseContextKey()
     let pauseRequest = pendingSessionPause.current
-    if (!pauseRequest || pauseRequest.fingerprint !== fingerprint) {
+    if (
+      !pauseRequest
+      || pauseRequest.fingerprint !== fingerprint
+      || pauseRequest.contextKey !== contextKey
+      || pauseRequest.stayInWorkspace !== stayInWorkspace
+    ) {
+      sessionPauseGeneration.current += 1
       pauseRequest = {
         fingerprint,
         idempotencyKey: requestId('pause-session'),
+        generation: sessionPauseGeneration.current,
+        contextKey,
+        stayInWorkspace,
         inFlight: false,
       }
     }
@@ -2006,40 +2064,31 @@ function App() {
         revision: currentClaim.revision,
         idempotencyKey: pauseRequest.idempotencyKey,
       })
-      if (
-        activeClaimRef.current?.claim_id !== currentClaim.claim_id
-        || activeSessionIdRef.current !== currentSessionId
-      ) {
-        pendingSessionPause.current = null
-        setStatus('idle')
-        return
-      }
+      if (!isSessionPauseCurrent(pauseRequest)) return
       rememberClaimInHistory(paused.claim)
-      resetForNewChat(stayInWorkspace)
+      resetForNewChat(stayInWorkspace, pauseRequest)
     } catch (requestError) {
+      if (!isSessionPauseCurrent(pauseRequest)) return
       pauseRequest.inFlight = false
-      if (
-        activeClaimRef.current?.claim_id !== currentClaim.claim_id
-        || activeSessionIdRef.current !== currentSessionId
-      ) {
-        setStatus('idle')
-        return
-      }
 
       if (!(requestError instanceof ApiRequestError) || !Number.isInteger(requestError.status)) {
+        let latestClaim = null
         try {
-          const latestClaim = await getClaim(currentClaim.claim_id)
+          latestClaim = await getClaim(currentClaim.claim_id)
+        } catch {
+          // Retain the current projection and original idempotency key. A retry safely
+          // replays a pause that may already have reached the service.
+        }
+        if (!isSessionPauseCurrent(pauseRequest)) return
+        if (latestClaim) {
           const pauseWasSaved = latestClaim.active_session_id === null
             && Boolean(latestClaim.incomplete_context)
           if (pauseWasSaved) {
             rememberClaimInHistory(latestClaim)
-            resetForNewChat(stayInWorkspace)
+            resetForNewChat(stayInWorkspace, pauseRequest)
             return
           }
           applyClaimSnapshot(latestClaim)
-        } catch {
-          // Retain the current projection and original idempotency key. A retry safely
-          // replays a pause that may already have reached the service.
         }
         setError('We could not confirm that your progress was saved because the claim service did not respond. Your current conversation is still open. Check your connection and select New chat again; the same save request will not create a duplicate.')
         setStatus('error')
@@ -2047,11 +2096,14 @@ function App() {
       }
 
       if (requestError.code === 'REVISION_CONFLICT') {
+        let latestClaim = null
         try {
-          applyClaimSnapshot(await getClaim(currentClaim.claim_id))
+          latestClaim = await getClaim(currentClaim.claim_id)
         } catch {
           // Keep the last visible projection when the refresh is also unavailable.
         }
+        if (!isSessionPauseCurrent(pauseRequest)) return
+        if (latestClaim) applyClaimSnapshot(latestClaim)
         setError('We could not save your place because this report changed in another session. Your current conversation is still open. Review the latest details and select New chat again.')
       } else {
         setError(`${requestError.message || 'We could not save your place before starting a new conversation.'} Your current conversation is still open. Review the report and select New chat again.`)
@@ -2527,6 +2579,7 @@ function App() {
 
   async function signIn(event) {
     event.preventDefault()
+    invalidateSessionPause({ identityChanged: true })
     const formData = new FormData(event.currentTarget)
     setAuthStatus('loading'); setAuthError('')
     try {
@@ -2557,6 +2610,7 @@ function App() {
 
   async function signUp(event) {
     event.preventDefault()
+    invalidateSessionPause({ identityChanged: true })
     const formData = new FormData(event.currentTarget)
     const password = String(formData.get('password') || '')
     const confirmPassword = String(formData.get('confirm_password') || '')
@@ -2593,6 +2647,7 @@ function App() {
   }
 
   async function signOut() {
+    invalidateSessionPause({ identityChanged: true })
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
     autoFillEditor.reset()
@@ -2626,6 +2681,7 @@ function App() {
   }
 
   function openClaimHistory() {
+    invalidateSessionPause()
     setSelectedHistoryClaimId(null)
     if (isWorkspaceActive) {
       setWorkspaceView('history')
