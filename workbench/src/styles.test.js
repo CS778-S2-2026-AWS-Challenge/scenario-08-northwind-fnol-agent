@@ -30,5 +30,6 @@ describe('Workbench density tokens', () => {
     expect(styles).toMatch(/\.staff-composer__input--voice \{[^}]*grid-template-columns: var\(--space-10\) var\(--space-10\) minmax\(0, 1fr\) var\(--space-10\);/)
     expect(styles).toMatch(/\.compact-composer__textarea \{[^}]*max-height: calc\(var\(--space-6\) \* 4\);/)
     expect(styles).toMatch(/\.compact-composer__send \{[^}]*width: var\(--space-10\);[^}]*height: var\(--space-10\);/)
+    expect(styles).toContain('.workbench-app:has(.conversation-detail .staff-composer) > .staff-agent:not(.is-open)')
   })
 })
