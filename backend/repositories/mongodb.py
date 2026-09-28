@@ -71,12 +71,14 @@ from backend.domain.models import (
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
+    FollowUpOperation,
     FollowUpRecord,
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
     MessageVisibility,
     MotorOtherDriverRecord,
+    RetentionOperation,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -452,6 +454,33 @@ class MongoDBRepository:
                 'record_type': 'follow_up',
                 'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
             },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('status', 1), ('due_at', 1), ('_id', 1)],
+            name='follow_up_due_ordered',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': FollowUpStatus.PENDING.value,
+            },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('status', 1), ('deadline_at', 1), ('_id', 1)],
+            name='follow_up_deadline_ordered',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('follow_up_id', 1), ('sequence', 1)],
+            unique=True,
+            name='follow_up_operation_sequence_unique',
+            partialFilterExpression={'record_type': 'follow_up_operation'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('updated_at', 1), ('_id', 1)],
+            name='retention_operation_claim_updated',
+            partialFilterExpression={'record_type': 'retention_operation'},
         )
         self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('created_at', 1)],
@@ -2238,6 +2267,137 @@ class MongoDBRepository:
             FollowUpRecord,
             {'claim_id': claim_id, 'customer_id': customer_id},
             'created_at',
+        )
+
+    def list_due_follow_ups(
+        self,
+        due_before: datetime,
+        *,
+        limit: int,
+        cursor: tuple[datetime, str] | None = None,
+    ) -> list[FollowUpRecord]:
+        if limit < 1:
+            raise ValueError('Follow-up query limit must be positive.')
+        query: dict[str, Any] = {
+            'record_type': 'follow_up',
+            'status': FollowUpStatus.PENDING.value,
+            'due_at': {'$lte': self._audit_timestamp(due_before)},
+        }
+        if cursor is not None:
+            query['$or'] = [
+                {
+                    'due_at': {
+                        '$gt': self._audit_timestamp(cursor[0]),
+                        '$lte': self._audit_timestamp(due_before),
+                    }
+                },
+                {
+                    'due_at': self._audit_timestamp(cursor[0]),
+                    '_id': {'$gt': self._record_id('follow_up', cursor[1])},
+                },
+            ]
+        records = []
+        for document in self._collection.find(query).sort([('due_at', 1), ('_id', 1)]).limit(limit):
+            record = self._model_from_document(document, FollowUpRecord)
+            if record is not None:
+                records.append(record)
+        return records
+
+    def list_expiring_follow_ups(
+        self,
+        deadline_before: datetime,
+        *,
+        limit: int,
+        cursor: tuple[datetime, str] | None = None,
+    ) -> list[FollowUpRecord]:
+        if limit < 1:
+            raise ValueError('Follow-up query limit must be positive.')
+        query: dict[str, Any] = {
+            'record_type': 'follow_up',
+            'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            'deadline_at': {'$lte': self._audit_timestamp(deadline_before)},
+        }
+        if cursor is not None:
+            query['$or'] = [
+                {
+                    'deadline_at': {
+                        '$gt': self._audit_timestamp(cursor[0]),
+                        '$lte': self._audit_timestamp(deadline_before),
+                    }
+                },
+                {
+                    'deadline_at': self._audit_timestamp(cursor[0]),
+                    '_id': {'$gt': self._record_id('follow_up', cursor[1])},
+                },
+            ]
+        records = []
+        for document in (
+            self._collection.find(query).sort([('deadline_at', 1), ('_id', 1)]).limit(limit)
+        ):
+            record = self._model_from_document(document, FollowUpRecord)
+            if record is not None:
+                records.append(record)
+        return records
+
+    def get_follow_up_operation(self, operation_id: str) -> FollowUpOperation | None:
+        return self._get('follow_up_operation', operation_id, FollowUpOperation)
+
+    def list_follow_up_operations(self, follow_up_id: str) -> list[FollowUpOperation]:
+        records = []
+        for document in self._collection.find(
+            {'record_type': 'follow_up_operation', 'follow_up_id': follow_up_id}
+        ).sort([('sequence', 1), ('_id', 1)]):
+            record = self._model_from_document(document, FollowUpOperation)
+            if record is not None:
+                records.append(record)
+        return records
+
+    def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
+        follow_up = self._get('follow_up', operation.follow_up_id, FollowUpRecord)
+        if follow_up is None or follow_up.claim_id != operation.claim_id:
+            raise KeyError(operation.follow_up_id)
+        if (
+            follow_up.policy_id != operation.policy_id
+            or follow_up.policy_version != operation.policy_version
+        ):
+            raise ValueError('Follow-up operation policy does not match its obligation.')
+        existing = self.get_follow_up_operation(operation.operation_id)
+        if existing is not None:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        duplicate = self._collection.find_one(
+            {
+                'record_type': 'follow_up_operation',
+                'follow_up_id': operation.follow_up_id,
+                'sequence': operation.sequence,
+            },
+        )
+        if duplicate is not None:
+            raise IdempotencyConflict(operation.operation_id)
+        self._put(
+            'follow_up_operation',
+            operation.operation_id,
+            operation,
+            claim_id=operation.claim_id,
+        )
+
+    def get_retention_operation(self, operation_id: str) -> RetentionOperation | None:
+        return self._get('retention_operation', operation_id, RetentionOperation)
+
+    def save_retention_operation(self, operation: RetentionOperation) -> None:
+        if self._get('claim', operation.claim_id, WorkingClaim) is None:
+            raise KeyError(operation.claim_id)
+        existing = self.get_retention_operation(operation.operation_id)
+        if existing is not None:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        self._put(
+            'retention_operation',
+            operation.operation_id,
+            operation,
+            claim_id=operation.claim_id,
         )
 
     def _reject_session_identity_conflict(
