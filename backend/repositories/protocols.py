@@ -1113,6 +1113,19 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Return immutable Runtime WorkItem records for one authorised Claim."""
         raise NotImplementedError
 
+    def save_runtime_work_item(
+        self,
+        item: RuntimeWorkItemRecord,
+        customer_id: str,
+    ) -> None:
+        """Persist one immutable Runtime responsibility record.
+
+        This is used when an existing authority such as ExternalTask creates
+        responsibility outside an Agent-turn transaction. Exact replay is
+        idempotent; identity reuse with changed content fails closed.
+        """
+        raise NotImplementedError
+
     def save_runtime_turn(
         self,
         claim: WorkingClaim,

@@ -7134,10 +7134,44 @@ class MongoDBRepository:
         return [
             item
             for item in (
-                self._model_from_document(document, RuntimeWorkItemRecord) for document in documents
+                self._model_from_document(document, RuntimeWorkItemRecord)
+                for document in documents
             )
             if item is not None
         ]
+
+    def save_runtime_work_item(
+        self,
+        item: RuntimeWorkItemRecord,
+        customer_id: str,
+    ) -> None:
+        if not self._claim_owned(item.claim_id, customer_id):
+            raise KeyError(item.claim_id)
+
+        def persist(mongo_session: Any) -> None:
+            existing = self._get(
+                'runtime_work_item',
+                item.work_item_id,
+                RuntimeWorkItemRecord,
+                customer_id=customer_id,
+                session=mongo_session,
+            )
+
+            if existing is not None:
+                if existing != item:
+                    raise IdempotencyConflict(item.work_item_id)
+                return
+
+            self._put(
+                'runtime_work_item',
+                item.work_item_id,
+                item,
+                customer_id=customer_id,
+                claim_id=item.claim_id,
+                session=mongo_session,
+            )
+
+        self._atomic(persist)
 
     def _save_agent_turn_records(
         self,

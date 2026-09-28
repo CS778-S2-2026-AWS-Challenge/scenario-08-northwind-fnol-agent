@@ -96,11 +96,32 @@ def test_provider_failure_is_saved_before_call_and_explicit_retry_reuses_inbound
 
 
 def test_provider_result_cannot_overwrite_concurrent_mutation(
-    app: FastAPI, client: TestClient, repository: FixtureRepository, auth_headers: dict[str, str]
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = CheckpointAgent(repository)
     agent.fail = False
     app.state.agent_turn_provider = agent
+
+    import backend.services.messages as messages_service
+
+    real_reduce_revision_conflict = (
+        messages_service.reduce_revision_conflict_recovery
+    )
+    recovery_calls: list[dict[str, object]] = []
+
+    def observe_revision_conflict(**kwargs: object):
+        recovery_calls.append(dict(kwargs))
+        return real_reduce_revision_conflict(**kwargs)
+
+    monkeypatch.setattr(
+        messages_service,
+        'reduce_revision_conflict_recovery',
+        observe_revision_conflict,
+    )
     created = client.post(
         '/api/v1/claims', headers={**auth_headers, 'Idempotency-Key': 'concurrent-create'}, json={}
     ).json()
@@ -125,6 +146,9 @@ def test_provider_result_cannot_overwrite_concurrent_mutation(
     )
     assert response.status_code == 409, response.text
     assert response.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert len(recovery_calls) == 1
+    assert recovery_calls[0]['expected_revision'] == 2
+    assert recovery_calls[0]['current_revision'] == 3
     assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 1
     replay = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',

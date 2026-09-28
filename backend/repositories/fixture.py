@@ -183,6 +183,9 @@ class FixtureRepository(PersistenceRepository):
         self._conversation_summaries: dict[str, VerifiedConversationSummary] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
         self._runtime_turns: dict[str, RuntimeTurnRecords] = {}
+        self._standalone_runtime_work_items: dict[
+            str, RuntimeWorkItemRecord
+        ] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
         self._staff_agent_messages: dict[str, StaffAgentMessage] = {}
         self._staff_agent_executions: dict[str, StaffAgentExecutionRecord] = {}
@@ -4084,7 +4087,44 @@ class FixtureRepository(PersistenceRepository):
             for item in turn.work_items
             if item.claim_id == claim_id
         ]
-        return deepcopy(sorted(items, key=lambda item: (item.updated_at, item.work_item_id)))
+        items.extend(
+            item
+            for item in self._standalone_runtime_work_items.values()
+            if item.claim_id == claim_id
+        )
+        return deepcopy(
+            sorted(
+                items,
+                key=lambda item: (
+                    item.updated_at,
+                    item.work_item_id,
+                ),
+            )
+        )
+
+    def save_runtime_work_item(
+        self,
+        item: RuntimeWorkItemRecord,
+        customer_id: str,
+    ) -> None:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(item.claim_id)
+
+            if claim is None or claim.customer_id != customer_id:
+                raise KeyError(item.claim_id)
+
+            existing = self._standalone_runtime_work_items.get(
+                item.work_item_id
+            )
+
+            if existing is not None:
+                if existing != item:
+                    raise IdempotencyConflict(item.work_item_id)
+                return
+
+            self._standalone_runtime_work_items[
+                item.work_item_id
+            ] = deepcopy(item)
 
     def find_runtime_trace_for_trigger(
         self,
