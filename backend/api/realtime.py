@@ -11,7 +11,7 @@ from typing import cast
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
-from backend.core.auth import Principal, require_claimant, require_staff
+from backend.core.auth import Principal, require_claimant, require_workbench_read
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.realtime import cursor_is_after
 from backend.services.realtime import RealtimeDispatcher, scope_for
@@ -146,7 +146,7 @@ def claimant_events(
 @workbench_router.get('/events', responses={200: {'content': {'text/event-stream': {}}}})
 def workbench_events(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
     cursor: str | None = Query(default=None),
     last_event_id: str | None = Header(default=None, alias='Last-Event-ID'),
 ) -> StreamingResponse:

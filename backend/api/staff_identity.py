@@ -3,7 +3,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
 
-from backend.core.auth import Principal, require_staff
+from backend.core.auth import Principal, require_staff_identity, staff_scopes_for_roles
 from backend.core.errors import ApiError
 from backend.domain.staff_identity import (
     AuthenticatedStaffSession,
@@ -47,24 +47,27 @@ def create_staff_auth_session(
         request.app.state.settings.staff_session_ttl_minutes,
         development_identity=request.app.state.settings.developer_mode,
     )
-    try:
-        mark_staff_online(
-            cast(PersistenceRepository, request.app.state.claim_repository), result.staff_id
-        )
-    except Exception as error:
-        identity_repository.revoke_session(hash_staff_access_token(result.access_token))
-        raise ApiError(
-            status_code=503,
-            code='STAFF_PRESENCE_UNAVAILABLE',
-            message='Staff presence could not be established; the session was not created.',
-            retryable=True,
-        ) from error
+    account = identity_repository.get_account(result.staff_id)
+    roles = frozenset(account.roles if account is not None else ())
+    if 'workbench:write' in staff_scopes_for_roles(roles):
+        try:
+            mark_staff_online(
+                cast(PersistenceRepository, request.app.state.claim_repository), result.staff_id
+            )
+        except Exception as error:
+            identity_repository.revoke_session(hash_staff_access_token(result.access_token))
+            raise ApiError(
+                status_code=503,
+                code='STAFF_PRESENCE_UNAVAILABLE',
+                message='Staff presence could not be established; the session was not created.',
+                retryable=True,
+            ) from error
     return result
 
 
 @router.get('/auth/session', response_model=CurrentStaffSession)
 def read_staff_auth_session(
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_staff_identity),
 ) -> CurrentStaffSession:
     return staff_session_projection(principal)
 
@@ -73,7 +76,7 @@ def read_staff_auth_session(
 def delete_staff_auth_session(
     request: Request,
     authorization: str | None = Header(default=None),
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_staff_identity),
 ) -> Response:
     token = (authorization or '').removeprefix('Bearer ').strip()
     presence_error: Exception | None = None
@@ -101,6 +104,6 @@ def delete_staff_auth_session(
 @router.get('/me', response_model=StaffProfileProjection)
 def read_staff_profile(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_staff_identity),
 ) -> StaffProfileProjection:
     return staff_profile_projection(repository_for(request), principal)
