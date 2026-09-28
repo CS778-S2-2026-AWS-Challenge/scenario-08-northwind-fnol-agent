@@ -25,6 +25,7 @@ from backend.domain.models import (
     IntegrationSource,
     WorkingClaim,
 )
+from backend.domain.recovery_policy_registry import RecoveryTrigger, classify_recovery
 from backend.domain.retrieval import RetrievalSource
 
 ExternalTaskResultVerification = _ExternalTaskResultVerification
@@ -146,6 +147,8 @@ class ExternalTaskFailureClassification(ContractModel):
     operation_status: ExternalTaskOperationStatus
     recovery: ExternalTaskRecovery
     retryable: bool
+    recovery_policy_id: str | None = None
+    recovery_policy_version: str | None = None
 
     @model_validator(mode='after')
     def validate_recovery_contract(self) -> 'ExternalTaskFailureClassification':
@@ -185,50 +188,68 @@ def classify_external_task_failure(
     failure_code: ExternalTaskFailureCode,
     delivery: ExternalTaskDelivery,
 ) -> ExternalTaskFailureClassification:
-    """Derive the operation status and recovery path for one external task failure.
+    """Derive one ExternalTask outcome through the shared recovery Registry.
 
-    `docs/claim-creation-boundary.md` states the timeout case explicitly: a
-    timeout after submission may be an unknown outcome rather than an ordinary
-    failure, and must be reconciled through the operation identity, idempotency
-    key, or provider reference before another attempt. `UNAVAILABLE` retains the
-    current assessor contract: it is retryable with the same operation identity
-    even when the failed invocation reached the provider.
-
-    `PARTIAL` is always an unknown outcome: a partial side effect exists
-    regardless of how the request was delivered.
+    The ExternalTask remains authoritative for delivery and operation state.
+    The Registry contributes only the provider-neutral recovery coordinate and
+    continuation decision, so this function does not create a second external
+    lifecycle.
 
     Args:
         failure_code: The provider-neutral failure class reported by the adapter.
-        delivery: Whether the request reached the provider before it failed.
+        delivery: Whether the transport reached the provider before it failed.
 
     Returns:
-        The operation status to record, the permitted recovery path, and whether
-        the caller may retry the same operation identity without reconciling
-        first.
+        The existing ExternalTask status/recovery classification plus the exact
+        immutable recovery-policy coordinate that justified it.
     """
 
     if failure_code in _REVIEW_REQUIRED_CODES:
-        return ExternalTaskFailureClassification(
+        classification = ExternalTaskFailureClassification(
             operation_status=ExternalTaskOperationStatus.TERMINAL_FAILURE,
             recovery=ExternalTaskRecovery.REVIEW_REQUIRED,
             retryable=False,
         )
-
-    submitted = delivery is ExternalTaskDelivery.SUBMITTED
-    unknown = failure_code is ExternalTaskFailureCode.PARTIAL or (
-        submitted and failure_code in _UNKNOWN_AFTER_SUBMISSION_CODES
-    )
-    if unknown:
-        return ExternalTaskFailureClassification(
-            operation_status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
-            recovery=ExternalTaskRecovery.RECONCILE_BEFORE_RETRY,
-            retryable=False,
+        trigger = RecoveryTrigger(
+            source='external',
+            outcome_code='terminal_failure',
+            delivery_certain=delivery is ExternalTaskDelivery.SUBMITTED,
         )
+    else:
+        submitted = delivery is ExternalTaskDelivery.SUBMITTED
+        unknown = failure_code is ExternalTaskFailureCode.PARTIAL or (
+            submitted and failure_code in _UNKNOWN_AFTER_SUBMISSION_CODES
+        )
+        if unknown:
+            classification = ExternalTaskFailureClassification(
+                operation_status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+                recovery=ExternalTaskRecovery.RECONCILE_BEFORE_RETRY,
+                retryable=False,
+            )
+            trigger = RecoveryTrigger(
+                source='external',
+                outcome_code='unknown_outcome',
+                delivery_certain=True,
+                side_effect_may_have_happened=True,
+            )
+        else:
+            classification = ExternalTaskFailureClassification(
+                operation_status=ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+                recovery=ExternalTaskRecovery.RETRY_SAME_OPERATION,
+                retryable=True,
+            )
+            trigger = RecoveryTrigger(
+                source='external',
+                outcome_code='retryable_failure',
+                delivery_certain=False,
+            )
 
-    return ExternalTaskFailureClassification(
-        operation_status=ExternalTaskOperationStatus.RETRYABLE_FAILURE,
-        recovery=ExternalTaskRecovery.RETRY_SAME_OPERATION,
-        retryable=True,
+    policy = classify_recovery(trigger)
+    return classification.model_copy(
+        update={
+            'recovery_policy_id': policy.policy_id,
+            'recovery_policy_version': policy.version,
+        }
     )
 
 
