@@ -309,10 +309,10 @@ security migration, not a flag rename. #247 and its consumers must preserve thes
 7. existing cross-role, ownership, projection, demo-endpoint, and deprecated-route tests
    remain green after the migration.
 
-The current customer client has a synthetic claimant fallback, the static Employee
-Workbench contains a synthetic staff token, and the shared test fixtures construct
-`Settings()` while using synthetic credentials. These are explicit migration inputs for
-Issue #247 is not evidence that developer mode should remain implicitly enabled.
+Before the identity migration, the customer client had a synthetic claimant fallback, the now
+retired static Employee Workbench contained a synthetic staff token, and the shared test fixtures
+constructed `Settings()` while using synthetic credentials. These were explicit migration inputs
+for Issue #247, not evidence that developer mode should remain implicitly enabled.
 
 ## Authentication and Authorisation Order
 
@@ -413,8 +413,8 @@ The current gaps are explicit:
   tool routes;
 - the in-process Agent is not an authenticated service principal and should not be
   presented as one;
-- the customer client, static Employee Workbench, `.env.example`, and shared test fixtures
-  still reflect the implicit synthetic-authentication prototype and require deliberate
+- the customer client, the since-retired static Employee Workbench, `.env.example`, and shared
+  test fixtures reflected the implicit synthetic-authentication prototype and required deliberate
   migration; and
 - request IDs exist, but complete identity access-audit persistence is not implemented.
 
