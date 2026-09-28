@@ -35,7 +35,7 @@ from backend.repositories.protocols import (
 from scripts.backfill_follow_up_policy import backfill_follow_ups
 
 
-def _repository(kind: str):
+def _repository(kind: str) -> FixtureRepository | MongoDBRepository:
     if kind == 'fixture':
         return FixtureRepository()
 
@@ -47,7 +47,9 @@ def _repository(kind: str):
     return repository
 
 
-def _seed_recovery(repository):
+def _seed_recovery(
+    repository: FixtureRepository | MongoDBRepository,
+) -> tuple[WorkingClaim, FollowUpRecord, datetime]:
     now = datetime(2026, 9, 28, 4, 0, tzinfo=UTC)
 
     claim = WorkingClaim(
@@ -160,6 +162,8 @@ def test_follow_up_operation_lifecycle_identity_and_owner_parity(
             f'follow-up:{follow_up.follow_up_id}',
             f'claim:{claim.claim_id}:revision:{claim.revision}',
         ],
+        created_at=now + timedelta(hours=1),
+        updated_at=now + timedelta(hours=1),
     )
 
     repository.save_follow_up_operation(
@@ -256,6 +260,8 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
         policy_version=follow_up.policy_version,
         based_on_claim_revision=claim.revision,
         scheduled_at=now + timedelta(hours=1),
+        created_at=now + timedelta(hours=1),
+        updated_at=now + timedelta(hours=1),
     )
 
     repository.save_follow_up_operation(
@@ -284,6 +290,8 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
                 policy_version=2,
                 based_on_claim_revision=claim.revision,
                 scheduled_at=now + timedelta(hours=2),
+                created_at=now + timedelta(hours=2),
+                updated_at=now + timedelta(hours=2),
             ),
             claim.customer_id,
         )
@@ -299,6 +307,8 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
                 policy_version=follow_up.policy_version,
                 based_on_claim_revision=claim.revision - 1,
                 scheduled_at=now + timedelta(hours=2),
+                created_at=now + timedelta(hours=2),
+                updated_at=now + timedelta(hours=2),
             ),
             claim.customer_id,
         )
@@ -314,6 +324,8 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
                 policy_version=follow_up.policy_version,
                 based_on_claim_revision=claim.revision,
                 scheduled_at=follow_up.deadline_at,
+                created_at=follow_up.deadline_at,
+                updated_at=follow_up.deadline_at,
             ),
             claim.customer_id,
         )
@@ -327,6 +339,8 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
         policy_version=follow_up.policy_version,
         based_on_claim_revision=claim.revision,
         scheduled_at=now + timedelta(hours=2),
+        created_at=now + timedelta(hours=2),
+        updated_at=now + timedelta(hours=2),
     )
 
     repository.save_follow_up_operation(
@@ -344,7 +358,10 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
 # Backend persistence and policy compatibility regression cases.
 
 
-def backend_contract_seed_claim(repository, follow_up: FollowUpRecord) -> None:
+def backend_contract_seed_claim(
+    repository: FixtureRepository | MongoDBRepository,
+    follow_up: FollowUpRecord,
+) -> None:
     claim = WorkingClaim(
         claim_id=follow_up.claim_id,
         customer_id='cus_operation_test',
@@ -363,7 +380,7 @@ def backend_contract_seed_claim(repository, follow_up: FollowUpRecord) -> None:
     if isinstance(repository, FixtureRepository):
         repository._claims[claim.claim_id] = claim
     else:
-        repository._atomic = lambda operation: operation(None)
+        repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
         repository._put(
             'claim', claim.claim_id, claim, customer_id=claim.customer_id, claim_id=claim.claim_id
         )
@@ -622,7 +639,7 @@ def test_backend_contract_mongo_retention_operation_is_replay_safe() -> None:
         {**claim.model_dump(mode='json'), '_id': f'claim:{claim.claim_id}', 'record_type': 'claim'}
     )
     operation = backend_contract_retention(claim.claim_id, now)
-    repository._atomic = lambda operation: operation(None)
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     assert repository.reserve_retention_operation(operation) is True
     assert repository.reserve_retention_operation(operation) is False
     assert repository.get_retention_operation(operation.operation_id) == operation
@@ -683,13 +700,15 @@ def test_backend_contract_model_guards_cover_invalid_lifecycle_combinations() ->
             backend_contract__operation(FollowUpOperationStatus.CANCELLED).model_dump()
         )
     with pytest.raises(ValueError):
-        RetentionOperation(
-            operation_id='rop_0123456789abcdef0123',
-            claim_id='claim',
-            target_refs=['target'],
-            status=RetentionOperationStatus.HELD,
-            created_at=now,
-            updated_at=now,
+        RetentionOperation.model_validate(
+            {
+                'operation_id': 'rop_0123456789abcdef0123',
+                'claim_id': 'claim',
+                'target_refs': ['target'],
+                'status': RetentionOperationStatus.HELD,
+                'created_at': now,
+                'updated_at': now,
+            }
         )
 
 

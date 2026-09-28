@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -6,8 +7,10 @@ from fastapi.testclient import TestClient
 
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.domain.models import ActorType, AgentAction, CustomerNextStep
+from backend.domain.recovery import RecoveryTransition
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentProposal, AgentTurnContext
+from backend.services.recovery_decisions import reduce_revision_conflict_recovery
 
 
 class CheckpointAgent:
@@ -108,10 +111,10 @@ def test_provider_result_cannot_overwrite_concurrent_mutation(
 
     import backend.services.messages as messages_service
 
-    real_reduce_revision_conflict = messages_service.reduce_revision_conflict_recovery
+    real_reduce_revision_conflict = reduce_revision_conflict_recovery
     recovery_calls: list[dict[str, object]] = []
 
-    def observe_revision_conflict(**kwargs: object):
+    def observe_revision_conflict(**kwargs: Any) -> RecoveryTransition:
         recovery_calls.append(dict(kwargs))
         return real_reduce_revision_conflict(**kwargs)
 

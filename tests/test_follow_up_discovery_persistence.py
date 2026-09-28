@@ -26,7 +26,7 @@ from backend.repositories.protocols import IdempotencyRecord
 NOW = datetime(2026, 9, 28, 5, 0, tzinfo=UTC)
 
 
-def _repository(kind: str):
+def _repository(kind: str) -> FixtureRepository | MongoDBRepository:
     if kind == 'fixture':
         return FixtureRepository()
 
@@ -39,7 +39,7 @@ def _repository(kind: str):
 
 
 def _seed_follow_up(
-    repository,
+    repository: FixtureRepository | MongoDBRepository,
     suffix: str,
     *,
     status: FollowUpStatus,
@@ -122,7 +122,7 @@ def _seed_follow_up(
             else FollowUpContactPermission.AUTHORISED
         ),
         channel=None if blocked else PreferredChannel.IN_APP,
-        reason_code=(FollowUpReasonCode.CONTACT_NOT_AUTHORISED if blocked else None),
+        blocked_reason=(FollowUpReasonCode.CONTACT_NOT_AUTHORISED if blocked else None),
         status=status,
         due_at=due_at,
         created_at=created_at,
@@ -150,7 +150,9 @@ def _seed_follow_up(
     return follow_up
 
 
-def _seed_discovery_set(repository):
+def _seed_discovery_set(
+    repository: FixtureRepository | MongoDBRepository,
+) -> tuple[FollowUpRecord, FollowUpRecord, FollowUpRecord, FollowUpRecord]:
     due_a = _seed_follow_up(
         repository,
         'due-a',

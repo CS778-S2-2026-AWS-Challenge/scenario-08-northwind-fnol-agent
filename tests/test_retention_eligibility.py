@@ -1022,7 +1022,7 @@ def test_database_failure_requires_reconciliation_and_retries_same_operation(
 
     original_apply = repository.apply_retention_record_target
 
-    state = {
+    state: dict[str, bool | str | None] = {
         'failed': False,
         'target_id': None,
     }

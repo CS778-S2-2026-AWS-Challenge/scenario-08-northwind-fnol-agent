@@ -1,6 +1,9 @@
+from typing import Any, NoReturn, cast
+
 import pytest
 
 import backend.services.messages as messages_service
+from backend.domain.models import AgentProposalSource
 
 
 def test_message_boundary_accepts_non_blocking_retrieval_recovery() -> None:
@@ -44,7 +47,7 @@ def test_message_boundary_does_not_reclassify_external_task_failure(
 ) -> None:
     calls: list[dict[str, object]] = []
 
-    def reject_if_called(**kwargs: object):
+    def reject_if_called(**kwargs: object) -> NoReturn:
         calls.append(dict(kwargs))
         raise AssertionError('ExternalTask recovery must not use generic tool policy.')
 
@@ -127,8 +130,8 @@ def test_dependency_recovery_work_item_uses_owning_runtime_turn_id() -> None:
         reason_codes=['DEPENDENCY_UNAVAILABLE'],
         customer_reason='Required capability is unavailable.',
         customer_response='The step cannot safely continue.',
-        customer_next_step=None,
-        proposal_source='model',
+        customer_next_step=cast(Any, None),
+        proposal_source=AgentProposalSource.MODEL_GATEWAY,
         model_profile_id='profile_runtime_link',
         created_at=now,
     )

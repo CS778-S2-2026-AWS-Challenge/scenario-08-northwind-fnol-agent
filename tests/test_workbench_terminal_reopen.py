@@ -1,8 +1,9 @@
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import mongomock
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.core.auth import Principal
@@ -440,7 +441,7 @@ def test_retention_workbench_projection_survives_working_claim_tombstone(
 
     completed = execute_retention_cleanup(
         repository,
-        client.app.state.evidence_storage,
+        cast(FastAPI, client.app).state.evidence_storage,
         frozen.operation_id,
         now=claim.updated_at + timedelta(minutes=3),
     )
