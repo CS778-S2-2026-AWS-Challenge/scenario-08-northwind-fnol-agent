@@ -75,6 +75,12 @@ class RevisionConflict(RepositoryConflict):
         self.current_revision = current_revision
 
 
+
+class RecoveryDeadlineConflict(RuntimeError):
+    """A recovery mutation lost to the authoritative absolute deadline."""
+
+
+
 class IdempotencyConflict(RepositoryConflict):
     pass
 
@@ -431,7 +437,9 @@ class ClaimRepository(Protocol):
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        reconciled_follow_up_operation: FollowUpOperation | None = None,
         replaced_active_session: SessionRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
     ) -> None:
         """Atomically replace/activate a session and resolve recovery work when supplied."""
         raise NotImplementedError
@@ -487,6 +495,62 @@ class ClaimRepository(Protocol):
         """Deterministically bind open legacy P17.1 Follow-ups.
 
         Returns ``(bound_count, failed_closed_count)``.
+        """
+        raise NotImplementedError
+
+    def commit_recovery_staff_abandonment(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically abandon one P17 recovery obligation and its Claim."""
+        raise NotImplementedError
+
+    def commit_follow_up_contact_withdrawal(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically block automatic P17 contact and record immutable Audit."""
+        raise NotImplementedError
+
+    def commit_recovery_expiry(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically terminalise one open P17 obligation at its deadline."""
+        raise NotImplementedError
+
+    def commit_due_follow_up_attempt(
+        self,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        operation: FollowUpOperation,
+        settled_previous_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        """Atomically commit one in-app P17 attempt and its Follow-up aggregate.
+
+        Candidate discovery is not authority. Implementations must reload and
+        revalidate Claim, Session, Follow-up, deadline, contact authority,
+        operation history, and Claim revision before committing.
         """
         raise NotImplementedError
 

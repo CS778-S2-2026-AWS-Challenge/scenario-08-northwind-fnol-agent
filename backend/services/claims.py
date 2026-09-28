@@ -1,8 +1,18 @@
 from collections.abc import Mapping
 from datetime import datetime
+from hashlib import sha256
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.audit import (
+    AuditActor,
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
@@ -31,6 +41,9 @@ from backend.domain.models import (
     CustomerNextStep,
     FieldSelectionState,
     FollowUpContactPermission,
+    FollowUpOperation,
+    FollowUpOperationResult,
+    FollowUpOperationStatus,
     FollowUpReasonCode,
     FollowUpRecord,
     FollowUpStatus,
@@ -69,6 +82,7 @@ from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
+    RecoveryDeadlineConflict,
     RevisionConflict,
 )
 from backend.services.agreement import (
@@ -851,6 +865,16 @@ def start_session(
     if claim is None:
         raise _claim_not_found()
 
+    if claim.terminal_disposition is not None:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message=(
+                'A terminal Claim must be reopened through the authorised '
+                'claim.reopen workflow before a claimant Session can start.'
+            ),
+        )
+
     active_session = repository.get_active_session(claim_id, principal.subject)
     resume_source = active_session
     if resume_source is None:
@@ -910,6 +934,7 @@ def start_session(
     else:
         timestamp = now_utc()
         resolved_follow_up: FollowUpRecord | None = None
+        reconciled_follow_up_operation: FollowUpOperation | None = None
         if resume_source is not None and resume_source.status is SessionStatus.PAUSED:
             open_follow_ups = [
                 record
@@ -923,6 +948,18 @@ def start_session(
                     open_follow_ups,
                     key=lambda record: (record.created_at, record.follow_up_id),
                 )
+                if (
+                    current_follow_up.deadline_at is not None
+                    and timestamp >= current_follow_up.deadline_at
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code='INVALID_STATE_TRANSITION',
+                        message=(
+                            'The incomplete-Claim recovery window has expired.'
+                        ),
+                    )
+
                 resolved_follow_up = current_follow_up.model_copy(
                     update={
                         'status': FollowUpStatus.RESOLVED,
@@ -932,6 +969,65 @@ def start_session(
                         'updated_at': timestamp,
                     }
                 )
+
+                operations = repository.list_follow_up_operations(
+                    claim_id,
+                    current_follow_up.follow_up_id,
+                    principal.subject,
+                )
+                open_operations = [
+                    operation
+                    for operation in operations
+                    if operation.status
+                    in {
+                        FollowUpOperationStatus.SCHEDULED,
+                        FollowUpOperationStatus.COMMITTED,
+                    }
+                ]
+
+                if len(open_operations) > 1:
+                    raise ApiError(
+                        status_code=409,
+                        code='INVALID_STATE_TRANSITION',
+                        message=(
+                            'The recovery operation history requires reconciliation.'
+                        ),
+                    )
+
+                if open_operations:
+                    current_operation = open_operations[0]
+
+                    if (
+                        current_operation.status
+                        is FollowUpOperationStatus.SCHEDULED
+                    ):
+                        reconciled_follow_up_operation = (
+                            current_operation.model_copy(
+                                update={
+                                    'status': (
+                                        FollowUpOperationStatus.CANCELLED
+                                    ),
+                                    'result': (
+                                        FollowUpOperationResult
+                                        .SUPERSEDED_BY_RESUME
+                                    ),
+                                    'cancelled_at': timestamp,
+                                }
+                            )
+                        )
+                    else:
+                        reconciled_follow_up_operation = (
+                            current_operation.model_copy(
+                                update={
+                                    'status': FollowUpOperationStatus.SETTLED,
+                                    'result': (
+                                        FollowUpOperationResult
+                                        .SUPERSEDED_BY_RESUME
+                                    ),
+                                    'settled_at': timestamp,
+                                }
+                            )
+                        )
         session = SessionRecord(
             session_id=new_id('ses'),
             claim_id=claim_id,
@@ -999,6 +1095,46 @@ def start_session(
             recomputation_reason='session_resumed',
             session_id=session.session_id,
         )
+
+        resume_audit_event: AuditEventEnvelope | None = None
+
+        if resolved_follow_up is not None:
+            resume_audit_event = AuditEventEnvelope(
+                event_id=(
+                    'aud_resume_'
+                    + sha256(
+                        f'{principal.subject}:{route}:{key}'.encode()
+                    ).hexdigest()[:20]
+                ),
+                event_type=AuditEventType.ACTION_COMPLETED,
+                outcome=AuditOutcome.SUCCEEDED,
+                subject=AuditSubject(
+                    subject_type=AuditSubjectType.CLAIM,
+                    subject_id=claim_id,
+                    claim_id=claim_id,
+                ),
+                actor=AuditActor(
+                    actor_type=ActorType.CLAIMANT,
+                    actor_id=principal.subject,
+                    auth_source=principal.auth_source,
+                ),
+                reason='The claimant resumed an incomplete Claim recovery checkpoint.',
+                source_refs=list(
+                    dict.fromkeys(
+                        [
+                            *resolved_follow_up.source_refs,
+                            f'follow-up:{resolved_follow_up.follow_up_id}',
+                            f'session:{session.session_id}',
+                        ]
+                    )
+                ),
+                visibility=AuditVisibility.INTERNAL_ONLY,
+                correlation_id=key,
+                idempotency_key=key,
+                claim_revision=updated_claim.revision,
+                created_at=timestamp,
+            )
+
         try:
             if resolved_follow_up is None:
                 repository.save_session_mutation(
@@ -1017,8 +1153,18 @@ def start_session(
                     idempotency=idempotency,
                     branch_evaluation=branch_evaluation,
                     resolved_follow_up=resolved_follow_up,
+                    reconciled_follow_up_operation=(
+                        reconciled_follow_up_operation
+                    ),
                     replaced_active_session=replaced_active_session,
+                    audit_event=resume_audit_event,
                 )
+        except RecoveryDeadlineConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='The incomplete-Claim recovery window has expired.',
+            ) from conflict
         except RevisionConflict as conflict:
             raise ApiError(
                 status_code=409,

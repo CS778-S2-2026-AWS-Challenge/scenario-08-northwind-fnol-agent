@@ -4,6 +4,7 @@ from typing import cast
 import mongomock
 from fastapi.testclient import TestClient
 
+from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import (
     Channel,
     ClaimState,
@@ -148,6 +149,22 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     assert len(resumed_follow_ups) == 1
     assert resumed_follow_ups[0].status is FollowUpStatus.RESOLVED
     assert resumed_follow_ups[0].outcome == 'claimant_resumed'
+
+    resume_events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim_id,
+            claim_id=claim_id,
+        )
+    )
+    resume_events = [
+        event
+        for event in resume_events
+        if event.idempotency_key == 'p17-resume'
+    ]
+    assert len(resume_events) == 1
+    assert resume_events[0].actor.actor_id == 'cus_demo'
+    assert resume_events[0].claim_revision == final_claim.revision
 
 
 def test_pause_checkpoint_rejects_stale_revision_without_partial_write(

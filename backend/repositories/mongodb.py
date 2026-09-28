@@ -51,6 +51,16 @@ from backend.domain.external_services import (
     assert_result_matches_task,
     assert_task_transition_is_permitted,
 )
+from backend.domain.follow_up_execution import (
+    FollowUpContactWithdrawalRejected,
+    FollowUpDueExecutionRejected,
+    FollowUpExpiryExecutionRejected,
+    FollowUpStaffAbandonmentRejected,
+    reduce_due_follow_up,
+    reduce_expired_follow_up,
+    reduce_follow_up_contact_withdrawal,
+    reduce_follow_up_staff_abandonment,
+)
 from backend.domain.follow_up_migration import (
     backfill_legacy_follow_up_record,
 )
@@ -164,6 +174,7 @@ from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
     IdempotencyRecord,
+    RecoveryDeadlineConflict,
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
@@ -2436,6 +2447,997 @@ class MongoDBRepository:
         )
 
         return decision.outcome
+
+    def commit_recovery_staff_abandonment(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_recovery_staff_abandonment(
+                expected_claim_revision,
+                expected_follow_up,
+                updated_claim,
+                updated_follow_up,
+                reconciled_operation,
+                customer_id,
+                idempotency,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_recovery_staff_abandonment(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        if claim.revision != expected_claim_revision:
+            raise RevisionConflict(claim.revision)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._reject_existing_idempotency(
+            idempotency,
+            mongo_session=mongo_session,
+        )
+
+        documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': claim.claim_id,
+                'follow_up_id': current_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+
+        operations = sorted(
+            (
+                operation
+                for document in documents
+                if (
+                    operation := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda operation: (
+                operation.sequence,
+                operation.operation_id,
+            ),
+        )
+
+        terminal = updated_claim.terminal_disposition
+        if terminal is None:
+            raise KeyError(claim.claim_id)
+
+        try:
+            transition = reduce_follow_up_staff_abandonment(
+                claim,
+                source_session,
+                current_follow_up,
+                operations,
+                terminal.recorded_at,
+                terminal.recorded_by,
+            )
+        except FollowUpStaffAbandonmentRejected as error:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            ) from error
+
+        if (
+            transition.claim != updated_claim
+            or transition.follow_up != updated_follow_up
+            or transition.reconciled_operation
+            != reconciled_operation
+        ):
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        prepared_audit = self._prepare_audit_events(
+            updated_claim,
+            (audit_event,),
+            mongo_session=mongo_session,
+        )
+
+        if reconciled_operation is not None:
+            stored_operation = next(
+                (
+                    operation
+                    for operation in operations
+                    if operation.operation_id
+                    == reconciled_operation.operation_id
+                ),
+                None,
+            )
+
+            if stored_operation is None:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_operation,
+                    reconciled_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                ) from error
+
+            operation_result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                    'status': stored_operation.status.value,
+                },
+                {
+                    **reconciled_operation.model_dump(mode='json'),
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        reconciled_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                },
+                session=mongo_session,
+            )
+
+            if operation_result.matched_count != 1:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+        claim_result = self._collection.replace_one(
+            {
+                '_id': self._record_id('claim', claim.claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'revision': expected_claim_revision,
+            },
+            {
+                **updated_claim.model_dump(mode='json'),
+                '_id': self._record_id('claim', updated_claim.claim_id),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'claim_id': updated_claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if claim_result.matched_count != 1:
+            raise RevisionConflict(expected_claim_revision)
+
+        follow_up_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    current_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+                'status': current_follow_up.status.value,
+                'attempt_count': current_follow_up.attempt_count,
+            },
+            {
+                **updated_follow_up.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up',
+                    updated_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if follow_up_result.matched_count != 1:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._save_idempotency(
+            idempotency,
+            mongo_session,
+        )
+
+        for event in prepared_audit:
+            self._insert_audit_event(
+                event,
+                mongo_session=mongo_session,
+            )
+
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
+            updated_claim,
+            mongo_session=mongo_session,
+            operation_correlation=idempotency.key,
+        )
+
+    def commit_follow_up_contact_withdrawal(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_follow_up_contact_withdrawal(
+                expected_claim_revision,
+                expected_follow_up,
+                updated_follow_up,
+                reconciled_operation,
+                customer_id,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_follow_up_contact_withdrawal(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        if claim.revision != expected_claim_revision:
+            raise RevisionConflict(claim.revision)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(
+                expected_follow_up.follow_up_id
+            )
+
+        documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': claim.claim_id,
+                'follow_up_id': current_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+
+        operations = sorted(
+            (
+                operation
+                for document in documents
+                if (
+                    operation := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda operation: (
+                operation.sequence,
+                operation.operation_id,
+            ),
+        )
+
+        try:
+            transition = reduce_follow_up_contact_withdrawal(
+                claim,
+                source_session,
+                current_follow_up,
+                operations,
+                updated_follow_up.updated_at,
+            )
+        except FollowUpContactWithdrawalRejected as error:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            ) from error
+
+        if (
+            transition.follow_up != updated_follow_up
+            or transition.reconciled_operation
+            != reconciled_operation
+        ):
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._ensure_new_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        if reconciled_operation is not None:
+            stored_operation = next(
+                (
+                    operation
+                    for operation in operations
+                    if operation.operation_id
+                    == reconciled_operation.operation_id
+                ),
+                None,
+            )
+            if stored_operation is None:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_operation,
+                    reconciled_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                ) from error
+
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                    'status': stored_operation.status.value,
+                },
+                {
+                    **reconciled_operation.model_dump(mode='json'),
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        reconciled_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                },
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+        result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    current_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+                'status': current_follow_up.status.value,
+                'attempt_count': current_follow_up.attempt_count,
+            },
+            {
+                **updated_follow_up.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up',
+                    updated_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if result.matched_count != 1:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
+            claim,
+            mongo_session=mongo_session,
+            operation_correlation=(
+                f'follow-up-contact:{updated_follow_up.follow_up_id}'
+            ),
+        )
+
+    def commit_recovery_expiry(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_recovery_expiry(
+                expected_claim_revision,
+                expected_follow_up,
+                updated_claim,
+                updated_follow_up,
+                reconciled_operation,
+                customer_id,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_recovery_expiry(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        if claim.revision != expected_claim_revision:
+            raise RevisionConflict(claim.revision)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(
+                expected_follow_up.follow_up_id
+            )
+
+        documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': claim.claim_id,
+                'follow_up_id': current_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+        operations = sorted(
+            (
+                operation
+                for document in documents
+                if (
+                    operation := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda operation: (
+                operation.sequence,
+                operation.operation_id,
+            ),
+        )
+
+        terminal = updated_claim.terminal_disposition
+        if terminal is None:
+            raise KeyError(claim.claim_id)
+
+        try:
+            transition = reduce_expired_follow_up(
+                claim,
+                source_session,
+                current_follow_up,
+                operations,
+                terminal.recorded_at,
+            )
+        except FollowUpExpiryExecutionRejected as error:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            ) from error
+
+        if (
+            transition.claim != updated_claim
+            or transition.follow_up != updated_follow_up
+            or transition.reconciled_operation
+            != reconciled_operation
+        ):
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._ensure_new_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        if reconciled_operation is not None:
+            stored_operation = next(
+                (
+                    operation
+                    for operation in operations
+                    if operation.operation_id
+                    == reconciled_operation.operation_id
+                ),
+                None,
+            )
+            if stored_operation is None:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_operation,
+                    reconciled_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                ) from error
+
+            result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                    'status': stored_operation.status.value,
+                },
+                {
+                    **reconciled_operation.model_dump(mode='json'),
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        reconciled_operation.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': claim.claim_id,
+                },
+                session=mongo_session,
+            )
+            if result.matched_count != 1:
+                raise IdempotencyConflict(
+                    reconciled_operation.operation_id
+                )
+
+        claim_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'claim',
+                    claim.claim_id,
+                ),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'revision': expected_claim_revision,
+            },
+            {
+                **updated_claim.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'claim',
+                    updated_claim.claim_id,
+                ),
+                'record_type': 'claim',
+                'customer_id': customer_id,
+                'claim_id': updated_claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if claim_result.matched_count != 1:
+            raise RevisionConflict(expected_claim_revision)
+
+        follow_up_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    current_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+                'status': current_follow_up.status.value,
+                'attempt_count': current_follow_up.attempt_count,
+            },
+            {
+                **updated_follow_up.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up',
+                    updated_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': claim.claim_id,
+            },
+            session=mongo_session,
+        )
+
+        if follow_up_result.matched_count != 1:
+            raise IdempotencyConflict(
+                current_follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        self._append_realtime_mutation(
+            RealtimeMutation.CLAIM_CHANGED,
+            updated_claim,
+            mongo_session=mongo_session,
+            operation_correlation=(
+                f'recovery-expiry:{updated_follow_up.follow_up_id}'
+            ),
+        )
+
+    def commit_due_follow_up_attempt(
+        self,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        operation: FollowUpOperation,
+        settled_previous_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._commit_due_follow_up_attempt(
+                expected_follow_up,
+                updated_follow_up,
+                operation,
+                settled_previous_operation,
+                customer_id,
+                audit_event,
+                mongo_session,
+            )
+        )
+
+    def _commit_due_follow_up_attempt(
+        self,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        operation: FollowUpOperation,
+        settled_previous_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+        mongo_session: Any,
+    ) -> None:
+        claim = self._get(
+            'claim',
+            expected_follow_up.claim_id,
+            WorkingClaim,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        current_follow_up = self._get(
+            'follow_up',
+            expected_follow_up.follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        source_session = self._get(
+            'session',
+            expected_follow_up.source_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if (
+            claim is None
+            or current_follow_up is None
+            or source_session is None
+        ):
+            raise KeyError(expected_follow_up.follow_up_id)
+
+        existing_operation = self._get(
+            'follow_up_operation',
+            operation.operation_id,
+            FollowUpOperation,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+
+        if existing_operation is not None:
+            if (
+                existing_operation == operation
+                and current_follow_up.attempt_count
+                >= updated_follow_up.attempt_count
+                and current_follow_up.updated_at
+                >= updated_follow_up.updated_at
+            ):
+                return
+            raise IdempotencyConflict(operation.operation_id)
+
+        if current_follow_up != expected_follow_up:
+            raise IdempotencyConflict(expected_follow_up.follow_up_id)
+
+        prior_documents = self._collection.find(
+            {
+                'record_type': 'follow_up_operation',
+                'claim_id': expected_follow_up.claim_id,
+                'follow_up_id': expected_follow_up.follow_up_id,
+                'customer_id': customer_id,
+            },
+            session=mongo_session,
+        )
+        prior_operations = sorted(
+            (
+                stored
+                for document in prior_documents
+                if (
+                    stored := self._model_from_document(
+                        document,
+                        FollowUpOperation,
+                    )
+                )
+                is not None
+            ),
+            key=lambda stored: (
+                stored.sequence,
+                stored.operation_id,
+            ),
+        )
+
+        committed_at = operation.committed_at
+        if committed_at is None:
+            raise IdempotencyConflict(operation.operation_id)
+
+        try:
+            transition = reduce_due_follow_up(
+                claim,
+                source_session,
+                current_follow_up,
+                prior_operations,
+                committed_at,
+            )
+        except FollowUpDueExecutionRejected as error:
+            raise IdempotencyConflict(
+                operation.operation_id
+            ) from error
+
+        if (
+            transition.operation != operation
+            or transition.follow_up != updated_follow_up
+            or transition.settled_previous_operation
+            != settled_previous_operation
+        ):
+            raise IdempotencyConflict(operation.operation_id)
+
+        self._ensure_new_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
+
+        if settled_previous_operation is not None:
+            stored_previous = next(
+                (
+                    stored
+                    for stored in prior_operations
+                    if stored.operation_id
+                    == settled_previous_operation.operation_id
+                ),
+                None,
+            )
+            if stored_previous is None:
+                raise IdempotencyConflict(
+                    settled_previous_operation.operation_id
+                )
+
+            try:
+                assert_follow_up_operation_transition(
+                    stored_previous,
+                    settled_previous_operation,
+                )
+            except ValueError as error:
+                raise IdempotencyConflict(
+                    settled_previous_operation.operation_id
+                ) from error
+
+            previous_document = {
+                **settled_previous_operation.model_dump(mode='json'),
+                '_id': self._record_id(
+                    'follow_up_operation',
+                    settled_previous_operation.operation_id,
+                ),
+                'record_type': 'follow_up_operation',
+                'customer_id': customer_id,
+                'claim_id': settled_previous_operation.claim_id,
+            }
+
+            previous_result = self._collection.replace_one(
+                {
+                    '_id': self._record_id(
+                        'follow_up_operation',
+                        stored_previous.operation_id,
+                    ),
+                    'record_type': 'follow_up_operation',
+                    'customer_id': customer_id,
+                    'claim_id': stored_previous.claim_id,
+                    'status': stored_previous.status.value,
+                },
+                previous_document,
+                session=mongo_session,
+            )
+            if previous_result.matched_count != 1:
+                raise IdempotencyConflict(
+                    settled_previous_operation.operation_id
+                )
+
+        operation_document = {
+            **operation.model_dump(mode='json'),
+            '_id': self._record_id(
+                'follow_up_operation',
+                operation.operation_id,
+            ),
+            'record_type': 'follow_up_operation',
+            'customer_id': customer_id,
+            'claim_id': operation.claim_id,
+        }
+
+        try:
+            self._collection.insert_one(
+                operation_document,
+                session=mongo_session,
+            )
+        except DuplicateKeyError as error:
+            raise IdempotencyConflict(
+                operation.operation_id
+            ) from error
+
+        expected_payload = expected_follow_up.model_dump(mode='json')
+        updated_document = {
+            **updated_follow_up.model_dump(mode='json'),
+            '_id': self._record_id(
+                'follow_up',
+                updated_follow_up.follow_up_id,
+            ),
+            'record_type': 'follow_up',
+            'customer_id': customer_id,
+            'claim_id': updated_follow_up.claim_id,
+        }
+
+        follow_up_result = self._collection.replace_one(
+            {
+                '_id': self._record_id(
+                    'follow_up',
+                    expected_follow_up.follow_up_id,
+                ),
+                'record_type': 'follow_up',
+                'customer_id': customer_id,
+                'claim_id': expected_follow_up.claim_id,
+                'status': expected_follow_up.status.value,
+                'attempt_count': expected_follow_up.attempt_count,
+                'updated_at': expected_payload['updated_at'],
+            },
+            updated_document,
+            session=mongo_session,
+        )
+
+        if follow_up_result.matched_count != 1:
+            raise IdempotencyConflict(
+                expected_follow_up.follow_up_id
+            )
+
+        self._insert_audit_event(
+            audit_event,
+            mongo_session=mongo_session,
+        )
 
     def list_due_follow_ups(
         self,
@@ -7164,7 +8166,9 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        reconciled_follow_up_operation: FollowUpOperation | None = None,
         replaced_active_session: SessionRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
     ) -> None:
         self._validate_session_mutation(
             claim,
@@ -7182,7 +8186,9 @@ class MongoDBRepository:
                 idempotency,
                 branch_evaluation,
                 resolved_follow_up,
+                reconciled_follow_up_operation,
                 replaced_active_session,
+                audit_event,
                 mongo_session,
             )
         )
@@ -7225,7 +8231,9 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None,
         resolved_follow_up: FollowUpRecord | None,
+        reconciled_follow_up_operation: FollowUpOperation | None,
         replaced_active_session: SessionRecord | None,
+        audit_event: AuditEventEnvelope | None,
         mongo_session: Any,
     ) -> None:
         stored_claim_document = self._collection.find_one(
@@ -7326,6 +8334,71 @@ class MongoDBRepository:
             )
             if resolved_follow_up != expected_follow_up:
                 raise KeyError(claim.claim_id)
+
+            if (
+                open_follow_up.deadline_at is not None
+                and resolved_follow_up.updated_at
+                >= open_follow_up.deadline_at
+            ):
+                raise RecoveryDeadlineConflict(
+                    open_follow_up.follow_up_id
+                )
+
+            open_operation_document = self._collection.find_one(
+                {
+                    'record_type': 'follow_up_operation',
+                    'claim_id': claim.claim_id,
+                    'follow_up_id': open_follow_up.follow_up_id,
+                    'customer_id': claim.customer_id,
+                    'status': {
+                        '$in': [
+                            FollowUpOperationStatus.SCHEDULED.value,
+                            FollowUpOperationStatus.COMMITTED.value,
+                        ]
+                    },
+                },
+                session=mongo_session,
+            )
+            open_operation = self._model_from_document(
+                open_operation_document,
+                FollowUpOperation,
+            )
+
+            if reconciled_follow_up_operation is None:
+                if open_operation is not None:
+                    raise KeyError(claim.claim_id)
+            else:
+                if (
+                    open_operation is None
+                    or open_operation.operation_id
+                    != reconciled_follow_up_operation.operation_id
+                ):
+                    raise KeyError(claim.claim_id)
+
+                try:
+                    assert_follow_up_operation_transition(
+                        open_operation,
+                        reconciled_follow_up_operation,
+                    )
+                except ValueError as error:
+                    raise KeyError(claim.claim_id) from error
+
+        elif reconciled_follow_up_operation is not None:
+            raise KeyError(claim.claim_id)
+
+        if resolved_follow_up is not None:
+            if audit_event is None:
+                raise KeyError(claim.claim_id)
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                (audit_event,),
+                mongo_session=mongo_session,
+            )
+        else:
+            if audit_event is not None:
+                raise KeyError(claim.claim_id)
+            prepared_audit = ()
+
         if branch_evaluation is not None:
             self._reject_branch_evaluation_identity_conflict(
                 branch_evaluation,
@@ -7380,6 +8453,15 @@ class MongoDBRepository:
                 claim_id=claim.claim_id,
                 session=mongo_session,
             )
+        if reconciled_follow_up_operation is not None:
+            self._put(
+                'follow_up_operation',
+                reconciled_follow_up_operation.operation_id,
+                reconciled_follow_up_operation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
         if branch_evaluation is not None:
             self._put(
                 'branch_evaluation',
@@ -7390,6 +8472,13 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(record=idempotency, session=mongo_session)
+
+        for event in prepared_audit:
+            self._insert_audit_event(
+                event,
+                mongo_session=mongo_session,
+            )
+
         self._append_realtime_mutation(
             RealtimeMutation.SESSION_CHANGED,
             claim,

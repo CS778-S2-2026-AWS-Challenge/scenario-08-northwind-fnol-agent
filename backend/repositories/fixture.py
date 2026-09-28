@@ -38,6 +38,16 @@ from backend.domain.external_services import (
     assert_result_matches_task,
     assert_task_transition_is_permitted,
 )
+from backend.domain.follow_up_execution import (
+    FollowUpContactWithdrawalRejected,
+    FollowUpDueExecutionRejected,
+    FollowUpExpiryExecutionRejected,
+    FollowUpStaffAbandonmentRejected,
+    reduce_due_follow_up,
+    reduce_expired_follow_up,
+    reduce_follow_up_contact_withdrawal,
+    reduce_follow_up_staff_abandonment,
+)
 from backend.domain.follow_up_migration import (
     backfill_legacy_follow_up_record,
 )
@@ -139,6 +149,7 @@ from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
+    RecoveryDeadlineConflict,
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
@@ -1495,6 +1506,513 @@ class FixtureRepository(PersistenceRepository):
 
         return bound_count, failed_count
 
+    def commit_recovery_staff_abandonment(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        idempotency: IdempotencyRecord,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(expected_follow_up.claim_id)
+            current_follow_up = self._follow_ups.get(
+                expected_follow_up.follow_up_id
+            )
+            source_session = self._sessions.get(
+                expected_follow_up.source_session_id
+            )
+
+            if (
+                claim is None
+                or claim.customer_id != customer_id
+                or current_follow_up is None
+                or source_session is None
+            ):
+                raise KeyError(expected_follow_up.follow_up_id)
+
+            if claim.revision != expected_claim_revision:
+                raise RevisionConflict(claim.revision)
+
+            if current_follow_up != expected_follow_up:
+                raise IdempotencyConflict(
+                    expected_follow_up.follow_up_id
+                )
+
+            lookup = (
+                idempotency.actor_id,
+                idempotency.route,
+                idempotency.key,
+            )
+
+            if self._idempotency.get(lookup) is not None:
+                raise IdempotencyConflict(idempotency.key)
+
+            operations = sorted(
+                (
+                    deepcopy(operation)
+                    for operation in self._follow_up_operations.values()
+                    if operation.claim_id == claim.claim_id
+                    and operation.follow_up_id
+                    == current_follow_up.follow_up_id
+                ),
+                key=lambda operation: (
+                    operation.sequence,
+                    operation.operation_id,
+                ),
+            )
+
+            terminal = updated_claim.terminal_disposition
+            if terminal is None:
+                raise KeyError(claim.claim_id)
+
+            try:
+                transition = reduce_follow_up_staff_abandonment(
+                    claim,
+                    source_session,
+                    current_follow_up,
+                    operations,
+                    terminal.recorded_at,
+                    terminal.recorded_by,
+                )
+            except FollowUpStaffAbandonmentRejected as error:
+                raise IdempotencyConflict(
+                    current_follow_up.follow_up_id
+                ) from error
+
+            if (
+                transition.claim != updated_claim
+                or transition.follow_up != updated_follow_up
+                or transition.reconciled_operation
+                != reconciled_operation
+            ):
+                raise IdempotencyConflict(
+                    current_follow_up.follow_up_id
+                )
+
+            if reconciled_operation is not None:
+                stored_operation = self._follow_up_operations.get(
+                    reconciled_operation.operation_id
+                )
+                if stored_operation is None:
+                    raise IdempotencyConflict(
+                        reconciled_operation.operation_id
+                    )
+
+                try:
+                    assert_follow_up_operation_transition(
+                        stored_operation,
+                        reconciled_operation,
+                    )
+                except ValueError as error:
+                    raise IdempotencyConflict(
+                        reconciled_operation.operation_id
+                    ) from error
+
+            prepared_audit = self._prepare_audit_events(
+                updated_claim,
+                (audit_event,),
+            )
+
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                updated_claim,
+                operation_correlation=idempotency.key,
+            )
+            assert realtime_event is not None
+
+            if reconciled_operation is not None:
+                self._follow_up_operations[
+                    reconciled_operation.operation_id
+                ] = deepcopy(reconciled_operation)
+
+            self._follow_ups[
+                updated_follow_up.follow_up_id
+            ] = deepcopy(updated_follow_up)
+
+            self._claims[
+                updated_claim.claim_id
+            ] = deepcopy(updated_claim)
+
+            self._idempotency[lookup] = deepcopy(idempotency)
+
+            for event in prepared_audit:
+                self._audit_events[event.event_id] = deepcopy(event)
+
+            self._commit_realtime_event(realtime_event)
+
+    def commit_follow_up_contact_withdrawal(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(expected_follow_up.claim_id)
+            current_follow_up = self._follow_ups.get(
+                expected_follow_up.follow_up_id
+            )
+            source_session = self._sessions.get(
+                expected_follow_up.source_session_id
+            )
+
+            if (
+                claim is None
+                or claim.customer_id != customer_id
+                or current_follow_up is None
+                or source_session is None
+            ):
+                raise KeyError(expected_follow_up.follow_up_id)
+
+            if claim.revision != expected_claim_revision:
+                raise RevisionConflict(claim.revision)
+
+            if current_follow_up != expected_follow_up:
+                raise IdempotencyConflict(
+                    expected_follow_up.follow_up_id
+                )
+
+            operations = sorted(
+                (
+                    deepcopy(operation)
+                    for operation in self._follow_up_operations.values()
+                    if operation.claim_id == claim.claim_id
+                    and operation.follow_up_id
+                    == current_follow_up.follow_up_id
+                ),
+                key=lambda operation: (
+                    operation.sequence,
+                    operation.operation_id,
+                ),
+            )
+
+            try:
+                transition = reduce_follow_up_contact_withdrawal(
+                    claim,
+                    source_session,
+                    current_follow_up,
+                    operations,
+                    updated_follow_up.updated_at,
+                )
+            except FollowUpContactWithdrawalRejected as error:
+                raise IdempotencyConflict(
+                    current_follow_up.follow_up_id
+                ) from error
+
+            if (
+                transition.follow_up != updated_follow_up
+                or transition.reconciled_operation
+                != reconciled_operation
+            ):
+                raise IdempotencyConflict(
+                    current_follow_up.follow_up_id
+                )
+
+            if reconciled_operation is not None:
+                stored_operation = self._follow_up_operations.get(
+                    reconciled_operation.operation_id
+                )
+                if stored_operation is None:
+                    raise IdempotencyConflict(
+                        reconciled_operation.operation_id
+                    )
+                try:
+                    assert_follow_up_operation_transition(
+                        stored_operation,
+                        reconciled_operation,
+                    )
+                except ValueError as error:
+                    raise IdempotencyConflict(
+                        reconciled_operation.operation_id
+                    ) from error
+
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                (audit_event,),
+            )
+
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                claim,
+                operation_correlation=(
+                    f'follow-up-contact:{updated_follow_up.follow_up_id}'
+                ),
+            )
+            assert realtime_event is not None
+
+            if reconciled_operation is not None:
+                self._follow_up_operations[
+                    reconciled_operation.operation_id
+                ] = deepcopy(reconciled_operation)
+
+            self._follow_ups[
+                updated_follow_up.follow_up_id
+            ] = deepcopy(updated_follow_up)
+
+            for event in prepared_audit:
+                self._audit_events[event.event_id] = deepcopy(event)
+
+            self._commit_realtime_event(realtime_event)
+
+    def commit_recovery_expiry(
+        self,
+        expected_claim_revision: int,
+        expected_follow_up: FollowUpRecord,
+        updated_claim: WorkingClaim,
+        updated_follow_up: FollowUpRecord,
+        reconciled_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(expected_follow_up.claim_id)
+            current_follow_up = self._follow_ups.get(
+                expected_follow_up.follow_up_id
+            )
+            source_session = self._sessions.get(
+                expected_follow_up.source_session_id
+            )
+
+            if (
+                claim is None
+                or claim.customer_id != customer_id
+                or current_follow_up is None
+                or source_session is None
+            ):
+                raise KeyError(expected_follow_up.follow_up_id)
+
+            if claim.revision != expected_claim_revision:
+                raise RevisionConflict(claim.revision)
+
+            if current_follow_up != expected_follow_up:
+                raise IdempotencyConflict(
+                    expected_follow_up.follow_up_id
+                )
+
+            operations = sorted(
+                (
+                    deepcopy(operation)
+                    for operation in self._follow_up_operations.values()
+                    if operation.claim_id == claim.claim_id
+                    and operation.follow_up_id
+                    == current_follow_up.follow_up_id
+                ),
+                key=lambda operation: (
+                    operation.sequence,
+                    operation.operation_id,
+                ),
+            )
+
+            terminal = updated_claim.terminal_disposition
+            if terminal is None:
+                raise KeyError(claim.claim_id)
+
+            try:
+                transition = reduce_expired_follow_up(
+                    claim,
+                    source_session,
+                    current_follow_up,
+                    operations,
+                    terminal.recorded_at,
+                )
+            except FollowUpExpiryExecutionRejected as error:
+                raise IdempotencyConflict(
+                    expected_follow_up.follow_up_id
+                ) from error
+
+            if (
+                transition.claim != updated_claim
+                or transition.follow_up != updated_follow_up
+                or transition.reconciled_operation
+                != reconciled_operation
+            ):
+                raise IdempotencyConflict(
+                    expected_follow_up.follow_up_id
+                )
+
+            if reconciled_operation is not None:
+                stored_operation = self._follow_up_operations.get(
+                    reconciled_operation.operation_id
+                )
+                if stored_operation is None:
+                    raise IdempotencyConflict(
+                        reconciled_operation.operation_id
+                    )
+                try:
+                    assert_follow_up_operation_transition(
+                        stored_operation,
+                        reconciled_operation,
+                    )
+                except ValueError as error:
+                    raise IdempotencyConflict(
+                        reconciled_operation.operation_id
+                    ) from error
+
+            prepared_audit = self._prepare_audit_events(
+                updated_claim,
+                (audit_event,),
+            )
+
+            realtime_event = self._prepare_realtime_mutation(
+                RealtimeMutation.CLAIM_CHANGED,
+                updated_claim,
+                operation_correlation=(
+                    f'recovery-expiry:{updated_follow_up.follow_up_id}'
+                ),
+            )
+            assert realtime_event is not None
+
+            if reconciled_operation is not None:
+                self._follow_up_operations[
+                    reconciled_operation.operation_id
+                ] = deepcopy(reconciled_operation)
+
+            self._follow_ups[
+                updated_follow_up.follow_up_id
+            ] = deepcopy(updated_follow_up)
+            self._claims[
+                updated_claim.claim_id
+            ] = deepcopy(updated_claim)
+
+            for event in prepared_audit:
+                self._audit_events[event.event_id] = deepcopy(event)
+
+            self._commit_realtime_event(realtime_event)
+
+    def commit_due_follow_up_attempt(
+        self,
+        expected_follow_up: FollowUpRecord,
+        updated_follow_up: FollowUpRecord,
+        operation: FollowUpOperation,
+        settled_previous_operation: FollowUpOperation | None,
+        customer_id: str,
+        audit_event: AuditEventEnvelope,
+    ) -> None:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(expected_follow_up.claim_id)
+            current_follow_up = self._follow_ups.get(
+                expected_follow_up.follow_up_id
+            )
+            source_session = self._sessions.get(
+                expected_follow_up.source_session_id
+            )
+
+            if (
+                claim is None
+                or claim.customer_id != customer_id
+                or current_follow_up is None
+                or source_session is None
+            ):
+                raise KeyError(expected_follow_up.follow_up_id)
+
+            existing_operation = self._follow_up_operations.get(
+                operation.operation_id
+            )
+
+            if existing_operation is not None:
+                if (
+                    existing_operation == operation
+                    and current_follow_up.attempt_count
+                    >= updated_follow_up.attempt_count
+                    and current_follow_up.updated_at
+                    >= updated_follow_up.updated_at
+                ):
+                    return
+                raise IdempotencyConflict(operation.operation_id)
+
+            if current_follow_up != expected_follow_up:
+                raise IdempotencyConflict(expected_follow_up.follow_up_id)
+
+            prior_operations = sorted(
+                (
+                    deepcopy(stored)
+                    for stored in self._follow_up_operations.values()
+                    if stored.follow_up_id == expected_follow_up.follow_up_id
+                    and stored.claim_id == expected_follow_up.claim_id
+                ),
+                key=lambda stored: (
+                    stored.sequence,
+                    stored.operation_id,
+                ),
+            )
+
+            committed_at = operation.committed_at
+            if committed_at is None:
+                raise IdempotencyConflict(operation.operation_id)
+
+            try:
+                transition = reduce_due_follow_up(
+                    claim,
+                    source_session,
+                    current_follow_up,
+                    prior_operations,
+                    committed_at,
+                )
+            except FollowUpDueExecutionRejected as error:
+                raise IdempotencyConflict(
+                    operation.operation_id
+                ) from error
+
+            if (
+                transition.operation != operation
+                or transition.follow_up != updated_follow_up
+                or transition.settled_previous_operation
+                != settled_previous_operation
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+
+            if settled_previous_operation is not None:
+                stored_previous = self._follow_up_operations.get(
+                    settled_previous_operation.operation_id
+                )
+                if stored_previous is None:
+                    raise IdempotencyConflict(
+                        settled_previous_operation.operation_id
+                    )
+                try:
+                    assert_follow_up_operation_transition(
+                        stored_previous,
+                        settled_previous_operation,
+                    )
+                except ValueError as error:
+                    raise IdempotencyConflict(
+                        settled_previous_operation.operation_id
+                    ) from error
+
+            if any(
+                stored.follow_up_id == operation.follow_up_id
+                and stored.sequence == operation.sequence
+                for stored in self._follow_up_operations.values()
+            ):
+                raise IdempotencyConflict(operation.operation_id)
+
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                (audit_event,),
+            )
+
+            if settled_previous_operation is not None:
+                self._follow_up_operations[
+                    settled_previous_operation.operation_id
+                ] = deepcopy(settled_previous_operation)
+
+            self._follow_up_operations[
+                operation.operation_id
+            ] = deepcopy(operation)
+
+            self._follow_ups[
+                updated_follow_up.follow_up_id
+            ] = deepcopy(updated_follow_up)
+
+            for event in prepared_audit:
+                self._audit_events[event.event_id] = deepcopy(event)
+
     def list_due_follow_ups(
         self,
         due_before: datetime,
@@ -1881,7 +2399,9 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        reconciled_follow_up_operation: FollowUpOperation | None = None,
         replaced_active_session: SessionRecord | None = None,
+        audit_event: AuditEventEnvelope | None = None,
     ) -> None:
         with self._claim_mutation_lock:
             stored_claim = self._validate_claim_mutation(
@@ -1972,6 +2492,63 @@ class FixtureRepository(PersistenceRepository):
                 )
                 if resolved_follow_up != expected_follow_up:
                     raise KeyError(claim.claim_id)
+
+                if (
+                    stored_follow_up.deadline_at is not None
+                    and resolved_follow_up.updated_at
+                    >= stored_follow_up.deadline_at
+                ):
+                    raise RecoveryDeadlineConflict(
+                        stored_follow_up.follow_up_id
+                    )
+
+                open_operations = [
+                    operation
+                    for operation in self._follow_up_operations.values()
+                    if operation.follow_up_id
+                    == stored_follow_up.follow_up_id
+                    and operation.claim_id == claim.claim_id
+                    and operation.status
+                    in {
+                        FollowUpOperationStatus.SCHEDULED,
+                        FollowUpOperationStatus.COMMITTED,
+                    }
+                ]
+
+                if reconciled_follow_up_operation is None:
+                    if open_operations:
+                        raise KeyError(claim.claim_id)
+                else:
+                    if (
+                        len(open_operations) != 1
+                        or open_operations[0].operation_id
+                        != reconciled_follow_up_operation.operation_id
+                    ):
+                        raise KeyError(claim.claim_id)
+
+                    try:
+                        assert_follow_up_operation_transition(
+                            open_operations[0],
+                            reconciled_follow_up_operation,
+                        )
+                    except ValueError as error:
+                        raise KeyError(claim.claim_id) from error
+
+            elif reconciled_follow_up_operation is not None:
+                raise KeyError(claim.claim_id)
+
+            if resolved_follow_up is not None:
+                if audit_event is None:
+                    raise KeyError(claim.claim_id)
+                prepared_audit = self._prepare_audit_events(
+                    claim,
+                    (audit_event,),
+                )
+            else:
+                if audit_event is not None:
+                    raise KeyError(claim.claim_id)
+                prepared_audit = ()
+
             lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
             if self._idempotency.get(lookup) is not None:
                 raise IdempotencyConflict(idempotency.key)
@@ -1989,11 +2566,19 @@ class FixtureRepository(PersistenceRepository):
             self._store_session(session)
             if resolved_follow_up is not None:
                 self._follow_ups[resolved_follow_up.follow_up_id] = deepcopy(resolved_follow_up)
+            if reconciled_follow_up_operation is not None:
+                self._follow_up_operations[
+                    reconciled_follow_up_operation.operation_id
+                ] = deepcopy(reconciled_follow_up_operation)
             if branch_evaluation is not None:
                 self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
                     branch_evaluation
                 )
             self._idempotency[lookup] = deepcopy(idempotency)
+
+            for event in prepared_audit:
+                self._audit_events[event.event_id] = deepcopy(event)
+
             self._commit_realtime_event(realtime_event)
 
     def _validate_branch_evaluation(

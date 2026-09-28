@@ -164,6 +164,8 @@ class TerminalDispositionValue(str, Enum):
 class TerminalDispositionReasonCode(str, Enum):
     CLAIM_CREATED = 'CLAIM_CREATED'
     ABANDONMENT_POLICY_APPLIED = 'ABANDONMENT_POLICY_APPLIED'
+    RECOVERY_EXPIRED = 'RECOVERY_EXPIRED'
+    AUTHORISED_STAFF_ABANDONMENT = 'AUTHORISED_STAFF_ABANDONMENT'
     AUTHORISED_CLOSURE = 'AUTHORISED_CLOSURE'
 
 
@@ -453,14 +455,20 @@ class ClaimTerminalDisposition(ContractModel):
 
     @model_validator(mode='after')
     def validate_terminal_reason(self) -> 'ClaimTerminalDisposition':
-        expected_reason = {
-            TerminalDispositionValue.COMPLETED: TerminalDispositionReasonCode.CLAIM_CREATED,
-            TerminalDispositionValue.ABANDONED: (
-                TerminalDispositionReasonCode.ABANDONMENT_POLICY_APPLIED
-            ),
-            TerminalDispositionValue.CLOSED: TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
+        allowed_reasons = {
+            TerminalDispositionValue.COMPLETED: {
+                TerminalDispositionReasonCode.CLAIM_CREATED,
+            },
+            TerminalDispositionValue.ABANDONED: {
+                TerminalDispositionReasonCode.ABANDONMENT_POLICY_APPLIED,
+                TerminalDispositionReasonCode.RECOVERY_EXPIRED,
+                TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT,
+            },
+            TerminalDispositionValue.CLOSED: {
+                TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
+            },
         }[self.value]
-        if self.reason_code is not expected_reason:
+        if self.reason_code not in allowed_reasons:
             raise ValueError('The terminal disposition reason must match its registered value.')
         if len(self.source_refs) != len(set(self.source_refs)):
             raise ValueError('Terminal disposition source references must be unique.')
@@ -2010,6 +2018,10 @@ class DecideCollaborationRequest(ContractModel):
 
 
 class RequeueClaimRequest(ContractModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class AbandonClaimRequest(ContractModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 

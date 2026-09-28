@@ -12,6 +12,7 @@ from backend.core.auth import Principal, require_staff
 from backend.core.errors import ApiError
 from backend.domain.assets import ClaimAssetSnapshotListResponse, project_snapshot
 from backend.domain.models import (
+    AbandonClaimRequest,
     AcceptHandoffRequest,
     AgentAction,
     CollaborationMutationResponse,
@@ -77,7 +78,10 @@ from backend.services.staff_actions import (
     update_staff_action,
 )
 from backend.services.support import decode_cursor, encode_cursor
-from backend.services.terminal_claims import reopen_claim
+from backend.services.terminal_claims import (
+    abandon_incomplete_claim,
+    reopen_claim,
+)
 from backend.services.workbench import (
     get_workbench_claim_filter_metadata,
     list_workbench_claims,
@@ -245,6 +249,25 @@ def read_workbench_claim_asset_snapshots(
     page = PageInfo(next_cursor=encode_cursor(offset + len(records)) if has_more else None)
     return ClaimAssetSnapshotListResponse(
         items=[project_snapshot(item) for item in records], page=page
+    )
+
+
+@router.post('/{claim_id}/abandon', response_model=WorkbenchClaimDetail)
+def abandon_workbench_claim(
+    claim_id: str,
+    payload: AbandonClaimRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> WorkbenchClaimDetail:
+    return abandon_incomplete_claim(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
     )
 
 
