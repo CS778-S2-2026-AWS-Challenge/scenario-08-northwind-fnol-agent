@@ -326,11 +326,11 @@ try {
         return
     }
 
-    # 7. Start the three frontends and wait for each to actually serve its page. Vite proxies
-    #    read the target from these environment variables at startup. These three are the only
-    #    names a frontend legitimately needs; everything else in $frontendEnv is a removal.
+    # 7. Start the three frontends and wait for each to actually serve its page. Vite clients
+    #    read these public runtime targets at startup; every backend-only value remains removed.
     $backendOrigin = "http://127.0.0.1:$BackendPort"
     $frontendEnv.VITE_BACKEND_PORT = [string]$BackendPort
+    $frontendEnv.VITE_NORTHWIND_WORKBENCH_URL = "http://127.0.0.1:$WorkbenchPort/workbench/"
     $frontendEnv.WORKBENCH_API_TARGET = $backendOrigin
     $frontendEnv.ADMIN_API_TARGET = $backendOrigin
 

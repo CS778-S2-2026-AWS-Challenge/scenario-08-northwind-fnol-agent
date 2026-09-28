@@ -1,4 +1,5 @@
 import { ChevronDown } from 'lucide-react'
+import { translate as t } from '../i18n.js'
 
 const CATEGORY_LABELS = {
   claim_type: 'Claim type',
@@ -12,14 +13,14 @@ const CATEGORY_LABELS = {
 }
 
 export function TagList({ tags = [], limit, grouped = false }) {
-  if (!tags.length) return <p className="empty-note">No source-backed tags are available yet.</p>
+  if (!tags.length) return <p className="empty-note">{t('No source-backed tags are available yet.')}</p>
   const visible = typeof limit === 'number' ? tags.slice(0, limit) : tags
 
   if (!grouped) {
     return (
-      <div className="tag-list" aria-label="Claim tags">
+      <div className="tag-list" aria-label={t('Claim tags')}>
         {visible.map((tag) => <Tag key={tag.tag_instance_id} tag={tag} />)}
-        {visible.length < tags.length && <span className="tag-more">+{tags.length - visible.length} more</span>}
+        {visible.length < tags.length && <span className="tag-more">{t('+{count} more', { count: tags.length - visible.length })}</span>}
       </div>
     )
   }
@@ -35,7 +36,7 @@ export function TagList({ tags = [], limit, grouped = false }) {
     <div className="tag-groups">
       {groups.map(([category, values]) => (
         <section className="tag-group" key={category}>
-          <h4>{CATEGORY_LABELS[category] || category}</h4>
+          <h4>{t(CATEGORY_LABELS[category] || category)}</h4>
           <div className="tag-list">
             {values.map((tag) => <Tag key={tag.tag_instance_id} tag={tag} expanded />)}
           </div>
@@ -56,13 +57,13 @@ function Tag({ tag, expanded = false }) {
       <div className="tag-details">
         <p>{tag.description}</p>
         <dl>
-          <div><dt>Basis</dt><dd>{tag.basis}</dd></div>
-          <div><dt>Source actor</dt><dd>{tag.source_actor || 'system'}</dd></div>
-          <div><dt>Freshness</dt><dd>{tag.freshness || 'current'}</dd></div>
-          <div><dt>Status</dt><dd>{tag.status}</dd></div>
-          {tag.attention_level && <div><dt>Attention</dt><dd>{tag.attention_level}</dd></div>}
-          <div><dt>Activated</dt><dd>{tag.activated_at}</dd></div>
-          <div><dt>Sources</dt><dd>{tag.source_refs.join(', ')}</dd></div>
+          <div><dt>{t('Basis')}</dt><dd>{tag.basis}</dd></div>
+          <div><dt>{t('Source actor')}</dt><dd>{t(tag.source_actor || 'system')}</dd></div>
+          <div><dt>{t('Freshness')}</dt><dd>{t(tag.freshness || 'current')}</dd></div>
+          <div><dt>{t('Status')}</dt><dd>{t(tag.status)}</dd></div>
+          {tag.attention_level && <div><dt>{t('Attention')}</dt><dd>{t(tag.attention_level)}</dd></div>}
+          <div><dt>{t('Activated')}</dt><dd>{tag.activated_at}</dd></div>
+          <div><dt>{t('Sources')}</dt><dd>{tag.source_refs.join(', ')}</dd></div>
         </dl>
       </div>
     </details>

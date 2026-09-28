@@ -56,10 +56,13 @@ import './styles/profile-shell.css'
 import './styles/profile-records.css'
 import './styles/profile-assets.css'
 import './styles/profile-responsive.css'
+import './styles/claim-history.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
 import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
+import useClaimAutoFillEditor from './profile/useClaimAutoFillEditor.js'
 import { documentAttentionCount } from './claimDocumentProjection.js'
+import { WORKBENCH_URL } from './runtimeConfig.js'
 import {
   forgetAnonymousConversation,
   readAnonymousConversationHistory,
@@ -435,6 +438,14 @@ function claimProgress(dynamicForm) {
   }
 }
 
+function protectedAccountPageForPath(pathname) {
+  if (pathname === '/account/claims') return 'claim-history'
+  if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return 'claim-evidence'
+  if (/^\/account\/claims\/[^/]+$/.test(pathname)) return 'claim-features'
+  if (pathname === '/files') return 'files'
+  return null
+}
+
 function App() {
   const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialDraftWorkspaceActive = globalThis.location?.pathname === '/claims/new'
@@ -445,10 +456,8 @@ function App() {
     if (path === '/profile' || path === '/account' || initialProfileSection) {
       return hasClaimantAccessToken() ? 'account' : 'login'
     }
-    if (/^\/account\/claims\/[^/]+\/evidence$/.test(path)) return 'claim-evidence'
-    if (/^\/account\/claims\/[^/]+$/.test(path)) return 'claim-features'
-    if (path === '/account/claims') return 'claim-history'
-    if (path === '/files') return 'files'
+    const protectedPage = protectedAccountPageForPath(path)
+    if (protectedPage) return hasClaimantAccessToken() ? protectedPage : 'login'
     if (path === '/how-it-works') return 'how-it-works'
     return 'home'
   })()
@@ -498,6 +507,10 @@ function App() {
     account,
     setAccount,
     enabled: page === 'account',
+  })
+  const autoFillEditor = useClaimAutoFillEditor({
+    account,
+    onSave: profileController.saveAutoFillPreferences,
   })
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
@@ -692,10 +705,8 @@ function App() {
     if (pathname === '/auth/login') return 'login'
     if (pathname === '/auth/register') return 'register'
     if (pathname === '/profile' || pathname === '/account' || profileSectionFromPath(pathname)) return account ? 'account' : 'login'
-    if (pathname === '/account/claims') return account ? 'claim-history' : 'login'
-    if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return account ? 'claim-evidence' : 'login'
-    if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
-    if (pathname === '/files') return account ? 'files' : 'login'
+    const protectedPage = protectedAccountPageForPath(pathname)
+    if (protectedPage) return account ? protectedPage : 'login'
     if (pathname === '/how-it-works') return 'how-it-works'
     if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
     return 'home'
@@ -1663,6 +1674,7 @@ function App() {
         revision: Math.max(uploadRevision, latestEvidenceRevision.current),
         succeeded: false,
         evidenceId: attempt.evidenceId,
+        message: requestError?.message || 'Northwind could not upload this file.',
       }
     } finally {
       if (evidenceUploadControllers.current.get(localId) === uploadController) {
@@ -1677,11 +1689,19 @@ function App() {
     requestedKind = null,
     requestedEvidenceId = null,
   ) {
-    if (isBusy) return
+    if (isBusy) {
+      return {
+        succeeded: false,
+        message: 'Another claim update is still in progress. Wait a moment, then choose Replace and try again.',
+      }
+    }
     if (!hasClaimantAccessToken()) {
       setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
       setStatus('error')
-      return
+      return {
+        succeeded: false,
+        message: 'Sign in, then choose Replace to upload this file.',
+      }
     }
     setError('')
     const attempt = existingAttempt || {
@@ -1705,10 +1725,10 @@ function App() {
           uploadAttempt: attempt,
         },
       ])
-      return
+      return { succeeded: true }
     }
 
-    await uploadAttachment(file, attempt, claim, {
+    return uploadAttachment(file, attempt, claim, {
       existingAttachment: Boolean(existingAttempt),
       checkExistingEvidence: Boolean(existingAttempt),
     })
@@ -2653,6 +2673,7 @@ function App() {
   async function signOut() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
+    autoFillEditor.reset()
     setAccount(null)
     setClaimHistory(readAnonymousConversationHistory())
     setClaimHistoryError('')
@@ -2718,13 +2739,6 @@ function App() {
     } else {
       setPage('claim-evidence')
     }
-  }
-
-  function openCurrentClaimEvidence() {
-    if (!claim?.claim_id) return
-    setSelectedHistoryClaimId(claim.claim_id)
-    setWorkspaceView('claim-evidence')
-    setMobileView('chat')
   }
 
   function openCurrentClaimDocuments() {
@@ -3049,6 +3063,7 @@ function App() {
 
   const isUrgentSupport = handoff?.support_need === 'urgent'
   const isProfilePage = page === 'account'
+  const isStandaloneClaimHistory = !isWorkspaceActive && page === 'claim-history'
   const profileDisplayName = account?.profile?.display_name || 'Log in to save your chat'
   const profileEmail = account?.profile?.email || 'Profile and preferences'
   const profileNamePreview = middleEllipsisLayoutParts(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)
@@ -3057,8 +3072,8 @@ function App() {
     : 'Open Profile and preferences'
 
   return (
-    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'workspace-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''}`}>
-      <header className={`product-header ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
+    <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'workspace-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''} ${isStandaloneClaimHistory ? 'is-claim-history-page' : ''}`}>
+      <header className={`product-header ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'is-intake-header' : ''} ${isStandaloneClaimHistory ? 'is-claim-history-header' : ''}`}>
         <div className="header-leading">
           <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
             <span className="brand-mark">N</span>
@@ -3142,7 +3157,51 @@ function App() {
             <p>Our claims assistant keeps track of the details, asks only for what is still needed, and explains the next step clearly. You can start without an account and log in later if you want to save your progress.</p>
           </section>
         </main>
-      ) : !isWorkspaceActive && ['claim-history', 'claim-features', 'claim-evidence'].includes(page) ? (
+      ) : isStandaloneClaimHistory ? (
+        <main className="claim-history-page">
+          {account ? (
+            <section className="claim-history-page-content" aria-labelledby="claim-history-page-title">
+              <nav className="claim-history-breadcrumb" aria-label="Breadcrumb">
+                <a
+                  href="/profile"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    setPage('account')
+                  }}
+                >
+                  Account
+                </a>
+                <span aria-hidden="true">/</span>
+                <span aria-current="page">Claims</span>
+              </nav>
+              <header className="claim-history-hero">
+                <div className="claim-history-hero-copy">
+                  <p className="claim-history-eyebrow">Your claims</p>
+                  <h1 id="claim-history-page-title">Claim history</h1>
+                  <p>Track open claims and review your previous submissions.</p>
+                </div>
+                <button className="claim-history-start-action" type="button" onClick={startNewChat}>
+                  <span aria-hidden="true">＋</span>
+                  Start a new claim
+                </button>
+              </header>
+              <ClaimHistory
+                claims={claimHistory}
+                error={claimHistoryError}
+                loading={claimHistory === null && !claimHistoryError}
+                refreshing={status === 'loading-reports'}
+                onRetry={loadSavedReports}
+                onSelect={openClaimFeatures}
+                onStartClaim={startNewChat}
+                onContinueReport={continueReportFromClaimHistory}
+                showEmptyStartAction={false}
+              />
+            </section>
+          ) : (
+            <p className="claim-history-page-checking" role="status">Checking your account…</p>
+          )}
+        </main>
+      ) : !isWorkspaceActive && ['claim-features', 'claim-evidence'].includes(page) ? (
         <main className="evidence-history-page">
           {account ? (
             <section className="evidence-history-page-content" aria-labelledby="account-claim-view-title">
@@ -3151,40 +3210,22 @@ function App() {
                 type="button"
                 onClick={page === 'claim-evidence'
                   ? () => setPage('claim-features')
-                  : page === 'claim-features'
-                    ? openClaimHistory
-                    : () => setPage('account')}
+                  : openClaimHistory}
               >
                 <span className="back-link-arrow" aria-hidden="true">←</span>
                 {page === 'claim-evidence'
                   ? 'Back to Claim features'
-                  : page === 'claim-features'
-                    ? 'Back to Claim history'
-                    : 'Back to account'}
+                  : 'Back to Claim history'}
               </button>
               <p className="eyebrow">Northwind account</p>
               <h1 id="account-claim-view-title">
-                {page === 'claim-history' ? 'Claim history' : page === 'claim-features' ? 'Claim features' : 'Evidence history'}
+                {page === 'claim-features' ? 'Claim features' : 'Evidence history'}
               </h1>
               <p>
-                {page === 'claim-history'
-                  ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
-                  : page === 'claim-features'
-                    ? 'Review this Claim\'s current status and available information.'
-                    : 'Review the files and supporting material recorded for the selected Claim.'}
+                {page === 'claim-features'
+                  ? 'Review this Claim\'s current status and available information.'
+                  : 'Review the files and supporting material recorded for the selected Claim.'}
               </p>
-              {page === 'claim-history' && (
-                <ClaimHistory
-                  claims={claimHistory}
-                  error={claimHistoryError}
-                  loading={claimHistory === null && !claimHistoryError}
-                  refreshing={status === 'loading-reports'}
-                  onRetry={loadSavedReports}
-                  onSelect={openClaimFeatures}
-                  onStartClaim={startNewChat}
-                  onContinueReport={continueReportFromClaimHistory}
-                />
-              )}
               {page === 'claim-features' && (
                 selectedHistoryClaim ? (
                   <ClaimFeatureDirectory claim={selectedHistoryClaim} onOpenEvidence={openClaimEvidence} />
@@ -3239,8 +3280,15 @@ function App() {
             <UserProfile
               account={account}
               activeSection={profileSection}
+              autoFillChoices={autoFillEditor.choices}
+              autoFillDirty={autoFillEditor.dirty}
+              autoFillError={autoFillEditor.error}
+              autoFillNotice={autoFillEditor.notice}
+              autoFillSaving={autoFillEditor.saving}
               controller={profileController}
+              onChangeAutoFillChoice={autoFillEditor.changeChoice}
               onOpenClaims={openSavedClaims}
+              onSaveAutoFillChoices={autoFillEditor.saveChoices}
               onSelectSection={openProfileSection}
               onSignOut={signOut}
             />
@@ -3291,7 +3339,7 @@ function App() {
             </button>
             <div className="employee-access">
               <span>Northwind team member?</span>
-              <a href="http://127.0.0.1:8002/">Employee access</a>
+              <a href={WORKBENCH_URL}>Employee access</a>
             </div>
           </section>
         </main>
@@ -3932,6 +3980,18 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
+              {detailsTab === 'documents' && workspaceView === 'chat' && (
+                <ClaimDocuments
+                  items={evidenceItems}
+                  loadStatus={evidenceLoadStatus}
+                  onUpload={(item, file) => handleFileSelected(
+                    file,
+                    null,
+                    item.kind,
+                    item.evidence_id,
+                  )}
+                />
+              )}
               {claim?.external_capabilities?.length > 0 && (
                 <button
                   ref={externalCapabilitiesTriggerRef}
@@ -3940,26 +4000,13 @@ function App() {
                   aria-haspopup="dialog"
                   onClick={() => setExternalCapabilitiesOpen(true)}
                 >
+                  <strong>Use a third-party service</strong>
                   <span>
-                    <strong>Third-party support</strong>
-                    <small>{claim.external_capabilities.length} services available</small>
+                    View {claim.external_capabilities.length}{' '}
+                    {claim.external_capabilities.length === 1 ? 'option' : 'options'}
+                    <span aria-hidden="true">›</span>
                   </span>
-                  <span aria-hidden="true">View</span>
                 </button>
-              )}
-              {detailsTab === 'documents' && workspaceView === 'chat' && (
-                <ClaimDocuments
-                  items={evidenceItems}
-                  loadStatus={evidenceLoadStatus}
-                  busy={isBusy}
-                  onUpload={(item, file) => handleFileSelected(
-                    file,
-                    null,
-                    item.kind,
-                    item.evidence_id,
-                  )}
-                  onView={openCurrentClaimEvidence}
-                />
               )}
             </div>
             </div>

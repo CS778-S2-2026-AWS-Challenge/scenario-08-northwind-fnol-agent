@@ -400,10 +400,63 @@ export function updateAccountPreferences(preferences, revision) {
   })
 }
 
+export function updateClaimAutoFillPreferences(preferences, revision) {
+  return apiRequest('/api/v1/account/claim-auto-fill-preferences', {
+    method: 'PATCH',
+    headers: revision == null ? undefined : { 'If-Match': String(revision) },
+    body: JSON.stringify(preferences),
+  })
+}
+
+export function listAccountPolicies({ cursor, limit = 25, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/account/policies?${params}`, { signal })
+}
+
+export function createAccountPolicy({ policyNumber, idempotencyKey = requestId('policy') }) {
+  return apiRequest('/api/v1/account/policies', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ policy_number: policyNumber }),
+  })
+}
+
+export function updateAccountPolicy({ policyId, revision, policyNumber }) {
+  return apiRequest(`/api/v1/account/policies/${encodeURIComponent(policyId)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify({ policy_number: policyNumber }),
+  })
+}
+
 export function listAccountPaymentDestinations({ cursor, limit = 25, signal } = {}) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
   return apiRequest(`/api/v1/account/payment-destinations?${params}`, { signal })
+}
+
+export function updateAccountPaymentDestination({
+  paymentDestinationId,
+  revision,
+  accountType,
+  accountNumber,
+  bankName,
+  accountHolderName,
+  isCommon,
+}) {
+  const updates = {
+    ...(accountType !== undefined ? { account_type: accountType } : {}),
+    ...(accountNumber !== undefined ? { account_number: accountNumber } : {}),
+    ...(bankName !== undefined ? { bank_name: bankName } : {}),
+    ...(accountHolderName !== undefined ? { account_holder_name: accountHolderName } : {}),
+    ...(isCommon !== undefined ? { is_common: isCommon } : {}),
+  }
+  return apiRequest(`/api/v1/account/payment-destinations/${encodeURIComponent(paymentDestinationId)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify(updates),
+  })
 }
 
 export function listAccountAssets({ cursor, limit = 25, signal } = {}) {

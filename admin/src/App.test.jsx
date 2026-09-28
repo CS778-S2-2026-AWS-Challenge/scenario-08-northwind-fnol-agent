@@ -98,6 +98,55 @@ it('renders server-backed configuration state after administrator sign-in', asyn
   expect(fetch).toHaveBeenCalledWith('/internal/v1/admin/configurations', expect.objectContaining({ headers: expect.any(Headers) }))
 })
 
+it('shows staff feedback only inside the administrator-protected console', async () => {
+  const user = userEvent.setup()
+  sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
+  const feedback = {
+    feedback_id: 'fdb_visible',
+    message: 'Please retain filters when I return to the queue.',
+    submitted_by_staff_id: 'stf_demo',
+    submitted_by_display_name: 'Demo Claims Professional',
+    source: 'workbench',
+    created_at: '2026-09-28T00:00:00Z',
+  }
+  const nextFeedback = {
+    ...feedback,
+    feedback_id: 'fdb_next',
+    message: 'A second page of feedback.',
+    submitted_by_staff_id: 'stf_second',
+    submitted_by_display_name: 'Second Staff Member',
+  }
+  const fetchMock = vi.fn(async (path) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
+    if (path === '/internal/v1/admin/feedback') {
+      return jsonResponse({ items: [feedback], page: { next_cursor: 'next-page' } })
+    }
+    if (path === '/internal/v1/admin/feedback?cursor=next-page') {
+      return jsonResponse({ items: [nextFeedback], page: { next_cursor: null } })
+    }
+    throw new Error(`Unexpected request: GET ${path}`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<MemoryRouter initialEntries={['/admin/feedback']}><App /></MemoryRouter>)
+
+  expect(await screen.findByRole('heading', { name: 'Staff feedback', level: 1 })).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: /staff feedback/i })).toBeInTheDocument()
+  await user.click((await screen.findByText('Demo Claims Professional')).closest('button'))
+  expect(screen.getByText('Please retain filters when I return to the queue.')).toBeInTheDocument()
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/internal/v1/admin/feedback',
+    expect.objectContaining({ headers: expect.any(Headers) }),
+  )
+  const feedbackRequest = fetchMock.mock.calls.find(([path]) => path === '/internal/v1/admin/feedback')
+  expect(feedbackRequest[1].headers.get('Authorization')).toBe('Bearer synthetic-admin')
+
+  await user.click(screen.getByRole('button', { name: 'Next page' }))
+  expect(await screen.findByText('Second Staff Member')).toBeInTheDocument()
+  expect(screen.getByText('Page 2')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Previous page' })).toBeEnabled()
+})
+
 it('uses the projected revision and idempotency key for a configuration action', async () => {
   const user = userEvent.setup()
   sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')

@@ -1,94 +1,187 @@
 import { expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import ClaimDocuments from './ClaimDocuments.jsx'
-import { documentAttentionCount, documentStatus } from '../claimDocumentProjection.js'
+import { documentStatus } from '../claimDocumentProjection.js'
 
-const documents = [
-  {
-    evidence_id: 'evd_later',
-    kind: 'police_report',
-    status: 'pending',
-    file_status: 'not_available',
-    needed_for: ['later_action'],
-    claimant_note: 'Police said this will be available next week.',
-  },
-  {
-    evidence_id: 'evd_received',
-    kind: 'receipt',
-    status: 'received',
-    file_status: 'ready',
-    original_filename: 'purchase-receipt.pdf',
-    needed_for: ['later_action'],
-  },
-  {
-    evidence_id: 'evd_processing',
-    kind: 'incident_photo',
-    status: 'received',
-    file_status: 'processing',
-    original_filename: 'kitchen-damage.jpg',
-    needed_for: ['current_action'],
-  },
-  {
-    evidence_id: 'evd_recommended',
+const recommendedPhoto = {
+  evidence_id: 'evd_photo',
+  kind: 'incident_photo',
+  status: 'missing',
+  file_status: 'not_available',
+  needed_for: [],
+}
+
+function renderDocuments(items, props = {}) {
+  return render(
+    <ClaimDocuments
+      items={items}
+      loadStatus="ready"
+      onUpload={vi.fn()}
+      {...props}
+    />,
+  )
+}
+
+it('renders a recommended upload as a complete task card with contract-backed constraints', async () => {
+  const user = userEvent.setup()
+  const { container } = renderDocuments([recommendedPhoto])
+
+  expect(screen.getByRole('heading', { name: 'Documents and evidence' })).toBeInTheDocument()
+  expect(screen.getByText('0 of 1 provided')).toBeInTheDocument()
+  expect(screen.getByRole('progressbar')).toHaveAttribute('max', '1')
+  expect(screen.getByRole('progressbar')).toHaveAttribute('value', '0')
+  expect(screen.getByRole('heading', { name: 'Recommended for this claim' })).toBeInTheDocument()
+  expect(screen.getByText('1 item')).toBeInTheDocument()
+
+  const card = screen.getByRole('listitem')
+  expect(within(card).getByRole('heading', { name: 'Photos of the damage' })).toBeInTheDocument()
+  expect(within(card).getByText('Recommended')).toBeInTheDocument()
+  expect(within(card).getByText(/Clear photos help Northwind/)).toBeInTheDocument()
+  expect(within(card).getByText('JPG, PNG or PDF · up to 10 MB each')).toBeInTheDocument()
+  expect(within(card).queryByText(/HEIC/)).not.toBeInTheDocument()
+  expect(within(card).getByRole('button', {
+    name: 'Upload photos for Photos of the damage',
+  })).toBeInTheDocument()
+  expect(screen.queryByText(/needs your attention/)).not.toBeInTheDocument()
+
+  const input = container.querySelector('input[type="file"]')
+  expect(input).toHaveAttribute('accept', 'image/jpeg,image/png,application/pdf')
+
+  await user.click(within(card).getByRole('button', { name: 'See photo tips' }))
+  expect(within(card).getByText(/full damaged area/)).toBeVisible()
+})
+
+it('separates required and recommended tasks without presenting recommendations as errors', () => {
+  const required = {
+    evidence_id: 'evd_required',
     kind: 'repair_quote',
     status: 'missing',
     file_status: 'not_available',
-    needed_for: [],
-  },
-  {
-    evidence_id: 'evd_required',
-    kind: 'proof_of_ownership',
-    status: 'missing',
-    file_status: 'not_available',
     needed_for: ['current_action'],
-  },
-]
+  }
+  renderDocuments([recommendedPhoto, required])
 
-it('sorts contract-backed document states and exposes only supported actions', async () => {
+  const requiredGroup = screen.getByRole('region', { name: 'Required for this claim' })
+  const recommendedGroup = screen.getByRole('region', { name: 'Recommended for this claim' })
+  expect(within(requiredGroup).getByText('Required')).toBeInTheDocument()
+  expect(within(recommendedGroup).getByText('Recommended')).toBeInTheDocument()
+  expect(within(recommendedGroup).queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it('shows an in-card loading state while the selected file is uploading', async () => {
   const user = userEvent.setup()
-  const onUpload = vi.fn()
-  const onView = vi.fn()
-  const { container } = render(
-    <ClaimDocuments
-      items={documents}
-      loadStatus="ready"
-      onUpload={onUpload}
-      onView={onView}
-    />,
+  let finishUpload
+  const onUpload = vi.fn(() => new Promise((resolve) => { finishUpload = resolve }))
+  const { container } = renderDocuments([recommendedPhoto], { onUpload })
+  const file = new File(['image'], 'damage.jpg', { type: 'image/jpeg' })
+
+  await user.upload(container.querySelector('input[type="file"]'), file)
+
+  expect(onUpload).toHaveBeenCalledWith(recommendedPhoto, file)
+  expect(screen.getByText('damage.jpg')).toBeInTheDocument()
+  expect(screen.getByText('JPG · Uploading…')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Uploading photos…' })).toBeDisabled()
+  expect(screen.queryByRole('button', { name: /Replace/ })).not.toBeInTheDocument()
+
+  finishUpload({ succeeded: true })
+  await waitFor(() => expect(screen.queryByText('JPG · Uploading…')).not.toBeInTheDocument())
+})
+
+it('shows the authoritative successful file and hides replacement and removal operations', () => {
+  renderDocuments([{
+    ...recommendedPhoto,
+    status: 'received',
+    file_status: 'ready',
+    original_filename: 'damage.jpg',
+    media_type: 'image/jpeg',
+  }])
+
+  expect(screen.getByText('1 of 1 provided')).toBeInTheDocument()
+  expect(screen.getByRole('progressbar')).toHaveAttribute('value', '1')
+  expect(screen.getByText('damage.jpg')).toBeInTheDocument()
+  expect(screen.getByText('JPG · Upload complete')).toBeInTheDocument()
+  expect(screen.getByText('Uploaded successfully')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Replace/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Upload photos/ })).not.toBeInTheDocument()
+})
+
+it('offers Replace only after an upload failure and keeps the error actionable', async () => {
+  const user = userEvent.setup()
+  const onUpload = vi.fn().mockResolvedValue({
+    succeeded: false,
+    message: 'The upload connection was interrupted. Choose Replace and try again.',
+  })
+  const { container } = renderDocuments([recommendedPhoto], { onUpload })
+
+  await user.upload(
+    container.querySelector('input[type="file"]'),
+    new File(['image'], 'damage.png', { type: 'image/png' }),
   )
 
-  expect(screen.getByText('2 items need your attention')).toBeInTheDocument()
-  const rows = screen.getAllByRole('listitem')
-  expect(rows.map((row) => within(row).getByText(
-    /Required|Recommended|Processing|Received|Can add later/,
-  ).textContent)).toEqual([
-    '!Required',
-    '+Recommended',
-    '…Processing',
-    '✓Received',
-    '↗Can add later',
-  ])
+  expect(await screen.findByRole('alert')).toHaveTextContent('The upload connection was interrupted')
+  expect(screen.getByText('PNG · Upload failed')).toBeInTheDocument()
+  expect(screen.getByRole('button', {
+    name: 'Replace photos for Photos of the damage',
+  })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument()
+})
 
-  const uploadInput = container.querySelector('input[type="file"]')
-  const file = new File(['ownership'], 'ownership.pdf', { type: 'application/pdf' })
-  await user.upload(uploadInput, file)
-  expect(onUpload).toHaveBeenCalledWith(documents.at(-1), file)
+it('rejects HEIC before upload and offers a replacement with supported formats', async () => {
+  const user = userEvent.setup({ applyAccept: false })
+  const onUpload = vi.fn()
+  const { container } = renderDocuments([recommendedPhoto], { onUpload })
 
-  await user.click(screen.getByRole('button', { name: 'View purchase-receipt.pdf' }))
-  expect(onView).toHaveBeenCalledWith(documents[1])
-  expect(screen.getByText('Add later')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Add later' })).not.toBeInTheDocument()
+  await user.upload(
+    container.querySelector('input[type="file"]'),
+    new File(['image'], 'damage.heic', { type: 'image/heic' }),
+  )
+
+  expect(screen.getByRole('alert')).toHaveTextContent('Choose a JPG, PNG or PDF file')
+  expect(screen.getByText('File · Unsupported file format')).toBeInTheDocument()
+  expect(screen.getByRole('button', {
+    name: 'Replace photos for Photos of the damage',
+  })).toBeInTheDocument()
+  expect(onUpload).not.toHaveBeenCalled()
+})
+
+it('derives server-side failure and invalid states without exposing unsupported actions', () => {
+  const failed = {
+    evidence_id: 'evd_failed',
+    kind: 'repair_quote',
+    status: 'received',
+    file_status: 'failed',
+    original_filename: 'failed-quote.pdf',
+    media_type: 'application/pdf',
+    needed_for: ['current_action'],
+  }
+  const invalid = {
+    evidence_id: 'evd_invalid',
+    kind: 'proof_of_ownership',
+    status: 'invalid',
+    file_status: 'ready',
+    original_filename: 'invalid-receipt.pdf',
+    media_type: 'application/pdf',
+    needed_for: ['current_action'],
+  }
+  renderDocuments([failed, invalid])
+
+  expect(screen.getAllByRole('alert')).toHaveLength(2)
+  expect(screen.getByRole('button', { name: 'Replace file for Repair quote' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Replace file for Proof of ownership' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument()
 })
 
 it('shows honest loading, empty, and unavailable states', () => {
   const { rerender } = render(<ClaimDocuments items={[]} loadStatus="loading" />)
-  expect(screen.getByRole('status')).toHaveTextContent('Checking document guidance')
+  expect(screen.getByRole('status')).toHaveTextContent('Checking what may help')
+  expect(screen.getByText('Checking progress…')).toBeInTheDocument()
 
   rerender(<ClaimDocuments items={[]} loadStatus="ready" />)
-  expect(screen.getByText('0 items need your attention')).toBeInTheDocument()
-  expect(screen.getByText('No claim-specific documents are recorded yet.')).toBeInTheDocument()
+  expect(screen.getByText('0 of 0 provided')).toBeInTheDocument()
+  expect(screen.getByText('Nothing to provide right now.')).toBeInTheDocument()
 
   rerender(<ClaimDocuments items={[]} loadStatus="error" />)
   expect(screen.getByRole('alert')).toHaveTextContent('Your claim is still saved')
@@ -99,41 +192,7 @@ it.each([
   ['invalid material needed now', { status: 'invalid', file_status: 'ready', needed_for: ['current_action'] }, 'required'],
   ['retryable supporting material', { status: 'received', file_status: 'failed', needed_for: [] }, 'recommended'],
   ['usable received material', { status: 'received', file_status: 'ready', needed_for: [] }, 'received'],
+  ['processing material', { status: 'received', file_status: 'processing', needed_for: [] }, 'processing'],
 ])('maps %s from both authoritative Evidence states', (_label, item, expected) => {
   expect(documentStatus(item)).toBe(expected)
-})
-
-it('renders failed and invalid material as attention items with replacement uploads', () => {
-  const failed = {
-    evidence_id: 'evd_failed',
-    kind: 'repair_quote',
-    status: 'received',
-    file_status: 'failed',
-    original_filename: 'failed-quote.pdf',
-    needed_for: ['current_action'],
-  }
-  const invalid = {
-    evidence_id: 'evd_invalid',
-    kind: 'proof_of_ownership',
-    status: 'invalid',
-    file_status: 'ready',
-    original_filename: 'invalid-receipt.pdf',
-    needed_for: ['current_action'],
-  }
-
-  render(
-    <ClaimDocuments
-      items={[failed, invalid]}
-      loadStatus="ready"
-      onUpload={vi.fn()}
-      onView={vi.fn()}
-    />,
-  )
-
-  expect(documentAttentionCount([failed, invalid])).toBe(2)
-  expect(screen.getByText('2 items need your attention')).toBeInTheDocument()
-  expect(screen.getAllByText('Required')).toHaveLength(2)
-  expect(screen.getByRole('button', { name: 'Upload failed-quote.pdf' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Upload invalid-receipt.pdf' })).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: /View (failed-quote|invalid-receipt)/ })).not.toBeInTheDocument()
 })

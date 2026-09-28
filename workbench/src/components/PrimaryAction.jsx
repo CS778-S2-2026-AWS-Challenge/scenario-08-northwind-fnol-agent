@@ -1,6 +1,7 @@
 import { ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { canSubmitProjectedAction } from '../projected-action.js'
+import { translate as t } from '../i18n.js'
 import { ActionDetails } from './ProjectedAction.jsx'
 import { ProjectedOwnershipAction } from './OwnershipActions.jsx'
 import ReopenClaimDialog from './ReopenClaimDialog.jsx'
@@ -29,16 +30,16 @@ export default function PrimaryAction({ action, handoff, request, onAccept, onOw
     <section className="primary-action" aria-labelledby="primary-action-title">
       <div className="primary-action__icon"><ShieldCheck size={22} /></div>
       <div className="primary-action__copy">
-        <p className="eyebrow">Staff next action</p>
-        <h2 id="primary-action-title">{action?.label || 'No staff action is currently authorised'}</h2>
-        <p>{action?.purpose || 'Continue reviewing the projected context. No controlled staff action is available for this Claim.'}</p>
-        {action?.availability === 'blocked' && <p className="record-note record-note--blocked"><strong>Blocked</strong>{action.blocked_reason || 'This action is not available for the current Claim state.'}</p>}
+        <p className="eyebrow">{t('Staff next action')}</p>
+        <h2 id="primary-action-title">{action?.label || t('No staff action is currently authorised')}</h2>
+        <p>{action?.purpose || t('Continue reviewing the projected context. No controlled staff action is available for this Claim.')}</p>
+        {action?.availability === 'blocked' && <p className="record-note record-note--blocked"><strong>{t('Blocked')}</strong>{action.blocked_reason || t('This action is not available for the current Claim state.')}</p>}
         {action && <ActionDetails action={action} />}
       </div>
       {action?.action_code === 'human.accept_handoff' && executable && handoff && (
         confirming
-          ? <div className="primary-action__confirm"><p>{action.confirmation?.message}</p><button className="button button--primary" type="button" disabled={busy} onClick={accept}>{busy ? 'Accepting...' : `Confirm ${action.label}`}</button>{error && <p className="form-error" role="alert">{error}</p>}</div>
-          : <button className="button button--primary" type="button" onClick={() => setConfirming(true)}>Review acceptance</button>
+          ? <div className="primary-action__confirm"><p>{action.confirmation?.message}</p><button className="button button--primary" type="button" disabled={busy} onClick={accept}>{busy ? t('Accepting...') : t('Confirm {action}', { action: action.label })}</button>{error && <p className="form-error" role="alert">{error}</p>}</div>
+          : <button className="button button--primary" type="button" onClick={() => setConfirming(true)}>{t('Review acceptance')}</button>
       )}
       {action?.action_code?.startsWith('ownership.') && executable && (
         <div className="primary-action__form"><ProjectedOwnershipAction action={action} request={request} onAction={onOwnershipAction} compact /></div>
@@ -47,7 +48,7 @@ export default function PrimaryAction({ action, handoff, request, onAccept, onOw
         <ReopenClaimDialog key={action.target_ref} action={action} onReopen={onReopen} />
       )}
       {action && executable && section && action.action_code !== 'human.accept_handoff' && (
-        <button className="button button--primary" type="button" onClick={() => onSection(section)}>Open {sectionLabel(section)}</button>
+        <button className="button button--primary" type="button" onClick={() => onSection(section)}>{t('Open {section}', { section: t(sectionLabel(section)) })}</button>
       )}
     </section>
   )

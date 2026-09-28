@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from hashlib import sha256
 from uuid import UUID
@@ -33,6 +33,10 @@ class _SyntheticProfile:
 
 CLAIMANT_SCOPES = frozenset({'claim:read:self', 'claim:write:self'})
 STAFF_SCOPES = frozenset({'workbench:read', 'workbench:write'})
+STAFF_ROLE_SCOPES: dict[str, frozenset[str]] = {
+    'claims_professional': STAFF_SCOPES,
+    'operations': frozenset(),
+}
 ADMIN_SCOPES = frozenset({'admin:read', 'admin:write'})
 INTEGRATION_SCOPES = frozenset({'tools:invoke'})
 
@@ -109,6 +113,19 @@ def _access_denied(message: str) -> ApiError:
     )
 
 
+def staff_scopes_for_roles(roles: frozenset[str]) -> frozenset[str]:
+    """Resolve coarse staff capabilities from server-owned account roles.
+
+    Args:
+        roles: Roles persisted on the authenticated staff account.
+
+    Returns:
+        The union of capabilities registered for those roles. Unknown roles grant nothing.
+    """
+
+    return frozenset(scope for role in roles for scope in STAFF_ROLE_SCOPES.get(role, ()))
+
+
 def _resolve_principal(
     request: Request,
     authorization: str | None,
@@ -152,10 +169,11 @@ def _resolve_principal(
             staff_account = request.app.state.staff_identity_repository.get_account(
                 staff_session.staff_id
             )
+            staff_roles = frozenset(staff_account.roles if staff_account is not None else ())
             principal = Principal(
                 subject=staff_session.staff_id,
                 actor_type='staff',
-                scopes=STAFF_SCOPES,
+                scopes=staff_scopes_for_roles(staff_roles),
                 auth_source=(
                     'developer:staff_session'
                     if settings.identity_mode is IdentityMode.DEVELOPER
@@ -163,7 +181,7 @@ def _resolve_principal(
                 ),
                 synthetic=settings.identity_mode is IdentityMode.DEVELOPER,
                 expires_at=staff_session.expires_at,
-                roles=frozenset(staff_account.roles if staff_account is not None else ()),
+                roles=staff_roles,
             )
 
     if settings.identity_mode is IdentityMode.DEVELOPER:
@@ -198,7 +216,7 @@ def _verify_principal(
         denied_message = f'Access denied for the {credential_label} boundary.'
         raise _access_denied(denied_message)
 
-    return principal
+    return replace(principal, scopes=effective_scopes)
 
 
 def _effective_scopes(request: Request, principal: Principal) -> frozenset[str]:
@@ -308,7 +326,17 @@ def require_durable_claimant(principal: Principal) -> None:
         )
 
 
-def require_staff(
+def require_staff_identity(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> Principal:
+    principal = _resolve_principal(request, authorization, credential_label='staff')
+    if principal.actor_type != 'staff':
+        raise _access_denied('Access denied for the staff boundary.')
+    return principal
+
+
+def require_workbench_read(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> Principal:
@@ -316,9 +344,51 @@ def require_staff(
         request,
         authorization,
         required_actor='staff',
-        required_scopes=STAFF_SCOPES,
+        required_scopes=frozenset({'workbench:read'}),
         credential_label='staff',
     )
+
+
+def require_workbench_write(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> Principal:
+    return _verify_principal(
+        request,
+        authorization,
+        required_actor='staff',
+        required_scopes=frozenset({'workbench:write'}),
+        credential_label='staff',
+    )
+
+
+def require_staff_capability(principal: Principal, scope: str) -> None:
+    """Enforce one server-derived staff capability at an application-service boundary.
+
+    Args:
+        principal: Authenticated principal supplied by the transport or another trusted caller.
+        scope: Exact capability required by the application operation.
+
+    Returns:
+        None when the principal has the required staff capability.
+
+    Raises:
+        ApiError: If the principal is not staff or lacks the required capability.
+    """
+
+    if principal.actor_type != 'staff' or scope not in principal.scopes:
+        raise _access_denied('Staff Workbench access is required.')
+
+
+def require_staff(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> Principal:
+    """Retain the legacy full-Workbench dependency for unchanged adjacent routes."""
+
+    principal = require_workbench_read(request, authorization)
+    require_staff_capability(principal, 'workbench:write')
+    return principal
 
 
 def require_administrator(

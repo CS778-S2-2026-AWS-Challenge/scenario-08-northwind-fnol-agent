@@ -19,6 +19,24 @@ meets the quantitative gates in #733. [The journey evidence pack](sprint4-journe
 scenario matrix and totals; [the gap record](sprint4-journey-acceptance-gaps.md) maps the same runs
 to the ten categories at a category level.
 
+## Current-main reconciliation
+
+Reconciled on 2026-09-28 against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c`. These anchors remain the historical controlled
+baseline and were not rerun by this documentation change.
+
+- PR #977 merged the claimant Runtime v8 model-backed path, and PR #1038 merged final
+  agreement/submission projection.
+- #771 records post-#977 Claim creation for motor in the Claimant UI and home through the claimant
+  API at `main@bf5599fd`. That is later evidence, not a rewrite of the anchors below.
+- Current code implements typed contents-item proposal, confirmation, persistence, Evidence
+  association, and role projections. The C1/C2 `unavailable` classification below applies to the
+  controlled anchor runs; issue #962 still needs to record the model-backed contents journey.
+- M2, M3, and H1 having no anchor remains a statement about the frozen baseline. The full current
+  5/3/2 evaluation set still needs exact-head execution and Scenario 8 metric evidence.
+- Simulated third-party services are an accepted project boundary. Real AWS integration remains
+  Sprint 5 work and must be evidenced separately.
+
 **Evidence level.** Every run is `runtime: fixture`, `provider_mode: simulated`, and
 `agent_runtime_profile: controlled`: API projections on the fixture runtime with simulated
 providers. Not browser, AWS, live-provider, model-backed, or production evidence.
@@ -209,6 +227,7 @@ all 20 steps succeeded.
 - **Three categories have no run.** M2, M3, and H1 stay open; #733 owns the frozen scenarios.
 - **No category meets #733's gates.** Ten of ten claim creations, the follow-up rate, severity, and
   fraud evaluation all need the model-backed runtime (#962) and frozen evaluation data.
-- **Contents never reaches creation.** C1 and C2 stop at `contents.items` until #962.
+- **Contents did not reach creation in this baseline.** C1 and C2 stop at `contents.items`; #962
+  must supply the model-backed current-head run before that historical classification changes.
 - **Material content is not read.** Conditions are declared by the pack and preserved; no anchor
   proves the Agent used a document's content.

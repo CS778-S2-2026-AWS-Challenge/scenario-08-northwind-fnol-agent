@@ -1,7 +1,7 @@
 from typing import Any
 
 from backend.adapters.claims_service import AssessorServiceAdapter
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError
 from backend.domain.audit import AuditEventEnvelope
 from backend.domain.branch_registry import BranchRuleEvaluator
@@ -144,8 +144,7 @@ def _completion_defaults(
 def _staff_claim(
     repository: PersistenceRepository, principal: Principal, claim_id: str
 ) -> WorkingClaim:
-    if principal.actor_type != 'staff':
-        raise ApiError(status_code=403, code='ACCESS_DENIED', message='Staff access is required.')
+    require_staff_capability(principal, 'workbench:write')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _not_found('The claim was not found.')
@@ -245,6 +244,7 @@ def accept_handoff(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> HandoffMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept'
@@ -375,6 +375,7 @@ def accept_external_review(
             validation fails.
     """
 
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review'
@@ -502,6 +503,7 @@ def reconcile_external_response(
             or idempotency validation fails.
     """
 
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile'
@@ -561,6 +563,7 @@ def send_staff_message(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> StaffMessageResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/messages'
@@ -688,6 +691,7 @@ def resolve_handoff(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> HandoffMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve'
@@ -827,6 +831,7 @@ def create_staff_action(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> StaffActionMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/staff-actions'
@@ -921,6 +926,7 @@ def update_staff_action(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> StaffActionMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action_id}'
@@ -1030,6 +1036,7 @@ def decide_signal(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> SignalDecisionResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/signals/{signal_id}/decisions'

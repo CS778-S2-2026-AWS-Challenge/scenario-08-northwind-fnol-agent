@@ -2,6 +2,7 @@ import { UsersRound } from 'lucide-react'
 import { useState } from 'react'
 import { isProjectedInputRequired } from '../projected-action.js'
 import { ProjectedActionInput } from './ProjectedAction.jsx'
+import { translate as t } from '../i18n.js'
 
 export default function OwnershipActions({ actions = [], requests = [], onAction, excludeAction }) {
   const ownershipActions = actions.filter((action) => (
@@ -14,8 +15,8 @@ export default function OwnershipActions({ actions = [], requests = [], onAction
     <section className="ownership-actions" aria-labelledby="ownership-actions-title">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Access and ownership</p>
-          <h2 id="ownership-actions-title">Work with this Claim</h2>
+          <p className="eyebrow">{t('Access and ownership')}</p>
+          <h2 id="ownership-actions-title">{t('Work with this Claim')}</h2>
         </div>
       </div>
       <div className="ownership-action-list">
@@ -69,7 +70,7 @@ export function ProjectedOwnershipAction({ action, request, onAction, compact = 
         <div>
           <strong>{action.label}</strong>
           <p>{action.purpose}</p>
-          <small>Unavailable: {action.blocked_reason || 'This action is not available for the current Claim state.'}</small>
+          <small>{t('Unavailable:')} {action.blocked_reason || t('This action is not available for the current Claim state.')}</small>
         </div>
       </article>
     )
@@ -86,13 +87,13 @@ export function ProjectedOwnershipAction({ action, request, onAction, compact = 
       >
         <UsersRound size={18} />
         <span>
-          <strong>{compact ? 'Provide action details' : action.label}</strong>
+          <strong>{compact ? t('Provide action details') : action.label}</strong>
           {!compact && <small>{action.purpose}</small>}
         </span>
       </button>
       {expanded && (
         <form id={formId} className="ownership-action__form" onSubmit={submit}>
-          {request?.reason && <p>Request reason: {request.reason}</p>}
+          {request?.reason && <p>{t('Request reason:')} {request.reason}</p>}
           {action.inputs.map((input) => (
             <ProjectedActionInput
               key={input.field_code}
@@ -108,8 +109,8 @@ export function ProjectedOwnershipAction({ action, request, onAction, compact = 
           {action.confirmation?.message && <p>{action.confirmation.message}</p>}
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="ownership-action__controls">
-            <button type="button" className="button button--quiet" onClick={() => setExpanded(false)}>Cancel</button>
-            <button type="submit" className="button button--primary" disabled={busy || missingRequiredInput}>{busy ? 'Working...' : action.label}</button>
+            <button type="button" className="button button--quiet" onClick={() => setExpanded(false)}>{t('Cancel')}</button>
+            <button type="submit" className="button button--primary" disabled={busy || missingRequiredInput}>{busy ? t('Working...') : action.label}</button>
           </div>
         </form>
       )}

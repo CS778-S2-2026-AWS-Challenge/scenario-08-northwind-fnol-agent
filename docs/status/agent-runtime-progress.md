@@ -7,6 +7,24 @@ specified, implemented, configured, degraded, or unavailable. It does not redefi
 requirements or API schemas. Update a row only with repeatable evidence from the exact
 commit under review.
 
+## Current-main reconciliation
+
+Reconciled on 2026-09-28 against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c`. This reconciliation inspects the
+merged implementation and existing exact-head evidence; it does not claim a new journey run.
+
+- PR #977 merged the claimant Runtime v8 proposal, validation, reduction, persistence,
+  recovery, model-request, and projection path. The repository no longer has only a controlled
+  claimant Runtime, although controlled runs remain valid deterministic evidence.
+- PR #1038 merged the final agreement and submission projection after Runtime v8. A complete
+  model-backed 5 motor / 3 home / 2 contents run has not been recorded on this head; issue #962
+  remains open for the first model-backed journey batch.
+- Third-party participant behavior is intentionally validated through provider-neutral simulation
+  for this student project. A missing commercial provider relationship is not a Runtime gap;
+  incomplete consent, authority, lifecycle, failure, or recovery behavior would be.
+- Real AWS migration and integration remain Sprint 5 delivery work. No AWS capability is promoted
+  by this source reconciliation.
+
 ## Evidence Rules
 
 - `specified`: target contract exists, but no implementation proof is claimed.
@@ -27,6 +45,7 @@ commit under review.
 | Same-conversation model selection | implemented | message `model_profile_id`, published capabilities, per-turn Runtime provenance, `tests/test_namespaced_runtime.py` | The catalog remains publication/health governed; a profile without a working provider must be exposed as unavailable, never faked. |
 | v7 one-call ordinary path | implemented | `backend/services/model_request_planner.py`, `backend/services/model_agent.py`, and `tests/test_agent_context_runtime_v7.py` | Ordinary turns are tool-free and bounded; live P50/P95 remains provider/deployment evidence. |
 | Fragmented Prompt Pack and deterministic routing | implemented | `backend/prompts/v7/`, `backend/services/turn_router.py`, `backend/services/prompt_composer.py`, and focused v7 tests | Fixture and contract evidence do not establish production answer quality. |
+| Claimant Runtime v8 | implemented (claimant path) | PR #977, `backend/domain/agent_v8.py`, `backend/services/turn_proposal_validation.py`, `backend/services/turn_reducer.py`, and v8 family tests | The merged implementation supports model-backed turns; a current-head model-backed 5/3/2 journey batch and its product metrics remain unrecorded. |
 | Stable Request Profiles, narrow schemas, and provider capabilities | implemented | v7 registries, OpenAI strict-schema, Bedrock forced-output, and Gemini native structured-output/function-continuation tests | Bedrock lookup continuation remains unavailable and fails compatibility before transport; Gemini PDF input remains disabled. |
 | Budgeted Context Planner and cache layout | implemented | context/cache planners, persisted v7 trace fields, and focused budget/cache tests | Provider token usage and cache metrics remain unknown when the endpoint does not report them. |
 | Verified rolling summary and lazy history | implemented | Fixture/Mongo immutable summary persistence, background compaction, older-message resolver, and focused parity tests | Compaction is post-response and v7-release-gated; wrong-scope, unverified, and Claim-conflicting summaries are omitted. |

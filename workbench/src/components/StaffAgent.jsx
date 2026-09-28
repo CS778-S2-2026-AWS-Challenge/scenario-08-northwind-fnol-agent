@@ -6,13 +6,18 @@ import {
   ChevronDown,
   Clipboard,
   GripHorizontal,
+  LoaderCircle,
   MessageSquarePlus,
   Send,
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { workbenchApi } from '../api.js'
+import { translate as t } from '../i18n.js'
 import { formatDateTime, words } from '../format.js'
+import AttachmentDraftControl from './AttachmentDraftControl.jsx'
+import CompactComposerTextarea from './CompactComposerTextarea.jsx'
+import VoiceInputControl from './VoiceInputControl.jsx'
 
 const MAX_CLAIM_SCOPE = 5
 const NEW_SESSION_TITLE = 'New Staff Agent session'
@@ -20,6 +25,7 @@ const DRAG_THRESHOLD = 4
 
 export default function StaffAgent({
   open,
+  embedded = false,
   onOpenChange,
   requestedSessionId,
   token,
@@ -43,9 +49,13 @@ export default function StaffAgent({
   const [position, setPosition] = useState(null)
   const widgetRef = useRef(null)
   const messageRef = useRef(null)
+  const attachmentDraftRef = useRef(null)
+  const voiceInputRef = useRef(null)
   const dragRef = useRef(null)
   const suppressClickRef = useRef(false)
   const activeSessionIdRef = useRef(null)
+  const currentMessageDraftRef = useRef('')
+  const draftsBySessionRef = useRef(new Map())
   const wasOpenRef = useRef(false)
   const onSessionChangeRef = useRef(onSessionChange)
 
@@ -63,10 +73,17 @@ export default function StaffAgent({
   }, [token])
 
   const selectSession = useCallback(async (sessionId) => {
+    draftsBySessionRef.current.set(staffAgentDraftKey(activeSessionIdRef.current), currentMessageDraftRef.current)
+    attachmentDraftRef.current?.clear()
+    voiceInputRef.current?.cancel({ announce: false, restoreFocus: false })
     setSessionNotice('')
     setError(null)
+    setScopeOpen(false)
     activeSessionIdRef.current = sessionId
     setActiveSessionId(sessionId)
+    const restoredDraft = draftsBySessionRef.current.get(staffAgentDraftKey(sessionId)) || ''
+    currentMessageDraftRef.current = restoredDraft
+    setMessage(restoredDraft)
     onSessionChangeRef.current(sessionId)
     setSelectedClaimIds([])
     await loadMessages(sessionId)
@@ -131,11 +148,18 @@ export default function StaffAgent({
       return
     }
 
+    draftsBySessionRef.current.set(staffAgentDraftKey(activeSessionIdRef.current), currentMessageDraftRef.current)
+    attachmentDraftRef.current?.clear()
+    voiceInputRef.current?.cancel({ announce: false, restoreFocus: false })
     activeSessionIdRef.current = null
     setActiveSessionId(null)
     setMessages([])
     setSelectedClaimIds([])
-    setSessionNotice(message.trim()
+    setScopeOpen(false)
+    const restoredDraft = draftsBySessionRef.current.get(staffAgentDraftKey(null)) || ''
+    currentMessageDraftRef.current = restoredDraft
+    setMessage(restoredDraft)
+    setSessionNotice(restoredDraft.trim()
       ? 'Your draft is still here. This conversation will be saved when you send it.'
       : 'This conversation will be saved when you send the first message.')
     messageRef.current?.focus()
@@ -143,8 +167,10 @@ export default function StaffAgent({
 
   async function submit(event) {
     event.preventDefault()
-    const content = message.trim()
-    if (!content || loading || sending) return
+    const submittedDraft = message
+    const content = submittedDraft.trim()
+    if (!content || loading || sending || attachmentDraftRef.current?.hasPendingAttachments()) return
+    voiceInputRef.current?.cancel({ announce: false, restoreFocus: false })
     setSending(true)
     setSessionNotice('')
     setError(null)
@@ -156,6 +182,9 @@ export default function StaffAgent({
         const session = await workbenchApi.createStaffAgentSession(token, NEW_SESSION_TITLE, newSessionModel)
         setSessions((current) => [session, ...current])
         sessionId = session.session_id
+        const unsavedDraft = currentMessageDraftRef.current
+        draftsBySessionRef.current.delete(staffAgentDraftKey(null))
+        draftsBySessionRef.current.set(staffAgentDraftKey(sessionId), unsavedDraft)
         activeSessionIdRef.current = sessionId
         setActiveSessionId(sessionId)
         onSessionChangeRef.current(sessionId)
@@ -167,7 +196,11 @@ export default function StaffAgent({
         content,
         selectedClaimIds,
       )
-      setMessage('')
+      if (currentMessageDraftRef.current === submittedDraft) {
+        currentMessageDraftRef.current = ''
+        draftsBySessionRef.current.set(staffAgentDraftKey(sessionId), '')
+        setMessage('')
+      }
       setMessages((current) => [
         ...current,
         response.staff_message,
@@ -226,6 +259,13 @@ export default function StaffAgent({
       if (current.length >= MAX_CLAIM_SCOPE) return current
       return [...current, claimId]
     })
+  }
+
+  function updateComposerDraft(nextMessage) {
+    currentMessageDraftRef.current = nextMessage
+    draftsBySessionRef.current.set(staffAgentDraftKey(activeSessionIdRef.current), nextMessage)
+    setMessage(nextMessage)
+    setSessionNotice('')
   }
 
   function beginDrag(event) {
@@ -289,57 +329,57 @@ export default function StaffAgent({
   }
 
   return (
-    <div ref={widgetRef} className={`staff-agent${open ? ' is-open' : ''}`} style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
-      {!open && (
-        <button className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label="Open Staff Agent" title="Draft with AI">
+    <div ref={widgetRef} className={`staff-agent${embedded ? ' staff-agent--embedded' : ''}${open ? ' is-open' : ''}`} style={!embedded && position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
+      {!open && !embedded && (
+        <button className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label={t('Open Staff Agent')} title={t('Draft with AI')}>
           <Bot size={23} />
         </button>
       )}
       {open && (
         <section className="staff-agent__panel" aria-labelledby="staff-agent-title">
-          <header className="staff-agent__header" onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag}>
+          <header className="staff-agent__header" onPointerDown={embedded ? undefined : beginDrag} onPointerMove={embedded ? undefined : drag} onPointerUp={embedded ? undefined : endDrag} onPointerCancel={embedded ? undefined : cancelDrag}>
             <span className="staff-agent__grip" aria-hidden="true"><GripHorizontal size={18} /></span>
             <div className="staff-agent__identity">
-              <h2 id="staff-agent-title">Staff Agent</h2>
-              <small>Private Workbench assistance</small>
+              <h2 id="staff-agent-title">{t('Staff Agent')}</h2>
+              <small>{t('Private Workbench assistance')}</small>
             </div>
-            <button className="icon-button" type="button" onClick={() => onOpenChange(false)} aria-label="Close Staff Agent"><X size={16} /></button>
+            <button className="icon-button" type="button" onClick={() => onOpenChange(false)} aria-label={t('Close Staff Agent')}><X size={16} /></button>
           </header>
 
           <div className="agent-context">
             <div className="agent-session-bar">
               <label>
-                <span>Session</span>
+                <span>{t('Session')}</span>
                 <select value={activeSessionId || ''} onChange={(event) => selectSession(event.target.value)} disabled={loading || sending || !sessions.length}>
-                  {!activeSessionId && <option value="">New conversation (not saved)</option>}
+                  {!activeSessionId && <option value="">{t('New conversation (not saved)')}</option>}
                   {sessions.map((session) => <option value={session.session_id} key={session.session_id}>{sessionLabel(session)}</option>)}
                 </select>
               </label>
               <label>
-                <span>New session model</span>
+                <span>{t('New session model')}</span>
                 <select value={newSessionModel} onChange={(event) => setNewSessionModel(event.target.value)} disabled={loading || sending || !models.length}>
-                  {!models.length && <option value="">No published model</option>}
+                  {!models.length && <option value="">{t('No published model')}</option>}
                   {models.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}
                 </select>
               </label>
-              <button className="agent-session-bar__new" type="button" onClick={beginNewSession} disabled={loading || sending} aria-label="Start a new Staff Agent session">
+              <button className="agent-session-bar__new" type="button" onClick={beginNewSession} disabled={loading || sending} aria-label={t('Start a new Staff Agent session')}>
                 <MessageSquarePlus size={16} />
-                <span>New</span>
+                <span>{t('New')}</span>
               </button>
             </div>
 
             <div className="agent-scope">
               <button type="button" className="agent-scope__toggle" aria-expanded={scopeOpen} aria-controls="staff-agent-claim-scope" onClick={() => setScopeOpen((value) => !value)}>
-                <span className="agent-scope__summary"><strong>Claim Scope</strong><small>{scopeLabel(selectedClaimIds, claims)}</small></span>
+                <span className="agent-scope__summary"><strong>{t('Claim Scope')}</strong><small>{scopeLabel(selectedClaimIds, claims)}</small></span>
                 <ChevronDown size={15} />
               </button>
               {scopeOpen && (
                 <fieldset id="staff-agent-claim-scope" className="agent-scope__options">
-                  <legend className="sr-only">Choose Claims for Staff Agent context</legend>
+                  <legend className="sr-only">{t('Choose Claims for Staff Agent context')}</legend>
                   <div className="agent-scope__options-header">
                     <span>
-                      <strong>Attach Claim context</strong>
-                      <small>Choose one Claim for focused help, or several to compare.</small>
+                      <strong>{t('Attach Claim context')}</strong>
+                      <small>{t('Choose one Claim for focused help, or several to compare.')}</small>
                     </span>
                     <span className="agent-scope__count">{selectedClaimIds.length} of {MAX_CLAIM_SCOPE}</span>
                   </div>
@@ -355,11 +395,11 @@ export default function StaffAgent({
                         </label>
                       )
                     })}
-                    {!claims.length && <p>No Claims are available to attach.</p>}
+                    {!claims.length && <p>{t('No Claims are available to attach.')}</p>}
                   </div>
                   <div className="agent-scope__footer">
                     <small className="agent-scope__status" aria-live="polite">{scopeStatus(selectedClaimIds.length)}</small>
-                    <button className="agent-scope__done" type="button" onClick={() => setScopeOpen(false)}>Done</button>
+                    <button className="agent-scope__done" type="button" onClick={() => setScopeOpen(false)}>{t('Done')}</button>
                   </div>
                 </fieldset>
               )}
@@ -368,12 +408,12 @@ export default function StaffAgent({
 
           <div className="agent-conversation">
             <div className="agent-messages" aria-live="polite">
-              {loading && <p className="agent-state">Loading Staff Agent sessions...</p>}
+              {loading && <p className="agent-state">{t('Loading Staff Agent sessions...')}</p>}
               {!loading && !messages.length && (
                 <div className="agent-empty">
                   <span className="agent-empty__icon" aria-hidden="true"><Bot size={20} /></span>
-                  <p>Ask a general question or explicitly attach up to five Claims.</p>
-                  <small>The Agent can advise and draft. Registered business actions execute only after explicit staff confirmation.</small>
+                  <p>{t('Ask a general question or explicitly attach up to five Claims.')}</p>
+                  <small>{t('The Agent can advise and draft. Registered business actions execute only after explicit staff confirmation.')}</small>
                 </div>
               )}
               {messages.map((item) => (
@@ -388,7 +428,7 @@ export default function StaffAgent({
             {sessionNotice && (
               <div className="agent-notice" role="status">
                 <CheckCircle2 size={16} aria-hidden="true" />
-                <span><strong>New conversation ready</strong><small>{sessionNotice}</small></span>
+                <span><strong>{t('New conversation ready')}</strong><small>{sessionNotice}</small></span>
               </div>
             )}
             {error && (
@@ -399,17 +439,69 @@ export default function StaffAgent({
                   <small>{error.message}</small>
                   {error.requestId && <small className="agent-error__reference">Reference: {error.requestId}</small>}
                 </span>
-                <button className="agent-feedback__dismiss" type="button" onClick={() => setError(null)} aria-label="Dismiss Staff Agent error"><X size={14} /></button>
+                <button className="agent-feedback__dismiss" type="button" onClick={() => setError(null)} aria-label={t('Dismiss Staff Agent error')}><X size={14} /></button>
               </div>
             )}
-            <form className="agent-composer" onSubmit={submit}>
-              <label className="sr-only" htmlFor="staff-agent-message">Message Staff Agent</label>
-              <textarea id="staff-agent-message" ref={messageRef} rows="2" value={message} onChange={(event) => { setMessage(event.target.value); setSessionNotice('') }} placeholder="Ask about selected Claims or policy" />
-              <button className="agent-composer__send" type="submit" disabled={!message.trim() || loading || sending} aria-busy={sending} aria-label="Send to Staff Agent">
-                <Send size={15} />
-                <span>{sending ? 'Sending...' : 'Send'}</span>
-              </button>
-            </form>
+            <AttachmentDraftControl
+              ref={attachmentDraftRef}
+              available={!loading && !sending}
+              idPrefix="staff-agent-attachment"
+              triggerClassName="agent-composer__attachment compact-composer__tool"
+            >
+              {({ attachmentsPending, describedBy, preview, trigger }) => (
+                <form className="agent-composer" onSubmit={submit}>
+                  {selectedClaimIds.length > 0 && (
+                    <div className="agent-composer__context">
+                      <button
+                        type="button"
+                        className="agent-composer__context-chip"
+                        aria-expanded={scopeOpen}
+                        aria-controls="staff-agent-claim-scope"
+                        onClick={() => setScopeOpen((value) => !value)}
+                        title="Review selected Claim context"
+                      >
+                        <span>{compactScopeLabel(selectedClaimIds, claims)}</span>
+                        <ChevronDown size={15} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
+                  {preview}
+                  <div className="agent-composer__input compact-composer__input">
+                    {trigger}
+                    <VoiceInputControl
+                      ref={voiceInputRef}
+                      available={!loading && !sending}
+                      draft={message}
+                      onDraft={updateComposerDraft}
+                      statusId="staff-agent-voice-status"
+                      textareaRef={messageRef}
+                    />
+                    <CompactComposerTextarea
+                      id="staff-agent-message"
+                      ref={messageRef}
+                      value={message}
+                      describedBy={describedBy}
+                      onValueChange={updateComposerDraft}
+                      placeholder={t('Ask about selected Claims or policy…')}
+                      label={t('Message Staff Agent')}
+                      submitDisabled={!message.trim() || loading || sending || attachmentsPending}
+                    />
+                    <button
+                      className="agent-composer__send compact-composer__send"
+                      type="submit"
+                      disabled={!message.trim() || loading || sending || attachmentsPending}
+                      aria-busy={sending}
+                      aria-label={t('Send to Staff Agent')}
+                      title={attachmentsPending ? 'Remove attachments to send text; file delivery is not available yet' : sending ? 'Sending to Staff Agent' : 'Send to Staff Agent'}
+                    >
+                      {sending
+                        ? <LoaderCircle className="compact-composer__spinner" size={18} aria-hidden="true" />
+                        : <Send size={18} aria-hidden="true" />}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </AttachmentDraftControl>
           </div>
         </section>
       )}
@@ -439,7 +531,7 @@ function AgentMessage({ message, onExecuteDraft }) {
           key={draft.draft_id || `${message.message_id}-draft-${index}`}
         />
       ))}
-      {!!message.source_refs?.length && <details><summary>Sources used</summary><ul>{message.source_refs.map((source) => <li key={source}>{source}</li>)}</ul></details>}
+      {!!message.source_refs?.length && <details><summary>{t('Sources used')}</summary><ul>{message.source_refs.map((source) => <li key={source}>{source}</li>)}</ul></details>}
     </article>
   )
 }
@@ -490,7 +582,7 @@ function AgentDraft({ draft, sourceMessage, onExecute }) {
       {executable && (
         <div className="agent-draft__action">
           <div>
-            <strong>Registered action</strong>
+            <strong>{t('Registered action')}</strong>
             <small>{draft.action_code} · target {draft.target_ref}</small>
           </div>
           {!reviewing && !execution && (
@@ -502,9 +594,9 @@ function AgentDraft({ draft, sourceMessage, onExecute }) {
       )}
       {executable && reviewing && !execution && (
         <div className="agent-draft__confirm">
-          <p>The Agent proposed this action. The Workbench will reload the Claim, use its current revision, and let the registered backend action decide whether execution is authorised.</p>
+          <p>{t('The Agent proposed this action. The Workbench will reload the Claim, use its current revision, and let the registered backend action decide whether execution is authorised.')}</p>
           <div className="form-actions">
-            <button className="button button--ghost" type="button" disabled={executing} onClick={() => setReviewing(false)}>Cancel</button>
+            <button className="button button--ghost" type="button" disabled={executing} onClick={() => setReviewing(false)}>{t('Cancel')}</button>
             <button className="button button--primary" type="button" disabled={executing} onClick={execute}>
               {executing ? 'Executing...' : 'Confirm and execute'}
             </button>
@@ -529,7 +621,7 @@ function AgentDraft({ draft, sourceMessage, onExecute }) {
           <span><strong>{executionError.title}</strong><small>{executionError.message}</small></span>
         </div>
       )}
-      {executable && <small>The saved registered payload is executed unchanged. To change the business action, ask Staff Agent to prepare a new draft.</small>}
+      {executable && <small>{t('The saved registered payload is executed unchanged. To change the business action, ask Staff Agent to prepare a new draft.')}</small>}
     </section>
   )
 }
@@ -639,6 +731,17 @@ function scopeLabel(selectedClaimIds, claims) {
 function scopeStatus(selectedCount) {
   if (!selectedCount) return 'No Claims attached. This stays a general question.'
   return `${selectedCount} Claim${selectedCount > 1 ? 's' : ''} attached. Changes apply immediately.`
+}
+
+function compactScopeLabel(selectedClaimIds, claims) {
+  if (selectedClaimIds.length > 1) return `${selectedClaimIds.length} Claims selected`
+  const claimId = selectedClaimIds[0]
+  const reference = claims.find((claim) => claim.claim_id === claimId)?.display_reference || claimId
+  return `Claim ${reference}`
+}
+
+function staffAgentDraftKey(sessionId) {
+  return sessionId || 'new-session'
 }
 
 function sessionLabel(session) {

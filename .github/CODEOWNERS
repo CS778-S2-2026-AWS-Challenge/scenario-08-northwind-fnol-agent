@@ -23,7 +23,6 @@
 /frontend/shared/                        @LLL263 @jxu316-arch @bdfa123
 /tests/                                  @LLL263 @jxu316-arch @bdfa123
 /prototype/                              @LLL263 @jxu316-arch @bdfa123
-/employee/                               @LLL263 @jxu316-arch @bdfa123
 
 # Cross-cutting delivery and integration surfaces.
 /automation/                             @liyang6620 @Ysoseri1224

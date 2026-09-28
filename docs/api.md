@@ -82,9 +82,17 @@ Normal-mode local runtimes use the separate SQLite staff identity adapter config
 `NORTHWIND_STAFF_IDENTITY_DB_PATH`. An initial account may be provisioned explicitly with
 `NORTHWIND_STAFF_BOOTSTRAP_EMAIL`, `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD`, and
 `NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME`; the plaintext password is never persisted. This is a
-real persistent local login path, but it is not an enterprise IdP, SSO, MFA, recovery, or complete
-staff-entitlement implementation. Production deployment still requires an approved identity
-provider adapter.
+real persistent local login path, but it is not an enterprise IdP, SSO, MFA, or recovery
+implementation. Production deployment still requires an approved identity provider adapter.
+
+The server derives coarse Workbench capabilities from the stored staff roles. A
+`claims_professional` receives `workbench:read` and `workbench:write`. An `operations`-only
+account receives neither capability and cannot read or mutate Workbench Claims. It can still read
+and revoke its own authenticated staff session and read its own staff profile, but it does not
+receive a claimable Workbench presence lease. A published access policy may further restrict
+role-derived capabilities but cannot grant a capability absent from the stored role. Workbench
+read and mutation routes enforce their respective capability before resource lookup; ownership,
+assignment, action-registry, revision, and idempotency checks remain additional requirements.
 
 Current scopes:
 
@@ -228,6 +236,8 @@ Claim State, WorkItems, handoffs, or claimant messages.
 | `POST` | `/internal/v1/admin/evaluations` | Record immutable model/knowledge/rule evaluation evidence; requires `Idempotency-Key` |
 | `GET` | `/internal/v1/admin/evaluations` | List evaluation evidence by purpose or state |
 | `GET` | `/internal/v1/admin/evaluations/{evaluation_id}` | Read one immutable evaluation record |
+| `GET` | `/internal/v1/admin/feedback` | List staff-submitted Workbench feedback, optionally filtered by submitting staff ID |
+| `GET` | `/internal/v1/admin/feedback/{feedback_id}` | Read one staff feedback record |
 | `POST` | `/internal/v1/admin/knowledge` | Create a governed knowledge source version; requires `Idempotency-Key` |
 | `GET` | `/internal/v1/admin/knowledge` | List knowledge source versions and lifecycle states |
 | `GET` | `/internal/v1/admin/knowledge/{knowledge_id}` | Read safe metadata and ingestion/publication status |
@@ -307,6 +317,15 @@ configuration, dataset, fixture, and source versions used for one evaluation run
 bounded scenario outcomes and numeric metrics, but never store prompts, claimant messages, provider
 payloads, credentials, or unrestricted personal data. The evaluation API is append-only: a new
 run creates a new record, and an idempotency replay returns the original record.
+
+Staff feedback records use opaque `fdb_` identifiers and contain only the submitted message,
+authenticated staff ID, staff display-name snapshot, bounded source, and server timestamp. The
+administrator list supports `staff_id`, `limit` (1–100), and opaque `cursor` parameters. These
+read routes use the same administrator boundary as the rest of the Control Plane; hiding an entry
+in the frontend is never treated as authorization. Feedback records do not contain or link Claim
+State, WorkItems, handoffs, or staff credentials. The Workbench instructs staff not to enter
+claimant names, Claim numbers, contact details, or other personal information in the free-text
+message; the backend does not claim automated personal-data detection.
 
 Knowledge administration uses opaque `knw_` identifiers for immutable source versions. The
 metadata contract requires source identity, insurer/product applicability, jurisdiction,
@@ -629,13 +648,20 @@ customer data.
 | `GET` | `/staff/auth/session` | Read the current authenticated staff session |
 | `DELETE` | `/staff/auth/session` | Revoke the current staff session |
 | `GET` | `/staff/me` | Read the authenticated staff member's minimal Workbench profile |
+| `POST` | `/staff/feedback` | Submit bounded Workbench feedback; requires `Idempotency-Key` |
 
 Only `POST /api/v1/staff/auth/sessions` is public. It accepts `email` and `password`, and returns
 `staff_id`, `access_token`, `token_type`, `expires_at`, and `development_identity`. It never accepts
 a role, scope, Claim assignment, or staff identifier from the client. The other routes require the
 issued staff bearer token and reject claimant credentials. `GET /staff/me` returns the staff ID,
 display name, email, roles, and development-identity marker; the server derives Workbench scopes
+from the stored roles rather than trusting the returned profile in later requests. Staff identity
+authentication alone does not grant Workbench Claim access.
 from the authenticated staff boundary rather than trusting the returned profile in later requests.
+`POST /staff/feedback` accepts a single whitespace-normalized `message` of 1–2,000 characters.
+The server derives the submitter from the authenticated staff session, never from request data.
+An idempotent replay within 24 hours returns the original receipt containing only `feedback_id`
+and `created_at`; the actor-scoped idempotency coordinate expires after that window.
 
 ## Shared Types
 
@@ -2610,6 +2636,12 @@ Returns staff and system updates visible to the claimant. Each update includes `
 
 ## Workbench API
 
+All Workbench projection routes require the server-derived `workbench:read` capability. Mutation,
+presence-update, Staff Agent write, and demo-control routes require `workbench:write`. A read-only
+effective principal receives no executable `allowed_actions`. Capability rejection uses the stable
+`403 ACCESS_DENIED` envelope before the server checks whether a referenced Claim, handoff, work
+item, signal, or external task exists.
+
 ### Endpoint Catalogue
 
 | Method | Path | Purpose |
@@ -2654,6 +2686,12 @@ Staff Agent sessions are private to the authenticated staff identity and remain 
 Workbench pages and browser refreshes. They are not Claim conversation sessions and are never
 exposed through claimant routes. `GET /api/v1/workbench/conversations` includes them with
 `kind: "staff_agent"` so the staff member can resume them from Claim conversations.
+
+Staff Agent session creation, model capabilities, session lists, and message history require the
+server-derived `workbench:read` capability. Message submission and confirmed draft execution require
+`workbench:write`. The same capability checks run at the application-service boundary before session
+or Claim lookup, so an authenticated operations-only identity receives `403 ACCESS_DENIED` without
+revealing whether a supplied session or Claim identifier exists.
 
 `POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
 `model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that

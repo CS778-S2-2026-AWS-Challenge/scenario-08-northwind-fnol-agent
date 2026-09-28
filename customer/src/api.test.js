@@ -4,10 +4,12 @@ import {
   applyEvidenceHistoryAction,
   createAccountAsset,
   createAccountIdentityDocument,
+  createAccountPolicy,
   createClaim,
   listAccountAssets,
   listAccountIdentityDocuments,
   listAccountPaymentDestinations,
+  listAccountPolicies,
   createPaymentDestination,
   listEvidenceHistory,
   listClaims,
@@ -19,9 +21,12 @@ import {
   streamRealtimeEvents,
   submitClaimMessage,
   updateAccountAsset,
+  updateClaimAutoFillPreferences,
   updateAccountProfile,
   updateAccountPreferences,
   updateAccountIdentityDocument,
+  updateAccountPaymentDestination,
+  updateAccountPolicy,
 } from './api.js'
 
 describe('claim message contract', () => {
@@ -93,6 +98,77 @@ describe('payment account clients', () => {
       '/api/v1/account/payment-destinations?limit=25&cursor=payment-cursor',
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
     )
+  })
+
+  it('updates a payment destination with revision authority and only supplied fields', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      payment_destination_id: 'pyd_synthetic',
+      masked_account_number: '••••4321',
+      revision: 2,
+    }), { status: 200 }))
+
+    await updateAccountPaymentDestination({
+      paymentDestinationId: 'pyd_synthetic',
+      revision: 1,
+      bankName: 'Northwind Bank',
+      accountHolderName: 'Synthetic Claimant',
+      accountType: 'everyday',
+      isCommon: true,
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/payment-destinations/pyd_synthetic',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer synthetic-claimant-token',
+          'If-Match': '1',
+        }),
+        body: JSON.stringify({
+          account_type: 'everyday',
+          bank_name: 'Northwind Bank',
+          account_holder_name: 'Synthetic Claimant',
+          is_common: true,
+        }),
+      }),
+    )
+  })
+})
+
+describe('policy account clients', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('lists, creates, and updates account policy numbers through the owner-scoped routes', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ items: [], page: { next_cursor: null } }), { status: 200 }))
+    await listAccountPolicies({ cursor: 'policy-cursor' })
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/account/policies?limit=25&cursor=policy-cursor',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ policy_id: 'pol_synthetic', revision: 1 }), { status: 201 }))
+    await createAccountPolicy({ policyNumber: 'MOTOR-1234', idempotencyKey: 'policy-create-1' })
+    expect(fetch).toHaveBeenLastCalledWith('/api/v1/account/policies', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'Idempotency-Key': 'policy-create-1' }),
+      body: JSON.stringify({ policy_number: 'MOTOR-1234' }),
+    }))
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ policy_id: 'pol_synthetic', revision: 2 }), { status: 200 }))
+    await updateAccountPolicy({ policyId: 'pol_synthetic', revision: 1, policyNumber: 'HOME-5678' })
+    expect(fetch).toHaveBeenLastCalledWith('/api/v1/account/policies/pol_synthetic', expect.objectContaining({
+      method: 'PATCH',
+      headers: expect.objectContaining({ 'If-Match': '1' }),
+      body: JSON.stringify({ policy_number: 'HOME-5678' }),
+    }))
   })
 })
 
@@ -763,6 +839,34 @@ describe('Account mutation contract', () => {
           'If-Match': '4',
         }),
         body: JSON.stringify({ email: false, sms: true }),
+      }),
+    )
+  })
+
+  it('replaces all five Claim auto-fill choices with account revision authority', async () => {
+    const preferences = {
+      personal_details: true,
+      policy_number: false,
+      saved_assets: true,
+      payment_details: false,
+      identity_information: true,
+    }
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      revision: 5,
+      claim_auto_fill_preferences: preferences,
+    }), { status: 200 }))
+
+    await updateClaimAutoFillPreferences(preferences, 4)
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/account/claim-auto-fill-preferences',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'If-Match': '4',
+        }),
+        body: JSON.stringify(preferences),
       }),
     )
   })

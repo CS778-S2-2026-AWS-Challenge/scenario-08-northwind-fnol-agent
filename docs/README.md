@@ -22,6 +22,7 @@ rules, or sprint commitments.
 
 The current time-bound direction and weekly execution records are maintained under `sprint/`:
 
+- [Sprint 5 Delivery Freeze, Evidence Validation, and Poster](../sprint/sprint5.md)
 - [Sprint 3 Validation Prototype Overview](../sprint/sprint3.md)
 - [Sprint 4 Execution Guide](../sprint/sprint4-execution-guide.md)
 - [Sprint 4 Governance and Week 7](../sprint/sprint4.md)
@@ -110,6 +111,7 @@ evidence:
 - [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md)
 - [Agent Behaviour and Model Gateway Design](design/agent-runtime/agent-behaviour-and-model-gateway-design.md)
 - [AWS Migration Preparation](design/aws-migration-preparation.md)
+- [First AWS deployment framework and evidence](design/aws-verified-deployment-plan.md)
 
 The target defines future engineering direction, the migration document isolates the temporary
 compatibility path, and the design study records research and rationale. Current API and runtime

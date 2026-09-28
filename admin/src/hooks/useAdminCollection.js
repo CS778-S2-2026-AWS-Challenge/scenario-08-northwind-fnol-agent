@@ -5,6 +5,7 @@ export default function useAdminCollection(endpoint, token) {
   const [items, setItems] = useState([])
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState(null)
+  const [page, setPage] = useState({ next_cursor: null })
   const [reloadVersion, setReloadVersion] = useState(0)
   const [resolvedRequest, setResolvedRequest] = useState('')
 
@@ -17,6 +18,7 @@ export default function useAdminCollection(endpoint, token) {
       .then((payload) => {
         if (!cancelled) {
           setItems(payload.items || [])
+          setPage(payload.page || { next_cursor: null })
           setStatus('ready')
           setError(null)
           setResolvedRequest(requestKey)
@@ -33,5 +35,5 @@ export default function useAdminCollection(endpoint, token) {
   }, [endpoint, reloadVersion, token])
 
   const requestKey = `${endpoint}:${reloadVersion}`
-  return { items, status: resolvedRequest === requestKey ? status : 'loading', error, reload }
+  return { items, page, status: resolvedRequest === requestKey ? status : 'loading', error, reload }
 }

@@ -1,6 +1,7 @@
 import { Download, Eye, FileWarning, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
+import { translate as t } from '../i18n.js'
 
 export default function EvidenceRecords({ claimId, records, onLoadEvidence }) {
   const [preview, setPreview] = useState(null)
@@ -29,8 +30,8 @@ export default function EvidenceRecords({ claimId, records, onLoadEvidence }) {
   return (
     <section className="resource-view">
       <header className="content-header">
-        <div><p className="eyebrow">Files and source-linked records</p><h2>Evidence</h2></div>
-        <span>{records.length} records</span>
+        <div><p className="eyebrow">{t('Files and source-linked records')}</p><h2>{t('Evidence')}</h2></div>
+        <span>{t('{count} records', { count: records.length })}</span>
       </header>
       {error && <p className="inline-error" role="alert"><FileWarning size={16} />{error}</p>}
       <div className="record-list">
@@ -45,45 +46,45 @@ export default function EvidenceRecords({ claimId, records, onLoadEvidence }) {
               </summary>
               <div className="record-body">
                 <dl>
-                  <dt>File status</dt><dd>{words(item.file_status)}</dd>
-                  <dt>Source</dt><dd>{words(item.source)}</dd>
-                  <dt>Responsible party</dt><dd>{words(item.responsible_party)}</dd>
-                  <dt>Needed for</dt><dd>{joinValues(item.needed_for)}</dd>
-                  <dt>Related fields</dt><dd>{joinValues(item.related_fields)}</dd>
-                  <dt>Expected</dt><dd>{item.expected_by ? formatDateTime(item.expected_by) : item.expected_timing || 'No timing recorded'}</dd>
-                  <dt>Updated</dt><dd>{formatDateTime(item.updated_at)}</dd>
+                  <dt>{t('File status')}</dt><dd>{words(item.file_status)}</dd>
+                  <dt>{t('Source')}</dt><dd>{words(item.source)}</dd>
+                  <dt>{t('Responsible party')}</dt><dd>{words(item.responsible_party)}</dd>
+                  <dt>{t('Needed for')}</dt><dd>{joinValues(item.needed_for)}</dd>
+                  <dt>{t('Related fields')}</dt><dd>{joinValues(item.related_fields)}</dd>
+                  <dt>{t('Expected')}</dt><dd>{item.expected_by ? formatDateTime(item.expected_by) : item.expected_timing || t('No timing recorded')}</dd>
+                  <dt>{t('Updated')}</dt><dd>{formatDateTime(item.updated_at)}</dd>
                 </dl>
                 {item.context_summary && <p className="record-summary">{item.context_summary}</p>}
-                {item.claimant_note && <p className="record-note"><strong>Claimant note</strong>{item.claimant_note}</p>}
+                {item.claimant_note && <p className="record-note"><strong>{t('Claimant note')}</strong>{item.claimant_note}</p>}
                 <div className="record-actions">
                   <button className="button button--secondary" type="button" disabled={!canOpen || loadingId === item.evidence_id} onClick={() => load(item)}>
                     {loadingId === item.evidence_id ? <LoaderCircle className="spin" size={16} /> : <Eye size={16} />}
-                    {loadingId === item.evidence_id ? 'Loading...' : 'View file'}
+                    {t(loadingId === item.evidence_id ? 'Loading...' : 'View file')}
                   </button>
-                  {!canOpen && <span>No uploaded file is available for this evidence record.</span>}
+                  {!canOpen && <span>{t('No uploaded file is available for this evidence record.')}</span>}
                 </div>
                 {itemPreview && (
                   <div className="evidence-preview">
-                    <div><strong>{itemPreview.filename}</strong><a className="button button--secondary" href={itemPreview.url} download={itemPreview.filename}><Download size={16} />Download</a></div>
+                    <div><strong>{itemPreview.filename}</strong><a className="button button--secondary" href={itemPreview.url} download={itemPreview.filename}><Download size={16} />{t('Download')}</a></div>
                     {itemPreview.mediaType.startsWith('image/') ? (
-                      <img src={itemPreview.url} alt={`Evidence preview: ${itemPreview.filename}`} />
+                      <img src={itemPreview.url} alt={t('Evidence preview: {filename}', { filename: itemPreview.filename })} />
                     ) : itemPreview.mediaType === 'application/pdf' ? (
-                      <iframe src={itemPreview.url} title={`Evidence preview: ${itemPreview.filename}`} />
+                      <iframe src={itemPreview.url} title={t('Evidence preview: {filename}', { filename: itemPreview.filename })} />
                     ) : (
-                      <p>This file type can be downloaded for review.</p>
+                      <p>{t('This file type can be downloaded for review.')}</p>
                     )}
                   </div>
                 )}
               </div>
             </details>
           )
-        }) : <p className="empty-note">No evidence records are available for this Claim.</p>}
+        }) : <p className="empty-note">{t('No evidence records are available for this Claim.')}</p>}
       </div>
-      <span className="sr-only">Evidence for {claimId}</span>
+      <span className="sr-only">{t('Evidence for {claimId}', { claimId })}</span>
     </section>
   )
 }
 
 function joinValues(values) {
-  return values?.length ? values.map(words).join(', ') : 'None recorded'
+  return values?.length ? values.map(words).join(', ') : t('None recorded')
 }

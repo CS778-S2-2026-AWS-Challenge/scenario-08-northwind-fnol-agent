@@ -45,7 +45,7 @@ MUST read [Frontend and Runtime Quality Standard](docs/frontend-and-runtime-qual
 before acting. This document defines the required product big picture, Agent-first claimant
 journey, Workbench task model, component and token system, route and state boundaries, frontend
 and Runtime responsibilities, real-API expectations, and acceptance evidence. Do not treat the
-legacy `employee/index.html` or other historical prototypes as the design baseline.
+retired static employee frontend or other historical prototypes as the design baseline.
 
 ## Required alignment before substantive work
 

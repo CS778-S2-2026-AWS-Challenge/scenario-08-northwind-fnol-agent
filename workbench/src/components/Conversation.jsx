@@ -1,19 +1,25 @@
-import { CheckCircle2, Clock3, Info, MessageSquare, Send, UserRoundCheck } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { CheckCircle2, Clock3, Info, LoaderCircle, MessageSquare, Paperclip, Send, UserRoundCheck } from 'lucide-react'
+import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { formatDate, formatTime, words } from '../format.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
+import AttachmentDraftControl from './AttachmentDraftControl.jsx'
+import CompactComposerTextarea from './CompactComposerTextarea.jsx'
 import ResourceBoundary from './ResourceBoundary.jsx'
 import { ProjectedActionState } from './ProjectedAction.jsx'
 import { HandoffResolution } from './ReviewActions.jsx'
+import VoiceInputControl from './VoiceInputControl.jsx'
 
 export default function Conversation({
   detail,
   handoffs = [],
   profile,
   resource,
+  evidenceRecords = [],
   requestedSessionId = null,
   draft,
+  scrollPosition = null,
   onDraft,
+  onScrollPosition,
   onAccept,
   onResolve,
   onSend,
@@ -27,6 +33,8 @@ export default function Conversation({
   const currentConversationKeyRef = useRef(null)
   const currentDraftRef = useRef(draft)
   const messageListRef = useRef(null)
+  const restoredConversationRef = useRef(null)
+  const voiceInputRef = useRef(null)
   const resourceRequestedSessionId = resource?.requested_session_id || null
   const displayedSessionId = resource?.resolved_session_id || null
   const viewSessionId = requestedSessionId || resourceRequestedSessionId || displayedSessionId
@@ -87,6 +95,7 @@ export default function Conversation({
     (sendError?.key === conversationKey && sendError.readbackFailure)
     || pendingDelivery,
   )
+  const voiceInputAvailable = canSend && !sending && !readbackBlocksResend
   const viewResource = displayedSessionMatchesView
     ? resource
     : resourceTargetsView && (resource?.error || resource?.status === 'unavailable')
@@ -151,9 +160,29 @@ export default function Conversation({
     messageListRef.current.scrollTop = messageListRef.current.scrollHeight
   }, [completedSends, conversationKey])
 
+  useLayoutEffect(() => {
+    if (
+      !conversationKey
+      || !displayedSessionMatchesView
+      || viewResource.loading
+      || restoredConversationRef.current === conversationKey
+      || !messageListRef.current
+    ) return
+    messageListRef.current.scrollTop = Number.isFinite(scrollPosition)
+      ? scrollPosition
+      : messageListRef.current.scrollHeight
+    restoredConversationRef.current = conversationKey
+  }, [conversationKey, displayedSessionMatchesView, scrollPosition, timeline.length, viewResource.loading])
+
   async function submit(event) {
     event.preventDefault()
-    if (!draft.trim() || !canSend || !displayedSessionId) return
+    if (
+      !draft.trim()
+      || !canSend
+      || !displayedSessionId
+      || voiceInputRef.current?.hasPendingAttachments?.()
+    ) return
+    voiceInputRef.current?.cancel({ announce: false, restoreFocus: false })
     const sendKey = conversationIdentity(detail.claim_id, displayedSessionId)
     const submittedDraft = draft
     const submittedMessage = draft.trim()
@@ -183,6 +212,16 @@ export default function Conversation({
     } finally {
       setPendingSendKey((current) => current === sendKey ? null : current)
     }
+  }
+
+  function updateDraft(nextDraft) {
+    currentDraftRef.current = nextDraft
+    if (
+      sendError?.key === conversationKey
+      && !sendError.readbackFailure
+      && nextDraft.trim() !== sendError.sentDraft
+    ) setSendError(null)
+    onDraft(nextDraft)
   }
 
   const placeholder = historicalSession
@@ -219,13 +258,19 @@ export default function Conversation({
             onResolve={onResolve}
           />
         )}
-        <ol ref={messageListRef} className="message-list" role="log" aria-label="Claimant conversation messages">
+        <ol
+          ref={messageListRef}
+          className="message-list"
+          role="log"
+          aria-label="Claimant conversation messages"
+          onScroll={(event) => onScrollPosition?.(event.currentTarget.scrollTop)}
+        >
           {timeline.map((item) => (
             item.kind === 'date'
               ? <DateDivider item={item} key={item.key} />
               : item.kind === 'event'
               ? <SystemEvent item={item} key={item.key} />
-              : <ConversationMessage message={item.message} key={item.key} />
+              : <ConversationMessage evidenceRecords={evidenceRecords} message={item.message} key={item.key} />
           ))}
           {!timeline.length && (
             <li className="conversation-empty">
@@ -256,46 +301,103 @@ export default function Conversation({
               </span>
             </div>
           )}
-          <div className="staff-composer__input">
-            <label className="sr-only" htmlFor="staff-reply">Message to claimant</label>
-            <textarea
-              id="staff-reply"
-              rows="1"
-              value={draft}
-              onChange={(event) => {
-                const nextDraft = event.target.value
-                if (
-                  sendError?.key === conversationKey
-                  && !sendError.readbackFailure
-                  && nextDraft.trim() !== sendError.sentDraft
-                ) setSendError(null)
-                onDraft(nextDraft)
-              }}
-              disabled={!canSend}
-              placeholder={placeholder}
-              aria-describedby={visibleSendError
-                ? 'staff-message-error'
-                : !canSend
-                  ? 'staff-message-status'
-                  : undefined}
-            />
-            <button
-              className="staff-composer__send"
-              type="submit"
-              disabled={!canSend || !draft.trim() || sending || readbackBlocksResend}
-              aria-label="Send message"
-              aria-busy={sending}
-              title={sending ? 'Sending message' : 'Send message'}
-            >
-              <Send size={18} aria-hidden="true" />
-            </button>
-          </div>
+          <StaffComposerInput
+            key={conversationKey}
+            ref={voiceInputRef}
+            conversationKey={conversationKey}
+            canSend={canSend}
+            voiceInputAvailable={voiceInputAvailable}
+            draft={draft}
+            onDraft={updateDraft}
+            placeholder={placeholder}
+            describedBy={[
+              visibleSendError ? 'staff-message-error' : null,
+              !canSend ? 'staff-message-status' : null,
+            ].filter(Boolean).join(' ') || undefined}
+            sendDisabled={!canSend || !draft.trim() || sending || readbackBlocksResend}
+            sending={sending}
+          />
           {visibleSendError && <p className="form-error" id="staff-message-error" role="alert">{visibleSendError}</p>}
         </form>
       </section>
     </ResourceBoundary>
   )
 }
+
+const StaffComposerInput = forwardRef(function StaffComposerInput({
+  conversationKey,
+  canSend,
+  voiceInputAvailable,
+  draft,
+  onDraft,
+  placeholder,
+  describedBy,
+  sendDisabled,
+  sending,
+}, controllerRef) {
+  const textareaRef = useRef(null)
+  const voiceControllerRef = useRef(null)
+  const attachmentControllerRef = useRef(null)
+
+  useImperativeHandle(controllerRef, () => ({
+    cancel: (options) => voiceControllerRef.current?.cancel(options),
+    hasPendingAttachments: () => attachmentControllerRef.current?.hasPendingAttachments() || false,
+  }), [])
+
+  return (
+    <AttachmentDraftControl
+      ref={attachmentControllerRef}
+      available={canSend && !sending}
+      idPrefix="staff-claimant-attachment"
+      triggerClassName="staff-composer__attachment compact-composer__tool"
+    >
+      {({ attachmentsPending, describedBy: attachmentDescription, preview, trigger }) => (
+        <>
+          {preview}
+          <div className={`staff-composer__input compact-composer__input${canSend ? ' staff-composer__input--voice' : ''}`}>
+            {canSend && (
+              <>
+                {trigger}
+                <VoiceInputControl
+                  key={`${conversationKey}:${voiceInputAvailable}`}
+                  ref={voiceControllerRef}
+                  available={voiceInputAvailable}
+                  draft={draft}
+                  onDraft={onDraft}
+                  statusId="staff-claimant-voice-status"
+                  textareaRef={textareaRef}
+                />
+              </>
+            )}
+            <CompactComposerTextarea
+              ref={textareaRef}
+              id="staff-reply"
+              value={draft}
+              onValueChange={onDraft}
+              disabled={!canSend}
+              placeholder={placeholder}
+              describedBy={[describedBy, attachmentDescription].filter(Boolean).join(' ') || undefined}
+              label="Message to claimant"
+              submitDisabled={sendDisabled || attachmentsPending}
+            />
+            <button
+              className="staff-composer__send compact-composer__send"
+              type="submit"
+              disabled={sendDisabled || attachmentsPending}
+              aria-label="Send message"
+              aria-busy={sending}
+              title={attachmentsPending ? 'Remove attachments to send text; file delivery is not available yet' : sending ? 'Sending message' : 'Send message'}
+            >
+              {sending
+                ? <LoaderCircle className="compact-composer__spinner" size={18} aria-hidden="true" />
+                : <Send size={18} aria-hidden="true" />}
+            </button>
+          </div>
+        </>
+      )}
+    </AttachmentDraftControl>
+  )
+})
 
 function AssistanceStatus({ action, compact = false, handoff, detail, profile, state, revision, onAccept, resolveAction, onResolve }) {
   const [confirming, setConfirming] = useState(false)
@@ -369,13 +471,31 @@ function AssistanceStatus({ action, compact = false, handoff, detail, profile, s
   )
 }
 
-function ConversationMessage({ message }) {
+function ConversationMessage({ message, evidenceRecords }) {
   const actor = message.actor || 'system'
+  const evidenceById = new Map(evidenceRecords.map((item) => [item.evidence_id, item]))
+  const attachments = (message.evidence_refs || []).map((evidenceId) => ({
+    evidenceId,
+    record: evidenceById.get(evidenceId),
+  }))
   return (
     <li className={`message message--${actor}`}>
       <article>
         <header><strong>{actorLabel(actor)}</strong><time dateTime={message.created_at}>{formatTime(message.created_at)}</time></header>
         <p>{message.content?.text || words(message.content?.type)}</p>
+        {attachments.length > 0 && (
+          <ul className="message-attachments" aria-label="Message attachments">
+            {attachments.map(({ evidenceId, record }) => (
+              <li key={evidenceId}>
+                <Paperclip aria-hidden="true" />
+                <span>
+                  <strong>{record?.original_filename || (record?.kind ? words(record.kind) : 'Attachment')}</strong>
+                  <small>{record?.status ? words(record.status) : evidenceId}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </article>
     </li>
   )

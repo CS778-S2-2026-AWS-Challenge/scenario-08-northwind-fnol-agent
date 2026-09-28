@@ -2,7 +2,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Request, status
 
-from backend.core.auth import Principal, require_staff
+from backend.core.auth import Principal, require_workbench_read, require_workbench_write
 from backend.core.config import AgentRuntimeProfile
 from backend.domain.configuration import ModelRuntimeConfiguration
 from backend.domain.knowledge import KnowledgeRetriever
@@ -97,7 +97,7 @@ def knowledge_version_for(request: Request, product: str) -> str | None:
 def create_session(
     payload: CreateStaffAgentSessionRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> StaffAgentSession:
     return create_staff_agent_session(
         repository_for(request),
@@ -110,7 +110,7 @@ def create_session(
 @router.get('/capabilities', response_model=StaffAgentCapabilitiesResponse)
 def read_capabilities(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> StaffAgentCapabilitiesResponse:
     if request.app.state.settings.agent_runtime_profile is not AgentRuntimeProfile.MODEL_GATEWAY:
         return StaffAgentCapabilitiesResponse(models=[])
@@ -144,7 +144,7 @@ def read_capabilities(
 @router.get('/sessions', response_model=StaffAgentSessionsResponse)
 def read_sessions(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> StaffAgentSessionsResponse:
     return list_staff_agent_sessions(repository_for(request), principal)
 
@@ -156,7 +156,7 @@ def read_sessions(
 def read_messages(
     session_id: str,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> StaffAgentMessagesResponse:
     return list_staff_agent_messages(repository_for(request), principal, session_id)
 
@@ -170,7 +170,7 @@ def create_message(
     session_id: str,
     payload: CreateStaffAgentMessageRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
 ) -> StaffAgentTurnResponse:
     return submit_staff_agent_message(
         repository_for(request),
@@ -193,7 +193,7 @@ def execute_draft(
     draft_id: str,
     payload: ExecuteStaffAgentDraftRequest,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> StaffAgentDraftExecutionResponse:

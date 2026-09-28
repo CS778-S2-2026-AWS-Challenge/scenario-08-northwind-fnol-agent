@@ -12,6 +12,27 @@ correcting how the home and contents disclosure-consent records are classified. 
 freeze a new scenario oracle, redefine product acceptance, or claim that any target category is
 complete.
 
+## Current-main reconciliation
+
+Reconciled on 2026-09-28 against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c`. The 100-run counts and classifications below are
+unchanged historical evidence; no new run is claimed here.
+
+- PR #977 merged the claimant Runtime v8 model-backed path. PR #1038 subsequently merged final
+  agreement and submission projection.
+- A #771 run at `main@bf5599fd` after #977 created a motor Claim in the real Claimant UI and a home
+  Claim through the claimant API. Its contents path still used the controlled Runtime and stopped
+  at `contents.items`.
+- Current code has typed contents-item proposal, confirmation, persistence, Evidence association,
+  and role projections. The historical contents result therefore describes the controlled
+  baseline, not an absent current domain contract.
+- No recorded rerun on `main@fad552f8` was found for all three families after #1038, and issue #962
+  still lacks the first model-backed journey batch. The current state is "implementation present;
+  current-head model-backed full-journey evidence pending."
+- Commercial third-party integration is not required for this student project. Provider-neutral
+  simulation is acceptable when consent, authority, lifecycle, idempotency, failure, unknown
+  outcome, recovery, and provenance remain observable. Real AWS integration remains Sprint 5 work.
+
 ## Authority and evidence
 
 This record applies the following authority order:
@@ -71,7 +92,7 @@ variant is evidence only for the behavior it actually exercises.
 | M1 | Collision and fast progression | AT-01 clear motor creation with received and four non-default material packs | `fixture-only` with the complete simulated pack; `partial` when a material has `no_route` or is not delivered | Frozen M1 oracle, deployed Runtime trace, claims-adapter provenance, and browser projection | #733 for the final oracle; #901 / PR #903 and #904–#910 for Agent Runtime v7; #769 for backend/AWS evidence | The exact M1 scenario and oracle are published, relevant v7 work is merged, and the configured claims adapter can return a traceable result |
 | M2 | Injury or continuing danger | None in the 100-run batch | Not yet run | Complete natural-language trajectory, urgent authority boundary, preserved progress, claimant/staff projection, and recovery result | #733 and Agent owner for the oracle; #770 for behavior; #771 for cross-end validation | The approved injury/danger scenario has an executable oracle and the final Runtime path is on `main` |
 | M3 | Another party or Police | AT-01 includes a Police event report supplied manually by the claimant | `fixture-only` or `partial`; the report is material input, not a dedicated another-party or Police-service journey | Another-party facts, Police responsibility and access form, consent/visibility, and claims-adapter result | #733 for the scenario; #769 for confirmed integration capability; #771 for role projections | The scenario distinguishes claimant-supplied Police material from any real or unavailable Police integration and has an executable next-step oracle |
-| M4 | Vehicle damage with assessor or repair | AT-01 assessor request/result and five motor material packs | `fixture-only` for the complete simulated-assessor path; variants can be `partial`. The #933 failure set records retryable, terminal, unusable-routing, unknown-outcome, and interrupted-dispatch assessor failures with their recovery | Live or truthfully unavailable provider evidence, repair responsibility, and browser state | #769 for provider/AWS boundary; #771 for claimant and Workbench projections | Provider mode and authority are fixed, failure states are observable, and both role projections consume the same external-task state |
+| M4 | Vehicle damage with assessor or repair | AT-01 assessor request/result and five motor material packs | `fixture-only` for the complete simulated-assessor path; variants can be `partial`. The #933 failure set records retryable, terminal, unusable-routing, unknown-outcome, and interrupted-dispatch assessor failures with their recovery | Complete simulated lifecycle evidence, repair responsibility, and browser state | #771 for claimant and Workbench projections | Simulation mode and authority are fixed, failure states are observable, and both role projections consume the same external-task state |
 | M5 | Fact or evidence conflict and professional review | PRES-02 guided review and staff resolution; separate AT-01 records preserve disputed and superseded pack metadata | `partial` in all 16 PRES-02 runs; the consent and assessment materials remain undelivered after the professional-review path | Final conflict oracle, internal-versus-claimant visibility, revision/idempotency readback, and browser evidence; AT-01 pack metadata alone does not prove professional-review behavior | #733 and #770 for the behavior oracle; #771 for browser and cross-role evidence | The v7 proposal/Runtime contract is published and the professional-review action can be verified from both role projections |
 | H1 | Burglary | None; the home batch contains water ingress only | Not yet run | Burglary facts, Police/evidence boundary, safety state, handoff or next safe action, and Claim creation | #733 for the frozen scenario; #770 for behavior; #769 for required backend capability | A registered-field-compatible burglary scenario and executable oracle are published |
 | H2 | Weather, water, or other property damage | Home water-ingress base path | 30 `fixture-only`; registered intake reaches Claim creation, and the disclosure-consent record is `not_applicable` under `P3-REPAIRER` | Final H2 oracle, claims-adapter provenance, and browser evidence | #769 for backend/external boundary; #771 for browser evidence | The exact scenario is selected for the ten-case suite |
@@ -89,7 +110,7 @@ The following gaps apply across more than one target row.
 | Claimant and staff agreement | Records include visibility and seam checks where the runner can read both projections | No browser evidence exists, and not every target row reaches both role projections | #771 claimant/workbench owners |
 | Agent and Runtime trace | API-level records retain observable proposals, next steps, and declared trace limitations | Internal proposal-to-execution evidence must be re-established after the v7 chain | #901 / PR #903 and #904–#910, with #910 as the publication boundary |
 | Browser journey | None; the baseline is API projection evidence | No screenshot or rendered interaction proves loading, pending, retry, unavailable, stale, or professional-review states | #771 claimant and Workbench slices; #902 only for evidence that specifically requires durable SSE reconnect or resynchronisation |
-| AWS and provider capability | Fixture runtime and simulated provider only | No real AWS permission, call, provider result, or production-integration claim | #769; unavailable remains an acceptable honest result |
+| AWS and provider capability | Fixture runtime and simulated third-party provider only | Real AWS permission, migration, and invocation evidence remains Sprint 5 work; a commercial third-party provider is not required | #769 and the Sprint 5 AWS integration owner |
 | Claimant effort | Exact 100-run totals and per-run records exist | The final ten-scenario question budget and repeated-question metrics have not been calculated | #733 metric definition and final ten-run batch |
 | Severity and fraud evaluation | Not measured by the 100-run baseline | No frozen blind severity labels, confusion matrix, or fraud TP/FP/FN/TN evidence | #733 and the authorized business-review boundary |
 | Failure and recovery | Zero baseline failures and blocks; oracle mismatches serialize correctly when injected by regression tests. The #933 set adds five assessor failure trajectories with both-end checks at the failure and recovery through the claimant retry or projected staff action; since #942 both ends agree in all five | Model timeout, malformed output, duplicate, resume, and professional-review trajectories are not yet one reviewed evidence set | #770 behavior and #769 backend failure semantics; #771 validates the cross-end result |
@@ -99,19 +120,19 @@ The following gaps apply across more than one target row.
 The next ten-scenario execution must not begin merely because the runner exists. It needs the
 following inputs in order:
 
-1. **Scenario and oracle input:** #733 must identify the exact ten scenario IDs and expected
-   product outcomes. The categories above are not a substitute for executable oracles.
-2. **Runtime input:** the relevant #901 / PR #903 and #904–#910 changes must be merged, with #910
-   publishing one coherent Agent Runtime v7 Release Set. An in-flight Runtime head is not a stable
-   baseline. Issue #902 is separate realtime synchronisation work, not a general v7 prerequisite;
-   only a browser/reconnect claim that uses its durable SSE behavior must wait for #902.
-3. **Backend input:** #769 must identify which claims-adapter, AWS, external-task, contents-item,
-   and failure semantics are implemented, simulated, or unavailable.
-4. **Projection input:** #771 owners must identify the claimant and Workbench routes that render
-   each selected target state without local lifecycle inference.
-5. **Evidence execution:** the journey-validation owner can then run one motor, one home, and one
-   contents smoke trajectory on the exact merged head. Expansion to all ten follows only after the
-   smoke records agree with their executable oracles.
+1. **Scenario and oracle input:** retain the exact five motor, three home, and two contents
+   categories and expected outcomes from #733; executable records must name their inputs and
+   complete material packs.
+2. **Runtime input:** use the merged PR #977 claimant Runtime v8 and the final agreement/submission
+   path from PR #1038. Issue #962 must supply the first recorded `model_gateway` batch rather than
+   silently using the controlled profile.
+3. **Backend and integration input:** identify the configured claims/AWS path, the intentionally
+   simulated third-party paths, and every unavailable dependency without mixing their provenance.
+4. **Projection input:** use the claimant and Workbench routes that render each selected state
+   without local lifecycle inference.
+5. **Evidence execution:** first rerun one motor, one home, and one contents trajectory on the
+   current exact head. Expand to the full ten only after the three smoke records agree with their
+   executable oracles.
 
 The bounded next validation slice is therefore a three-family exact-head smoke rerun after the
 first four inputs exist. It uses `northwind-journey-run/6`, including the per-run metric

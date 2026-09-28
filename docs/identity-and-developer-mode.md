@@ -127,7 +127,7 @@ The initial role-to-scope contract is intentionally narrow.
 | Actor type | Minimum scopes | Primary boundary |
 | --- | --- | --- |
 | claimant | `claim:read:self`, `claim:write:self` | Own claimant-visible Claim State, sessions, messages, evidence, support requests, status |
-| staff | `workbench:read`, `workbench:write` | Authorised internal claim/workbench projections and staff mutations |
+| staff | Capabilities derived from the stored staff roles | Staff identity session and role-authorised application boundaries |
 | administrator | `admin:read`, `admin:write` | Separately contracted Control Plane configuration and audit surfaces |
 | agent_service | `agent:execute` plus explicitly granted tool capabilities | Claim-scoped orchestration only when an external service boundary exists |
 | integration_service | `tools:invoke` plus an allow-listed operation/purpose | Narrow internal adapter routes |
@@ -136,6 +136,19 @@ Scopes are capabilities, not role aliases and not wildcard resource grants. A fu
 staff principal may receive `operations:read` without receiving administrator
 configuration authority. An administrator does not automatically receive claimant or
 unrestricted production Claim State editing authority.
+
+The current staff role mapping is deliberately closed:
+
+| Stored staff role | Derived capabilities | Boundary |
+| --- | --- | --- |
+| `claims_professional` | `workbench:read`, `workbench:write` | Authorised Workbench projections and mutations |
+| `operations` | None | Own staff session and profile only; no Workbench Claim access |
+
+Unknown roles grant no capability. A published access policy can remove a derived capability but
+cannot add one. The staff identity routes for the current session, profile, and logout require an
+authenticated staff identity rather than Workbench capability, so an operations-only account can
+still manage its own session. Operations-only authentication does not create a claimable Workbench
+presence lease.
 
 The Admin API is available under the separate `/internal/v1/admin` boundary. Its account
 management routes use the same administrator scopes and identity repository boundary; they do
@@ -309,10 +322,10 @@ security migration, not a flag rename. #247 and its consumers must preserve thes
 7. existing cross-role, ownership, projection, demo-endpoint, and deprecated-route tests
    remain green after the migration.
 
-The current customer client has a synthetic claimant fallback, the static Employee
-Workbench contains a synthetic staff token, and the shared test fixtures construct
-`Settings()` while using synthetic credentials. These are explicit migration inputs for
-Issue #247 is not evidence that developer mode should remain implicitly enabled.
+Before the identity migration, the customer client had a synthetic claimant fallback, the now
+retired static Employee Workbench contained a synthetic staff token, and the shared test fixtures
+constructed `Settings()` while using synthetic credentials. These were explicit migration inputs
+for Issue #247, not evidence that developer mode should remain implicitly enabled.
 
 ## Authentication and Authorisation Order
 
@@ -413,8 +426,8 @@ The current gaps are explicit:
   tool routes;
 - the in-process Agent is not an authenticated service principal and should not be
   presented as one;
-- the customer client, static Employee Workbench, `.env.example`, and shared test fixtures
-  still reflect the implicit synthetic-authentication prototype and require deliberate
+- the customer client, the since-retired static Employee Workbench, `.env.example`, and shared
+  test fixtures reflected the implicit synthetic-authentication prototype and required deliberate
   migration; and
 - request IDs exist, but complete identity access-audit persistence is not implemented.
 

@@ -188,6 +188,21 @@ BACKEND_CONSUMER_RULES = (
     ),
     (
         (
+            'backend/core/auth.py',
+            'backend/api/staff_identity.py',
+            'backend/api/staff_presence.py',
+            'backend/services/staff_identity.py',
+            'backend/services/staff_presence.py',
+        ),
+        (
+            'tests/test_admin_access_audit.py',
+            'tests/test_identity_runtime.py',
+            'tests/test_staff_identity.py',
+            'tests/test_staff_workbench_authorization.py',
+        ),
+    ),
+    (
+        (
             'backend/domain/claim_creation.py',
             'backend/domain/external_service_registry.py',
             'backend/domain/external_services.py',

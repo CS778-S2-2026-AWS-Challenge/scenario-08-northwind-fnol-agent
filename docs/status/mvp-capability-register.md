@@ -9,6 +9,21 @@ for every claim. It is a status record observed at a point in time, not a contra
 redefine `SPEC/`, the API contract, or any engineering document, and a capability listed here is
 only as good as the evidence in its row.
 
+## Current-main reconciliation
+
+Reconciled on 2026-09-28 against
+`main@fad552f83a6ebae409f2677bed80a8c9899d206c`. Existing classifications retain their named run
+heads; source inspection alone does not promote a historical row to `verified`.
+
+- PR #977 implements the claimant Runtime v8 model-backed path, and PR #1038 completes final
+  agreement/submission projection. The `Live model-backed intake` row remains `partial` only
+  because issue #962 has not recorded the first model-backed 5/3/2 journey batch, not because the
+  model Runtime is absent.
+- Controlled assessor and other third-party simulations are an intentional project delivery
+  boundary. They remain `fixture-dependent` rather than incomplete live-provider integrations.
+- AWS remains unverified in this register. Real AWS migration and integration are Sprint 5 work
+  and require their own exact-head connection and invocation evidence.
+
 Compiled against `main` at `26d6d790`, which carries the #271 canonical path validation and the #281 regression entry point. Every command in the re-derivation section below exists on that commit and was run there to produce the classifications recorded here.
 
 PR #350 updates the two local-provider rows owned by `@liyang6620` after synchronising with
@@ -57,7 +72,7 @@ production capability: `fixture-dependent` is a real, useful status, not a softe
 
 | Capability | Evidence and what is missing | Owner |
 | --- | --- | --- |
-| Live model-backed intake | The provider-neutral gateway and explicit `model_gateway` profile are implemented. The current default is the OpenRouter `openai/gpt-4o` profile, with Gemini retained as a selectable comparison profile; credentials remain outside source and persisted configuration. Provider probes are not by themselves a complete claimant-journey acceptance claim; a complete live turn remains separate deployment evidence. | @Ysoseri1224 |
+| Live model-backed intake | The provider-neutral gateway, explicit `model_gateway` profile, and claimant Runtime v8 path are implemented through merged PR #977. The current default is the OpenRouter `openai/gpt-4o` profile, with Gemini retained as a selectable comparison profile; credentials remain outside source and persisted configuration. Provider probes and contract tests are not a complete claimant-journey acceptance claim; issue #962 still owns the first recorded model-backed journey batch. | @Ysoseri1224 |
 | MongoDB persistence profile | `validate_runtime_profiles.py` classifies `mongodb` as `partial` with `startup_refused`, and `docs/status/runtime-profile-validation.md` records that connection primitives and a bounded probe exist but the configured Atlas probe was unavailable during that run. Persistence alone cannot supply evidence, policy/history or knowledge capabilities, so the profile is not selected at runtime. | @liyang6620 |
 | Claimant-to-staff messaging | Merged PR #339 closes the #248 authority and continuity gaps: staff send requires the authoritative active session and an accepted handoff assigned to the authenticated principal, `in_reply_to` cannot cross claim or session boundaries or target internal material, and claimant visibility is filtered before keyset pagination. Issue #248 remains open, so the slice is implemented and reviewed but not declared complete by its owner. | @jxu316-arch |
 | Connected evidence and canonical data journey | Merged PR #312 delivers the #261 journey and its acceptance evidence is recorded, but issue #261 remains open because the pull request used `Refs` rather than `Closes`. The behaviour is on `main`; the issue closure is outstanding. | @bdfa123 |

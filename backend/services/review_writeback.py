@@ -1,6 +1,6 @@
 from typing import Any
 
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError
 from backend.domain.ids import new_id
 from backend.domain.models import (
@@ -37,8 +37,7 @@ def _staff_claim(
     principal: Principal,
     claim_id: str,
 ) -> WorkingClaim:
-    if principal.actor_type != 'staff':
-        raise ApiError(status_code=403, code='ACCESS_DENIED', message='Staff access is required.')
+    require_staff_capability(principal, 'workbench:write')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise ApiError(
@@ -144,6 +143,7 @@ def decide_review_signal(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> SignalDecisionResponse:
+    require_staff_capability(principal, 'workbench:write')
     claim = _staff_claim(repository, principal, claim_id)
     require_claim_collaborator(repository, claim, principal)
     signal = _persisted_signal(repository, claim, signal_id)
