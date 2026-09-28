@@ -2171,13 +2171,28 @@ class MongoDBRepository:
                 if hold.released_at is not None:
                     raise ValueError('A retention hold must be persisted before release.')
 
-                self._put(
-                    'retention_hold',
-                    hold.hold_id,
-                    hold,
-                    claim_id=hold.claim_id,
-                    session=mongo_session,
-                )
+                # Insert-only: a concurrent creator of the same hold identity
+                # either replays exactly or conflicts; it never overwrites.
+                try:
+                    self._collection.insert_one(
+                        {
+                            **hold.model_dump(mode='json'),
+                            '_id': self._record_id('retention_hold', hold.hold_id),
+                            'record_type': 'retention_hold',
+                            'customer_id': None,
+                            'claim_id': hold.claim_id,
+                        },
+                        session=mongo_session,
+                    )
+                except DuplicateKeyError as error:
+                    winner = self._get(
+                        'retention_hold',
+                        hold.hold_id,
+                        RetentionHoldRecord,
+                        session=mongo_session,
+                    )
+                    if winner != hold:
+                        raise IdempotencyConflict(hold.hold_id) from error
                 return
 
             if current == hold:

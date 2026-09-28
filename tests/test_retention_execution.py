@@ -183,6 +183,12 @@ def test_retention_hold_repository_has_fixture_mongo_release_parity(
     repository.save_retention_hold(hold)
     repository.save_retention_hold(hold)
 
+    # The hold's authority coordinates are immutable once created.
+    with pytest.raises(ValueError):
+        repository.save_retention_hold(
+            hold.model_copy(update={'reason': RetentionHoldReason.LEGAL_HOLD})
+        )
+
     listed = repository.list_retention_holds(hold.claim_id)
     assert listed == [hold]
     assert listed[0].active is True
