@@ -727,11 +727,17 @@ def test_backend_contract_fixture_query_and_operation_rejection_paths() -> None:
         repository.save_retention_operation(retention, expected_revision=1)
 
 
-def test_missing_policy_binding_is_readable_blocked_and_never_synthesized() -> None:
+@pytest.mark.parametrize('legacy_contact_block', [False, True])
+def test_missing_policy_binding_is_readable_blocked_and_never_synthesized(
+    legacy_contact_block: bool,
+) -> None:
     bound = backend_contract__follow_up()
     payload = bound.model_dump(mode='json')
     payload.pop('policy_id')
     payload.pop('policy_version')
+    if legacy_contact_block:
+        payload.update(status='blocked', contact_permission='not_authorised', channel=None)
+        payload['reason_code'] = FollowUpReasonCode.CONTACT_NOT_AUTHORISED
     unbound = FollowUpRecord.model_validate(payload)
     assert unbound.policy_id is None and unbound.policy_version is None
     assert unbound.status is FollowUpStatus.BLOCKED
