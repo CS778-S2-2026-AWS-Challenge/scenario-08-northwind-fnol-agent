@@ -352,6 +352,88 @@ def test_follow_up_operation_sequence_policy_revision_and_deadline_parity(
     ) == [first, second]
 
 
+@pytest.mark.parametrize('kind', ['fixture', 'mongodb'])
+def test_follow_up_operation_identity_is_immutable_and_transitions_are_conditional(
+    kind: str,
+) -> None:
+    repository = _repository(kind)
+    claim, follow_up, now = _seed_recovery(repository)
+    customer_id = claim.customer_id
+    reserved = FollowUpOperation(
+        operation_id='fop_transition',
+        follow_up_id=follow_up.follow_up_id,
+        claim_id=claim.claim_id,
+        sequence=1,
+        policy_id='incomplete_claim_follow_up',
+        policy_version=1,
+        based_on_claim_revision=claim.revision,
+        scheduled_at=now + timedelta(hours=1),
+        created_at=now + timedelta(hours=1),
+        updated_at=now + timedelta(hours=1),
+    )
+    repository.save_follow_up_operation(reserved, customer_id)
+
+    # Same identity, different immutable payload: conflict, evidence kept.
+    with pytest.raises(IdempotencyConflict):
+        repository.save_follow_up_operation(
+            reserved.model_copy(update={'scheduled_at': now + timedelta(hours=2)}),
+            customer_id,
+        )
+
+    committed = reserved.model_copy(
+        update={
+            'status': FollowUpOperationStatus.COMMITTED,
+            'result': FollowUpOperationResult.DELIVERED_IN_APP,
+            'committed_at': now + timedelta(hours=1, minutes=1),
+        }
+    )
+    repository.save_follow_up_operation(committed, customer_id)
+    # Exact replay of the settled transition is stable.
+    repository.save_follow_up_operation(committed, customer_id)
+
+    # A competing worker that still holds the stale reservation loses.
+    stale_cancel = reserved.model_copy(
+        update={
+            'status': FollowUpOperationStatus.CANCELLED,
+            'result': FollowUpOperationResult.AUTHORITY_LOST,
+            'cancelled_at': now + timedelta(hours=1, minutes=2),
+        }
+    )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_follow_up_operation(stale_cancel, customer_id)
+
+    settled = committed.model_copy(
+        update={
+            'status': FollowUpOperationStatus.SETTLED,
+            'result': FollowUpOperationResult.NO_RESPONSE,
+            'settled_at': now + timedelta(hours=1, minutes=3),
+        }
+    )
+    repository.save_follow_up_operation(settled, customer_id)
+
+    # Terminal evidence cannot be rewritten to a different final result.
+    with pytest.raises(IdempotencyConflict):
+        repository.save_follow_up_operation(
+            settled.model_copy(update={'result': FollowUpOperationResult.SUPERSEDED_BY_RESUME}),
+            customer_id,
+        )
+
+    stored = repository.get_follow_up_operation(claim.claim_id, reserved.operation_id, customer_id)
+    assert stored == settled
+    immutable = {
+        'operation_id',
+        'follow_up_id',
+        'claim_id',
+        'sequence',
+        'policy_id',
+        'policy_version',
+        'based_on_claim_revision',
+        'scheduled_at',
+        'created_at',
+    }
+    assert stored.model_dump(include=immutable) == reserved.model_dump(include=immutable)
+
+
 # Backend persistence and policy compatibility regression cases.
 
 
@@ -660,3 +742,77 @@ def test_missing_policy_binding_is_readable_blocked_and_never_synthesized(
     backend_contract_seed_claim(repository, unbound)
     repository._follow_ups[unbound.follow_up_id] = unbound
     assert repository.list_due_follow_ups(unbound.created_at, limit=10) == ([], None)
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongodb'])
+@pytest.mark.parametrize('anonymous', [True, False])
+def test_service_pause_resume_stores_valid_resolved_record_in_both_adapters(
+    kind: str,
+    anonymous: bool,
+) -> None:
+    from backend.core.auth import Principal
+    from backend.domain.models import StartSessionRequest
+    from backend.services.claims import pause_session, start_session
+
+    repository = _repository(kind)
+    now = datetime.now(UTC)
+    customer = 'anonymous:synthetic' if anonymous else 'cus_resume_probe'
+    claim = WorkingClaim(
+        claim_id='clm_resume_probe',
+        customer_id=customer,
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        claim_state=ClaimState(),
+        active_session_id='ses_resume_probe',
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Describe incident.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=now,
+        updated_at=now,
+    )
+    session = SessionRecord(
+        session_id='ses_resume_probe',
+        claim_id=claim.claim_id,
+        customer_id=customer,
+        status=SessionStatus.ACTIVE,
+        context_revision=1,
+        started_at=now,
+        last_active_at=now,
+    )
+    repository.create_claim(claim, session)
+    principal = Principal(
+        subject=customer,
+        actor_type='claimant',
+        auth_source='anonymous:browser_session' if anonymous else 'test',
+    )
+
+    pause_session(repository, principal, claim.claim_id, session.session_id, 'pause', '1')
+    (paused,) = repository.list_follow_ups(claim.claim_id, customer)
+    if anonymous:
+        assert paused.status is FollowUpStatus.BLOCKED
+        assert paused.blocked_reason is FollowUpReasonCode.CONTACT_NOT_AUTHORISED
+    else:
+        assert paused.status is FollowUpStatus.PENDING
+        assert paused.due_at is not None
+
+    resumed = start_session(
+        repository, principal, claim.claim_id, StartSessionRequest(intent='resume'), 'resume'
+    )
+
+    (stored,) = repository.list_follow_ups(claim.claim_id, customer)
+    # A fresh round-trip through the model must validate the persisted shape.
+    stored = FollowUpRecord.model_validate(stored.model_dump(mode='json'))
+    assert stored.status is FollowUpStatus.RESOLVED
+    assert stored.resolution_code is FollowUpResolutionCode.CLAIMANT_RESUMED
+    assert stored.blocked_reason is None
+    assert stored.due_at is None
+    assert stored.active_operation_id is None
+    current = repository.get_claim(claim.claim_id, customer)
+    assert current is not None
+    assert current.active_session_id == resumed.session_id
+    assert resumed.session_id != session.session_id
+    # No executable recovery work remains after resume.
+    due, _ = repository.list_due_follow_ups(now + timedelta(days=30), limit=10, cursor=None)
+    assert claim.claim_id not in {item.claim_id for item in due}

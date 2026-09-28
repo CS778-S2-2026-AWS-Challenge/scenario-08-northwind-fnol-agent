@@ -20,6 +20,7 @@ from backend.domain.models import (
     FollowUpOperationStatus,
     FollowUpReasonCode,
     FollowUpRecord,
+    FollowUpResolutionCode,
     FollowUpStatus,
     PreferredChannel,
     ResponsibleParty,
@@ -760,3 +761,99 @@ def test_retention_reservation_closes_follow_up_operation_reads(
         )
         == []
     )
+
+
+def _resume(repository: PersistenceRepository, claim: WorkingClaim, key: str):  # type: ignore[no-untyped-def]
+    from backend.core.auth import Principal
+    from backend.domain.models import StartSessionRequest
+    from backend.services.claims import start_session
+
+    principal = Principal(subject=claim.customer_id, actor_type='claimant', auth_source='test')
+    return start_session(
+        repository, principal, claim.claim_id, StartSessionRequest(intent='resume'), key
+    )
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongo'])
+def test_resume_before_deadline_makes_later_expiry_a_noop(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = _repository(kind)
+    claim, _, follow_up, interrupted_at = _checkpoint(repository)
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+    monkeypatch.setattr('backend.services.claims.now_utc', lambda: deadline - timedelta(seconds=1))
+
+    resumed = _resume(repository, claim, 'resume-before-deadline')
+
+    # The expiry worker still holds the stale open candidate; it must reload
+    # authoritative state and do nothing.
+    assert process_expiring_follow_up(repository, follow_up, deadline) is None
+    stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+    assert stored_claim is not None
+    assert stored_claim.terminal_disposition is None
+    assert stored_claim.active_session_id == resumed.session_id
+    stored = repository.get_follow_up(claim.claim_id, follow_up.follow_up_id, claim.customer_id)
+    assert stored is not None
+    assert stored.resolution_code is FollowUpResolutionCode.CLAIMANT_RESUMED
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongo'])
+def test_resume_at_deadline_loses_to_expiry_precedence(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.core.errors import ApiError
+
+    repository = _repository(kind)
+    claim, _, follow_up, interrupted_at = _checkpoint(repository)
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+    monkeypatch.setattr('backend.services.claims.now_utc', lambda: deadline)
+
+    with pytest.raises(ApiError) as denied:
+        _resume(repository, claim, 'resume-at-deadline')
+    assert denied.value.status_code == 409
+
+    stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+    assert stored_claim is not None
+    assert stored_claim.active_session_id is None
+    assert stored_claim.revision == claim.revision
+    stored = repository.get_follow_up(claim.claim_id, follow_up.follow_up_id, claim.customer_id)
+    assert stored is not None
+    assert stored.status is FollowUpStatus.PENDING
+    assert process_expiring_follow_up(repository, follow_up, deadline) is not None
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongo'])
+def test_expiry_committed_mid_resume_rejects_the_stale_resume(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.core.errors import ApiError
+
+    repository = _repository(kind)
+    claim, _, follow_up, interrupted_at = _checkpoint(repository)
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+    monkeypatch.setattr('backend.services.claims.now_utc', lambda: deadline - timedelta(seconds=1))
+    list_operations = repository.list_follow_up_operations
+    raced = {'done': False}
+
+    def expiry_commits_between_read_and_write(*args, **kwargs):  # type: ignore[no-untyped-def]
+        # Resume has read the open obligation; the expiry worker now commits.
+        if not raced['done']:
+            raced['done'] = True
+            assert process_expiring_follow_up(repository, follow_up, deadline) is not None
+        return list_operations(*args, **kwargs)
+
+    monkeypatch.setattr(
+        repository, 'list_follow_up_operations', expiry_commits_between_read_and_write
+    )
+
+    with pytest.raises(ApiError) as denied:
+        _resume(repository, claim, 'resume-racing-expiry')
+    assert denied.value.status_code == 409
+
+    stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+    assert stored_claim is not None
+    assert stored_claim.terminal_disposition is not None
+    assert stored_claim.active_session_id is None
+    stored = repository.get_follow_up(claim.claim_id, follow_up.follow_up_id, claim.customer_id)
+    assert stored is not None
+    assert stored.resolution_code is FollowUpResolutionCode.RECOVERY_EXPIRED
