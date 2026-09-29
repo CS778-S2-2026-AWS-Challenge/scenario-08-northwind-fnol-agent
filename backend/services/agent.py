@@ -130,6 +130,12 @@ DANGER_NEGATION_PATTERNS = (
         rf'\bno\s+longer\s+(?:in\s+)?{DANGER_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
+    re.compile(
+        r'\b(?:no\s+one|nobody|none(?:\s+of\s+us)?)\s+(?:is|are|was|were)\s+'
+        r'(?:(?:still|currently)\s+)?in\s+'
+        rf'(?:(?:still|continuing|immediate|ongoing)\s+)?{DANGER_STATE_PATTERN}\b',
+        re.IGNORECASE,
+    ),
 )
 HOME_RISK_NONE_PATTERNS = (
     re.compile(r'^(?:no|none|nope)[.!]?$', re.IGNORECASE),
@@ -543,7 +549,10 @@ def _safety_is_explicitly_clear(message_text: str) -> bool:
     injury_clear = any(pattern.search(message_text) for pattern in INJURY_NEGATION_PATTERNS)
     danger_clear = any(pattern.search(message_text) for pattern in DANGER_NEGATION_PATTERNS)
     scene_clear = any(pattern.search(message_text) for pattern in SAFETY_CLEAR_PATTERNS)
-    return injury_clear and (danger_clear or scene_clear)
+    signal_remains = _contains_unnegated_signal(
+        message_text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS
+    ) or _contains_unnegated_signal(message_text, DANGER_PATTERNS, DANGER_NEGATION_PATTERNS)
+    return injury_clear and (danger_clear or scene_clear) and not signal_remains
 
 
 def _controlled_requirement_value(field_code: str, message_text: str) -> Any | None:
