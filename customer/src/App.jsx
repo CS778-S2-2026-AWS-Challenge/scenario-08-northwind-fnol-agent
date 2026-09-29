@@ -253,13 +253,16 @@ function ClaimStartIcon({ name, className = '' }) {
 
 function ConversationStart({ onChoosePrompt }) {
   return (
-    <section className="conversation-start" aria-labelledby="conversation-start-title">
+    <section className="conversation-start" aria-labelledby="conversation-title">
       <div className="conversation-start-intro">
         <span className="conversation-start-shield" aria-hidden="true">
           <ClaimStartIcon name="shield" />
         </span>
         <div>
-          <h2 id="conversation-start-title">Let&apos;s get your claim started</h2>
+          <div className="conversation-start-title-row">
+            <h1 id="conversation-title">Let&apos;s get your claim started</h1>
+            <span className="conversation-start-status">Ready to start</span>
+          </div>
           <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
         </div>
       </div>
@@ -4156,19 +4159,19 @@ function App() {
                 )
               )}
             </div>
-            <div className="conversation-heading">
-              <div className="conversation-heading-main">
-                <div className="claim-heading-identity">
-                  {claim ? <span>Claim:</span> : null}
-                  <h1 id="conversation-title">{claim?.claim_id || 'New conversation'}</h1>
+            {claim && (
+              <div className="conversation-heading">
+                <div className="conversation-heading-main">
+                  <div className="claim-heading-identity">
+                    <span>Claim:</span>
+                    <h1 id="conversation-title">{claim.claim_id}</h1>
+                  </div>
                 </div>
-              </div>
-              <div className="claim-status">{claim
-                ? claim.external_claim?.creation_status === 'created'
+                <div className="claim-status">{claim.external_claim?.creation_status === 'created'
                   ? 'Claim created'
-                  : handoff ? 'Staff assistance active' : 'In progress'
-                : 'Ready to start'}</div>
-            </div>
+                  : handoff ? 'Staff assistance active' : 'In progress'}</div>
+              </div>
+            )}
 
             {claim && (
               <ClaimProgressDisclosure
