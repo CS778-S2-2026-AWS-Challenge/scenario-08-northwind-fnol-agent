@@ -1367,6 +1367,100 @@ def integration_headers(key: str, revision: int) -> dict[str, str]:
     }
 
 
+@pytest.mark.parametrize('decision', ['confirmed', 'rejected'])
+def test_evidence_participant_projection_requires_claimant_confirmation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    decision: str,
+) -> None:
+    created = create_claim(client, auth_headers, 'participant-evidence-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'participant', 1)
+    complete_upload(client, auth_headers, claim_id, evidence_id, 'participant', 2)
+    fields = {
+        'driver.name': 'Synthetic Driver',
+        'policyholder.name': 'Synthetic Policyholder',
+        'witness.name': 'Synthetic Witness',
+    }
+    processed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=integration_headers('participant-process', 3),
+        json={
+            'facts': [
+                {'field_code': code, 'value': value, 'confidence': 0.9}
+                for code, value in fields.items()
+            ]
+        },
+    )
+    assert processed.status_code == 200, processed.text
+    before = repository.get_claim_internal(claim_id)
+    assert before is not None
+    assert before.driver is None and before.policyholder is None and before.witnesses == []
+
+    route = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions'
+    headers = {**auth_headers, 'Idempotency-Key': 'participant-decision', 'If-Match': '4'}
+    payload = {'field_codes': list(fields), 'decision': decision}
+    decided = client.post(route, headers=headers, json=payload)
+    assert decided.status_code == 200, decided.text
+    replay = client.post(route, headers=headers, json=payload)
+    assert replay.json() == decided.json()
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None and stored.revision == 5
+    for code in fields:
+        assert stored.form[code].source_refs == [
+            evidence_id,
+            f'evidence:{evidence_id}:material:1',
+        ]
+    for role_route, role_headers in [
+        (f'/api/v1/claims/{claim_id}', auth_headers),
+        (f'/api/v1/workbench/claims/{claim_id}', staff_auth_headers),
+    ]:
+        response = client.get(role_route, headers=role_headers)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if decision == 'confirmed':
+            assert body['driver']['name'] == fields['driver.name']
+            assert body['policyholder']['name'] == fields['policyholder.name']
+            assert body['witnesses'][0]['name'] == fields['witness.name']
+            assert body['witnesses'][0]['witness_id'] == stored.witnesses[0].witness_id
+        else:
+            assert body['driver'] is None and body['policyholder'] is None
+            assert body['witnesses'] == []
+
+
+@pytest.mark.parametrize('code', ['driver.licence_number', 'other_party.policy_number'])
+def test_evidence_rejects_protected_participant_extraction_before_persistence(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    code: str,
+) -> None:
+    created = create_claim(client, auth_headers, 'protected-evidence-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'protected', 1)
+    complete_upload(client, auth_headers, claim_id, evidence_id, 'protected', 2)
+    before_claim = repository.get_claim_internal(claim_id)
+    before_evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    route = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
+    response = client.post(
+        route,
+        headers=integration_headers('protected-process', 3),
+        json={'facts': [{'field_code': code, 'value': 'SYNTHETIC-SECRET-123', 'confidence': 0.9}]},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()['error']['code'] == 'PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE'
+    assert 'SYNTHETIC-SECRET-123' not in response.text
+    assert repository.get_claim_internal(claim_id) == before_claim
+    assert repository.get_evidence(claim_id, evidence_id, 'cus_demo') == before_evidence
+    assert repository.find_idempotency('cus_demo', route, 'protected-process') is None
+
+
 def test_completion_transition_uses_storage_result_source(
     client: TestClient,
     auth_headers: dict[str, str],

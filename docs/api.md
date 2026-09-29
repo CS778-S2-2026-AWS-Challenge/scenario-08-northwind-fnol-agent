@@ -1115,6 +1115,27 @@ other-driver data never blocks initial capture. The generic form route rejects
 `other_party.policy_number`; callers must use the protected Motor other-driver route so the
 plaintext value never enters the generic form store.
 
+If a policy number is supplied without working protection, the service returns retryable
+`503 PROTECTED_DATA_UNAVAILABLE` before changing the participant, Claim revision, or successful
+idempotency result. Insurer-only and claim-reference-only submissions do not require protection.
+
+Participant form facts synchronize the Claim-scoped `policyholder`, `driver`, and first witness
+record through one service boundary before the existing atomic Claim write. This applies to
+form PATCH, accepted Agent form changes, form confirmation, and Evidence fact decisions.
+Only confirmed facts populate typed participant values; proposed, disputed, and unavailable
+changes remain in the form with their status and source/assertion history. They do not appear
+as settled values in typed participant projections. Corrections retain participant identity.
+A confirmed `witness.present=no` clears witness records; a later `yes` alone does not restore
+old contacts. Additional witness records retain their identities when the first is corrected.
+
+The form PATCH route accepts `driver.licence_number` only with confirmed status and working
+protection. It stores ciphertext in the driver record and masks the form value and assertion
+history before persistence. Unavailable protection returns the same safe retryable `503`.
+Agent and Evidence extraction writes for licence numbers or other-party policy numbers return
+`422 PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE`; these paths cannot persist raw protected facts.
+The raw-value input limit remains 120 characters; durable ciphertext has a separate 1024-character
+limit to accommodate encryption overhead. These changes do not select Agent questions.
+
 Contents association purposes are `proof_of_purchase`, `item_condition`, `repair_assessment`, and
 `authority_document`. Both item and Evidence must belong to the same owned Claim. Cross-Claim or
 inaccessible Evidence returns concealed `404`; a duplicate association returns `409` and does not

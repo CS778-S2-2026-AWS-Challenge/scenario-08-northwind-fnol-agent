@@ -9,6 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from backend.core.auth import Principal
+from backend.core.errors import ApiError
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     ActorReference,
@@ -18,6 +20,7 @@ from backend.domain.models import (
     ContentsEvidencePurpose,
     ContentsItem,
     ContentsItemEvidenceAssociation,
+    CreateMotorOtherDriverRequest,
     CustomerNextStep,
     EvidenceFileStatus,
     EvidenceRecord,
@@ -35,6 +38,12 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord
+from backend.services.claim_data import create_motor_other_driver
+from backend.services.protected_values import (
+    ProtectedValueError,
+    UnavailableProtectedValueAdapter,
+    protected_value_adapter_for,
+)
 
 
 def _create_claim(
@@ -178,9 +187,16 @@ def test_motor_other_driver_rejects_blank_text_without_any_mutation(
     assert repository.find_idempotency('cus_demo', route, idempotency_key) is None
 
 
-def test_motor_other_driver_accepts_insurer_only_detail(
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [('insurer_name', 'Synthetic Mutual'), ('claim_reference', 'SYNTHETIC-CLAIM-123')],
+)
+def test_motor_other_driver_accepts_non_policy_detail_without_protection(
     client: TestClient,
     auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    field: str,
+    value: str,
 ) -> None:
     claim = _create_claim(
         client,
@@ -188,18 +204,107 @@ def test_motor_other_driver_accepts_insurer_only_detail(
         incident_type='motor',
         key='motor-other-driver-insurer-only',
     )
-    response = client.post(
-        f'/api/v1/claims/{claim["claim_id"]}/motor-other-driver',
-        headers={
-            **auth_headers,
-            'Idempotency-Key': 'motor-other-driver-insurer-only-create',
-            'If-Match': str(claim['revision']),
-        },
-        json={'insurer_name': 'Synthetic Mutual'},
+    response = create_motor_other_driver(
+        repository,
+        Principal(subject='cus_demo', actor_type='claimant'),
+        claim['claim_id'],
+        CreateMotorOtherDriverRequest.model_validate({field: value}),
+        'motor-other-driver-non-policy-create',
+        str(claim['revision']),
     )
 
-    assert response.status_code == 201, response.text
-    assert response.json()['participant']['insurer_name'] == 'Synthetic Mutual'
+    assert response.participant.model_dump()[field] == value
+    assert response.participant.policy_number_masked is None
+    assert response.revision == claim['revision'] + 1
+
+
+@pytest.mark.parametrize('protection', ['omitted', 'unavailable', 'failure'])
+def test_motor_other_driver_policy_protection_fails_before_any_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    protection: str,
+) -> None:
+    class FailingProtection(UnavailableProtectedValueAdapter):
+        def seal(self, value: str) -> str:
+            raise ProtectedValueError(f'Unable to seal sensitive value {value}')
+
+    claim = _create_claim(
+        client, auth_headers, incident_type='motor', key='motor-policy-failure-claim'
+    )
+    before_claim = repository.get_claim_internal(claim['claim_id'])
+    before_children = deepcopy(repository._motor_other_drivers)
+    before_idempotency = deepcopy(repository._idempotency)
+    before_events = repository.replay_realtime_events(None, limit=1000)
+    adapters = {
+        'omitted': None,
+        'unavailable': UnavailableProtectedValueAdapter(),
+        'failure': FailingProtection(),
+    }
+    with pytest.raises(ApiError) as caught:
+        create_motor_other_driver(
+            repository,
+            Principal(subject='cus_demo', actor_type='claimant'),
+            claim['claim_id'],
+            CreateMotorOtherDriverRequest(policy_number='SYNTHETIC-POLICY-123'),
+            'motor-policy-failure',
+            str(claim['revision']),
+            adapters[protection],
+        )
+
+    assert caught.value.status_code == 503
+    assert caught.value.code == 'PROTECTED_DATA_UNAVAILABLE'
+    assert caught.value.retryable is True
+    assert 'SYNTHETIC-POLICY-123' not in str(caught.value)
+    assert caught.value.details is None
+    assert repository.get_claim_internal(claim['claim_id']) == before_claim
+    assert repository._motor_other_drivers == before_children
+    assert repository._idempotency == before_idempotency
+    assert repository.replay_realtime_events(None, limit=1000) == before_events
+
+
+@pytest.mark.parametrize(
+    'policy_number',
+    ['SYNTHETIC-POLICY-123', '\U0001f697' * 116 + '1234'],
+    ids=['short', 'maximum-unicode'],
+)
+def test_motor_other_driver_policy_is_encrypted_and_role_safe(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    policy_number: str,
+) -> None:
+    claim = _create_claim(
+        client, auth_headers, incident_type='motor', key='motor-policy-protected-claim'
+    )
+    route = f'/api/v1/claims/{claim["claim_id"]}/motor-other-driver'
+    headers = {
+        **auth_headers,
+        'Idempotency-Key': 'motor-policy-protected-create',
+        'If-Match': str(claim['revision']),
+    }
+    created = client.post(route, headers=headers, json={'policy_number': policy_number})
+    assert created.status_code == 201, created.text
+    replay = client.post(route, headers=headers, json={'policy_number': policy_number})
+    assert replay.json() == created.json()
+    stored = repository.get_motor_other_driver(claim['claim_id'], 'cus_demo')
+    assert stored is not None and stored.policy_number is not None
+    assert stored.policy_number != policy_number
+    assert protected_value_adapter_for('test').resolve(stored.policy_number) == policy_number
+    assert policy_number not in repr(repository._idempotency)
+    for path, role_headers in [
+        (route, auth_headers),
+        (f'/api/v1/claims/{claim["claim_id"]}', auth_headers),
+        (f'/api/v1/workbench/claims/{claim["claim_id"]}', staff_auth_headers),
+    ]:
+        response = client.get(path, headers=role_headers)
+        assert response.status_code == 200, response.text
+        projection = response.json() if path == route else response.json()['motor_other_driver']
+        assert projection['policy_number_masked'] == stored.policy_number_masked
+        assert 'policy_number' not in projection
+        assert policy_number not in response.text
+        assert stored.policy_number not in response.text
 
 
 def test_motor_other_driver_is_optional_and_rejected_outside_motor(

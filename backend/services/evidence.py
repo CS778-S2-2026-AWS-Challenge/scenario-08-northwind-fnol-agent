@@ -70,6 +70,10 @@ from backend.services.agent_evidence_actions import (
     execute_confirmed_evidence_action,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claim_participants import (
+    reject_unprotected_participant_fields,
+    synchronize_participants,
+)
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.support import (
     decode_cursor,
@@ -1328,6 +1332,7 @@ def complete_evidence_processing(
         return response
 
     field_codes = [fact.field_code for fact in payload.facts]
+    reject_unprotected_participant_fields(field_codes)
     invalid_codes = [code for code in field_codes if code not in REGISTERED_FIELD_CODES]
     if len(set(field_codes)) != len(field_codes) or invalid_codes:
         details = [
@@ -1442,6 +1447,7 @@ def complete_evidence_processing(
     updated_claim = _updated_claim(claim, _records_with(repository, claim, processed)).model_copy(
         update={'form': {**claim.form, **proposed_fields}}
     )
+    updated_claim = synchronize_participants(updated_claim, proposed_fields)
     response = EvidenceProcessingResponse(
         evidence_id=evidence_id,
         revision=updated_claim.revision,
@@ -1593,6 +1599,8 @@ def decide_evidence_facts(
     updated_claim = _updated_claim(claim, _records_with(repository, claim, decided)).model_copy(
         update={'form': {**claim.form, **updated_fields}}
     )
+    reject_unprotected_participant_fields(updated_fields)
+    updated_claim = synchronize_participants(updated_claim, updated_fields)
     response = EvidenceFactDecisionResponse(
         evidence_id=evidence_id,
         revision=updated_claim.revision,

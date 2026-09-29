@@ -47,7 +47,6 @@ from backend.domain.models import (
     NeededFor,
     PageInfo,
     PauseSessionResponse,
-    PolicyholderRecord,
     PreferredChannel,
     ProposedFormChange,
     ResponsibleParty,
@@ -58,7 +57,6 @@ from backend.domain.models import (
     StaffActionStatus,
     StartSessionRequest,
     StructuredFormField,
-    WitnessRecord,
     WorkflowState,
     WorkingClaim,
 )
@@ -84,6 +82,7 @@ from backend.services.claim_data import (
     project_contents_item_evidence_association,
     project_motor_other_driver,
 )
+from backend.services.claim_participants import synchronize_participants
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_current_action_projection
@@ -97,7 +96,11 @@ from backend.services.incomplete_claims import (
     find_incomplete_recovery,
     recovery_checkpoint_allowed,
 )
-from backend.services.protected_values import ProtectedValueAdapter, masked_value
+from backend.services.protected_values import (
+    ProtectedValueAdapter,
+    ProtectedValueError,
+    masked_value,
+)
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -1062,123 +1065,6 @@ def get_session(
     return _claimant_session(session, claim.customer_next_step)
 
 
-def _materialize_participant_records(
-    claim: WorkingClaim,
-    updated_fields: dict[str, StructuredFormField],
-    *,
-    protected_values: ProtectedValueAdapter | None,
-) -> tuple[
-    dict[str, StructuredFormField],
-    PolicyholderRecord | None,
-    DriverRecord | None,
-    list[WitnessRecord],
-]:
-    """Keep participant records authoritative when fields arrive through the form API."""
-    fields = {**claim.form, **updated_fields}
-
-    def value(code: str) -> object | None:
-        field = fields.get(code)
-        return None if field is None else field.value
-
-    policyholder = claim.policyholder
-    if value('policyholder.identity_ref') is not None or value('policyholder.name') is not None:
-        policyholder = PolicyholderRecord(
-            identity_ref=value('policyholder.identity_ref')
-            if value('policyholder.identity_ref') is not None
-            else (policyholder.identity_ref if policyholder else None),
-            name=value('policyholder.name')
-            if value('policyholder.name') is not None
-            else (policyholder.name if policyholder else None),
-        )
-
-    driver = claim.driver
-    licence_update = updated_fields.get('driver.licence_number')
-    raw_licence = licence_update.value if licence_update is not None else None
-    if any(
-        value(code) is not None
-        for code in (
-            'driver.identity_ref',
-            'driver.name',
-            'driver.phone',
-            'driver.email',
-            'driver.relationship_to_policyholder',
-            'driver.owner_permission',
-            'driver.licence_number',
-            'driver.licence_status',
-        )
-    ):
-        protected_licence: str | None
-        if raw_licence is not None:
-            if protected_values is None:
-                raise ValueError('Protected driver licence storage is not configured.')
-            assert licence_update is not None
-            protected_licence = protected_values.seal(str(raw_licence))
-            updated_fields['driver.licence_number'] = licence_update.model_copy(
-                update={'value': masked_value(str(raw_licence))}
-            )
-        else:
-            protected_licence = driver.licence_number if driver else None
-        driver = DriverRecord(
-            identity_ref=(
-                value('driver.identity_ref')
-                if value('driver.identity_ref') is not None
-                else (driver.identity_ref if driver else None)
-            ),
-            name=(
-                value('driver.name')
-                if value('driver.name') is not None
-                else (driver.name if driver else None)
-            ),
-            phone=(
-                value('driver.phone')
-                if value('driver.phone') is not None
-                else (driver.phone if driver else None)
-            ),
-            email=(
-                value('driver.email')
-                if value('driver.email') is not None
-                else (driver.email if driver else None)
-            ),
-            relationship_to_policyholder=value('driver.relationship_to_policyholder')
-            if value('driver.relationship_to_policyholder') is not None
-            else (driver.relationship_to_policyholder if driver else None),
-            owner_permission=value('driver.owner_permission')
-            if value('driver.owner_permission') is not None
-            else (driver.owner_permission if driver else None),
-            licence_number=protected_licence,
-            licence_number_masked=(
-                masked_value(str(raw_licence))
-                if raw_licence is not None
-                else (driver.licence_number_masked if driver else None)
-            ),
-            licence_status=value('driver.licence_status')
-            if value('driver.licence_status') is not None
-            else (driver.licence_status if driver else None),
-        )
-
-    witnesses = list(claim.witnesses)
-    if value('witness.present') == 'no':
-        witnesses = []
-    elif value('witness.present') == 'yes' or any(
-        value(code) is not None for code in ('witness.name', 'witness.phone', 'witness.email')
-    ):
-        current = witnesses[0] if witnesses else WitnessRecord(witness_id=new_id('wit'))
-        witnesses = [
-            WitnessRecord(
-                witness_id=current.witness_id,
-                name=value('witness.name') if value('witness.name') is not None else current.name,
-                phone=value('witness.phone')
-                if value('witness.phone') is not None
-                else current.phone,
-                email=value('witness.email')
-                if value('witness.email') is not None
-                else current.email,
-            ),
-            *witnesses[1:],
-        ]
-    return updated_fields, policyholder, driver, witnesses
-
-
 def update_form(
     repository: PersistenceRepository,
     principal: Principal,
@@ -1203,6 +1089,7 @@ def update_form(
 
     timestamp = now_utc()
     updated_fields: dict[str, StructuredFormField] = {}
+    protected_driver = claim.driver
     for update in payload.updates:
         if update.field_code not in REGISTERED_FIELD_CODES:
             raise ApiError(
@@ -1239,10 +1126,57 @@ def update_form(
                 details=[ErrorDetail(field=update.field_code, reason=str(error))],
             ) from error
         existing = claim.form.get(update.field_code)
+        value_changed = existing is not None and existing.value != update.value
+        if update.field_code == 'driver.licence_number':
+            if update.status is not FormStatus.CONFIRMED:
+                raise ApiError(
+                    status_code=422,
+                    code='VALIDATION_ERROR',
+                    message='The protected licence path accepts only confirmed values.',
+                )
+            raw_licence = str(update.value)
+            if len(raw_licence) > 120:
+                raise ApiError(
+                    status_code=422,
+                    code='VALIDATION_ERROR',
+                    message='The protected licence value exceeds its length limit.',
+                )
+            try:
+                if protected_values is None:
+                    raise ProtectedValueError('Protection unavailable.')
+                if protected_driver is not None and protected_driver.licence_number is not None:
+                    value_changed = (
+                        protected_values.resolve(protected_driver.licence_number)
+                        != raw_licence.strip()
+                    )
+                ciphertext = protected_values.seal(raw_licence)
+            except ProtectedValueError as error:
+                raise ApiError(
+                    status_code=503,
+                    code='PROTECTED_DATA_UNAVAILABLE',
+                    message='Protected participant data is temporarily unavailable.',
+                    retryable=True,
+                ) from error
+            # Mask before fact resolution creates assertion history or audit refs.
+            update = update.model_copy(
+                update={
+                    'value': masked_value(raw_licence),
+                    'correction_reason': 'Protected licence corrected.'
+                    if update.correction_reason is not None
+                    else None,
+                }
+            )
+            protected_driver = DriverRecord.model_validate(
+                {
+                    **(protected_driver.model_dump() if protected_driver else {}),
+                    'licence_number': ciphertext,
+                    'licence_number_masked': update.value,
+                }
+            )
         if (
             existing is not None
             and existing.status.value == 'confirmed'
-            and existing.value != update.value
+            and value_changed
             and update.correction_reason is None
         ):
             raise ApiError(
@@ -1281,28 +1215,12 @@ def update_form(
             explicit_correction=update.correction_reason is not None,
         )
 
-    try:
-        updated_fields, policyholder, driver, witnesses = _materialize_participant_records(
-            claim,
-            updated_fields,
-            protected_values=protected_values,
-        )
-    except ValueError as error:
-        raise ApiError(
-            status_code=422,
-            code='PROTECTED_DATA_UNAVAILABLE',
-            message='The protected participant value could not be stored.',
-            details=[ErrorDetail(field='driver.licence_number', reason=str(error))],
-        ) from error
-
     incident_type = _apply_product_family_transition(claim, updated_fields)
     projected_claim = claim.model_copy(
         update={
             'form': {**claim.form, **updated_fields},
             'incident_type': incident_type,
-            'policyholder': policyholder,
-            'driver': driver,
-            'witnesses': witnesses,
+            'driver': protected_driver,
             'payment_destination_id': (
                 None
                 if 'claimant.contact_preference' in updated_fields
@@ -1310,6 +1228,7 @@ def update_form(
             ),
         }
     )
+    projected_claim = synchronize_participants(projected_claim, updated_fields)
     candidate_branch_evaluation = BranchRuleEvaluator().evaluate(
         projected_claim,
         current_action=claim.claim_state.next_action,
@@ -1543,6 +1462,7 @@ def confirm_form_fields(
             'updated_at': timestamp,
         }
     )
+    updated_claim = synchronize_participants(updated_claim, confirmed_fields)
     updated_claim = apply_progress(
         updated_claim,
         BranchRuleEvaluator().evaluate(

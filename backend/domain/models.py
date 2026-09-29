@@ -709,7 +709,7 @@ class MotorOtherDriverRecord(ContractModel):
     email: StrippedNonEmptyText | None = Field(default=None, min_length=3, max_length=254)
     vehicle_registration: StrippedNonEmptyText | None = Field(default=None, max_length=40)
     insurer_name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
-    policy_number: StrippedNonEmptyText | None = Field(default=None, max_length=120)
+    policy_number: StrippedNonEmptyText | None = Field(default=None, max_length=1024)
     policy_number_masked: str | None = Field(default=None, max_length=40)
     claim_reference: StrippedNonEmptyText | None = Field(default=None, max_length=120)
     source_refs: list[str] = Field(default_factory=list, max_length=10)
@@ -1060,7 +1060,7 @@ class DriverRecord(ContractModel):
     email: StrippedNonEmptyText | None = Field(default=None, max_length=254)
     relationship_to_policyholder: str | None = Field(default=None, max_length=80)
     owner_permission: str | None = Field(default=None, max_length=40)
-    licence_number: StrippedNonEmptyText | None = Field(default=None, max_length=120)
+    licence_number: StrippedNonEmptyText | None = Field(default=None, max_length=1024)
     licence_number_masked: str | None = Field(default=None, max_length=40)
     licence_status: str | None = Field(default=None, max_length=40)
 

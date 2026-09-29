@@ -25,7 +25,11 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
-from backend.services.protected_values import ProtectedValueAdapter, masked_value
+from backend.services.protected_values import (
+    ProtectedValueAdapter,
+    ProtectedValueError,
+    masked_value,
+)
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -161,16 +165,25 @@ def create_motor_other_driver(
 
     timestamp = now_utc()
     raw_policy_number = payload.policy_number
+    protected_policy_number = None
+    if raw_policy_number is not None:
+        try:
+            if protected_values is None:
+                raise ProtectedValueError('Protected data is not configured.')
+            protected_policy_number = protected_values.seal(raw_policy_number)
+        except ProtectedValueError as error:
+            raise ApiError(
+                status_code=503,
+                code='PROTECTED_DATA_UNAVAILABLE',
+                message='Protected Claim data is temporarily unavailable.',
+                retryable=True,
+            ) from error
     record = MotorOtherDriverRecord(
         participant_id=new_id('par'),
         claim_id=claim_id,
         customer_id=principal.subject,
         **payload.model_dump(exclude={'policy_number'}),
-        policy_number=(
-            protected_values.seal(raw_policy_number)
-            if raw_policy_number is not None and protected_values is not None
-            else raw_policy_number
-        ),
+        policy_number=protected_policy_number,
         policy_number_masked=(
             masked_value(raw_policy_number) if raw_policy_number is not None else None
         ),
