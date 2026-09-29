@@ -4141,23 +4141,26 @@ function App() {
                 )
               )}
               {workspaceView === 'agreement' && (
-                <AgreementConfirmationPanel
-                  claim={claim}
-                  busy={isBusy}
-                  status={status}
-                  submissionError={
-                    agreementSubmissionError?.claimId === claim?.claim_id
-                      ? agreementSubmissionError
-                      : null
-                  }
-                  onSubmit={submitAgreementAndCreate}
+                <>
+                  {agreementSubmissionError?.claimId === claim?.claim_id && (
+                    <div className="claim-history-state is-error" role="alert">
+                      <h2>{agreementSubmissionError.title}</h2>
+                      <p>{agreementSubmissionError.message}</p>
+                    </div>
+                  )}
+                  <AgreementConfirmationPanel
+                    claim={claim}
+                    busy={isBusy}
+                    status={status}
+                    onSubmit={submitAgreementAndCreate}
                   onReviewInformation={() => {
                     setDetailsOpen(true)
                     setDetailsTab('summary')
                     setWorkspaceView('chat')
                   }}
-                  onReturnToConversation={() => setWorkspaceView('chat')}
-                />
+                    onReturnToConversation={() => setWorkspaceView('chat')}
+                  />
+                </>
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
