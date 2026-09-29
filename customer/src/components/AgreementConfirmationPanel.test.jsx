@@ -133,4 +133,31 @@ describe('AgreementConfirmationPanel', () => {
     fireEvent.click(retry)
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
+  it('announces a visible submission error and keeps retry available', () => {
+    render(
+      <AgreementConfirmationPanel
+        claim={claim}
+        busy={false}
+        status="error"
+        submissionError={{
+          kind: 'network',
+          title: 'Submission interrupted',
+          message: 'Check your connection and try again. This screen does not show your Claim as created.',
+        }}
+        onSubmit={vi.fn()}
+        onReviewInformation={vi.fn()}
+        onReturnToConversation={vi.fn()}
+      />,
+    )
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toBeVisible()
+    expect(alert).toHaveTextContent('Submission interrupted')
+    expect(alert).toHaveTextContent('This screen does not show your Claim as created.')
+    expect(alert).toHaveFocus()
+
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(screen.getByRole('button', { name: 'Submit claim' }).disabled).toBe(false)
+  })
+
 })
