@@ -1246,7 +1246,7 @@ describe('claimant intake projection', () => {
     messageList.scrollTop = 0
     fireEvent.scroll(messageList)
 
-    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'It happened at 8pm.')
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'It happened at 8pm.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await screen.findByText('Thank you. I have recorded the incident time.')).toBeVisible()
@@ -1956,7 +1956,7 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
     await user.type(
-      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
+      screen.getByPlaceholderText('Write the details you know...'),
       'One more detail after returning.',
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2018,7 +2018,7 @@ describe('claimant intake projection', () => {
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
-    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'Retry this detail safely.')
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'Retry this detail safely.')
 
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Reconciliation unavailable.')
@@ -2083,7 +2083,7 @@ describe('claimant intake projection', () => {
     }
 
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
-    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), pendingText)
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), pendingText)
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(responseIsLost ? 2 : 1))
 
@@ -2345,7 +2345,7 @@ describe('claimant intake projection', () => {
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
     await screen.findByText(initialClaim.claim_id)
 
-    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'The water is now turned off.')
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await screen.findByText('Thanks, I recorded that update.')).toBeVisible()
@@ -2444,7 +2444,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
     await screen.findByText('Claim resumed')
-    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'The water is now turned off.')
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await screen.findByText('Thanks, I recorded that update.')
 
@@ -2786,7 +2786,7 @@ describe('claimant intake projection', () => {
     await screen.findByText(agentMessage.content.text)
 
     await user.type(
-      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
+      screen.getByPlaceholderText('Write the details you know...'),
       newerClaimantMessage.content.text,
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2812,7 +2812,7 @@ describe('claimant intake projection', () => {
     })
 
     await user.type(
-      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
+      screen.getByPlaceholderText('Write the details you know...'),
       'One more conflicting update.',
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -3272,8 +3272,30 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(await screen.findByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Write the details you know...')).toBeVisible()
+    expect(screen.queryByPlaceholderText('Write what happened, or choose a prompt above…'))
+      .not.toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: /Review claim details/i }))
     expect(screen.getByText('2 to review')).toBeInTheDocument()
+
+    const historyView = screen.getByRole('button', { name: 'History' })
+    const chatView = screen.getByRole('button', { name: 'Chat' })
+    const detailsView = screen.getByRole('button', { name: 'Details' })
+    expect(detailsView).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true')
+
+    await user.click(screen.getByRole('tab', { name: 'What to provide' }))
+    expect(screen.getByRole('tabpanel', { name: 'What to provide' })).toBeInTheDocument()
+
+    await user.click(chatView)
+    expect(chatView).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+
+    await user.click(historyView)
+    expect(historyView).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Profile and preferences' })).toBeInTheDocument()
   })
 
   it('uses the claimant-safe Incident type label in the details review', async () => {
@@ -3557,7 +3579,7 @@ describe('claimant intake projection', () => {
     ))
 
     await user.type(
-      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
+      screen.getByPlaceholderText('Write the details you know...'),
       newerClaimantMessage.content.text,
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -4521,13 +4543,13 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    await screen.findByPlaceholderText('Write what happened, or choose a prompt above…')
+    await screen.findByPlaceholderText('Write the details you know...')
     // Evidence sent on an earlier message is historical: it must never sit
     // in the composer tray as if it were staged to ride the next message.
     expect((await screen.findByText('already-sent.jpg')).closest('.user-bubble')).not.toBeNull()
     expect(container.querySelector('.composer-attachments')).not.toBeInTheDocument()
 
-    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'One more detail.')
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'One more detail.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))

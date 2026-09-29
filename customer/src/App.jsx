@@ -4417,7 +4417,9 @@ function App() {
                   : null}
               placeholder={assistanceState?.key === 'response_needed'
                 ? 'Reply to Northwind staff...'
-                : 'Write what happened, or choose a prompt above…'}
+                : isNewConversationEmpty
+                  ? 'Write what happened, or choose a prompt above…'
+                  : 'Write the details you know...'}
               buttonLabel={status === 'sending'
                 ? 'Sending...'
                 : failedMessage

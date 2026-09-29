@@ -1889,8 +1889,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   .intake-history { padding-inline: var(--space-2); }
   .intake-history-top, .intake-history-label, .intake-history-meta, .intake-profile-copy { display: none; }
   .intake-profile { grid-template-columns: 1fr; gap: 0; justify-items: center; padding: 0; }
-  .intake-details-panel,
-  .details-reopen { display: none; }
+  .intake-details-panel { grid-column: 1 / -1; border-top: var(--border-region); border-left: 0; }
 }
 
 @media (max-width: 640px) {
@@ -1984,10 +1983,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   .document-group-heading { align-items: flex-start; }
   .document-card-actions .document-upload-action { width: 100%; }
   .external-capabilities-trigger { align-items: flex-start; }
-  .mobile-intake-tabs,
-  .intake-history.mobile-view-history,
-  .intake-details-panel.mobile-view-details:not(.is-collapsed) { display: none; }
-  .intake-page .conversation-panel { display: flex; }
   .conversation-start { gap: var(--space-5); margin-top: 0; }
   .conversation-start-intro { gap: var(--space-3); }
 }
