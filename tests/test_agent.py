@@ -17,6 +17,7 @@ from backend.services.agent import (
     InvariantGuardedAgent,
     _controlled_requirement_value,
     authorised_state_changes,
+    detect_safety_interrupt,
     validate_proposal,
 )
 
@@ -98,6 +99,33 @@ def test_home_risk_parser_does_not_invert_negated_safety_conditions(
     expected: str | None,
 ) -> None:
     assert _controlled_requirement_value('property.ongoing_risk', message_text) == expected
+
+
+@pytest.mark.parametrize(
+    ('message_text', 'urgent'),
+    [
+        ('No one is injured and nobody is in immediate danger.', False),
+        ('None of us are in immediate danger.', False),
+        ('Nobody was in continuing danger.', False),
+        ('Nobody is hurt, but we are still in immediate danger.', True),
+        ('We are in immediate danger.', True),
+    ],
+)
+def test_safety_interrupt_treats_negated_danger_subjects_as_negated(
+    message_text: str,
+    urgent: bool,
+) -> None:
+    interrupt = detect_safety_interrupt(
+        AgentTurnContext(
+            claim=make_claim(),
+            session_id='ses_agent',
+            trigger_message_id='msg_safety',
+            message_text=message_text,
+            evidence_refs=[],
+        )
+    )
+
+    assert (interrupt is not None and interrupt.kind == 'urgent_safety') is urgent
 
 
 def test_action_registry_defines_every_action_and_separates_tools_from_semantics() -> None:

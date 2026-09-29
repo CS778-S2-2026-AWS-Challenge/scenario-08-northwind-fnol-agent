@@ -130,6 +130,12 @@ DANGER_NEGATION_PATTERNS = (
         rf'\bno\s+longer\s+(?:in\s+)?{DANGER_STATE_PATTERN}\b',
         re.IGNORECASE,
     ),
+    re.compile(
+        r'\b(?:no\s+one|nobody|none(?:\s+of\s+us)?)\s+(?:is|are|was|were)\s+'
+        r'(?:(?:still|currently)\s+)?in\s+'
+        rf'(?:(?:still|continuing|immediate|ongoing)\s+)?{DANGER_STATE_PATTERN}\b',
+        re.IGNORECASE,
+    ),
 )
 HOME_RISK_NONE_PATTERNS = (
     re.compile(r'^(?:no|none|nope)[.!]?$', re.IGNORECASE),
