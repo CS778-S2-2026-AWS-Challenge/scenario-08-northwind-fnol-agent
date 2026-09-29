@@ -1,0 +1,46 @@
+"""CLI wrapper scripts/start-dev.ps1 calls to fetch dev model credentials.
+
+The fetch and parse logic itself lives in backend/core/dev_secrets.py, a config-layer
+integration point alongside config/model-runtime-bindings.json; this script only resolves
+the bearer token (a developer's own GitHub identity by default), calls that function, and
+prints the result as JSON on stdout so the PowerShell launcher can consume it without owning
+any of this logic.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from backend.core.dev_secrets import (
+    configured_model_credential_names,
+    fetch_dev_model_secrets,
+    resolve_secrets_token,
+)
+
+
+def main() -> int:
+    try:
+        token = resolve_secrets_token()
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    try:
+        secrets = fetch_dev_model_secrets(token)
+    except Exception as error:  # surfaced to the developer as a plain message
+        print(str(error), file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                'secrets': secrets,
+                'configured_credential_names': configured_model_credential_names(),
+            }
+        )
+    )
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
