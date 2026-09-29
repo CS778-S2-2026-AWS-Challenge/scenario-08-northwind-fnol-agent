@@ -334,6 +334,37 @@ describe('ClaimAutoFillPanel', () => {
     expect(container.querySelector('.claim-autofill-inline')).not.toBeInTheDocument()
   })
 
+  it.each(['proposed', 'confirmed'])(
+    'does not automatically apply a sole asset to an incompatible %s Claim family',
+    async (status) => {
+      const asset = {
+        asset_id: 'ase_11111111111111111111',
+        asset_type: 'vehicle',
+        display_name: 'Family SUV',
+        details: { registration: 'ABC123' },
+        revision: 2,
+      }
+      api.getClaimAutoFillSuggestions.mockResolvedValue(manifest([
+        suggestion('saved_assets', { action: 'select_asset' }),
+      ]))
+      api.listAccountAssets.mockResolvedValue(page([asset]))
+
+      const { container } = renderPanel({
+        claim: {
+          ...claim,
+          form: {
+            'claim.product_family': { value: 'home', status },
+            'property.address': { value: '1 Reported Road', status },
+          },
+        },
+      })
+
+      await waitFor(() => expect(api.listAccountAssets).toHaveBeenCalled())
+      expect(api.selectClaimAsset).not.toHaveBeenCalled()
+      expect(container.querySelector('.claim-autofill-inline')).not.toBeInTheDocument()
+    },
+  )
+
   it('keeps confirmation-only categories out of the conversation until their workflow step', async () => {
     api.getClaimAutoFillSuggestions.mockResolvedValue(manifest([
       suggestion('personal_details', { action: 'review_and_confirm' }),

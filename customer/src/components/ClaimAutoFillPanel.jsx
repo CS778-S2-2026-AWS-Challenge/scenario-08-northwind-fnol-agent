@@ -60,6 +60,17 @@ function claimAlreadyHasAssetData(claim, assets) {
   })
 }
 
+function assetMatchesClaimProductFamily(claim, asset) {
+  const productFamily = claim.form?.['claim.product_family']
+  if (!hasFieldValue(productFamily)) return true
+  const assetProductFamily = {
+    vehicle: 'motor',
+    property: 'home',
+    contents: 'contents',
+  }[asset.asset_type]
+  return productFamily.value === assetProductFamily
+}
+
 function policyLabel(policy) {
   return `Policy ${maskPolicyNumber(policy.policy_number)}`
 }
@@ -241,11 +252,16 @@ export default function ClaimAutoFillPanel({
     if (!resources.policyError && resources.policies.length === 1 && !policyApplied) {
       return { kind: 'policy', record: resources.policies[0] }
     }
-    if (!resources.assetError && resources.assets.length === 1 && !assetApplied) {
+    if (
+      !resources.assetError
+      && resources.assets.length === 1
+      && !assetApplied
+      && assetMatchesClaimProductFamily(claim, resources.assets[0])
+    ) {
       return { kind: 'asset', record: resources.assets[0] }
     }
     return null
-  }, [assetApplied, policyApplied, resources])
+  }, [assetApplied, claim, policyApplied, resources])
 
   const choice = useMemo(() => {
     if (automaticSelection || resources.status !== 'ready') return null
