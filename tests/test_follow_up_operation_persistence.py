@@ -447,6 +447,7 @@ def _seed(repository: Any) -> tuple[WorkingClaim, FollowUpRecord]:
                 **follow_up.model_dump(mode='json'),
                 '_id': 'follow_up:' + follow_up.follow_up_id,
                 'record_type': 'follow_up',
+                'recovery_discovery_ready': True,
                 'customer_id': claim.customer_id,
             }
         )
@@ -909,8 +910,12 @@ def test_backfill_then_paginate_mixed_offsets_and_fractional_times(
         ) == timedelta(days=7)
 
 
-def test_unmigratable_follow_up_is_quarantined_without_blocking_healthy_expiry(
+@pytest.mark.parametrize('field', ['due_at', 'deadline_at'])
+@pytest.mark.parametrize('source_problem', ['missing', 'contradictory'])
+def test_unmigratable_follow_up_is_isolated_and_reenters_after_source_repair(
     monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    source_problem: str,
 ) -> None:
     repository = MongoDBRepository(mongomock.MongoClient(), 'recovery_isolation')
     healthy = _follow_up()
@@ -930,6 +935,20 @@ def test_unmigratable_follow_up_is_quarantined_without_blocking_healthy_expiry(
             'recovery_context': {'interrupted_at': healthy.created_at.isoformat()},
         }
     )
+    for index, reason in enumerate([None, 'contact_not_authorised', 'attempt_limit_reached']):
+        document = healthy.model_dump(mode='json')
+        document.update(
+            _id=f'follow_up:fup_healthy_{index}',
+            follow_up_id=f'fup_healthy_{index}',
+            claim_id=f'clm_healthy_{index}',
+            record_type='follow_up',
+            recovery_discovery_ready=True,
+        )
+        if reason is not None:
+            document.update(status='blocked', blocked_reason=reason, due_at=None)
+            if reason == 'contact_not_authorised':
+                document.update(contact_permission='not_authorised', channel=None)
+        repository._collection.insert_one(document)
     legacy = healthy.model_dump(mode='json')
     legacy.update(
         {
@@ -938,13 +957,22 @@ def test_unmigratable_follow_up_is_quarantined_without_blocking_healthy_expiry(
             'follow_up_id': 'fup_unmigratable',
             'claim_id': 'clm_other',
             'source_session_id': 'ses_missing',
-            'status': 'blocked',
-            'contact_permission': 'not_authorised',
-            'due_at': None,
+            'due_at': healthy.created_at.isoformat(),
             'deadline_at': '2026-09-16T01:00:00+00:00',
         }
     )
     repository._collection.insert_one(legacy)
+    source = {
+        '_id': 'session:ses_missing',
+        'record_type': 'session',
+        'session_id': 'ses_missing',
+        'claim_id': 'clm_other',
+        'recovery_context': {
+            'interrupted_at': (healthy.created_at + timedelta(days=1)).isoformat()
+        },
+    }
+    if source_problem == 'contradictory':
+        repository._collection.insert_one(source)
     transaction = MagicMock()
     transaction.__enter__.return_value = transaction
     transaction.with_transaction.side_effect = lambda callback: callback(None)
@@ -963,12 +991,105 @@ def test_unmigratable_follow_up_is_quarantined_without_blocking_healthy_expiry(
     assert stored['recovery_discovery_ready'] is False
     assert stored['recovery_migration_reason'] == 'source_state_inconsistent'
     assert healthy.deadline_at is not None
-    assert [
-        item.follow_up_id
-        for item in repository.list_expiring_follow_ups(
-            healthy.deadline_at + timedelta(days=1), limit=10
+    assert {key: stored[key] for key in legacy} == legacy
+    blocked = repository._model_from_document(stored, FollowUpRecord)
+    assert blocked is not None and blocked.status is FollowUpStatus.BLOCKED
+    assert blocked.due_at is None and blocked.deadline_at is None
+    with pytest.raises(ValueError, match='migration repair'):
+        repository._put('follow_up', blocked.follow_up_id, blocked, claim_id=blocked.claim_id)
+    with pytest.raises(ValueError, match='migration repair'):
+        repository.save_follow_up_operation(
+            _operation().model_copy(
+                update={'claim_id': blocked.claim_id, 'follow_up_id': blocked.follow_up_id}
+            )
         )
-    ] == [healthy.follow_up_id]
+    query = (
+        repository.list_due_follow_ups if field == 'due_at' else repository.list_expiring_follow_ups
+    )
+    cutoff = healthy.deadline_at + timedelta(days=1)
+
+    def pages() -> list[str]:
+        cursor = None
+        identifiers: list[str] = []
+        # A page must never preflight the entire collection with find_one.
+        with monkeypatch.context() as context:
+            context.setattr(
+                repository._collection,
+                'find_one',
+                lambda *args, **kwargs: pytest.fail('Unexpected per-page compatibility probe'),
+            )
+            for _ in range(8):
+                page = query(cutoff, limit=1, cursor=cursor)
+                if not page:
+                    return identifiers
+                item = page[0]
+                identifiers.append(item.follow_up_id)
+                cursor = (getattr(item, field), item.follow_up_id)
+        pytest.fail('Pagination did not terminate')
+
+    expected = ['fup_healthy_0']
+    if field == 'deadline_at':
+        expected += ['fup_healthy_1', 'fup_healthy_2']
+    expected += [healthy.follow_up_id]
+    assert pages() == expected
+    source['recovery_context'] = {'interrupted_at': healthy.created_at.isoformat()}
+    repository._collection.replace_one({'_id': source['_id']}, source, upsert=True)
+    report = backfill_follow_ups(repository._collection, apply=True)
+    assert report['rejected'] == []
+    assert report['applied'] == ['fup_unmigratable']
+    assert pages() == [*expected, 'fup_unmigratable']
+    assert backfill_follow_ups(repository._collection, apply=True)['candidate_count'] == 0
+
+
+def test_quarantine_prevents_stale_reserved_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'quarantine_commit')
+    monkeypatch.setattr(repository, '_atomic', lambda callback: callback(None))
+    bundle = _commit_bundle(repository)
+    operation, _, previous, _, claim, idem, _ = bundle
+    repository._collection.update_one(
+        {'_id': 'follow_up:' + previous.follow_up_id},
+        {
+            '$set': {
+                'recovery_discovery_ready': False,
+                'recovery_migration_reason': 'source_state_inconsistent',
+            }
+        },
+    )
+    before = list(repository._collection.find())
+    with pytest.raises(ValueError, match='migration repair'):
+        repository.commit_follow_up_operation(*bundle)
+    assert list(repository._collection.find()) == before
+    assert repository.get_follow_up_operation(operation.operation_id) == operation
+    assert repository.find_idempotency(idem.actor_id, idem.route, idem.key) is None
+    stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+    assert stored_claim is not None and stored_claim.revision == 2
+
+
+@pytest.mark.parametrize(
+    'reason',
+    [FollowUpReasonCode.SOURCE_STATE_INCONSISTENT, FollowUpReasonCode.POLICY_BINDING_INVALID],
+)
+def test_unsafe_blocked_obligation_is_not_expiry_candidate(
+    recovery_repository: Any,
+    reason: FollowUpReasonCode,
+) -> None:
+    repository = recovery_repository
+    claim, original = _seed(repository)
+    blocked = original.model_copy(
+        update={'status': FollowUpStatus.BLOCKED, 'blocked_reason': reason, 'due_at': None}
+    )
+    if isinstance(repository, FixtureRepository):
+        repository._follow_ups[blocked.follow_up_id] = blocked
+    else:
+        repository._put(
+            'follow_up',
+            blocked.follow_up_id,
+            blocked,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+        )
+    assert original.deadline_at is not None
+    assert repository.list_expiring_follow_ups(original.deadline_at, limit=1) == []
 
 
 def _follow_up() -> FollowUpRecord:
@@ -1102,6 +1223,7 @@ def test_mongo_due_deadline_and_operation_contracts() -> None:
             **follow_up.model_dump(mode='json'),
             '_id': 'follow_up:fup_operation_test',
             'record_type': 'follow_up',
+            'recovery_discovery_ready': True,
             'claim_id': follow_up.claim_id,
             'customer_id': 'cus_operation_test',
         }

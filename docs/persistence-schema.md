@@ -1412,11 +1412,14 @@ does not introduce a generic Inbox or Outbox, and ExternalTask keeps its existin
 reconciliation authority.
 
 Follow-up due/deadline JSON timestamps use UTC with exactly six fractional digits and a
-Z suffix. Writes, backfill, cutoffs and cursors share this serialization. Run backfill before
-enabling discovery over legacy records. Mongo discovery explicitly rejects alternate non-null
-ordering representations on open records instead of silently returning an incomplete page.
-This read-only compatibility check can scan the open-record index; candidate retrieval itself
-retains its bounded indexed query.
+Z suffix. Writes, backfill, cutoffs and cursors share this serialization. Mongo pages require
+adapter metadata `recovery_discovery_ready=true`. New authoritative writes set this marker;
+legacy records, including canonical records, require source-validated backfill first. The
+indexes `follow_up_due_ready_ordered` and `follow_up_deadline_ready_ordered` use
+`(record_type, recovery_discovery_ready, status, due_at|deadline_at, _id)` with the existing
+open-status partial filters. Each page uses an equality/range query and limit, without a
+global compatibility probe or regex fallback. Old index names can coexist during rollout;
+this slice does not drop indexes. An empty page is not proof that migration backlog is healthy.
 
 The claimant and Workbench projections expose the persisted Follow-up deadline; Workbench also
 exposes the authoritative attempt count. Retention cleanup remains a separate cross-store
@@ -1425,13 +1428,19 @@ schema records the approved policy/source coordinates and execution progress onl
 consumer supplies the approved classification/hold decisions; this slice does not choose
 retention policy or implement destructive cleanup and access closure.
 
-The current discovery contract supersedes the legacy compatibility wording above: routine pages
-use the record-level `recovery_discovery_ready` marker and never perform a collection-wide scan.
-Canonical legacy records remain pageable while migration is pending. Missing or contradictory
-source records are quarantined with `policy_binding_invalid` or `source_state_inconsistent`,
-preserving raw timestamps, bindings, and source references; the migration report identifies the
-repair owner. A repaired record re-enters discovery only after authoritative backfill clears the
-quarantine marker.
+Missing or contradictory source records are quarantined with adapter-only
+`recovery_migration_reason=policy_binding_invalid|source_state_inconsistent` and readiness false.
+Raw timestamps, bindings, source references, and audit evidence remain unchanged. Repository
+reads expose the existing blocked reason with no executable schedule or authoritative deadline;
+normal replacement is rejected to preserve raw evidence. Reservation and commit both require
+readiness; discovery never grants execution authority. Fixture uses the same blocked reasons
+to exclude unsafe obligations. Valid contact-blocked and exhausted obligations remain eligible
+for expiry. No new domain state, external API field, or operation store is introduced.
+
+The backend data operator owns reconciliation: retain the migration report, restore missing
+source evidence or correct contradictory data only from approved original evidence, then run
+dry-run and apply again. Apply revalidates source and target before setting readiness true and
+clearing the migration reason. No automatic deadline guess or source recreation is permitted.
 
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
 read-only by default, derives the deadline only from the source Session's persisted interruption
@@ -1441,7 +1450,9 @@ a deadline from the migration execution time, deployment time, or current wall c
 Missing and explicit-null fields are eligible; compatible non-null bindings are preserved.
 Existing offset/variable-precision due/deadline strings are normalized without changing their
 instants, including records whose policy binding is already complete. Canonical records are
-not rewritten on repeat runs. Contradictory bindings/deadlines are rejected unchanged.
+not rewritten on repeat runs after readiness is established. Contradictory bindings/deadlines
+are rejected with only quarantine metadata added by an exact-target conditional update. Reports
+include typed reason and repair owner, and the CLI exits nonzero for rejected/conflicting rows.
 Apply requires Mongo transactions:
 an exact-source conditional write fence and target CAS commit together. The Session's
 adapter-only `recovery_backfill_fence` counter changes no domain revision or interruption

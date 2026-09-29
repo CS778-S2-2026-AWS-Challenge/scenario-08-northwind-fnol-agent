@@ -110,7 +110,7 @@ from backend.domain.recovery import (
     validate_follow_up_transition,
     validate_retention_transition,
 )
-from backend.domain.recovery_time import RECOVERY_TIMESTAMP_PATTERN, recovery_timestamp
+from backend.domain.recovery_time import recovery_timestamp
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
     PolicyRetrievalRecord,
@@ -469,11 +469,12 @@ class MongoDBRepository:
         self._collection.create_index(
             [
                 ('record_type', 1),
+                ('recovery_discovery_ready', 1),
                 ('status', 1),
                 ('due_at', 1),
                 ('_id', 1),
             ],
-            name='follow_up_due_ordered',
+            name='follow_up_due_ready_ordered',
             partialFilterExpression={
                 'record_type': 'follow_up',
                 'status': FollowUpStatus.PENDING.value,
@@ -482,11 +483,12 @@ class MongoDBRepository:
         self._collection.create_index(
             [
                 ('record_type', 1),
+                ('recovery_discovery_ready', 1),
                 ('status', 1),
                 ('deadline_at', 1),
                 ('_id', 1),
             ],
-            name='follow_up_deadline_ordered',
+            name='follow_up_deadline_ready_ordered',
             partialFilterExpression={
                 'record_type': 'follow_up',
                 'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
@@ -2326,12 +2328,9 @@ class MongoDBRepository:
             raise ValueError('Follow-up query limit must be positive.')
         query: dict[str, Any] = {
             'record_type': 'follow_up',
-            'recovery_discovery_ready': {'$ne': False},
+            'recovery_discovery_ready': True,
             'status': FollowUpStatus.PENDING.value,
-            'due_at': {
-                '$regex': RECOVERY_TIMESTAMP_PATTERN,
-                '$lte': recovery_timestamp(due_before),
-            },
+            'due_at': {'$lte': recovery_timestamp(due_before)},
         }
         if cursor is not None:
             query['$and'] = [
@@ -2368,12 +2367,9 @@ class MongoDBRepository:
             raise ValueError('Follow-up query limit must be positive.')
         query: dict[str, Any] = {
             'record_type': 'follow_up',
-            'recovery_discovery_ready': {'$ne': False},
+            'recovery_discovery_ready': True,
             'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
-            'deadline_at': {
-                '$regex': RECOVERY_TIMESTAMP_PATTERN,
-                '$lte': recovery_timestamp(deadline_before),
-            },
+            'deadline_at': {'$lte': recovery_timestamp(deadline_before)},
         }
         if cursor is not None:
             query['$or'] = [
@@ -2437,6 +2433,17 @@ class MongoDBRepository:
             if existing != operation:
                 raise IdempotencyConflict(operation.operation_id)
             return
+        if (
+            self._collection.find_one(
+                {
+                    '_id': self._record_id('follow_up', operation.follow_up_id),
+                    'recovery_discovery_ready': True,
+                },
+                projection={'_id': 1},
+            )
+            is None
+        ):
+            raise ValueError('Follow-up requires authoritative migration repair.')
         duplicate = self._collection.find_one(
             {
                 'record_type': 'follow_up_operation',
@@ -2554,6 +2561,18 @@ class MongoDBRepository:
                     ):
                         raise IdempotencyConflict(operation.operation_id)
                 return operation.model_copy(deep=True)
+            if (
+                self._collection.find_one(
+                    {
+                        '_id': self._record_id('follow_up', follow_up.follow_up_id),
+                        'recovery_discovery_ready': True,
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is None
+            ):
+                raise ValueError('Follow-up requires authoritative migration repair.')
             previous = self._get(
                 'follow_up', follow_up.follow_up_id, FollowUpRecord, session=mongo_session
             )
