@@ -36,6 +36,7 @@ export default function ClaimReviewPanel({
   busy,
   status,
   stepActive,
+  conversationEmpty = false,
 }) {
   const sections = claimReviewSections(form, contentsItems)
   const requirements = claimReviewRequirements(dynamicForm)
@@ -43,11 +44,13 @@ export default function ClaimReviewPanel({
 
   return (
     <>
-      <div className="claim-details-section-heading">
-        {stepActive && <p className="eyebrow">Step 2 of 4 · Review information</p>}
-        <h3>{stepActive ? 'Check your claim information' : 'What we have so far'}</h3>
-        <p className="panel-subtitle">Review or correct anything here</p>
-      </div>
+      {!conversationEmpty && (
+        <div className="claim-details-section-heading">
+          {stepActive && <p className="eyebrow">Step 2 of 4 · Review information</p>}
+          <h3>{stepActive ? 'Check your claim information' : 'What we have so far'}</h3>
+          <p className="panel-subtitle">Review or correct anything here</p>
+        </div>
+      )}
 
       {requirements.available && requirements.missingRequiredNow.length > 0 && (
         <section
@@ -66,7 +69,17 @@ export default function ClaimReviewPanel({
         </section>
       )}
 
-      {!hasReviewItems ? (
+      {!hasReviewItems && conversationEmpty ? (
+        <div className="claim-summary-empty">
+          <svg className="claim-summary-empty-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 3ZM18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14ZM6 13l.8 2.2L9 16l-2.2.8L6 19l-.8-2.2L3 16l2.2-.8L6 13Z" />
+          </svg>
+          <div>
+            <h3>Your summary will build as you chat</h3>
+            <p>Key dates, people, damage and supporting items will appear here automatically.</p>
+          </div>
+        </div>
+      ) : !hasReviewItems ? (
         <p className="empty-details">Details from your conversation will appear here.</p>
       ) : (
         <div className="field-list">
