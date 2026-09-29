@@ -3236,6 +3236,36 @@ describe('claimant intake projection', () => {
     },
   )
 
+
+  it.each([
+    [409, 'REVISION_CONFLICT', 'Submission was not accepted', 'Review the latest claim information and try again.'],
+    [422, 'AGREEMENT_CONFIRMATION_REQUIRED', 'Submission was not accepted', 'Review the latest claim information and try again.'],
+    [503, 'CLAIM_SERVICE_UNAVAILABLE', 'Submission result is unclear', 'Do not assume your Claim was created.'],
+  ])(
+    'distinguishes Step 4 HTTP %s failure feedback',
+    async (statusCode, code, title, expectedText) => {
+      const user = userEvent.setup()
+      const { agreement } = configureAgreementSubmissionFailureJourney()
+      api.acceptClaimAgreement.mockRejectedValue(Object.assign(
+        new api.ApiRequestError('The claim service could not complete this request.'),
+        { code, status: statusCode, retryable: statusCode >= 500 },
+      ))
+
+      await openAgreementForFailureTest(user, agreement)
+      await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+      const errorHeading = await screen.findByRole('heading', { name: title })
+      const agreementAlert = errorHeading.closest('[role="alert"]')
+      expect(agreementAlert).not.toBeNull()
+      expect(agreementAlert).toBeVisible()
+      expect(agreementAlert).toHaveTextContent(expectedText)
+      expect(
+        screen.queryByRole('heading', { name: 'Claim submitted' }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Submit claim' })).toBeEnabled()
+    },
+  )
+
   it('keeps agreement review in the Agent message flow before final submission', async () => {
     const user = userEvent.setup()
 
