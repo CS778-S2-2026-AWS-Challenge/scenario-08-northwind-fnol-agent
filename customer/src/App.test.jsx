@@ -1124,11 +1124,10 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    expect(screen.queryByRole('button', { name: 'Back to Claim history' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Claim history' }))
 
     expect(screen.getByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
     expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
   })
@@ -1233,6 +1232,8 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: navigationLabel }))
     expect(await screen.findByRole('heading', { level: 1, name: headingLabel })).toBeVisible()
+    expect(within(container.querySelector('.workspace-utility-page'))
+      .queryByRole('button', { name: /^Back/ })).not.toBeInTheDocument()
 
     const utilityBack = within(header).getByRole('button', { name: 'Back to previous page' })
     await user.click(utilityBack)
@@ -2004,7 +2005,7 @@ describe('claimant intake projection', () => {
       })
     })
 
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.type(
       screen.getByPlaceholderText('Write the details you know...'),
       'One more detail after returning.',
@@ -2067,7 +2068,7 @@ describe('claimant intake projection', () => {
       claim: pausedClaim(),
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.type(screen.getByPlaceholderText('Write the details you know...'), 'Retry this detail safely.')
 
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2132,7 +2133,7 @@ describe('claimant intake projection', () => {
       await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(1))
     }
 
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.type(screen.getByPlaceholderText('Write the details you know...'), pendingText)
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(responseIsLost ? 2 : 1))
@@ -2224,7 +2225,7 @@ describe('claimant intake projection', () => {
     await startActiveClaim(user)
     await user.click(screen.getByRole('button', { name: 'New chat' }))
     await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.click(screen.getByRole('button', { name: 'New chat' }))
     await act(async () => oldPause.reject(new api.ApiRequestError('Old pause failed.')))
 

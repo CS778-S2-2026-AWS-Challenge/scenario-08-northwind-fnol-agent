@@ -244,7 +244,6 @@ function PrivacySection({
 export default function PrivacyPage({
   claimType = null,
   hasCurrentClaim = false,
-  onBack,
   onViewClaim = null,
   showPrototypeNotice = import.meta.env.DEV,
 }) {
@@ -334,11 +333,6 @@ export default function PrivacyPage({
 
   return (
     <article className="privacy-page" ref={articleRef}>
-      <button className="back-link privacy-back-link" type="button" onClick={onBack}>
-        <span className="back-link-arrow" aria-hidden="true">←</span>
-        Back to conversation
-      </button>
-
       {displayPrototypeNotice && (
         <div className="privacy-prototype-notice" role="note">
           {privacyContent.prototypeNotice}

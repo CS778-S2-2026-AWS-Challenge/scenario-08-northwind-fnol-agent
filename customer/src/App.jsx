@@ -3299,12 +3299,6 @@ function App() {
     setPage('home')
   }
 
-  function workspaceBackLabel() {
-    if (workspaceView === 'claim-evidence') return 'Back to Claim features'
-    if (workspaceView === 'claim-features') return 'Back to Claim history'
-    return 'Back to conversation'
-  }
-
   function navigateBackFromWorkspaceUtility() {
     if (workspaceView === 'claim-evidence') {
       setWorkspaceView('claim-features')
@@ -4064,19 +4058,10 @@ function App() {
                 <PrivacyPage
                   claimType={claim?.incident_type || null}
                   hasCurrentClaim={Boolean(claim?.claim_id)}
-                  onBack={navigateBackFromWorkspaceUtility}
                   onViewClaim={claim ? () => openClaimFeatures(claim) : null}
                 />
               ) : (
                 <>
-                  <button
-                    className="back-link"
-                    type="button"
-                    onClick={navigateBackFromWorkspaceUtility}
-                  >
-                    <span className="back-link-arrow" aria-hidden="true">←</span>
-                    {workspaceBackLabel()}
-                  </button>
                   <h1>
                     {workspaceView === 'history'
                     ? 'Claim history'

@@ -23,24 +23,6 @@
   color: var(--color-text-primary);
 }
 
-.privacy-back-link {
-  display: inline-flex;
-  min-height: var(--size-control-touch);
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  cursor: pointer;
-}
-
-.privacy-back-link:hover {
-  color: var(--color-text-primary);
-  background: var(--color-accent-soft);
-}
-
-.privacy-back-link:focus-visible,
 .privacy-claim-action:focus-visible,
 .privacy-section-heading button:focus-visible,
 .privacy-toc-mobile summary:focus-visible,
@@ -492,7 +474,6 @@
   .product-header,
   .mobile-intake-tabs,
   .intake-history,
-  .privacy-back-link,
   .privacy-claim-action,
   .privacy-claim-order,
   .privacy-toc-desktop,

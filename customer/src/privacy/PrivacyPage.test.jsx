@@ -18,7 +18,6 @@ function renderPrivacyPage(props = {}) {
     <PrivacyPage
       claimType="motor"
       hasCurrentClaim
-      onBack={vi.fn()}
       onViewClaim={vi.fn()}
       {...props}
     />,
@@ -105,7 +104,6 @@ describe('PrivacyPage', () => {
       <PrivacyPage
         claimType="motor"
         hasCurrentClaim
-        onBack={vi.fn()}
         onViewClaim={null}
       />,
     )
