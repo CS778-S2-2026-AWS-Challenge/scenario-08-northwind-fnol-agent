@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
@@ -31,7 +31,9 @@ from backend.domain.models import (
     CustomerNextStep,
     FieldSelectionState,
     FollowUpContactPermission,
+    FollowUpReasonCode,
     FollowUpRecord,
+    FollowUpResolutionCode,
     FollowUpStatus,
     FormConfirmationRequest,
     FormConfirmationResponse,
@@ -57,6 +59,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.recovery import RecoveryAuthorityError
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     ClaimRepository,
@@ -261,6 +264,7 @@ def _claimant_incomplete_context(
         last_meaningful_activity_at=recovery.last_meaningful_activity_at,
         resume_point=recovery.resume_point,
         follow_up_due_at=follow_up.due_at,
+        expires_at=follow_up.deadline_at,
         follow_up_status=follow_up.status,
     )
 
@@ -566,6 +570,8 @@ def pause_session(
         claim_id=claim_id,
         source_session_id=session_id,
         purpose='resume_incomplete_claim',
+        policy_id='incomplete_claim_follow_up',
+        policy_version=1,
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[
             f'claim:{claim_id}:revision:{updated_claim.revision}',
@@ -580,8 +586,12 @@ def pause_session(
         attempt_count=0,
         channel=PreferredChannel.IN_APP if contact_authorised else None,
         outcome=None,
+        blocked_reason=(
+            FollowUpReasonCode.CONTACT_NOT_AUTHORISED if not contact_authorised else None
+        ),
         status=FollowUpStatus.PENDING if contact_authorised else FollowUpStatus.BLOCKED,
         due_at=timestamp if contact_authorised else None,
+        deadline_at=recovery.interrupted_at + timedelta(days=7),
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -590,6 +600,7 @@ def pause_session(
         last_meaningful_activity_at=recovery.last_meaningful_activity_at,
         resume_point=recovery.resume_point,
         follow_up_due_at=follow_up.due_at,
+        expires_at=follow_up.deadline_at,
         follow_up_status=follow_up.status,
     )
     claimant_after = claimant_claim(
@@ -910,6 +921,9 @@ def start_session(
                     update={
                         'status': FollowUpStatus.RESOLVED,
                         'outcome': 'claimant_resumed',
+                        'resolution_code': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                        'blocked_reason': None,
+                        'due_at': None,
                         'updated_at': timestamp,
                     }
                 )
@@ -1014,6 +1028,13 @@ def start_session(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The session resume request conflicted with an existing retry or session.',
             ) from conflict
+        except RecoveryAuthorityError as error:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='Saved recovery information needs repair before this claim can resume.',
+                details=[ErrorDetail(field='incomplete_context', reason='recovery_unavailable')],
+            ) from error
         claim = updated_claim
 
     return _claimant_session(session, claim.customer_next_step)

@@ -889,11 +889,27 @@ A session MAY move from `active` to `paused` after claimant inactivity or when t
 
 `POST /api/v1/claims/{claim_id}/sessions/{session_id}/pause` is the explicit P17.1 interruption boundary. It requires the current Claim revision through `If-Match` plus an `Idempotency-Key`, atomically marks the current session `paused`, aligns that Session's recovery snapshot to the accepted Claim revision, clears the Claim's active-session pointer, stores bounded recovery context, and creates exactly one open Claim-scoped recovery Follow-up for the `resume_incomplete_claim` purpose. The accepted Claim revision is part of the idempotency fingerprint, so reusing the same key with a different `If-Match` value returns `409 IDEMPOTENCY_CONFLICT`. It does not create a second Claim State, send a follow-up, make an abandonment decision, or apply a retention transition.
 
-The recovery Follow-up persists purpose, source references, responsible party, channel, due time, status, attempt count, and a contact-permission condition. An authenticated claimant may receive a `pending` in-app recovery Follow-up; that record does not authorise email, SMS, or phone contact. An anonymous browser claimant has no durable authorised contact channel in P17.1, so the record is persisted as `blocked` with `contact_permission=not_authorised`, no channel, and no due time. P17.2 owns any later scheduling, delivery, attempt, or escalation policy.
+The recovery Follow-up persists purpose, source references, responsible party, channel, due time, absolute deadline, status, attempt count, policy binding, typed lifecycle reasons, and a contact-permission condition. An authenticated claimant may receive a `pending` in-app recovery Follow-up; that record does not authorise email, SMS, or phone contact. An anonymous browser claimant has no durable authorised contact channel, so the record is persisted as `blocked` with `contact_permission=not_authorised`, a typed blocked reason, no channel, and no due time. The claimant projection exposes the persisted deadline and the Workbench projection also exposes the authoritative attempt count. Later delivery or escalation policy must consume these records rather than infer state from free text.
 
 After that checkpoint, claimant Claim detail and Claim list projections may include `incomplete_context` containing the interruption time, last meaningful activity, bounded resume point, and the claimant-safe open Follow-up state. Pause is accepted only when the authoritative Claim is not `created` and `customer_next_step.can_resume=true`; terminal or explicitly non-resumable Claims return `409 INVALID_STATE_TRANSITION`. Claimant and Workbench projections use the same incomplete predicate: an eligible resumable non-terminal Claim, no authoritative active Session, a relevant paused recovery checkpoint, and an open recovery Follow-up. This applies to every resumable non-terminal workflow state, not only `collecting`. The persisted checkpoint also records the exact durable source reference for the latest qualifying claimant message or accepted claimant business action.
 
-When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
+When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. Resolution records `claimant_resumed`, clears the blocked reason and executable due time, and preserves the original policy/deadline and contact facts. This applies to authenticated and anonymous claimants in both persistence adapters. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
+
+A blocked Follow-up with `attempt_limit_reached` keeps its original contact-permission fact
+and deadline while removing executable scheduling. Attempt count includes only committed
+countable operations; cancelled operation history does not consume the attempt budget.
+Internal due/deadline persistence and cursors use fixed-precision UTC timestamps without
+changing the represented instant. Exhaustion is not equivalent to contact withdrawal
+or Claim abandonment. Legacy blocked records without a reason retain their previous
+not-authorised/no-channel interpretation. No new recovery or retention HTTP endpoint is added.
+
+Quarantined recovery obligations remain readable without an invented deadline. Incomplete
+internal policy coordinates are not exposed as verified policy bindings. If a valid checkpoint
+is unavailable, incomplete projections remain absent; otherwise they show blocked with no
+schedule or deadline. Resuming an obligation blocked by inconsistent source evidence or an
+invalid policy binding returns `409 INVALID_STATE_TRANSITION`, with
+`details[].reason=recovery_unavailable`, before Claim, Session, or idempotency mutation.
+Operator repair is required; resume does not clear an unresolved authority error.
 
 Only one active claimant session per claim is permitted.
 
