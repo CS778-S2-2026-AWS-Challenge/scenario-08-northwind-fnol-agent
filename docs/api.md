@@ -1037,7 +1037,7 @@ Initial common field codes:
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
 | `vehicle.use` | enum | `private`, `commuting`, `business`, `rideshare_delivery`, `other`, or `unknown` |
 | `vehicle.towing_required` | enum | `required`, `not_required`, `already_towed`, or `unknown` |
-| `vehicle.towing_location` | object/string | Current or intended towing location |
+| `vehicle.towing_location` | object/string | Claimant-supplied current or intended tow location; the backend does not infer which interpretation applies |
 | `driver.identity_ref` | string | Actual-driver identity reference when available |
 | `driver.name` | string | Actual-driver name when no identity reference is available |
 | `driver.phone` | string | Actual-driver phone |
@@ -1045,7 +1045,7 @@ Initial common field codes:
 | `driver.relationship_to_policyholder` | enum | Actual-driver relationship to the policyholder |
 | `driver.owner_permission` | enum | Permission fact: `confirmed`, `not_confirmed`, `unknown`, or `not_applicable` |
 | `driver.licence_number` | protected string | Protected licence value; never sent to model/RAG |
-| `driver.licence_status` | enum | `valid`, `expired`, `suspended`, `learner`, `restricted`, or `unknown` |
+| `driver.licence_status` | enum | One reported licensing state: `valid`, `expired`, `suspended`, `learner`, `restricted`, or `unknown`; the current contract does not expose a separate licence-class field |
 | `other_party.insurer_name` | string | Other-party insurer on the existing Motor other-driver record |
 | `other_party.policy_number` | protected string | Other-party policy number; protected and masked in projections |
 | `other_party.claim_reference` | string | Other-party insurer claim reference |

@@ -218,6 +218,41 @@ def test_motor_other_driver_accepts_non_policy_detail_without_protection(
     assert response.revision == claim['revision'] + 1
 
 
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [('insurer_name', 'Synthetic Mutual'), ('claim_reference', 'SYNTHETIC-CLAIM-123')],
+)
+def test_motor_other_driver_api_accepts_partial_non_policy_detail(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    field: str,
+    value: str,
+) -> None:
+    claim = _create_claim(
+        client,
+        auth_headers,
+        incident_type='motor',
+        key=f'motor-other-driver-api-{field}',
+    )
+    route = f'/api/v1/claims/{claim["claim_id"]}/motor-other-driver'
+    response = client.post(
+        route,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'motor-other-driver-api-{field}',
+            'If-Match': str(claim['revision']),
+        },
+        json={field: value},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()['participant'][field] == value
+    stored = repository.get_motor_other_driver(claim['claim_id'], 'cus_demo')
+    assert stored is not None
+    assert getattr(stored, field) == value
+
+
 @pytest.mark.parametrize('protection', ['omitted', 'unavailable', 'failure'])
 def test_motor_other_driver_policy_protection_fails_before_any_mutation(
     client: TestClient,

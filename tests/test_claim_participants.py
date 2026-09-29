@@ -1,12 +1,19 @@
 """Regression coverage for participant records at the shared Claim mutation boundary."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.domain.models import AgentAction, FormSource, FormStatus, ProposedFormChange
+from backend.domain.models import (
+    AgentAction,
+    FormSource,
+    FormStatus,
+    ProposedFormChange,
+    WitnessRecord,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentProposal, AgentTurnContext
 from backend.services.protected_values import ProtectedValueError, UnavailableProtectedValueAdapter
@@ -331,6 +338,84 @@ def test_agent_witness_uncertainty_preserves_identity_until_confirmed_absence(
             assert stored.witnesses[0].phone == '+64 21 555 0101'
             if index == 1:
                 assert stored.witnesses[0].name is None
+
+
+def test_witness_update_preserves_other_repeatable_records(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='witness-repeatable-records').json()
+    claim_id = created['claim']['claim_id']
+    initialized = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={
+            'updates': [
+                {'field_code': 'witness.present', 'value': 'yes'},
+                {'field_code': 'witness.name', 'value': 'First Witness'},
+            ]
+        },
+    )
+    assert initialized.status_code == 200, initialized.text
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None and len(stored.witnesses) == 1
+    second = WitnessRecord(
+        witness_id='witness-second',
+        name='Second Witness',
+        phone='+64 21 555 0102',
+    )
+    with_second = stored.model_copy(
+        update={
+            'revision': stored.revision + 1,
+            'witnesses': [stored.witnesses[0], second],
+            'updated_at': datetime.now(UTC),
+        }
+    )
+    repository.save_claim(with_second, stored.revision)
+
+    corrected = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(with_second.revision)},
+        json={
+            'updates': [
+                {
+                    'field_code': 'witness.name',
+                    'value': 'Updated First Witness',
+                    'correction_reason': 'The claimant corrected the first witness name.',
+                }
+            ]
+        },
+    )
+    assert corrected.status_code == 200, corrected.text
+    refreshed = repository.get_claim(claim_id, 'cus_demo')
+    assert refreshed is not None
+    assert [witness.name for witness in refreshed.witnesses] == [
+        'Updated First Witness',
+        'Second Witness',
+    ]
+
+
+def test_form_cannot_store_other_party_policy_number(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='protected-other-party-form').json()
+    claim_id = created['claim']['claim_id']
+    response = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(created['claim']['revision'])},
+        json={
+            'updates': [{'field_code': 'other_party.policy_number', 'value': 'SYNTHETIC-POLICY'}]
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()['error']['code'] == 'PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE'
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    assert 'other_party.policy_number' not in stored.form
 
 
 def test_protected_licence_long_value_and_same_mask_correction(
