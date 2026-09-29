@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 function readable(value) {
   if (value === null || value === undefined || value === '') return 'Not recorded'
@@ -19,6 +19,7 @@ export default function AgreementConfirmationPanel({
   claim,
   busy,
   status,
+  submissionError,
   onSubmit,
   onReviewInformation,
   onReturnToConversation,
@@ -31,6 +32,11 @@ export default function AgreementConfirmationPanel({
     scope: confirmationScope,
     values: {},
   }))
+  const submissionErrorRef = useRef(null)
+
+  useEffect(() => {
+    if (submissionError) submissionErrorRef.current?.focus()
+  }, [submissionError])
   const confirmations = (
     confirmationState.scope === confirmationScope
       ? confirmationState.values
@@ -142,6 +148,18 @@ export default function AgreementConfirmationPanel({
 
       <h3>Agreement</h3>
       <p>{agreement.display_copy}</p>
+
+      {submissionError && (
+        <div
+          ref={submissionErrorRef}
+          className="claim-history-state is-error"
+          role="alert"
+          tabIndex={-1}
+        >
+          <h3>{submissionError.title}</h3>
+          <p>{submissionError.message}</p>
+        </div>
+      )}
 
       {alreadyAccepted ? (
         <p role="status">
