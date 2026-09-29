@@ -1073,11 +1073,19 @@ def _materialize_participant_records(
     driver = claim.driver
     licence_update = updated_fields.get('driver.licence_number')
     raw_licence = licence_update.value if licence_update is not None else None
-    if any(value(code) is not None for code in (
-        'driver.identity_ref', 'driver.name', 'driver.phone', 'driver.email',
-        'driver.relationship_to_policyholder', 'driver.owner_permission',
-        'driver.licence_number', 'driver.licence_status',
-    )):
+    if any(
+        value(code) is not None
+        for code in (
+            'driver.identity_ref',
+            'driver.name',
+            'driver.phone',
+            'driver.email',
+            'driver.relationship_to_policyholder',
+            'driver.owner_permission',
+            'driver.licence_number',
+            'driver.licence_status',
+        )
+    ):
         protected_licence: str | None
         if raw_licence is not None:
             if protected_values is None:
@@ -1117,8 +1125,11 @@ def _materialize_participant_records(
             if value('driver.owner_permission') is not None
             else (driver.owner_permission if driver else None),
             licence_number=protected_licence,
-            licence_number_masked=(masked_value(str(raw_licence)) if raw_licence is not None
-                                   else (driver.licence_number_masked if driver else None)),
+            licence_number_masked=(
+                masked_value(str(raw_licence))
+                if raw_licence is not None
+                else (driver.licence_number_masked if driver else None)
+            ),
             licence_status=value('driver.licence_status')
             if value('driver.licence_status') is not None
             else (driver.licence_status if driver else None),
@@ -1131,12 +1142,19 @@ def _materialize_participant_records(
         value(code) is not None for code in ('witness.name', 'witness.phone', 'witness.email')
     ):
         current = witnesses[0] if witnesses else WitnessRecord(witness_id=new_id('wit'))
-        witnesses = [WitnessRecord(
-            witness_id=current.witness_id,
-            name=value('witness.name') if value('witness.name') is not None else current.name,
-            phone=value('witness.phone') if value('witness.phone') is not None else current.phone,
-            email=value('witness.email') if value('witness.email') is not None else current.email,
-        ), *witnesses[1:]]
+        witnesses = [
+            WitnessRecord(
+                witness_id=current.witness_id,
+                name=value('witness.name') if value('witness.name') is not None else current.name,
+                phone=value('witness.phone')
+                if value('witness.phone') is not None
+                else current.phone,
+                email=value('witness.email')
+                if value('witness.email') is not None
+                else current.email,
+            ),
+            *witnesses[1:],
+        ]
     return updated_fields, policyholder, driver, witnesses
 
 
