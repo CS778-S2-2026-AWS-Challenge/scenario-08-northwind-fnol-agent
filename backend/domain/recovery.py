@@ -82,8 +82,7 @@ def validate_follow_up_commit(
         or operation.policy_id != previous.policy_id
         or operation.policy_version != previous.policy_version
         or operation.based_on_claim_revision != claim.revision
-        or operation.sequence != previous.attempt_count + 1
-        or current.attempt_count != operation.sequence
+        or current.attempt_count != previous.attempt_count + 1
         or claim.active_session_id is not None
         or claim.terminal_disposition is not None
         or session is None

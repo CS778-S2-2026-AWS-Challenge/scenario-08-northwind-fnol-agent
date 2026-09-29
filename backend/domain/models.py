@@ -2,8 +2,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_serializer,
+    model_validator,
+)
 
+from backend.domain.recovery_time import recovery_timestamp
 from backend.domain.tag_registry import StaffTag
 
 
@@ -1170,6 +1178,10 @@ class FollowUpRecord(ContractModel):
             if self.blocked_reason is not None:
                 raise ValueError('A resolved Follow-up cannot have a blocked reason.')
         return self
+
+    @field_serializer('due_at', 'deadline_at', when_used='json')
+    def serialize_recovery_time(self, value: datetime | None) -> str | None:
+        return recovery_timestamp(value) if value is not None else None
 
 
 class FollowUpOperation(ContractModel):

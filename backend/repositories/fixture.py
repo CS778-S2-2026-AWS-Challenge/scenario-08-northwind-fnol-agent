@@ -1505,6 +1505,11 @@ class FixtureRepository(PersistenceRepository):
         ]
         return sorted(records, key=lambda operation: (operation.sequence, operation.operation_id))
 
+    def next_follow_up_operation_sequence(self, follow_up_id: str) -> int:
+        with self._claim_mutation_lock:
+            history = self.list_follow_up_operations(follow_up_id)
+            return history[-1].sequence + 1 if history else 1
+
     def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
         operation = FollowUpOperation.model_validate(operation.model_dump())
         if operation.status is not FollowUpOperationStatus.RESERVED:
@@ -1527,6 +1532,8 @@ class FixtureRepository(PersistenceRepository):
                 None,
             )
             if duplicate is not None:
+                raise IdempotencyConflict(operation.operation_id)
+            if operation.sequence != self.next_follow_up_operation_sequence(operation.follow_up_id):
                 raise IdempotencyConflict(operation.operation_id)
             follow_up = self._follow_ups.get(operation.follow_up_id)
             if follow_up is None or follow_up.claim_id != operation.claim_id:

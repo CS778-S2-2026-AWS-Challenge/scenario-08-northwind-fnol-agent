@@ -16,6 +16,7 @@ from pymongo.errors import PyMongoError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.domain.recovery_time import RECOVERY_TIMESTAMP_PATTERN, recovery_timestamp
 from backend.repositories.mongodb import MongoDBConfigurationError, MongoDBConnectionConfig
 
 _DATETIME = TypeAdapter(datetime)
@@ -39,6 +40,8 @@ def backfill_follow_ups(
                     {'policy_id': None},
                     {'policy_version': None},
                     {'deadline_at': None},
+                    {'deadline_at': {'$not': {'$regex': RECOVERY_TIMESTAMP_PATTERN}}},
+                    {'due_at': {'$ne': None, '$not': {'$regex': RECOVERY_TIMESTAMP_PATTERN}}},
                 ],
             }
         ).sort('_id', 1)
@@ -76,6 +79,12 @@ def backfill_follow_ups(
                 _DATETIME.validate_python(follow_up['deadline_at']) != deadline_at
             ):
                 raise ValueError('Existing deadline contradicts the original interruption.')
+            canonical_deadline = recovery_timestamp(deadline_at)
+            canonical_due = (
+                recovery_timestamp(_DATETIME.validate_python(follow_up['due_at']))
+                if follow_up.get('due_at') is not None
+                else None
+            )
         except (AttributeError, TypeError, ValidationError, ValueError) as error:
             report['rejected'].append({'follow_up_id': follow_up_id, 'reason': str(error)})
             continue
@@ -83,9 +92,12 @@ def backfill_follow_ups(
         update: dict[str, Any] = {
             'policy_id': 'incomplete_claim_follow_up',
             'policy_version': 1,
-            'deadline_at': deadline_at.isoformat(),
         }
         update = {key: value for key, value in update.items() if follow_up.get(key) is None}
+        if follow_up.get('deadline_at') != canonical_deadline:
+            update['deadline_at'] = canonical_deadline
+        if follow_up.get('due_at') != canonical_due:
+            update['due_at'] = canonical_due
         if (
             follow_up.get('status') == 'blocked'
             and follow_up.get('contact_permission') == 'not_authorised'

@@ -1355,6 +1355,13 @@ or delete retained data. The following table defines the consumer boundary.
 | RetentionOperation | ID, Claim, policy, source revision/references, target set, creation time | Eligible/held to executing; executing to reconciliation/completed; reconciliation to executing; completed is immutable | Insert-only create; complete prior-record compare-and-set; successful step evidence is append-only |
 | FollowUpRecord | Claim/source Session, policy, original deadline | Resume clears blocked reason and schedule, records claimant_resumed | Existing Claim revision and session activation transaction remain authoritative |
 
+Operation sequence is distinct from attempt count. The repository method
+next_follow_up_operation_sequence proposes max persisted sequence + 1, including
+cancelled history. Saving requires that next sequence; the unique sequence index in Mongo
+or the Fixture lock arbitrates concurrent reservations. A loser rereads authority and history
+before retrying. Discovery is not a reservation. Only a qualifying atomic commit increments
+attempt_count by exactly one. Cancellation retains its sequence and immutable evidence.
+
 Creation never replaces a conflicting identity. Conditional advancement rejects stale
 state and immutable-field changes; exact retries return the stored result. A blocked
 obligation has no executable schedule, but only contact_not_authorised (including
@@ -1404,6 +1411,13 @@ corresponding adapter indexes and cursor contract. The current transaction-local
 does not introduce a generic Inbox or Outbox, and ExternalTask keeps its existing operation and
 reconciliation authority.
 
+Follow-up due/deadline JSON timestamps use UTC with exactly six fractional digits and a
+Z suffix. Writes, backfill, cutoffs and cursors share this serialization. Run backfill before
+enabling discovery over legacy records. Mongo discovery explicitly rejects alternate non-null
+ordering representations on open records instead of silently returning an incomplete page.
+This read-only compatibility check can scan the open-record index; candidate retrieval itself
+retains its bounded indexed query.
+
 The claimant and Workbench projections expose the persisted Follow-up deadline; Workbench also
 exposes the authoritative attempt count. Retention cleanup remains a separate cross-store
 operation and is not inferred from this Follow-up record. The bounded RetentionOperation
@@ -1416,8 +1430,11 @@ read-only by default, derives the deadline only from the source Session's persis
 time, conditionally updates records with missing policy/deadline fields under `--apply`, and
 reports records with missing or contradictory source state instead of guessing. It never derives
 a deadline from the migration execution time, deployment time, or current wall clock.
-Missing and explicit-null fields are eligible; compatible non-null bindings are preserved,
-and contradictory bindings/deadlines are rejected unchanged. Apply requires Mongo transactions:
+Missing and explicit-null fields are eligible; compatible non-null bindings are preserved.
+Existing offset/variable-precision due/deadline strings are normalized without changing their
+instants, including records whose policy binding is already complete. Canonical records are
+not rewritten on repeat runs. Contradictory bindings/deadlines are rejected unchanged.
+Apply requires Mongo transactions:
 an exact-source conditional write fence and target CAS commit together. The Session's
 adapter-only `recovery_backfill_fence` counter changes no domain revision or interruption
 evidence; it forces a write conflict if the source changes concurrently. Unsupported

@@ -26,6 +26,7 @@ from backend.domain.models import (
     RetentionOperationStatus,
     WorkingClaim,
 )
+from backend.domain.recovery_time import recovery_timestamp
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyConflict
@@ -625,7 +626,7 @@ def test_migration_partial_null_and_conflicting_bindings(
         assert stored == original
     else:
         assert stored['policy_version'] == 1
-        assert stored['deadline_at'] == '2026-09-16T00:00:00+00:00'
+        assert stored['deadline_at'] == '2026-09-16T00:00:00.000000Z'
 
 
 @pytest.mark.parametrize('source_changed', [True, False])
@@ -670,6 +671,241 @@ def test_migration_conflicting_source_or_binding_does_not_apply(
     assert result['conflicts'] == ['f']
     stored = collection.find_one({'_id': 'follow_up:f'})
     assert stored is not None and 'deadline_at' not in stored
+
+
+def test_cancelled_history_allows_retry_without_counting_cancellation(
+    recovery_repository: Any,
+) -> None:
+    from dataclasses import replace
+
+    from backend.domain.recovery import follow_up_commit_fingerprint
+    from backend.repositories.protocols import RevisionConflict
+
+    repository = recovery_repository
+    initial = _commit_bundle(repository)
+    reserved, committed, previous, aggregate, claim, idem, audits = initial
+    authoritative = repository.get_claim(claim.claim_id, claim.customer_id)
+    changed = authoritative.model_copy(update={'revision': 3})
+    if isinstance(repository, FixtureRepository):
+        repository._claims[claim.claim_id] = changed
+    else:
+        repository._collection.update_one(
+            {'_id': 'claim:' + claim.claim_id}, {'$set': {'revision': 3}}
+        )
+    with pytest.raises(RevisionConflict):
+        repository.commit_follow_up_operation(*initial)
+    cancelled = reserved.model_copy(
+        update={
+            'status': FollowUpOperationStatus.CANCELLED,
+            'result_code': FollowUpOperationResult.STALE_REVISION,
+            'cancelled_at': reserved.created_at,
+        }
+    )
+    repository.advance_follow_up_operation(reserved, cancelled)
+    fresh = repository.get_claim(claim.claim_id, claim.customer_id)
+    fresh_follow_up = repository.get_follow_up(
+        claim.claim_id, previous.follow_up_id, claim.customer_id
+    )
+    assert fresh_follow_up.attempt_count == 0
+    retry = reserved.model_copy(
+        update={
+            'operation_id': 'fop_abcdef0123456789abcd',
+            'sequence': repository.next_follow_up_operation_sequence(previous.follow_up_id),
+            'based_on_claim_revision': fresh.revision,
+        }
+    )
+    assert retry.sequence == 2
+    repository.save_follow_up_operation(retry)
+    competitor = retry.model_copy(
+        update={'operation_id': 'fop_11111111111111111111', 'sequence': 3}
+    )
+    repository.save_follow_up_operation(competitor)
+
+    def bundle(operation: FollowUpOperation, count: int = 1) -> tuple[Any, ...]:
+        result = committed.model_copy(
+            update={
+                'operation_id': operation.operation_id,
+                'sequence': operation.sequence,
+                'based_on_claim_revision': fresh.revision,
+            }
+        )
+        next_claim = fresh.model_copy(update={'revision': fresh.revision + 1})
+        next_aggregate = aggregate.model_copy(update={'attempt_count': count})
+        events = (
+            audits[0].model_copy(
+                update={
+                    'event_id': 'aud_' + operation.operation_id,
+                    'correlation_id': operation.operation_id,
+                    'claim_revision': next_claim.revision,
+                }
+            ),
+        )
+        replay = replace(
+            idem,
+            key=operation.operation_id,
+            response_payload={'operation_id': operation.operation_id},
+            request_fingerprint=follow_up_commit_fingerprint(
+                operation, result, fresh_follow_up, next_aggregate, next_claim, events
+            ),
+        )
+        return operation, result, fresh_follow_up, next_aggregate, next_claim, replay, events
+
+    with pytest.raises(ValueError):
+        repository.commit_follow_up_operation(*bundle(retry, count=2))
+    winning = bundle(retry)
+    assert repository.commit_follow_up_operation(*winning) == winning[1]
+    assert repository.commit_follow_up_operation(*winning) == winning[1]
+    with pytest.raises((IdempotencyConflict, RevisionConflict)):
+        repository.commit_follow_up_operation(*bundle(competitor))
+    stored = repository.get_follow_up(claim.claim_id, previous.follow_up_id, claim.customer_id)
+    assert stored.attempt_count == 1
+    assert repository.get_follow_up_operation(reserved.operation_id) == cancelled
+    assert repository.get_follow_up_operation(competitor.operation_id) == competitor
+
+
+def test_competing_retry_reservations_claim_one_next_sequence(
+    recovery_repository: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = recovery_repository
+    _seed(repository)
+    reserved = _operation()
+    repository.save_follow_up_operation(reserved)
+    repository.advance_follow_up_operation(
+        reserved,
+        reserved.model_copy(
+            update={
+                'status': FollowUpOperationStatus.CANCELLED,
+                'result_code': FollowUpOperationResult.STALE_REVISION,
+                'cancelled_at': reserved.created_at,
+            }
+        ),
+    )
+    candidates = [
+        reserved.model_copy(
+            update={
+                'operation_id': 'fop_' + digit * 20,
+                'sequence': repository.next_follow_up_operation_sequence(reserved.follow_up_id),
+            }
+        )
+        for digit in ('a', 'b')
+    ]
+    barrier = Barrier(2)
+    if isinstance(repository, MongoDBRepository):
+        insert = repository._collection.insert_one
+
+        def synchronized(document: Any, **kwargs: Any) -> Any:
+            barrier.wait(timeout=5)
+            return insert(document, **kwargs)
+
+        monkeypatch.setattr(repository._collection, 'insert_one', synchronized)
+
+    def save(operation: FollowUpOperation) -> str:
+        if isinstance(repository, FixtureRepository):
+            barrier.wait(timeout=5)
+        try:
+            repository.save_follow_up_operation(operation)
+            return 'saved'
+        except IdempotencyConflict:
+            return 'conflict'
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(save, candidates)) == ['conflict', 'saved']
+    history = repository.list_follow_up_operations(reserved.follow_up_id)
+    assert [item.sequence for item in history] == [1, 2]
+    assert history[0].status is FollowUpOperationStatus.CANCELLED
+    assert repository.next_follow_up_operation_sequence(reserved.follow_up_id) == 3
+
+
+@pytest.mark.parametrize('field', ['due_at', 'deadline_at'])
+def test_backfill_then_paginate_mixed_offsets_and_fractional_times(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    from datetime import timezone
+
+    repository = MongoDBRepository(mongomock.MongoClient(), 'pagination_regression')
+    collection = repository._collection
+    base = _follow_up()
+    assert base.due_at is not None and base.deadline_at is not None
+    variants = [
+        ('missing', 0),
+        ('offset', 0),
+        ('utc_iso', 0),
+        ('z', 0),
+        ('new', 0),
+        ('fraction', 1),
+    ]
+    expected = []
+    for index, (representation, microseconds) in enumerate(variants):
+        instant = base.created_at + timedelta(microseconds=microseconds)
+        deadline = instant + timedelta(days=7)
+        identifier = f'fup_page_{index}'
+        expected.append(identifier)
+        record = base.model_copy(
+            update={
+                'follow_up_id': identifier,
+                'claim_id': f'clm_page_{index}',
+                'source_session_id': f'ses_page_{index}',
+                'due_at': instant,
+                'deadline_at': deadline,
+            }
+        ).model_dump(mode='json')
+        if representation == 'missing':
+            record.pop('deadline_at')
+            record['due_at'] = instant.isoformat()
+        elif representation in {'offset', 'utc_iso', 'z'}:
+            offset = timezone(timedelta(hours=13)) if representation == 'offset' else UTC
+            for key, value in [('due_at', instant), ('deadline_at', deadline)]:
+                text = value.astimezone(offset).isoformat()
+                record[key] = text.replace('+00:00', 'Z') if representation == 'z' else text
+        collection.insert_one(
+            {**record, '_id': 'follow_up:' + identifier, 'record_type': 'follow_up'}
+        )
+        collection.insert_one(
+            {
+                '_id': 'session:' + record['source_session_id'],
+                'record_type': 'session',
+                'session_id': record['source_session_id'],
+                'claim_id': record['claim_id'],
+                'recovery_context': {'interrupted_at': instant.isoformat()},
+            }
+        )
+    query = (
+        repository.list_due_follow_ups
+        if field == 'due_at'
+        else (repository.list_expiring_follow_ups)
+    )
+    cutoff = base.due_at if field == 'due_at' else base.deadline_at
+    with pytest.raises(ValueError, match='migration required'):
+        query(cutoff, limit=1)
+    original = list(collection.find({'record_type': 'follow_up'}).sort('_id', 1))
+    backfill_follow_ups(collection)
+    assert list(collection.find({'record_type': 'follow_up'}).sort('_id', 1)) == original
+    transaction = MagicMock()
+    transaction.__enter__.return_value = transaction
+    transaction.with_transaction.side_effect = lambda callback: callback(None)
+    monkeypatch.setattr(collection.database.client, 'start_session', lambda: transaction)
+    report = backfill_follow_ups(collection, apply=True)
+    assert len(report['applied']) == 4
+    assert backfill_follow_ups(collection, apply=True)['candidate_count'] == 0
+    assert [item.follow_up_id for item in query(cutoff, limit=10)] == expected[:-1]
+    cursor = None
+    observed = []
+    for _ in range(8):
+        page = query(cutoff + timedelta(microseconds=1), limit=1, cursor=cursor)
+        if not page:
+            break
+        item = page[0]
+        observed.append(item.follow_up_id)
+        cursor = (getattr(item, field).astimezone(timezone(timedelta(hours=-4))), item.follow_up_id)
+    assert observed == expected
+    for document in collection.find({'record_type': 'follow_up'}):
+        assert document['policy_id'] == base.policy_id
+        assert document['policy_version'] == base.policy_version
+        assert datetime.fromisoformat(document['deadline_at']) - datetime.fromisoformat(
+            document['due_at']
+        ) == timedelta(days=7)
 
 
 def _follow_up() -> FollowUpRecord:
@@ -790,7 +1026,7 @@ def test_follow_up_policy_backfill_is_read_only_until_apply() -> None:
     stored = collection.find_one({'_id': 'follow_up:fup_migration'})
     assert stored is not None
     assert stored['policy_id'] == 'incomplete_claim_follow_up'
-    assert stored['deadline_at'] == (now + timedelta(days=7)).isoformat()
+    assert stored['deadline_at'] == recovery_timestamp(now + timedelta(days=7))
     assert stored['blocked_reason'] == 'contact_not_authorised'
 
 

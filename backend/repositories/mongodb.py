@@ -109,6 +109,7 @@ from backend.domain.recovery import (
     validate_follow_up_transition,
     validate_retention_transition,
 )
+from backend.domain.recovery_time import RECOVERY_TIMESTAMP_PATTERN, recovery_timestamp
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
     PolicyRetrievalRecord,
@@ -2287,21 +2288,22 @@ class MongoDBRepository:
     ) -> list[FollowUpRecord]:
         if limit < 1:
             raise ValueError('Follow-up query limit must be positive.')
+        self._require_canonical_follow_up_times('due_at')
         query: dict[str, Any] = {
             'record_type': 'follow_up',
             'status': FollowUpStatus.PENDING.value,
-            'due_at': {'$lte': self._audit_timestamp(due_before)},
+            'due_at': {'$lte': recovery_timestamp(due_before)},
         }
         if cursor is not None:
             query['$or'] = [
                 {
                     'due_at': {
-                        '$gt': self._audit_timestamp(cursor[0]),
-                        '$lte': self._audit_timestamp(due_before),
+                        '$gt': recovery_timestamp(cursor[0]),
+                        '$lte': recovery_timestamp(due_before),
                     }
                 },
                 {
-                    'due_at': self._audit_timestamp(cursor[0]),
+                    'due_at': recovery_timestamp(cursor[0]),
                     '_id': {'$gt': self._record_id('follow_up', cursor[1])},
                 },
             ]
@@ -2321,21 +2323,22 @@ class MongoDBRepository:
     ) -> list[FollowUpRecord]:
         if limit < 1:
             raise ValueError('Follow-up query limit must be positive.')
+        self._require_canonical_follow_up_times('deadline_at')
         query: dict[str, Any] = {
             'record_type': 'follow_up',
             'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
-            'deadline_at': {'$lte': self._audit_timestamp(deadline_before)},
+            'deadline_at': {'$lte': recovery_timestamp(deadline_before)},
         }
         if cursor is not None:
             query['$or'] = [
                 {
                     'deadline_at': {
-                        '$gt': self._audit_timestamp(cursor[0]),
-                        '$lte': self._audit_timestamp(deadline_before),
+                        '$gt': recovery_timestamp(cursor[0]),
+                        '$lte': recovery_timestamp(deadline_before),
                     }
                 },
                 {
-                    'deadline_at': self._audit_timestamp(cursor[0]),
+                    'deadline_at': recovery_timestamp(cursor[0]),
                     '_id': {'$gt': self._record_id('follow_up', cursor[1])},
                 },
             ]
@@ -2347,6 +2350,20 @@ class MongoDBRepository:
             if record is not None:
                 records.append(record)
         return records
+
+    def _require_canonical_follow_up_times(self, field: str) -> None:
+        legacy = self._collection.find_one(
+            {
+                'record_type': 'follow_up',
+                'status': {'$in': ['pending', 'blocked']},
+                field: {'$ne': None, '$not': {'$regex': RECOVERY_TIMESTAMP_PATTERN}},
+            },
+            projection={'_id': 1},
+        )
+        if legacy is not None:
+            raise ValueError(
+                'Recovery timestamp migration required; run backfill_follow_up_policy.'
+            )
 
     def get_follow_up_operation(self, operation_id: str) -> FollowUpOperation | None:
         return self._get('follow_up_operation', operation_id, FollowUpOperation)
@@ -2360,6 +2377,14 @@ class MongoDBRepository:
             if record is not None:
                 records.append(record)
         return records
+
+    def next_follow_up_operation_sequence(self, follow_up_id: str) -> int:
+        latest = self._collection.find_one(
+            {'record_type': 'follow_up_operation', 'follow_up_id': follow_up_id},
+            sort=[('sequence', -1)],
+            projection={'sequence': 1},
+        )
+        return int(latest['sequence']) + 1 if latest else 1
 
     def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
         operation = FollowUpOperation.model_validate(operation.model_dump())
@@ -2389,6 +2414,10 @@ class MongoDBRepository:
         )
         if duplicate is not None:
             if self._model_from_document(duplicate, FollowUpOperation) == operation:
+                return
+            raise IdempotencyConflict(operation.operation_id)
+        if operation.sequence != self.next_follow_up_operation_sequence(operation.follow_up_id):
+            if self.get_follow_up_operation(operation.operation_id) == operation:
                 return
             raise IdempotencyConflict(operation.operation_id)
         try:

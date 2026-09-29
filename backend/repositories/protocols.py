@@ -478,6 +478,10 @@ class ClaimRepository(Protocol):
     def list_follow_up_operations(self, follow_up_id: str) -> list[FollowUpOperation]:
         raise NotImplementedError
 
+    def next_follow_up_operation_sequence(self, follow_up_id: str) -> int:
+        """Propose the next history sequence; save arbitrates concurrent reservations."""
+        raise NotImplementedError
+
     def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
         """Persist one immutable logical operation with duplicate identity protection."""
         raise NotImplementedError
