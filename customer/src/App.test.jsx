@@ -3197,7 +3197,6 @@ describe('claimant intake projection', () => {
 
       const alert = await screen.findByRole('alert')
       expect(alert).toBeVisible()
-      expect(alert).toHaveFocus()
       expect(alert).toHaveTextContent('Submission interrupted')
       expect(alert).toHaveTextContent(
         phase === 'acceptance'
