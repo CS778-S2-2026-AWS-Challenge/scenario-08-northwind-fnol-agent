@@ -37,6 +37,8 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
+import AttachmentPreview from './components/AttachmentPreview.jsx'
+import { modelAttachmentCompatibility } from './attachmentModelCompatibility.js'
 import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
@@ -300,6 +302,73 @@ function evidenceFileStatusLabel(fileStatus, status) {
   return status === 'received' ? 'Received' : status
 }
 
+function isSendableComposerAttachment(attachment) {
+  if (attachment.status === 'staged') {
+    return Boolean(attachment.stagedFile && attachment.uploadAttempt)
+  }
+  return (
+    (attachment.status === 'uploaded' || attachment.status === 'processing')
+    && Boolean(attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+  )
+}
+
+function attachmentSubmissionSignature(text, attachments, modelProfileId) {
+  return JSON.stringify({
+    text,
+    modelProfileId,
+    attachments: attachments.map((attachment) => (
+      attachment.evidenceId
+      || attachment.uploadAttempt?.evidenceId
+      || attachment.id
+      || attachment.name
+    )),
+  })
+}
+
+function localAttachmentFile(attachment) {
+  return attachment?.previewFile || attachment?.stagedFile || attachment?.retryFile || null
+}
+
+function ClaimantMessageAttachments({ message, evidenceItems, attachments, previewFiles }) {
+  const presentedAttachments = Array.isArray(attachments)
+    ? attachments.map((attachment) => ({
+      ...attachment,
+      previewFile: localAttachmentFile(attachment)
+        || previewFiles?.get(attachment.evidenceId || attachment.uploadAttempt?.evidenceId),
+    }))
+    : (message?.evidence_refs || []).map((evidenceId, index) => {
+      const evidence = evidenceItems.find((item) => item.evidence_id === evidenceId)
+      return {
+        id: evidenceId,
+        name: evidence?.original_filename || evidence?.kind || `Attached file ${index + 1}`,
+        previewFile: previewFiles?.get(evidenceId),
+        statusLabel: evidence
+          ? evidenceFileStatusLabel(evidence.file_status, evidence.status)
+          : 'Attached',
+      }
+    })
+
+  if (presentedAttachments.length === 0) return null
+
+  return (
+    <ul className="message-attachments" aria-label="Attached files">
+      {presentedAttachments.map((attachment, index) => (
+        <li className="message-attachment" key={attachment.id || attachment.name || index}>
+          <AttachmentPreview
+            attachment={attachment}
+            fallbackClassName="message-attachment-icon"
+            className="message-attachment-preview"
+          />
+          <span className="message-attachment-copy">
+            <strong>{attachment.name || `Attached file ${index + 1}`}</strong>
+            <small>{attachment.statusLabel || 'Attached'}</small>
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 async function fetchClaimHistory({ signal } = {}) {
   const claimsById = new Map()
   const seenCursors = new Set()
@@ -498,6 +567,9 @@ function App() {
   const evidenceHasLocalMutation = useRef(false)
   const evidenceClaimId = useRef(null)
   const evidenceUploadControllers = useRef(new Map())
+  const evidencePreviewFiles = useRef(new Map())
+  const attachmentsRef = useRef(attachments)
+  const cancelledAttachmentIds = useRef(new Set())
   const dismissedComposerEvidenceIds = useRef(new Set())
   const detailsTabRefs = useRef({})
   const conversationPanelRef = useRef(null)
@@ -519,6 +591,7 @@ function App() {
   activeSessionIdRef.current = sessionId
   accountRef.current = account
   workspaceViewRef.current = workspaceView
+  attachmentsRef.current = attachments
   messagesRef.current = messages
   const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const realtimeSyncNotice = realtimeHealth === 'stale'
@@ -946,13 +1019,17 @@ function App() {
     forceLatestMessages.current = false
   }, [
     assistanceState,
+    attachments,
     claim?.external_claim,
     conversationActionKind,
     conversationTimeline,
+    draft,
+    error,
     evidenceSyncNotice,
     failedMessage,
     isWorkspaceActive,
     pendingMessage,
+    selectedModel,
     status,
     workspaceView,
   ])
@@ -1081,6 +1158,7 @@ function App() {
       id: current.id || evidence.evidence_id,
       evidenceId: evidence.evidence_id,
       name: evidence.original_filename || evidence.kind,
+      mediaType: evidence.media_type,
       status,
       statusLabel,
       ...(canCheckStatus
@@ -1501,6 +1579,7 @@ function App() {
 
   useEffect(() => {
     if (!claim?.claim_id) {
+      evidencePreviewFiles.current.clear()
       evidenceClaimId.current = null
       latestEvidenceRevision.current = 0
       latestEvidenceItems.current = []
@@ -1511,6 +1590,7 @@ function App() {
       return undefined
     }
     if (evidenceClaimId.current !== claim.claim_id) {
+      evidencePreviewFiles.current.clear()
       evidenceClaimId.current = claim.claim_id
       latestEvidenceRevision.current = 0
       latestEvidenceItems.current = []
@@ -1569,11 +1649,18 @@ function App() {
     evidenceUploadControllers.current.get(localId)?.abort()
     const uploadController = new AbortController()
     evidenceUploadControllers.current.set(localId, uploadController)
+    if (attempt.evidenceId) evidencePreviewFiles.current.set(attempt.evidenceId, file)
     setAttachments((current) => existingAttachment
       ? current.map((item) => item.id === localId
-        ? { ...item, status: 'uploading', statusLabel: 'Uploading…', retry: null }
+        ? { ...item, previewFile: file, status: 'uploading', statusLabel: 'Uploading…', retry: null }
         : item)
-      : [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
+      : [...current, {
+        id: localId,
+        name: file.name,
+        previewFile: file,
+        status: 'uploading',
+        statusLabel: 'Uploading…',
+      }])
     let uploadRevision = activeClaim.revision
     try {
       if (checkExistingEvidence) {
@@ -1595,7 +1682,14 @@ function App() {
             })
             : item))
           if (settleStatus) setStatus('idle')
-          return { revision: uploadRevision, succeeded: true }
+          return {
+            revision: uploadRevision,
+            succeeded: true,
+            evidenceId: observed.evidence_id,
+            fileStatus: observed.file_status,
+            statusLabel: evidenceFileStatusLabel(observed.file_status, observed.status),
+            readyForMessage: observed.file_status !== 'failed',
+          }
         }
       }
       const requested = await requestEvidenceUpload({
@@ -1607,9 +1701,11 @@ function App() {
         idempotencyKey: attempt.uploadKey,
         signal: uploadController.signal,
       })
+      uploadRevision = requested.revision
       evidenceHasLocalMutation.current = true
       latestEvidenceRevision.current = requested.revision
       attempt.evidenceId = requested.evidence_id
+      evidencePreviewFiles.current.set(requested.evidence_id, file)
       dismissedComposerEvidenceIds.current.delete(requested.evidence_id)
       setAttachments((current) => current.map((item) => item.id === localId
         ? { ...item, evidenceId: requested.evidence_id, stagedFile: null, uploadAttempt: attempt }
@@ -1641,10 +1737,17 @@ function App() {
         })
         : item))
       if (settleStatus) setStatus('idle')
-      return { revision: completed.revision, succeeded: true }
+      return {
+        revision: completed.revision,
+        succeeded: true,
+        evidenceId: completed.evidence.evidence_id,
+        fileStatus: completed.evidence.file_status,
+        statusLabel: evidenceFileStatusLabel(completed.evidence.file_status, completed.evidence.status),
+        readyForMessage: completed.evidence.file_status !== 'failed',
+      }
     } catch (requestError) {
       if (requestError?.name === 'AbortError') {
-        return { revision: uploadRevision, succeeded: false }
+        return { revision: uploadRevision, succeeded: false, aborted: true }
       }
       setAttachments((current) => current.map((item) => item.id === localId
         ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
@@ -1653,6 +1756,7 @@ function App() {
       return {
         revision: Math.max(uploadRevision, latestEvidenceRevision.current),
         succeeded: false,
+        evidenceId: attempt.evidenceId,
         message: requestError?.message || 'Northwind could not upload this file.',
       }
     } finally {
@@ -1690,6 +1794,7 @@ function App() {
       kind: requestedKind || (file.type.startsWith('image/') ? 'incident_photo' : 'other_document'),
       evidenceId: requestedEvidenceId,
     }
+    cancelledAttachmentIds.current.delete(attempt.localId)
 
     if (!isWorkspaceActive || !claim) {
       setAttachments((current) => [
@@ -1699,6 +1804,7 @@ function App() {
           name: file.name,
           status: 'staged',
           statusLabel: 'Ready to upload after your first message is sent',
+          previewFile: file,
           stagedFile: file,
           uploadAttempt: attempt,
         },
@@ -1713,14 +1819,23 @@ function App() {
   }
 
   function removeComposerAttachment(attachment) {
+    cancelledAttachmentIds.current.add(attachment.id)
+    attachmentsRef.current = attachmentsRef.current.filter((item) => item.id !== attachment.id)
     evidenceUploadControllers.current.get(attachment.id)?.abort()
     evidenceUploadControllers.current.delete(attachment.id)
     const evidenceId = attachment.evidenceId || attachment.uploadAttempt?.evidenceId
-    if (evidenceId) dismissedComposerEvidenceIds.current.add(evidenceId)
+    if (evidenceId) {
+      dismissedComposerEvidenceIds.current.add(evidenceId)
+      evidencePreviewFiles.current.delete(evidenceId)
+    }
     setAttachments((current) => current.filter((item) => item.id !== attachment.id))
   }
 
   function clearComposerAttachments() {
+    for (const attachment of attachmentsRef.current) {
+      cancelledAttachmentIds.current.add(attachment.id)
+    }
+    attachmentsRef.current = []
     for (const controller of evidenceUploadControllers.current.values()) controller.abort()
     evidenceUploadControllers.current.clear()
     dismissedComposerEvidenceIds.current.clear()
@@ -1728,6 +1843,19 @@ function App() {
   }
 
   function cancelComposerDraftAttachments() {
+    const draftAttachmentIds = new Set(attachmentsRef.current
+      .filter((item) => (
+        item.status === 'staged'
+        || item.status === 'uploading'
+        || (item.status === 'failed' && !item.evidenceId)
+      ))
+      .map((item) => item.id))
+    for (const attachmentId of draftAttachmentIds) {
+      cancelledAttachmentIds.current.add(attachmentId)
+    }
+    attachmentsRef.current = attachmentsRef.current.filter(
+      (item) => !draftAttachmentIds.has(item.id),
+    )
     for (const controller of evidenceUploadControllers.current.values()) controller.abort()
     evidenceUploadControllers.current.clear()
     setAttachments((current) => current.filter((item) => {
@@ -1831,24 +1959,49 @@ function App() {
   async function sendMessage(event, recoveryMessage = null) {
     event.preventDefault()
     const text = recoveryMessage ? messageText(recoveryMessage) : draft.trim()
-    if ((!text && !recoveryMessage?.evidence_refs?.length) || isBusy) return
-    const stagedAttachments = recoveryMessage ? [] : attachments.filter((attachment) => (
-      attachment.status === 'staged'
-      && attachment.stagedFile
-      && attachment.uploadAttempt
-    ))
-    // Already-uploaded attachments (attached mid-conversation, before this
-    // Send) carry an evidenceId but were never linked to a message: the model
-    // only sees an attachment when its evidence_id rides on the same turn.
-    const readyAttachmentEvidenceIds = recoveryMessage ? [] : attachments
-      .filter((attachment) => (
-        attachment.evidenceId
-        && attachment.status !== 'staged'
-        && attachment.status !== 'failed'
-        && attachment.status !== 'uploading'
-      ))
-      .map((attachment) => attachment.evidenceId)
+    const recoveryEvidenceRefs = recoveryMessage?.evidence_refs || []
+    const recoveryAttachments = recoveryMessage
+      ? recoveryEvidenceRefs.map((evidenceId, index) => {
+        const evidence = evidenceItems.find((item) => item.evidence_id === evidenceId)
+        return {
+          id: evidenceId,
+          evidenceId,
+          name: evidence?.original_filename || evidence?.kind || `Attached file ${index + 1}`,
+          mediaType: evidence?.media_type,
+          previewFile: evidencePreviewFiles.current.get(evidenceId),
+          status: evidence?.file_status === 'processing' ? 'processing' : 'uploaded',
+          statusLabel: evidence
+            ? evidenceFileStatusLabel(evidence.file_status, evidence.status)
+            : 'Attached',
+        }
+      })
+      : []
+    const selectedAttachments = recoveryMessage
+      ? recoveryAttachments
+      : attachments.filter(isSendableComposerAttachment)
+    const hasUploadingAttachment = !recoveryMessage
+      && attachments.some((attachment) => attachment.status === 'uploading')
+    if ((!text && selectedAttachments.length === 0) || hasUploadingAttachment || isBusy) return
+    const selectedModelOption = runtimeCapabilities.models.find((model) => model.id === selectedModel)
+    const modelCompatibility = modelAttachmentCompatibility(selectedAttachments, selectedModelOption)
+    if (!modelCompatibility.compatible) {
+      setError(modelCompatibility.message)
+      setStatus('error')
+      return
+    }
+    const stagedAttachments = recoveryMessage
+      ? []
+      : selectedAttachments.filter((attachment) => attachment.status === 'staged')
+    const submissionSignature = recoveryMessage
+      ? JSON.stringify({
+        clientMessageId: recoveryMessage.client_message_id,
+        text,
+        modelProfileId: selectedModel,
+        attachments: recoveryEvidenceRefs,
+      })
+      : attachmentSubmissionSignature(text, selectedAttachments, selectedModel)
     const isAssistanceReply = assistanceState?.key === 'response_needed'
+    let presentedAttachments = selectedAttachments
 
     forceLatestMessages.current = true
     setError('')
@@ -1866,15 +2019,17 @@ function App() {
     try {
       if (recoveryMessage) {
         pendingSubmission.current = {
+          signature: submissionSignature,
           text,
           claimKey: requestId('claim'),
           turnKey: requestId('turn'),
           clientMessageId: recoveryMessage.client_message_id,
-          evidenceRefs: recoveryMessage.evidence_refs || [],
+          evidenceRefs: recoveryEvidenceRefs,
         }
       }
-      if (pendingSubmission.current?.text !== text) {
+      if (!recoveryMessage && pendingSubmission.current?.signature !== submissionSignature) {
         pendingSubmission.current = {
+          signature: submissionSignature,
           text,
           claimKey: requestId('claim'),
           turnKey: requestId('turn'),
@@ -1884,7 +2039,14 @@ function App() {
       const operation = pendingSubmission.current
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
-      setPendingMessage({ text, turnId: operation.clientMessageId, retrying: Boolean(recoveryMessage) })
+      setPendingMessage({
+        text,
+        attachments: selectedAttachments.map((attachment) => attachment.status === 'staged'
+          ? { ...attachment, status: 'uploading', statusLabel: 'Preparing upload…' }
+          : attachment),
+        turnId: operation.clientMessageId,
+        retrying: Boolean(recoveryMessage),
+      })
       let activeClaim = hasStarted ? claim : null
       let activeSessionId = hasStarted ? sessionId : null
       if (activeClaim && activeSessionId) {
@@ -1903,6 +2065,11 @@ function App() {
         activeSessionId = created.session.session_id
         rememberClaimInHistory(created.claim)
         replaceActiveClaimContext(created.claim, activeSessionId)
+        evidenceClaimId.current = created.claim.claim_id
+        latestEvidenceRevision.current = Number(created.claim.revision || 0)
+        latestEvidenceItems.current = []
+        evidenceHasLocalMutation.current = false
+        dismissedComposerEvidenceIds.current.clear()
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
@@ -1916,54 +2083,90 @@ function App() {
         setWorkspaceView('chat')
         setMobileView('chat')
         setWorkspaceActive(true)
-        messageWasSubmitted = true
       }
 
-      // Staged attachments (selected before the claim existed) upload now,
-      // before the turn: the model can only read evidence attached to this
-      // same message, not a follow-up one nobody sends.
-      let uploadedStagedEvidenceIds = []
-      if (stagedAttachments.length) {
-        let attachmentClaim = activeClaim
-        for (const attachment of stagedAttachments) {
-          const upload = await uploadAttachment(
-            attachment.stagedFile,
-            attachment.uploadAttempt,
-            attachmentClaim,
-            { existingAttachment: true, settleStatus: false },
-          )
-          attachmentClaim = { ...attachmentClaim, revision: upload.revision }
-          if (upload.succeeded && attachment.uploadAttempt?.evidenceId) {
-            uploadedStagedEvidenceIds.push(attachment.uploadAttempt.evidenceId)
+      let turnClaim = activeClaim
+      const uploadedAttachments = new Map()
+      const attachmentIsStillSelected = (attachment) => (
+        !cancelledAttachmentIds.current.has(attachment.id)
+        && attachmentsRef.current.some((current) => current.id === attachment.id)
+      )
+      for (const attachment of stagedAttachments) {
+        if (!attachmentIsStillSelected(attachment)) continue
+        const upload = await uploadAttachment(
+          attachment.stagedFile,
+          attachment.uploadAttempt,
+          turnClaim,
+          { existingAttachment: true, settleStatus: false },
+        )
+        turnClaim = { ...turnClaim, revision: upload.revision }
+        if (upload.aborted && !attachmentIsStillSelected(attachment)) continue
+        if (!upload.succeeded || !upload.evidenceId || upload.readyForMessage === false) {
+          if (isAssistanceReply) setAssistanceReplyReview(null)
+          activeTurnProgressRef.current = null
+          setActiveTurnProgress(null)
+          setPendingMessage(null)
+          if (upload.aborted) {
+            pendingSubmission.current = null
+            setStatus('idle')
+          } else if (upload.readyForMessage === false) {
+            setError('The file could not be processed. Remove it or check its status before sending.')
+            setStatus('error')
           }
+          return
         }
-        activeClaim = attachmentClaim
+        if (!attachmentIsStillSelected(attachment)) continue
+        uploadedAttachments.set(attachment.id, {
+          ...attachment,
+          evidenceId: upload.evidenceId,
+          status: upload.fileStatus === 'processing' ? 'processing' : 'uploaded',
+          statusLabel: upload.statusLabel || 'Uploaded',
+        })
       }
-      const turnEvidenceRefs = [
-        ...(operation.evidenceRefs || []),
-        ...readyAttachmentEvidenceIds,
-        ...uploadedStagedEvidenceIds,
-      ]
+      presentedAttachments = recoveryMessage
+        ? selectedAttachments
+        : selectedAttachments
+            .filter(attachmentIsStillSelected)
+            .map((attachment) => uploadedAttachments.get(attachment.id) || attachment)
+      const evidenceRefs = recoveryMessage
+        ? [...new Set(operation.evidenceRefs || [])]
+        : [...new Set(presentedAttachments
+            .map((attachment) => attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+            .filter(Boolean))]
+      if (!text && evidenceRefs.length === 0) {
+        if (isAssistanceReply) setAssistanceReplyReview(null)
+        activeTurnProgressRef.current = null
+        setActiveTurnProgress(null)
+        setPendingMessage(null)
+        pendingSubmission.current = null
+        setStatus('idle')
+        return
+      }
+      const currentSignature = recoveryMessage
+        ? operation.signature
+        : attachmentSubmissionSignature(text, presentedAttachments, selectedModel)
+      if (!recoveryMessage && operation.signature !== currentSignature) {
+        operation.turnKey = requestId('turn')
+        operation.clientMessageId = requestId('message')
+      }
+      operation.signature = currentSignature
+      setPendingMessage({
+        text,
+        attachments: presentedAttachments,
+        turnId: operation.clientMessageId,
+      })
 
+      messageWasSubmitted = true
       const turn = await submitClaimMessage({
         claimId: activeClaim.claim_id,
         sessionId: activeSessionId,
-        revision: activeClaim.revision,
+        revision: turnClaim.revision,
         text,
+        evidenceRefs,
         modelProfileId: selectedModel,
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
-        evidenceRefs: turnEvidenceRefs,
       })
-      for (const evidenceId of turnEvidenceRefs) dismissedComposerEvidenceIds.current.add(evidenceId)
-      // Attachments that rode this message are done being staged in the
-      // composer: drop them from the preview tray now that they are part of
-      // the sent message, rather than leaving them stuck there unremovable.
-      if (turnEvidenceRefs.length) {
-        setAttachments((current) => current.filter(
-          (item) => !item.evidenceId || !turnEvidenceRefs.includes(item.evidenceId),
-        ))
-      }
       const currentRevision = currentTurnRevision(turn)
       const historicalTurn = turn.current_claim && currentRevision > turn.claim_revision
       // Historical actions are evidence, not permission to act on today's offer.
@@ -2031,8 +2234,15 @@ function App() {
           }
         }
       }
-      // Staged attachments already uploaded above, before the turn, so their
-      // evidence_id could ride on this same message.
+      if (!recoveryMessage) {
+        const sentAttachmentIds = new Set(selectedAttachments.map((attachment) => attachment.id))
+        const sentEvidenceRefs = new Set(evidenceRefs)
+        for (const evidenceId of sentEvidenceRefs) dismissedComposerEvidenceIds.current.add(evidenceId)
+        setAttachments((current) => current.filter((attachment) => (
+          !sentAttachmentIds.has(attachment.id)
+          && !sentEvidenceRefs.has(attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+        )))
+      }
       setStatus('idle')
     } catch (requestError) {
       if (isAssistanceReply) setAssistanceReplyReview(null)
@@ -2042,17 +2252,30 @@ function App() {
       if (messageWasSubmitted) {
         const serverConfirmedFailure = requestError instanceof ApiRequestError
           && Number.isInteger(requestError.status)
+        const attachmentGuidance = presentedAttachments.length > 1
+          ? 'Your file uploads are preserved and remain attached. '
+          : presentedAttachments.length === 1
+            ? 'Your file upload is preserved and remains attached. '
+            : ''
         const retryGuidance = requestError instanceof ApiRequestError && requestError.retryable
-          ? 'Try again in a moment.'
-          : 'Review the message and try again.'
+          ? 'Try the message again in a moment.'
+          : requestError instanceof ApiRequestError && requestError.code === 'DEPENDENCY_FAILED'
+            ? 'Retry the message, or select another available model and retry.'
+            : 'Review the message and try again.'
         const failureMessage = serverConfirmedFailure
-          ? `${requestError.message} ${retryGuidance}`
-          : 'We could not confirm delivery because the connection ended before the service responded. Retry safely; the same request will not create a duplicate.'
+          ? `${requestError.message} ${attachmentGuidance}${retryGuidance}`
+          : `We could not confirm delivery because the connection ended before the service responded. ${attachmentGuidance}Retry safely; the same request will not create a duplicate.`
         if (recoveryMessage) {
           pendingSubmission.current = null
           setRecoveryFailure({ messageId: recoveryMessage.message_id, message: failureMessage })
         } else {
-          setFailedMessage({ text, sender: 'You', message: failureMessage })
+          setFailedMessage({
+            text,
+            attachments: presentedAttachments,
+            sender: 'You',
+            deliveryState: serverConfirmedFailure ? 'Not sent' : 'Delivery not confirmed',
+            message: failureMessage,
+          })
         }
         setError('')
         if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
@@ -2082,6 +2305,7 @@ function App() {
     latestEvidenceItems.current = []
     evidenceHasLocalMutation.current = false
     evidenceClaimId.current = null
+    evidencePreviewFiles.current.clear()
     replaceActiveClaimContext(null, null, { preserveSessionPause: true })
     commitMessages([])
     setForm({})
@@ -3495,10 +3719,16 @@ function App() {
                   onRemoveAttachment={removeComposerAttachment}
                 />
                 {failedMessage && (
-                  <article className="message message-claimant is-failed">
+                  <article className="message message-claimant is-failed" role="alert">
                     <p className="message-author">{failedMessage.sender}</p>
-                    <p>{failedMessage.text}</p>
-                    <p className="message-state">{failedMessage.message}</p>
+                    {failedMessage.text && <p>{failedMessage.text}</p>}
+                    <ClaimantMessageAttachments
+                      evidenceItems={evidenceItems}
+                      attachments={failedMessage.attachments}
+                      previewFiles={evidencePreviewFiles.current}
+                    />
+                    <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
+                    <p className="message-failure-detail">{failedMessage.message}</p>
                   </article>
                 )}
               </section>
@@ -3765,11 +3995,19 @@ function App() {
                 }
                 const message = item.message
                 if (message.actor === 'claimant') {
+                  const claimantText = messageText(message)
                   return (
                     <article className="msg-user" key={item.key}>
                       <div className="chat-message-row">
                         <div className="user-message-body">
-                          <div className="chat-bubble user-bubble">{messageText(message)}</div>
+                          <div className="chat-bubble user-bubble">
+                            {claimantText && <p className="user-bubble-text">{claimantText}</p>}
+                            <ClaimantMessageAttachments
+                              message={message}
+                              evidenceItems={evidenceItems}
+                              previewFiles={evidencePreviewFiles.current}
+                            />
+                          </div>
                           {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                             <div className="message-recovery" role="status">
                               <p>{message.recovery.claimant_projection}</p>
@@ -3862,7 +4100,14 @@ function App() {
                     <div className="message-timestamp">Sending…</div>
                     <div className="chat-message-row">
                       <div className="user-message-body">
-                        <div className="chat-bubble user-bubble">{pendingMessage.text}</div>
+                        <div className="chat-bubble user-bubble">
+                          {pendingMessage.text && <p className="user-bubble-text">{pendingMessage.text}</p>}
+                          <ClaimantMessageAttachments
+                            evidenceItems={evidenceItems}
+                            attachments={pendingMessage.attachments}
+                            previewFiles={evidencePreviewFiles.current}
+                          />
+                        </div>
                       </div>
                       <span className="message-avatar claimant-message-avatar" aria-hidden="true">
                         {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
@@ -3880,8 +4125,15 @@ function App() {
                   <div className="chat-message-row">
                     <div className="user-message-body">
                       <div className="chat-bubble user-bubble">
-                        <p>{failedMessage.text}</p>
-                        <p className="message-state">Delivery not confirmed</p>
+                        <p className="message-author">{failedMessage.sender}</p>
+                        {failedMessage.text && <p className="user-bubble-text">{failedMessage.text}</p>}
+                        <ClaimantMessageAttachments
+                          evidenceItems={evidenceItems}
+                          attachments={failedMessage.attachments}
+                          previewFiles={evidencePreviewFiles.current}
+                        />
+                        <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
+                        <p className="message-failure-detail">{failedMessage.message}</p>
                       </div>
                     </div>
                     <span className="message-avatar claimant-message-avatar" aria-hidden="true">
@@ -3974,7 +4226,7 @@ function App() {
                   : assistanceState?.key === 'response_needed'
                     ? 'Send reply'
                     : 'Send'}
-              error={failedMessage?.message || error}
+              error={error}
               variant="workspace"
               claimType={claimType}
               setClaimType={setClaimType}

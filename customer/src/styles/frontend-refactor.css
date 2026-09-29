@@ -103,7 +103,7 @@
 .intake-details-panel.is-collapsed { display: none; }
 
 /* The composer grows with both text and evidence cards without adding a second frame. */
-.workspace-composer { margin-top: auto; }
+.workspace-composer { flex: 0 0 auto; margin-top: auto; padding-bottom: 0; }
 .workspace-composer .input-field {
   display: block;
   min-height: calc(var(--space-16) + var(--space-4));
@@ -117,7 +117,9 @@
 }
 .workspace-composer .input-field::-webkit-scrollbar { display: none; }
 .composer-attachments {
-  display: grid;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-3) 0;
   border: var(--border-component);
@@ -126,18 +128,50 @@
   background: var(--color-surface);
 }
 .composer-attachments + .input-field { border-top: 0; border-radius: 0; }
-.composer-file { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-1); border: var(--border-component); border-radius: var(--radius-md); background: var(--color-page); }
+.composer-file { display: flex; align-items: center; gap: var(--space-2); min-width: 0; max-width: 100%; width: var(--claimant-attachment-card-width); flex: 0 1 var(--claimant-attachment-card-width); padding: var(--space-1); border: var(--border-component); border-radius: var(--radius-md); background: var(--color-page); }
 .composer-file.is-selected { border-color: var(--color-accent); box-shadow: var(--shadow-subtle); }
 .composer-file-select, .composer-file-static { display: flex; align-items: center; gap: var(--space-2); min-width: 0; flex: 1; padding: var(--space-1); border: 0; border-radius: var(--radius-sm); color: var(--color-text-primary); background: transparent; text-align: left; font: inherit; }
 .composer-file-select { cursor: pointer; }
 .composer-file-select:focus-visible, .composer-file-remove:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
 .composer-file-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-sm); color: var(--color-accent-strong); background: var(--color-accent-soft); }
+.attachment-preview { position: relative; display: grid; width: var(--size-control-touch); height: var(--size-control-touch); min-height: var(--size-control-touch); flex: 0 0 var(--size-control-touch); place-items: center; overflow: hidden; border-radius: var(--radius-md); color: var(--color-accent-strong); background: var(--color-accent-soft); box-shadow: var(--shadow-image-inset); text-decoration: none; }
+.attachment-preview:hover { color: var(--color-text-primary); }
+.attachment-preview:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
+.attachment-preview-image { display: block; width: 100%; height: 100%; object-fit: cover; }
+.attachment-preview-glyph { font-size: var(--font-size-section); }
 .composer-file-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .composer-file-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
 .composer-file-copy small { color: var(--color-text-muted); font-size: var(--font-size-caption); }
 .composer-file-failed { border-color: var(--color-danger); background: var(--color-danger-soft); }
 .composer-file-remove { display: grid; width: var(--size-control-touch); height: var(--size-control-touch); flex: 0 0 var(--size-control-touch); place-items: center; padding: 0; border: 0; border-radius: var(--radius-md); color: var(--color-text-secondary); background: transparent; font: inherit; font-size: var(--font-size-section); cursor: pointer; }
 .composer-file-remove:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+.composer-capability-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-top: var(--border-component);
+  border-top-color: var(--color-divider);
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  color: var(--color-warning);
+  background: transparent;
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+.composer-capability-warning-icon {
+  display: grid;
+  width: var(--space-5);
+  height: var(--space-5);
+  flex: 0 0 var(--space-5);
+  place-items: center;
+  border: var(--border-component);
+  border-color: currentColor;
+  border-radius: var(--radius-round);
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+}
 .workspace-composer .input-toolbar { margin-top: 0; padding: var(--space-2) var(--space-3); border: var(--border-component); border-top: 0; border-radius: 0 0 var(--radius-xl) var(--radius-xl); background: var(--color-surface); }
 .workspace-composer .toolbar-left { overflow: visible; }
 .workspace-composer .claim-type-control {
@@ -414,6 +448,24 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 }
 .entry-page .composer { display: flex; flex: 1; flex-direction: column; }
 .entry-page .entry-composer-surface { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.entry-page .entry-composer-surface.has-attachments {
+  overflow: visible;
+  border: var(--border-component);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+}
+.entry-page .entry-composer-surface.has-attachments .composer-attachments {
+  padding-bottom: var(--space-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.entry-page .entry-composer-surface.has-attachments .report-text {
+  padding-inline: var(--space-3);
+}
+.entry-page .entry-composer-surface.has-attachments .input-toolbar {
+  padding: var(--space-2) var(--space-3);
+}
 .entry-page .report-text {
   min-height: calc(var(--space-16) + var(--space-4));
   flex: 1;
@@ -1171,8 +1223,18 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .user-bubble::after { right: calc(var(--space-1) * -1); }
 .agent-bubble, .staff-bubble { background: var(--color-surface); }
 .agent-bubble::after, .staff-bubble::after { left: calc(var(--space-1) * -1); }
+.user-bubble-text { margin: 0; white-space: pre-wrap; }
+.message-attachments { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.user-bubble-text + .message-attachments { margin-top: var(--space-3); }
+.message-attachment { display: flex; min-width: 0; align-items: center; gap: var(--space-2); padding: var(--space-2); border: var(--border-component); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--color-surface); }
+.message-attachment-icon { display: grid; width: var(--size-control-touch); height: var(--size-control-touch); flex: 0 0 var(--size-control-touch); place-items: center; border-radius: var(--radius-md); color: var(--color-accent-strong); background: var(--color-accent-soft); }
+.message-attachment-copy { display: grid; min-width: 0; gap: var(--space-1); }
+.message-attachment-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
+.message-attachment-copy small { color: var(--color-text-muted); font-size: var(--font-size-caption); }
+.msg-user.is-pending .user-bubble { opacity: var(--opacity-disabled); }
 .msg-user.is-failed .user-bubble { color: var(--color-text-primary); background: var(--color-danger-soft); }
 .msg-user.is-failed .message-state { color: var(--color-danger); }
+.message-failure-detail { margin: var(--space-2) 0 0; color: var(--color-danger); font-size: var(--font-size-caption); line-height: var(--line-height-body); }
 .message-recovery { max-width: var(--measure-reading); margin-top: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-body); }
 .message-recovery p { margin: 0 0 var(--space-2); }
 .message-recovery p:last-child { margin-bottom: 0; }
@@ -1740,12 +1802,17 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   border-radius: var(--radius-xl);
   background: var(--color-surface);
 }
+.composer-input-surface:focus-within { border-color: var(--color-accent); }
 .composer-input-surface .composer-attachments,
 .composer-input-surface .input-field,
 .composer-input-surface .input-toolbar {
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+.composer-input-surface .input-field:focus {
+  outline: 0;
+  box-shadow: var(--shadow-none);
 }
 .composer-input-surface .composer-attachments { padding-bottom: 0; }
 .composer-input-surface .input-field { padding-bottom: var(--space-2); }
