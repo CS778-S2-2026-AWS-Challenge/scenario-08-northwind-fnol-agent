@@ -733,11 +733,12 @@ export function submitClaimMessage({
   sessionId,
   revision,
   text,
+  evidenceRefs = [],
   modelProfileId = null,
   idempotencyKey = requestId('turn'),
   clientMessageId = requestId('message'),
-  evidenceRefs = [],
 }) {
+  const normalizedText = text?.trim() || ''
   return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: {
@@ -746,7 +747,7 @@ export function submitClaimMessage({
     },
     body: JSON.stringify({
       client_message_id: clientMessageId,
-      content: { type: 'text', text },
+      ...(normalizedText ? { content: { type: 'text', text: normalizedText } } : {}),
       evidence_refs: evidenceRefs,
       ...(modelProfileId ? { model_profile_id: modelProfileId } : {}),
     }),

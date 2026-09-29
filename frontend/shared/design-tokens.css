@@ -86,6 +86,7 @@
   --border-danger: 1.5px solid var(--color-danger);
   --shadow-none: none;
   --shadow-subtle: 0 1px 3px rgba(26, 24, 20, .08);
+  --shadow-image-inset: inset 0 0 0 1px rgba(26, 24, 20, .1);
   --shadow-popover: 0 8px 24px rgba(26, 24, 20, .14);
   --shadow-modal: 0 16px 40px rgba(26, 24, 20, .18);
   --blur-subtle: blur(8px);
@@ -133,6 +134,9 @@
   --claimant-profile-label-width: 160px;
   --claimant-profile-address-min-height: 96px;
   --claimant-details-panel-width: 400px;
+
+  /* Claimant attachment cards stay compact while shrinking with narrow composers. */
+  --claimant-attachment-card-width: 400px;
 
   /* Claimant entry semantic contract. Component CSS consumes these roles
      without reconstructing translucent states or page geometry. */
