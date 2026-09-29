@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 function readable(value) {
   if (value === null || value === undefined || value === '') return 'Not recorded'
@@ -151,10 +151,8 @@ export default function AgreementConfirmationPanel({
 
       {submissionError && (
         <div
-          ref={submissionErrorRef}
           className="claim-history-state is-error"
           role="alert"
-          tabIndex={-1}
         >
           <h3>{submissionError.title}</h3>
           <p>{submissionError.message}</p>
