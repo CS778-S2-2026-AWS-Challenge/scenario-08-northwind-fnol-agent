@@ -43,6 +43,7 @@ import ClaimDocuments from './components/ClaimDocuments.jsx'
 import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
 import AgreementConfirmationPanel from './components/AgreementConfirmationPanel.jsx'
 import PayoutContactPanel from './components/PayoutContactPanel.jsx'
+import ClaimAutoFillPanel from './components/ClaimAutoFillPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
   AgentTurnDisclosure,
@@ -413,6 +414,7 @@ function App() {
   const [dynamicForm, setDynamicForm] = useState(null)
   const [nextStep, setNextStep] = useState(null)
   const [status, setStatus] = useState('idle')
+  const [autoFillBusy, setAutoFillBusy] = useState(false)
   const [error, setError] = useState('')
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
@@ -701,7 +703,7 @@ function App() {
     }
   }, [draftWorkspaceActive, isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
 
-  const isBusy = [
+  const claimOperationBusy = [
     'starting',
     'sending',
     'confirming',
@@ -715,6 +717,7 @@ function App() {
     'saving-payment-destination',
     'saving-payout-contact',
   ].includes(status)
+  const isBusy = claimOperationBusy || autoFillBusy
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
     [form],
@@ -3561,6 +3564,16 @@ function App() {
                 <div className="conversation-agent-action is-standalone">
                   {renderConversationAction()}
                 </div>
+              )}
+              {account && claim && (
+                <ClaimAutoFillPanel
+                  key={`${account.customer_id}:${claim.claim_id}`}
+                  account={account}
+                  claim={claim}
+                  busy={claimOperationBusy}
+                  onBusyChange={setAutoFillBusy}
+                  onClaimReadback={applyClaimSnapshot}
+                />
               )}
               {pendingMessage && (
                 <>

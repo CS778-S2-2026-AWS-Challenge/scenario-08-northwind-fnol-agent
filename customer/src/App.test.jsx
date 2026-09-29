@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   getAuthenticatedAccount: vi.fn(),
   hasClaimantAccessToken: vi.fn(),
   getClaim: vi.fn(),
+  getClaimAutoFillSuggestions: vi.fn(),
   getClaimMessages: vi.fn(),
   getClaimEvidence: vi.fn(),
   getRuntimeCapabilities: vi.fn(),
@@ -22,6 +23,7 @@ const api = vi.hoisted(() => ({
   listAccountIdentityDocuments: vi.fn(),
   listAccountPaymentDestinations: vi.fn(),
   listAccountPolicies: vi.fn(),
+  listClaimAssetSnapshots: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
   listPaymentDestinations: vi.fn(),
@@ -34,6 +36,8 @@ const api = vi.hoisted(() => ({
   registerClaimant: vi.fn(),
   requestEvidenceUpload: vi.fn(),
   selectClaimPayoutContact: vi.fn(),
+  selectClaimAsset: vi.fn(),
+  selectClaimPolicy: vi.fn(),
   uploadEvidenceContent: vi.fn(),
   completeEvidenceUpload: vi.fn(),
   resumeClaimSession: vi.fn(),
@@ -256,10 +260,17 @@ describe('claimant intake projection', () => {
       default_model_profile_id: 'qwen-local',
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
+    api.getClaimAutoFillSuggestions.mockImplementation(async (claimId) => ({
+      claim_id: claimId,
+      claim_revision: 1,
+      account_revision: 1,
+      suggestions: [],
+    }))
     api.listAccountAssets.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountIdentityDocuments.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountPolicies.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listClaimAssetSnapshots.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
@@ -335,6 +346,72 @@ describe('claimant intake projection', () => {
     expect(agentArticle.querySelector('time.message-timestamp'))
       .toHaveAttribute('datetime', agentMessage.created_at)
     expect(container.querySelectorAll('.message-list time.message-timestamp')).toHaveLength(1)
+  })
+
+  it('automatically applies a sole saved policy without adding a persistent workspace card', async () => {
+    const user = userEvent.setup()
+    const policy = {
+      policy_id: 'pol_11111111111111111111',
+      policy_number: 'MOTOR-1234',
+      revision: 1,
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_synthetic',
+      revision: 1,
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+      claim_auto_fill_preferences: {
+        personal_details: false,
+        policy_number: true,
+        saved_assets: false,
+        payment_details: false,
+        identity_information: false,
+      },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPolicies.mockResolvedValue({ items: [policy], page: { next_cursor: null } })
+    api.getClaimAutoFillSuggestions.mockImplementation(async (claimId) => ({
+      claim_id: claimId,
+      claim_revision: 1,
+      account_revision: 1,
+      suggestions: [{
+        category: 'policy_number',
+        enabled: true,
+        available: true,
+        eligible: true,
+        action: 'select_policy',
+      }],
+    }))
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.selectClaimPolicy.mockResolvedValue({ claim_id: initialClaim.claim_id, revision: 3 })
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 3,
+      form: {
+        'policy.policy_number': {
+          value: policy.policy_number,
+          status: 'proposed',
+          source: 'claimant',
+          source_refs: [`policy:${policy.policy_id}:revision:1`],
+        },
+      },
+      primary_action: primaryAction({ revision: 3 }),
+    })
+
+    render(<App />)
+    await user.type(await screen.findByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await waitFor(() => expect(api.selectClaimPolicy).toHaveBeenCalledWith({
+      claimId: initialClaim.claim_id,
+      revision: 2,
+      policyId: policy.policy_id,
+      idempotencyKey: 'claim-policy-selection-test',
+    }))
+    expect(await screen.findByText(/Policy ••••1234 was added to this Claim as information to review/)).toBeInTheDocument()
+    expect(screen.queryByText('Use your saved details')).not.toBeInTheDocument()
   })
 
   it('shows one truthful Agent placeholder for the first claimant turn', async () => {

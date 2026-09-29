@@ -18,8 +18,8 @@ export default function ClaimAutoFillChoices({
 
   return (
     <form className="profile-autofill-form" onSubmit={submit}>
-      <p className="profile-helper-copy">Show makes a category eligible for a future Claim suggestion. You will review and confirm any suggested information before it enters a Claim.</p>
-      <p className="profile-helper-copy">Payment details and Identity information only prompt you to confirm separately. Their numbers are never suggested.</p>
+      <p className="profile-helper-copy">Show lets Northwind use this category in future Claims. When the matching Claim information is empty, one saved policy or asset is added automatically for review; if there are several, the Claim asks you to choose one.</p>
+      <p className="profile-helper-copy">At the payout or identity step, saved details can be offered or preselected for separate confirmation. Full account and document numbers are never copied into the Claim.</p>
       <div className="profile-autofill-choices">
         {choices.map((choice, index) => {
           const inputId = `${formId}-${index}`

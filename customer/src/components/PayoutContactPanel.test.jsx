@@ -115,6 +115,56 @@ describe('PayoutContactPanel', () => {
     expect(screen.getByRole('radio', { name: /In-app Northwind account messages/i })).toBeEnabled()
   })
 
+  it('preselects the common payout account when payment auto-fill is enabled but still requires confirmation', async () => {
+    const user = userEvent.setup()
+    const onContinue = vi.fn().mockResolvedValue({})
+    const destinations = [
+      {
+        payment_destination_id: 'pyd_everyday',
+        account_type: 'Everyday',
+        masked_account_number: '***************6700',
+        active: true,
+        is_common: false,
+      },
+      {
+        payment_destination_id: 'pyd_savings',
+        account_type: 'Savings',
+        masked_account_number: '***************8821',
+        active: true,
+        is_common: true,
+      },
+    ]
+
+    render(
+      <PayoutContactPanel
+        account={{
+          ...account,
+          claim_auto_fill_preferences: { payment_details: true },
+        }}
+        claim={claim}
+        destinations={destinations}
+        loading={false}
+        loadError=""
+        busy={false}
+        onAddDestination={vi.fn()}
+        onContinue={onContinue}
+        onManageContact={vi.fn()}
+        onLogin={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('radio', { name: /Savings .*8821/i })).toBeChecked()
+    expect(screen.getByText(/saved payout account was preselected/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue to agreement' })).toBeDisabled()
+
+    await user.click(screen.getByRole('radio', { name: /Email claimant@example.test/i }))
+    await user.click(screen.getByRole('button', { name: 'Continue to agreement' }))
+    expect(onContinue).toHaveBeenCalledWith({
+      paymentDestinationId: 'pyd_savings',
+      contactPreference: 'email',
+    })
+  })
+
   it('clears Claim-scoped selection and sensitive draft when the active Claim changes', async () => {
     const user = userEvent.setup()
     const destination = {

@@ -408,6 +408,54 @@ export function updateClaimAutoFillPreferences(preferences, revision) {
   })
 }
 
+export function getClaimAutoFillSuggestions(claimId, { signal } = {}) {
+  return apiRequest(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/auto-fill-suggestions`,
+    { signal },
+  )
+}
+
+export function selectClaimPolicy({
+  claimId,
+  revision,
+  policyId,
+  idempotencyKey = requestId('policy-selection'),
+}) {
+  return apiRequest(`/api/v1/claims/${encodeURIComponent(claimId)}/policy-selections`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ policy_id: policyId }),
+  })
+}
+
+export function selectClaimAsset({
+  claimId,
+  revision,
+  assetId,
+  idempotencyKey = requestId('asset-selection'),
+}) {
+  return apiRequest(`/api/v1/claims/${encodeURIComponent(claimId)}/asset-selections`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ asset_id: assetId }),
+  })
+}
+
+export function listClaimAssetSnapshots(claimId, { cursor, limit = 100, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/asset-snapshots?${params}`,
+    { signal },
+  )
+}
+
 export function listAccountPolicies({ cursor, limit = 25, signal } = {}) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
