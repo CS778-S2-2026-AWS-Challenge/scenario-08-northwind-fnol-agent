@@ -155,6 +155,37 @@ function initialTurn() {
   }
 }
 
+function deferredRequest() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function enableAuthenticatedImageAttachments() {
+  api.hasClaimantAccessToken.mockReturnValue(true)
+  api.getAuthenticatedAccount.mockResolvedValue({
+    customer_id: 'cus_attachment_test',
+    profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+    preferences: { email: true, sms: false },
+  })
+  api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+  api.getRuntimeCapabilities.mockResolvedValue({
+    claim_types: ['motor', 'home', 'contents'],
+    models: [{
+      id: 'qwen-local',
+      label: 'qwen3.8-27b',
+      availability: 'available',
+      image_input: true,
+      document_input: true,
+    }],
+    default_model_profile_id: 'qwen-local',
+  })
+}
+
 function realtimeChange(revision, resources = ['claim', 'messages']) {
   return realtimeChangeFor(initialClaim.claim_id, revision, resources)
 }
@@ -3684,6 +3715,115 @@ describe('claimant intake projection', () => {
     })
     expect(preview).toHaveAttribute('href', 'blob:app/file-only-damage.jpg')
     expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:app/file-only-damage.jpg')
+  })
+
+  it('does not upload an attachment removed while Claim creation is pending', async () => {
+    const user = userEvent.setup()
+    const claimCreation = deferredRequest()
+    enableAuthenticatedImageAttachments()
+    api.createClaim.mockReturnValue(claimCreation.promise)
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'remove-before-claim.jpg', { type: 'image/jpeg' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.createClaim).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Remove remove-before-claim.jpg' }))
+    await act(async () => claimCreation.resolve({
+      claim: initialClaim,
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+    }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled())
+    expect(api.requestEvidenceUpload).not.toHaveBeenCalled()
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+    expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument()
+  })
+
+  it('skips a later staged attachment removed while an earlier upload is pending', async () => {
+    const user = userEvent.setup()
+    const firstUploadRequest = deferredRequest()
+    let requestSequence = 0
+    enableAuthenticatedImageAttachments()
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    api.requestEvidenceUpload.mockReturnValueOnce(firstUploadRequest.promise)
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_first_staged',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'first-staged.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+      },
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claimant_message: {
+        ...claimantMessage,
+        content: { type: 'evidence_reference' },
+        evidence_refs: ['evd_first_staged'],
+      },
+      claim_revision: 5,
+      primary_action: primaryAction({ revision: 5 }),
+    })
+
+    render(<App />)
+    const fileInput = document.querySelector('input[type="file"]')
+    await user.upload(fileInput, new File(['one'], 'first-staged.jpg', { type: 'image/jpeg' }))
+    await user.upload(fileInput, new File(['two'], 'remove-from-queue.jpg', { type: 'image/jpeg' }))
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Remove remove-from-queue.jpg' }))
+    await act(async () => firstUploadRequest.resolve({
+      evidence_id: 'evd_first_staged',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+    expect(api.requestEvidenceUpload).toHaveBeenCalledTimes(1)
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceRefs: ['evd_first_staged'],
+    }))
+  })
+
+  it('aborts an active staged upload and does not send an empty attachment-only turn', async () => {
+    const user = userEvent.setup()
+    enableAuthenticatedImageAttachments()
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_cancelled_upload',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockImplementation(({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(
+        Object.assign(new Error('Upload aborted'), { name: 'AbortError' }),
+      ))
+    }))
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'cancel-active-upload.jpg', { type: 'image/jpeg' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.uploadEvidenceContent).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Remove cancel-active-upload.jpg' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled())
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+    expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument()
   })
 
   it('keeps an uploaded image preview available when the model turn fails', async () => {

@@ -562,6 +562,8 @@ function App() {
   const evidenceClaimId = useRef(null)
   const evidenceUploadControllers = useRef(new Map())
   const evidencePreviewFiles = useRef(new Map())
+  const attachmentsRef = useRef(attachments)
+  const cancelledAttachmentIds = useRef(new Set())
   const dismissedComposerEvidenceIds = useRef(new Set())
   const detailsTabRefs = useRef({})
   const conversationPanelRef = useRef(null)
@@ -582,6 +584,7 @@ function App() {
   activeClaimRef.current = claim
   activeSessionIdRef.current = sessionId
   accountRef.current = account
+  attachmentsRef.current = attachments
   messagesRef.current = messages
   const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const realtimeSyncNotice = realtimeHealth === 'stale'
@@ -1619,6 +1622,7 @@ function App() {
         idempotencyKey: attempt.uploadKey,
         signal: uploadController.signal,
       })
+      uploadRevision = requested.revision
       evidenceHasLocalMutation.current = true
       latestEvidenceRevision.current = requested.revision
       attempt.evidenceId = requested.evidence_id
@@ -1711,6 +1715,7 @@ function App() {
       kind: requestedKind || (file.type.startsWith('image/') ? 'incident_photo' : 'other_document'),
       evidenceId: requestedEvidenceId,
     }
+    cancelledAttachmentIds.current.delete(attempt.localId)
 
     if (!isWorkspaceActive || !claim) {
       setAttachments((current) => [
@@ -1735,6 +1740,8 @@ function App() {
   }
 
   function removeComposerAttachment(attachment) {
+    cancelledAttachmentIds.current.add(attachment.id)
+    attachmentsRef.current = attachmentsRef.current.filter((item) => item.id !== attachment.id)
     evidenceUploadControllers.current.get(attachment.id)?.abort()
     evidenceUploadControllers.current.delete(attachment.id)
     const evidenceId = attachment.evidenceId || attachment.uploadAttempt?.evidenceId
@@ -1746,6 +1753,10 @@ function App() {
   }
 
   function clearComposerAttachments() {
+    for (const attachment of attachmentsRef.current) {
+      cancelledAttachmentIds.current.add(attachment.id)
+    }
+    attachmentsRef.current = []
     for (const controller of evidenceUploadControllers.current.values()) controller.abort()
     evidenceUploadControllers.current.clear()
     dismissedComposerEvidenceIds.current.clear()
@@ -1753,6 +1764,19 @@ function App() {
   }
 
   function cancelComposerDraftAttachments() {
+    const draftAttachmentIds = new Set(attachmentsRef.current
+      .filter((item) => (
+        item.status === 'staged'
+        || item.status === 'uploading'
+        || (item.status === 'failed' && !item.evidenceId)
+      ))
+      .map((item) => item.id))
+    for (const attachmentId of draftAttachmentIds) {
+      cancelledAttachmentIds.current.add(attachmentId)
+    }
+    attachmentsRef.current = attachmentsRef.current.filter(
+      (item) => !draftAttachmentIds.has(item.id),
+    )
     for (const controller of evidenceUploadControllers.current.values()) controller.abort()
     evidenceUploadControllers.current.clear()
     setAttachments((current) => current.filter((item) => {
@@ -1905,13 +1929,12 @@ function App() {
 
       let turnClaim = activeClaim
       const uploadedAttachments = new Map()
-      const evidenceRefs = recoveryMessage
-        ? [...new Set(operation.evidenceRefs || [])]
-        : [...new Set(selectedAttachments
-            .filter((attachment) => attachment.status !== 'staged')
-            .map((attachment) => attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
-            .filter(Boolean))]
+      const attachmentIsStillSelected = (attachment) => (
+        !cancelledAttachmentIds.current.has(attachment.id)
+        && attachmentsRef.current.some((current) => current.id === attachment.id)
+      )
       for (const attachment of stagedAttachments) {
+        if (!attachmentIsStillSelected(attachment)) continue
         const upload = await uploadAttachment(
           attachment.stagedFile,
           attachment.uploadAttempt,
@@ -1919,6 +1942,7 @@ function App() {
           { existingAttachment: true, settleStatus: false },
         )
         turnClaim = { ...turnClaim, revision: upload.revision }
+        if (upload.aborted && !attachmentIsStillSelected(attachment)) continue
         if (!upload.succeeded || !upload.evidenceId || upload.readyForMessage === false) {
           if (isAssistanceReply) setAssistanceReplyReview(null)
           activeTurnProgressRef.current = null
@@ -1933,7 +1957,7 @@ function App() {
           }
           return
         }
-        if (!evidenceRefs.includes(upload.evidenceId)) evidenceRefs.push(upload.evidenceId)
+        if (!attachmentIsStillSelected(attachment)) continue
         uploadedAttachments.set(attachment.id, {
           ...attachment,
           evidenceId: upload.evidenceId,
@@ -1941,10 +1965,33 @@ function App() {
           statusLabel: upload.statusLabel || 'Uploaded',
         })
       }
-      operation.signature = attachmentSubmissionSignature(text, selectedAttachments, selectedModel)
-      presentedAttachments = selectedAttachments.map((attachment) => (
-        uploadedAttachments.get(attachment.id) || attachment
-      ))
+      presentedAttachments = recoveryMessage
+        ? selectedAttachments
+        : selectedAttachments
+            .filter(attachmentIsStillSelected)
+            .map((attachment) => uploadedAttachments.get(attachment.id) || attachment)
+      const evidenceRefs = recoveryMessage
+        ? [...new Set(operation.evidenceRefs || [])]
+        : [...new Set(presentedAttachments
+            .map((attachment) => attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+            .filter(Boolean))]
+      if (!text && evidenceRefs.length === 0) {
+        if (isAssistanceReply) setAssistanceReplyReview(null)
+        activeTurnProgressRef.current = null
+        setActiveTurnProgress(null)
+        setPendingMessage(null)
+        pendingSubmission.current = null
+        setStatus('idle')
+        return
+      }
+      const currentSignature = recoveryMessage
+        ? operation.signature
+        : attachmentSubmissionSignature(text, presentedAttachments, selectedModel)
+      if (!recoveryMessage && operation.signature !== currentSignature) {
+        operation.turnKey = requestId('turn')
+        operation.clientMessageId = requestId('message')
+      }
+      operation.signature = currentSignature
       setPendingMessage({
         text,
         attachments: presentedAttachments,
