@@ -101,6 +101,26 @@ def test_discovery_outage_preserves_cursor_and_does_not_log_provider_secrets(
     assert 'private-credential' not in caplog.text
 
 
+def test_orphan_and_unexpected_provider_failure_do_not_skip_later_images(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    repository = _repository()
+    repository.list_evidence_recovery_page.return_value = [
+        _record('evd_orphan'),
+        _record('evd_error'),
+        _record('evd_valid'),
+    ]
+    repository.get_claim_internal.side_effect = [None, Mock(revision=7), Mock(revision=8)]
+    repair = Mock(side_effect=[RuntimeError('private-provider-payload'), None])
+    monkeypatch.setattr('backend.services.image_recovery.repair_processing_image', repair)
+    worker = ImageRecoveryWorker(cast(PersistenceRepository, repository), MockEvidenceStorage())
+    assert worker.run_once() == 60.0
+    assert [call.args[3] for call in repair.call_args_list] == ['evd_error', 'evd_valid']
+    assert repair.call_args.args[4] == 8
+    assert repair.call_args.kwargs['apply'] is True
+    assert 'private-provider-payload' not in caplog.text
+
+
 @pytest.mark.parametrize(
     'updates',
     [
