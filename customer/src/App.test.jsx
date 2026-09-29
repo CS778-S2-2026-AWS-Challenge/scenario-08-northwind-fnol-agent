@@ -1784,13 +1784,13 @@ describe('claimant intake projection', () => {
     expect(api.startClaimSession).not.toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
     expect(screen.getByText('Ready to start')).toBeVisible()
-    expect(screen.getByPlaceholderText('Write the details you know...')).toHaveValue('')
+    expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Start claim' })).not.toBeInTheDocument()
     expect(screen.queryByText('clm_ui_second')).not.toBeInTheDocument()
     expect(globalThis.location.pathname).toBe('/claims/new')
 
     await user.type(
-      screen.getByPlaceholderText('Write the details you know...'),
+      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
       'A second incident happened today.',
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2208,8 +2208,46 @@ describe('claimant intake projection', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
-    expect(screen.getByPlaceholderText('Write the details you know...')).toBeVisible()
+    expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'Start your insurance claim' })).not.toBeInTheDocument()
+  })
+
+  it('guides a new conversation and fills the composer without sending', async () => {
+    const user = userEvent.setup()
+    globalThis.history.replaceState({}, '', '/claims/new')
+
+    const { container } = render(<App />)
+
+    expect(screen.getByRole('heading', { name: "Let's get your claim started" })).toBeVisible()
+    expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()
+    expect(screen.getByText(/Your information stays private/)).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Your summary will build as you chat' })).toBeVisible()
+    expect(screen.getByText(/Key dates, people, damage and supporting items/)).toBeVisible()
+
+    const composer = screen.getByPlaceholderText('Write what happened, or choose a prompt above…')
+    const send = screen.getByRole('button', { name: 'Send' })
+    const prompt = screen.getByRole('button', { name: 'I was in a car accident' })
+    const messageList = container.querySelector('.message-list')
+    Object.defineProperty(messageList, 'scrollHeight', { configurable: true, value: 960 })
+    messageList.scrollTop = 240
+    expect(send).toBeDisabled()
+
+    prompt.focus()
+    await user.keyboard('{Enter}')
+
+    expect(prompt).toHaveFocus()
+    expect(messageList.scrollTop).toBe(0)
+    expect(composer).toHaveValue('I was in a car accident')
+    expect(send).toBeEnabled()
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+
+    await user.click(composer)
+    await user.type(composer, ' near my home.')
+    expect(composer).toHaveValue('I was in a car accident near my home.')
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
   })
 
   it('restores anonymous session-local history through the existing Claim APIs after reload', async () => {
@@ -3234,8 +3272,30 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(await screen.findByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Write the details you know...')).toBeVisible()
+    expect(screen.queryByPlaceholderText('Write what happened, or choose a prompt above…'))
+      .not.toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: /Review claim details/i }))
     expect(screen.getByText('2 to review')).toBeInTheDocument()
+
+    const historyView = screen.getByRole('button', { name: 'History' })
+    const chatView = screen.getByRole('button', { name: 'Chat' })
+    const detailsView = screen.getByRole('button', { name: 'Details' })
+    expect(detailsView).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true')
+
+    await user.click(screen.getByRole('tab', { name: 'What to provide' }))
+    expect(screen.getByRole('tabpanel', { name: 'What to provide' })).toBeInTheDocument()
+
+    await user.click(chatView)
+    expect(chatView).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+
+    await user.click(historyView)
+    expect(historyView).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Profile and preferences' })).toBeInTheDocument()
   })
 
   it('uses the claimant-safe Incident type label in the details review', async () => {
