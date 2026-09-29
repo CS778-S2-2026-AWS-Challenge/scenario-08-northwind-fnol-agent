@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-15.1'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-28.1'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -344,6 +344,43 @@ WORKBENCH_ACTION_REGISTRY = {
                 ),
             ),
             ('customer_next_step.update', 'customer_update.append'),
+        ),
+        RegisteredWorkbenchAction(
+            'claim.abandon',
+            WorkbenchActionTargetType.CLAIM,
+            'Abandon incomplete Claim',
+            'Authoritatively stop this incomplete Claim while retaining its records for reopen.',
+            WorkbenchActionPermission.PRIMARY_OWNER,
+            ConfirmationLevel.EXPLICIT,
+            'The Claim will become abandoned and automatic recovery will stop.',
+            (
+                'terminal_disposition.set',
+                'follow_up.resolve',
+                'claim.revision.advance',
+                'audit.append',
+            ),
+            (
+                _input(
+                    'reason',
+                    'Why are you abandoning this incomplete Claim?',
+                    WorkbenchActionInputControl.TEXTAREA,
+                ),
+            ),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'IDEMPOTENCY_CONFLICT',
+                'INVALID_STATE_TRANSITION',
+                'RESOURCE_NOT_FOUND',
+                'REVISION_CONFLICT',
+                'VALIDATION_ERROR',
+            ),
+            audit_requirements=(
+                'action_code',
+                'target_ref',
+                'actor_id',
+                'resulting_revision',
+                'follow_up_ref',
+            ),
         ),
         RegisteredWorkbenchAction(
             'claim.reopen',
