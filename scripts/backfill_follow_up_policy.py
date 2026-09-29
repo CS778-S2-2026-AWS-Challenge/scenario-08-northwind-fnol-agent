@@ -37,6 +37,7 @@ def backfill_follow_ups(
             {
                 'record_type': 'follow_up',
                 '$or': [
+                    {'recovery_discovery_ready': {'$ne': True}},
                     {'policy_id': None},
                     {'policy_version': None},
                     {'deadline_at': None},
@@ -63,18 +64,21 @@ def backfill_follow_ups(
                 'claim_id': follow_up.get('claim_id'),
             },
         )
+        reason_code = 'source_state_inconsistent'
         try:
             interrupted_at = (session or {}).get('recovery_context', {}).get('interrupted_at')
             interrupted_at = _DATETIME.validate_python(interrupted_at)
             if interrupted_at.tzinfo is None or interrupted_at.utcoffset() is None:
                 raise ValueError('interrupted_at must include a timezone offset.')
             deadline_at = interrupted_at + timedelta(days=7)
+            reason_code = 'policy_binding_invalid'
             for field, expected in (
                 ('policy_id', 'incomplete_claim_follow_up'),
                 ('policy_version', 1),
             ):
                 if follow_up.get(field) is not None and follow_up[field] != expected:
                     raise ValueError('Existing policy binding contradicts the approved policy.')
+            reason_code = 'source_state_inconsistent'
             if follow_up.get('deadline_at') is not None and (
                 _DATETIME.validate_python(follow_up['deadline_at']) != deadline_at
             ):
@@ -86,7 +90,29 @@ def backfill_follow_ups(
                 else None
             )
         except (AttributeError, TypeError, ValidationError, ValueError) as error:
-            report['rejected'].append({'follow_up_id': follow_up_id, 'reason': str(error)})
+            report['rejected'].append(
+                {
+                    'follow_up_id': follow_up_id,
+                    'reason_code': reason_code,
+                    'reason': str(error),
+                    'repair_owner': 'backend_data_operator',
+                }
+            )
+            if apply:
+                predicate = dict(follow_up)
+                if 'recovery_discovery_ready' not in follow_up:
+                    predicate['recovery_discovery_ready'] = {'$exists': False}
+                result = collection.update_one(
+                    predicate,
+                    {
+                        '$set': {
+                            'recovery_discovery_ready': False,
+                            'recovery_migration_reason': reason_code,
+                        }
+                    },
+                )
+                if result.matched_count != 1:
+                    report['conflicts'].append(follow_up_id)
             continue
 
         update: dict[str, Any] = {
@@ -94,6 +120,7 @@ def backfill_follow_ups(
             'policy_version': 1,
         }
         update = {key: value for key, value in update.items() if follow_up.get(key) is None}
+        update.update(recovery_discovery_ready=True, recovery_migration_reason=None)
         if follow_up.get('deadline_at') != canonical_deadline:
             update['deadline_at'] = canonical_deadline
         if follow_up.get('due_at') != canonical_due:
@@ -128,7 +155,14 @@ def _apply_backfill(
     # Apply requires a transaction-capable Mongo deployment. The source fence is
     # adapter metadata, not a Session revision or a change to recovery evidence.
     predicate: dict[str, Any] = dict(original)
-    for field in ('policy_id', 'policy_version', 'deadline_at', 'blocked_reason'):
+    for field in (
+        'policy_id',
+        'policy_version',
+        'deadline_at',
+        'blocked_reason',
+        'recovery_discovery_ready',
+        'recovery_migration_reason',
+    ):
         if field not in original:
             predicate[field] = {'$exists': False}
 

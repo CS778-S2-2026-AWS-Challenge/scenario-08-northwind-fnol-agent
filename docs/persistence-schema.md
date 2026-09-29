@@ -1425,6 +1425,14 @@ schema records the approved policy/source coordinates and execution progress onl
 consumer supplies the approved classification/hold decisions; this slice does not choose
 retention policy or implement destructive cleanup and access closure.
 
+The current discovery contract supersedes the legacy compatibility wording above: routine pages
+use the record-level `recovery_discovery_ready` marker and never perform a collection-wide scan.
+Canonical legacy records remain pageable while migration is pending. Missing or contradictory
+source records are quarantined with `policy_binding_invalid` or `source_state_inconsistent`,
+preserving raw timestamps, bindings, and source references; the migration report identifies the
+repair owner. A repaired record re-enters discovery only after authoritative backfill clears the
+quarantine marker.
+
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
 read-only by default, derives the deadline only from the source Session's persisted interruption
 time, conditionally updates records with missing policy/deadline fields under `--apply`, and

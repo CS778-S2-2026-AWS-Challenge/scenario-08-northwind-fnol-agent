@@ -73,6 +73,7 @@ from backend.domain.models import (
     EvidenceRecord,
     FollowUpOperation,
     FollowUpOperationStatus,
+    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpResolutionCode,
     FollowUpStatus,
@@ -466,7 +467,12 @@ class MongoDBRepository:
             },
         )
         self._collection.create_index(
-            [('record_type', 1), ('status', 1), ('due_at', 1), ('_id', 1)],
+            [
+                ('record_type', 1),
+                ('status', 1),
+                ('due_at', 1),
+                ('_id', 1),
+            ],
             name='follow_up_due_ordered',
             partialFilterExpression={
                 'record_type': 'follow_up',
@@ -474,7 +480,12 @@ class MongoDBRepository:
             },
         )
         self._collection.create_index(
-            [('record_type', 1), ('status', 1), ('deadline_at', 1), ('_id', 1)],
+            [
+                ('record_type', 1),
+                ('status', 1),
+                ('deadline_at', 1),
+                ('_id', 1),
+            ],
             name='follow_up_deadline_ordered',
             partialFilterExpression={
                 'record_type': 'follow_up',
@@ -1383,6 +1394,22 @@ class MongoDBRepository:
         if kind == 'realtime_event':
             raise TypeError('Realtime events must use the immutable append path.')
         document = model.model_dump(mode='json')
+        if kind == 'follow_up':
+            existing_follow_up = self._collection.find_one(
+                {'_id': self._record_id(kind, identifier), 'record_type': kind},
+                projection={'recovery_migration_reason': 1},
+                session=session,
+            )
+            if existing_follow_up and existing_follow_up.get('recovery_migration_reason'):
+                raise ValueError('Quarantined Follow-up requires authoritative migration repair.')
+            document['recovery_discovery_ready'] = (
+                model.deadline_at is not None
+                and model.blocked_reason
+                not in {
+                    FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
+                    FollowUpReasonCode.POLICY_BINDING_INVALID,
+                }
+            )
         if kind == 'claim':
             if not isinstance(model, WorkingClaim):
                 raise TypeError('Claim records require WorkingClaim.')
@@ -1479,6 +1506,15 @@ class MongoDBRepository:
         if document is None:
             return None
         payload = {key: value for key, value in document.items() if key in model_type.model_fields}
+        if model_type is FollowUpRecord and document.get('recovery_migration_reason'):
+            # Preserve raw migration evidence; expose the approved non-executable reason.
+            payload.update(
+                status='blocked',
+                blocked_reason=document['recovery_migration_reason'],
+                due_at=None,
+                deadline_at=None,
+                resolution_code=None,
+            )
         if model_type in {AssetRecord, ClaimAssetSnapshot}:
             details = payload.get('details')
             if payload.get('asset_type') == AssetType.CONTENTS.value and isinstance(details, dict):
@@ -2288,24 +2324,31 @@ class MongoDBRepository:
     ) -> list[FollowUpRecord]:
         if limit < 1:
             raise ValueError('Follow-up query limit must be positive.')
-        self._require_canonical_follow_up_times('due_at')
         query: dict[str, Any] = {
             'record_type': 'follow_up',
+            'recovery_discovery_ready': {'$ne': False},
             'status': FollowUpStatus.PENDING.value,
-            'due_at': {'$lte': recovery_timestamp(due_before)},
+            'due_at': {
+                '$regex': RECOVERY_TIMESTAMP_PATTERN,
+                '$lte': recovery_timestamp(due_before),
+            },
         }
         if cursor is not None:
-            query['$or'] = [
+            query['$and'] = [
                 {
-                    'due_at': {
-                        '$gt': recovery_timestamp(cursor[0]),
-                        '$lte': recovery_timestamp(due_before),
-                    }
-                },
-                {
-                    'due_at': recovery_timestamp(cursor[0]),
-                    '_id': {'$gt': self._record_id('follow_up', cursor[1])},
-                },
+                    '$or': [
+                        {
+                            'due_at': {
+                                '$gt': recovery_timestamp(cursor[0]),
+                                '$lte': recovery_timestamp(due_before),
+                            }
+                        },
+                        {
+                            'due_at': recovery_timestamp(cursor[0]),
+                            '_id': {'$gt': self._record_id('follow_up', cursor[1])},
+                        },
+                    ]
+                }
             ]
         records = []
         for document in self._collection.find(query).sort([('due_at', 1), ('_id', 1)]).limit(limit):
@@ -2323,11 +2366,14 @@ class MongoDBRepository:
     ) -> list[FollowUpRecord]:
         if limit < 1:
             raise ValueError('Follow-up query limit must be positive.')
-        self._require_canonical_follow_up_times('deadline_at')
         query: dict[str, Any] = {
             'record_type': 'follow_up',
+            'recovery_discovery_ready': {'$ne': False},
             'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
-            'deadline_at': {'$lte': recovery_timestamp(deadline_before)},
+            'deadline_at': {
+                '$regex': RECOVERY_TIMESTAMP_PATTERN,
+                '$lte': recovery_timestamp(deadline_before),
+            },
         }
         if cursor is not None:
             query['$or'] = [
@@ -2350,20 +2396,6 @@ class MongoDBRepository:
             if record is not None:
                 records.append(record)
         return records
-
-    def _require_canonical_follow_up_times(self, field: str) -> None:
-        legacy = self._collection.find_one(
-            {
-                'record_type': 'follow_up',
-                'status': {'$in': ['pending', 'blocked']},
-                field: {'$ne': None, '$not': {'$regex': RECOVERY_TIMESTAMP_PATTERN}},
-            },
-            projection={'_id': 1},
-        )
-        if legacy is not None:
-            raise ValueError(
-                'Recovery timestamp migration required; run backfill_follow_up_policy.'
-            )
 
     def get_follow_up_operation(self, operation_id: str) -> FollowUpOperation | None:
         return self._get('follow_up_operation', operation_id, FollowUpOperation)

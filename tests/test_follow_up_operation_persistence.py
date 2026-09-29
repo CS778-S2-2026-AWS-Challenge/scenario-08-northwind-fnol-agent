@@ -623,7 +623,9 @@ def test_migration_partial_null_and_conflicting_bindings(
     stored = collection.find_one({'_id': 'follow_up:f'})
     assert stored is not None
     if expected == 'rejected':
-        assert stored == original
+        assert all(stored.get(key) == value for key, value in original.items())
+        assert stored['recovery_discovery_ready'] is False
+        assert stored['recovery_migration_reason']
     else:
         assert stored['policy_version'] == 1
         assert stored['deadline_at'] == '2026-09-16T00:00:00.000000Z'
@@ -877,8 +879,7 @@ def test_backfill_then_paginate_mixed_offsets_and_fractional_times(
         else (repository.list_expiring_follow_ups)
     )
     cutoff = base.due_at if field == 'due_at' else base.deadline_at
-    with pytest.raises(ValueError, match='migration required'):
-        query(cutoff, limit=1)
+    # Noncanonical legacy records remain excluded until authoritative backfill.
     original = list(collection.find({'record_type': 'follow_up'}).sort('_id', 1))
     backfill_follow_ups(collection)
     assert list(collection.find({'record_type': 'follow_up'}).sort('_id', 1)) == original
@@ -887,7 +888,7 @@ def test_backfill_then_paginate_mixed_offsets_and_fractional_times(
     transaction.with_transaction.side_effect = lambda callback: callback(None)
     monkeypatch.setattr(collection.database.client, 'start_session', lambda: transaction)
     report = backfill_follow_ups(collection, apply=True)
-    assert len(report['applied']) == 4
+    assert len(report['applied']) == 6
     assert backfill_follow_ups(collection, apply=True)['candidate_count'] == 0
     assert [item.follow_up_id for item in query(cutoff, limit=10)] == expected[:-1]
     cursor = None
@@ -906,6 +907,67 @@ def test_backfill_then_paginate_mixed_offsets_and_fractional_times(
         assert datetime.fromisoformat(document['deadline_at']) - datetime.fromisoformat(
             document['due_at']
         ) == timedelta(days=7)
+
+
+def test_unmigratable_follow_up_is_quarantined_without_blocking_healthy_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'recovery_isolation')
+    healthy = _follow_up()
+    repository._collection.insert_one(
+        {
+            **healthy.model_dump(mode='json'),
+            '_id': 'follow_up:' + healthy.follow_up_id,
+            'record_type': 'follow_up',
+        }
+    )
+    repository._collection.insert_one(
+        {
+            '_id': 'session:' + healthy.source_session_id,
+            'record_type': 'session',
+            'session_id': healthy.source_session_id,
+            'claim_id': healthy.claim_id,
+            'recovery_context': {'interrupted_at': healthy.created_at.isoformat()},
+        }
+    )
+    legacy = healthy.model_dump(mode='json')
+    legacy.update(
+        {
+            '_id': 'follow_up:fup_unmigratable',
+            'record_type': 'follow_up',
+            'follow_up_id': 'fup_unmigratable',
+            'claim_id': 'clm_other',
+            'source_session_id': 'ses_missing',
+            'status': 'blocked',
+            'contact_permission': 'not_authorised',
+            'due_at': None,
+            'deadline_at': '2026-09-16T01:00:00+00:00',
+        }
+    )
+    repository._collection.insert_one(legacy)
+    transaction = MagicMock()
+    transaction.__enter__.return_value = transaction
+    transaction.with_transaction.side_effect = lambda callback: callback(None)
+    monkeypatch.setattr(
+        repository._collection.database.client, 'start_session', lambda: transaction
+    )
+    report = backfill_follow_ups(repository._collection, apply=True)
+    assert report['applied'] == [healthy.follow_up_id]
+    rejected = next(
+        item for item in report['rejected'] if item['follow_up_id'] == 'fup_unmigratable'
+    )
+    assert rejected['reason_code'] == 'source_state_inconsistent'
+    stored = repository._collection.find_one({'_id': legacy['_id']})
+    assert stored is not None
+    assert stored['deadline_at'] == legacy['deadline_at']
+    assert stored['recovery_discovery_ready'] is False
+    assert stored['recovery_migration_reason'] == 'source_state_inconsistent'
+    assert [
+        item.follow_up_id
+        for item in repository.list_expiring_follow_ups(
+            healthy.deadline_at + timedelta(days=1), limit=10
+        )
+    ] == [healthy.follow_up_id]
 
 
 def _follow_up() -> FollowUpRecord:

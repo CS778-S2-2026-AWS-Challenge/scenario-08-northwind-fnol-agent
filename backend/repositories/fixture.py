@@ -60,6 +60,7 @@ from backend.domain.models import (
     EvidenceRecord,
     FollowUpOperation,
     FollowUpOperationStatus,
+    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpResolutionCode,
     FollowUpStatus,
@@ -1484,6 +1485,11 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(record)
             for record in self._follow_ups.values()
             if record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+            and record.blocked_reason
+            not in {
+                FollowUpReasonCode.POLICY_BINDING_INVALID,
+                FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
+            }
             and record.deadline_at is not None
             and record.deadline_at <= deadline_before
         ]
