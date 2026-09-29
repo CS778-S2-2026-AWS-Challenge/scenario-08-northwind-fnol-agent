@@ -1308,6 +1308,7 @@ def repair_processing_image(
         or evidence.material_version != material_version
         or evidence.status is not EvidenceStatus.RECEIVED
         or evidence.claimant_history_state is not EvidenceHistoryState.AVAILABLE
+        or evidence.provenance.get('processing_state') != 'queued'
         or evidence.provenance.get('extraction_state')
     ):
         raise ApiError(

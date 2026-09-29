@@ -2576,6 +2576,14 @@ PDF remains `202 processing`; no automatic PDF processor is dispatched by this c
 Filename, media type, size, and file status can be read from the evidence list. Storage keys,
 checksums, processing references, and file contents remain internal.
 
+On persistent data profiles, backend startup also runs bounded background recovery of legacy
+claimant JPEG/PNG records still marked `processing` with queued provenance. It validates each
+record's current final object and applies the same terminal result with Claim revision and
+material-generation checks. Storage outages and conflicts remain retryable on later passes.
+Clients observe recovery through the existing Evidence reads and realtime invalidations;
+GET requests do not perform repair. Old completion idempotency responses remain historical,
+so clients refresh the authoritative Evidence resource after recovery. PDF is excluded.
+
 Authorised staff can read completed fixture evidence through
 `GET /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content`. This applies the same
 staff claim-access boundary as Workbench detail and returns the registered media type with an

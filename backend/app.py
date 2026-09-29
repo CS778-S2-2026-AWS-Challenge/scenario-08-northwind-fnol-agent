@@ -114,6 +114,7 @@ from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
     resolve_external_service_entry,
 )
+from backend.services.image_recovery import ImageRecoveryWorker
 from backend.services.initial_runtime_release import install_initial_runtime_release
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
@@ -251,13 +252,22 @@ def create_app(
         bundle = data_runtime_bundle or build_data_runtime_bundle(resolved_settings)
 
     realtime_dispatcher = RealtimeDispatcher(bundle.repository)
+    image_recovery_worker = (
+        ImageRecoveryWorker(bundle.repository, bundle.evidence_storage)
+        if bundle.profile is not DataRuntimeProfile.FIXTURE
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         realtime_dispatcher.start()
         try:
+            if image_recovery_worker is not None:
+                image_recovery_worker.start()
             yield
         finally:
+            if image_recovery_worker is not None:
+                image_recovery_worker.stop()
             realtime_dispatcher.stop()
             bundle.close()
 
@@ -330,6 +340,7 @@ def create_app(
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
     app.state.realtime_dispatcher = realtime_dispatcher
+    app.state.image_recovery_worker = image_recovery_worker
     app.state.claimant_runtime_action_dispatcher = ClaimantRuntimeActionDispatcher()
     if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
         if agent_turn_provider is not None:

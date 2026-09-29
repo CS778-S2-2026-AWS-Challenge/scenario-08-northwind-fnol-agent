@@ -266,7 +266,13 @@ FastAPI evidence flow against local MinIO, start the packaged service and config
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
 
-To repair one previously stuck JPEG/PNG upload, open an operator shell with the same persistent
+After starting the updated backend on a persistent data profile, previously queued JPEG/PNG
+uploads are checked automatically in small background batches. Valid images become ready;
+corrupt images become failed. Conflicts and unavailable storage are retried in later passes.
+Refresh the Evidence view after recovery; no re-upload or manual command is required for normal
+legacy queued uploads. This does not process PDF or mark image-derived facts confirmed.
+
+For an explicitly targeted diagnostic repair, open an operator shell with the same persistent
 runtime environment as the backend, then run `py -3.12 scripts/repair_processing_image.py
 --claim-id YOUR-CLAIM-ID --evidence-id YOUR-EVIDENCE-ID --revision CURRENT-REVISION
 --material-version CURRENT-MATERIAL-VERSION`. Inspect this dry-run's predicted file status before
