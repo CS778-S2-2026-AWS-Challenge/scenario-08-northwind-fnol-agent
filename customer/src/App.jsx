@@ -54,6 +54,7 @@ import {
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
 import UserProfile from './components/UserProfile.jsx'
+import PrivacyPage from './privacy/PrivacyPage.jsx'
 import './styles/profile-shell.css'
 import './styles/profile-records.css'
 import './styles/profile-assets.css'
@@ -252,13 +253,13 @@ function ClaimStartIcon({ name, className = '' }) {
 
 function ConversationStart({ onChoosePrompt }) {
   return (
-    <section className="conversation-start" aria-labelledby="conversation-start-title">
+    <section className="conversation-start" aria-labelledby="conversation-title">
       <div className="conversation-start-intro">
         <span className="conversation-start-shield" aria-hidden="true">
           <ClaimStartIcon name="shield" />
         </span>
         <div>
-          <h2 id="conversation-start-title">Let&apos;s get your claim started</h2>
+          <h1 id="conversation-title">Let&apos;s get your claim started</h1>
           <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
         </div>
       </div>
@@ -3298,6 +3299,26 @@ function App() {
     setPage('home')
   }
 
+  function navigateBackFromWorkspaceUtility() {
+    if (workspaceView === 'claim-evidence') {
+      setWorkspaceView('claim-features')
+      return
+    }
+    if (workspaceView === 'claim-features') {
+      openClaimHistory()
+      return
+    }
+    leaveWorkspaceUtility()
+  }
+
+  function handleWorkspaceHeaderBack() {
+    if (workspaceView !== 'chat') {
+      navigateBackFromWorkspaceUtility()
+      return
+    }
+    returnToLanding()
+  }
+
   function openProfileFromWorkspace(section = null) {
     if (!account) {
       setPage('login')
@@ -3612,8 +3633,8 @@ function App() {
             <button
               className="header-back-to-start"
               type="button"
-              aria-label="Back to start"
-              onClick={returnToLanding}
+              aria-label={workspaceView === 'chat' ? 'Back to start' : 'Back to previous page'}
+              onClick={handleWorkspaceHeaderBack}
               disabled={isBusy}
             >
               <span aria-hidden="true">←</span>
@@ -3929,7 +3950,7 @@ function App() {
           </section>
         </main>
       ) : (
-        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'}`}>
+        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''}`}>
           <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
             {[
               ['history', 'History'],
@@ -3950,7 +3971,17 @@ function App() {
               >
                 {status === 'pausing-session' ? 'Saving...' : 'New chat'}
               </button>
-              <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
+              <button
+                className={workspaceView === 'privacy' ? 'is-active' : undefined}
+                type="button"
+                aria-current={workspaceView === 'privacy' ? 'page' : undefined}
+                onClick={() => {
+                  setWorkspaceView('privacy')
+                  setMobileView('chat')
+                }}
+              >
+                Privacy &amp; your data
+              </button>
               <button type="button" onClick={openClaimHistory}>Claim history</button>
               <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
               <button
@@ -4020,29 +4051,19 @@ function App() {
           </aside>
           <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
-              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''}`}
+              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''} ${workspaceView === 'privacy' ? 'is-privacy-page' : ''}`}
               hidden={workspaceView === 'chat'}
             >
-              <button
-                className="back-link"
-                type="button"
-                onClick={workspaceView === 'claim-evidence'
-                  ? () => setWorkspaceView('claim-features')
-                  : workspaceView === 'claim-features'
-                    ? openClaimHistory
-                    : leaveWorkspaceUtility}
-              >
-                <span className="back-link-arrow" aria-hidden="true">←</span>
-                {workspaceView === 'claim-evidence'
-                  ? 'Back to Claim features'
-                  : workspaceView === 'claim-features'
-                    ? 'Back to Claim history'
-                    : 'Back to conversation'}
-              </button>
-              <h1>
-                {workspaceView === 'privacy'
-                  ? 'Privacy policy'
-                  : workspaceView === 'history'
+              {workspaceView === 'privacy' ? (
+                <PrivacyPage
+                  claimType={claim?.incident_type || null}
+                  hasCurrentClaim={Boolean(claim?.claim_id)}
+                  onViewClaim={claim ? () => openClaimFeatures(claim) : null}
+                />
+              ) : (
+                <>
+                  <h1>
+                    {workspaceView === 'history'
                     ? 'Claim history'
                     : workspaceView === 'claim-features'
                       ? 'Claim features'
@@ -4051,11 +4072,9 @@ function App() {
                         : workspaceView === 'agreement'
                             ? 'Agreement & confirmation'
                             : 'Evidence history'}
-              </h1>
-              <p>
-                {workspaceView === 'privacy'
-                  ? 'We only use the information needed to handle your Claim and show you what has been recorded.'
-                  : workspaceView === 'history'
+                  </h1>
+                  <p>
+                    {workspaceView === 'history'
                     ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
                     : workspaceView === 'claim-features'
                       ? 'Review this Claim\'s current status and available information.'
@@ -4066,7 +4085,9 @@ function App() {
                             : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
-              </p>
+                  </p>
+                </>
+              )}
               {workspaceView === 'history' && (
                 account ? (
                   <ClaimHistory
@@ -4135,13 +4156,15 @@ function App() {
                 )
               )}
             </div>
-            <div className="conversation-heading">
-              <div className="conversation-heading-main">
-                <div className="claim-heading-identity">
-                  {claim ? <span>Claim:</span> : null}
-                  <h1 id="conversation-title">{claim?.claim_id || 'New conversation'}</h1>
+            <div className={`conversation-heading ${claim ? '' : 'is-empty'}`}>
+              {claim && (
+                <div className="conversation-heading-main">
+                  <div className="claim-heading-identity">
+                    <span>Claim:</span>
+                    <h1 id="conversation-title">{claim.claim_id}</h1>
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="claim-status">{claim
                 ? claim.external_claim?.creation_status === 'created'
                   ? 'Claim created'

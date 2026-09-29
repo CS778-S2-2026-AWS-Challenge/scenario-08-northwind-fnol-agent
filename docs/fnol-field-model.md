@@ -166,7 +166,7 @@ make their boundary explicit.
 | `vehicle.damage_description` | Visible damage account | scalar/no | C,E/y/y/y | safety/y/registered | Registered; evidence link separate | C/S; privacy |
 | `vehicle.drivable` | Whether the vehicle is safe and able to be driven | boolean/no | C/y/y/y | safety/y/registered | Registered; towing rule gap | C/S; safety |
 | `vehicle.towing_required` | Required, not required, already towed, or unknown | enum/no | C,S/y/y/y | safety/y/registered | Implemented as a bounded Dynamic Form field | C/S; consent |
-| `vehicle.towing_location` | Current or intended tow location | location/no | C/y/y/y | safety/c/registered | Implemented as a bounded Dynamic Form field | C/S; privacy/consent |
+| `vehicle.towing_location` | Claimant-supplied current or intended tow location; interpretation is not inferred by the backend | location/no | C/y/y/y | safety/c/registered | Implemented as a bounded Dynamic Form field; the current contract preserves the supplied meaning without choosing current versus destination | C/S; privacy/consent |
 | `driver.identity_ref` | Existing account identity reference for the actual Driver | reference/no | C,Y/y/y/n | authority/c/registered | Implemented as a typed Driver record member | S; privacy/authority |
 | `driver.name` | Actual Driver name when no identity reference is available | scalar/no | C/y/y/n | authority/c/registered | Implemented as a typed Driver record member | C/S; privacy/authority |
 | `driver.phone` | Actual Driver phone | scalar/no | C/y/y/n | contact/c/registered | Implemented as a typed Driver record member | C/S; privacy |
@@ -174,7 +174,7 @@ make their boundary explicit.
 | `driver.relationship_to_policyholder` | Driver relationship to the Policyholder | enum/no | C/y/y/y | authority/c/registered | Implemented as a typed Driver record member | C/S; authority |
 | `driver.owner_permission` | Confirmed, not confirmed, unknown, or not applicable | enum/no | C/y/y/y | authority/c/registered | Implemented as a typed Driver record member without liability inference | C/S; authority |
 | `driver.licence_number` | Protected Driver licence number | protected scalar/no | C,E/y/y/n | authority/pending/registered | Stored in the protected Driver boundary and omitted from model/RAG and claimant projections | S; privacy/authority |
-| `driver.licence_status` | Valid, expired, suspended, learner, restricted, or unknown | enum/no | C,E/y/y/y | review/pending/registered | Implemented as a typed Driver record member and bounded review semantics | S; privacy/review |
+| `driver.licence_status` | One reported licensing state: valid, expired, suspended, learner, restricted, or unknown | enum/no | C,E/y/y/y | review/pending/registered | Implemented as a typed Driver record member; the current contract does not expose a separate licence-class field | S; privacy/review |
 | `collision.occurred` | Collision branch fact | enum/no | C/y/y/y | routing/y/record | Covered by collision branch evaluation; not a lifecycle or form field | C/S; privacy |
 | `other_vehicle.identity` | Other vehicle reference/details | object/yes | C,E/y/y/y | provider/pending/record | Bounded `MotorOtherDriverRecord.vehicle_registration`; zero or one per Motor Claim | C/S; privacy |
 | `other_party.contact` | Other party name, phone, and email | object/no | C/y/y/y | external/pending/record | Bounded `MotorOtherDriverRecord`; excluded from model/RAG context | C/S; privacy |

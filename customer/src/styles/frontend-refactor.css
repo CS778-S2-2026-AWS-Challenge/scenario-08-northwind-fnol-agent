@@ -1052,6 +1052,12 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   text-transform: none;
   letter-spacing: normal;
 }
+.conversation-heading.is-empty { min-height: var(--space-6); }
+.conversation-heading.is-empty .claim-status {
+  position: absolute;
+  top: calc(var(--space-16) + var(--space-4));
+  right: calc(var(--space-16) + var(--space-12));
+}
 .conversation-heading h1 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: var(--font-size-section); line-height: var(--line-height-heading); }
 .claim-progress-disclosure {
   position: relative;
@@ -1284,7 +1290,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.conversation-start-intro h2 {
+.conversation-start-intro h1 {
   margin: 0 0 var(--space-2);
   color: var(--color-text-primary);
   font-size: var(--font-size-page);
@@ -1939,6 +1945,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   .conversation-panel.mobile-view-chat { min-height: calc(100svh - 120px); padding: var(--space-4); }
   .intake-details-panel.mobile-view-details { min-height: calc(100svh - 120px); flex-direction: column; border-top: 0; }
   .conversation-heading { display: block; }
+  .conversation-heading.is-empty .claim-status { position: static; }
   .claim-progress-requirements { grid-template-columns: 1fr; }
   .assistance-status { padding: var(--space-3) var(--space-4); }
   .conversation-action-trigger { grid-template-columns: var(--space-8) minmax(0, 1fr); }
