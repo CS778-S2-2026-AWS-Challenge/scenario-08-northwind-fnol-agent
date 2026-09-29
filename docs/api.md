@@ -82,9 +82,17 @@ Normal-mode local runtimes use the separate SQLite staff identity adapter config
 `NORTHWIND_STAFF_IDENTITY_DB_PATH`. An initial account may be provisioned explicitly with
 `NORTHWIND_STAFF_BOOTSTRAP_EMAIL`, `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD`, and
 `NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME`; the plaintext password is never persisted. This is a
-real persistent local login path, but it is not an enterprise IdP, SSO, MFA, recovery, or complete
-staff-entitlement implementation. Production deployment still requires an approved identity
-provider adapter.
+real persistent local login path, but it is not an enterprise IdP, SSO, MFA, or recovery
+implementation. Production deployment still requires an approved identity provider adapter.
+
+The server derives coarse Workbench capabilities from the stored staff roles. A
+`claims_professional` receives `workbench:read` and `workbench:write`. An `operations`-only
+account receives neither capability and cannot read or mutate Workbench Claims. It can still read
+and revoke its own authenticated staff session and read its own staff profile, but it does not
+receive a claimable Workbench presence lease. A published access policy may further restrict
+role-derived capabilities but cannot grant a capability absent from the stored role. Workbench
+read and mutation routes enforce their respective capability before resource lookup; ownership,
+assignment, action-registry, revision, and idempotency checks remain additional requirements.
 
 Current scopes:
 
@@ -647,6 +655,8 @@ Only `POST /api/v1/staff/auth/sessions` is public. It accepts `email` and `passw
 a role, scope, Claim assignment, or staff identifier from the client. The other routes require the
 issued staff bearer token and reject claimant credentials. `GET /staff/me` returns the staff ID,
 display name, email, roles, and development-identity marker; the server derives Workbench scopes
+from the stored roles rather than trusting the returned profile in later requests. Staff identity
+authentication alone does not grant Workbench Claim access.
 from the authenticated staff boundary rather than trusting the returned profile in later requests.
 `POST /staff/feedback` accepts a single whitespace-normalized `message` of 1–2,000 characters.
 The server derives the submitter from the authenticated staff session, never from request data.
@@ -2653,6 +2663,12 @@ Returns staff and system updates visible to the claimant. Each update includes `
 
 ## Workbench API
 
+All Workbench projection routes require the server-derived `workbench:read` capability. Mutation,
+presence-update, Staff Agent write, and demo-control routes require `workbench:write`. A read-only
+effective principal receives no executable `allowed_actions`. Capability rejection uses the stable
+`403 ACCESS_DENIED` envelope before the server checks whether a referenced Claim, handoff, work
+item, signal, or external task exists.
+
 ### Endpoint Catalogue
 
 | Method | Path | Purpose |
@@ -2697,6 +2713,12 @@ Staff Agent sessions are private to the authenticated staff identity and remain 
 Workbench pages and browser refreshes. They are not Claim conversation sessions and are never
 exposed through claimant routes. `GET /api/v1/workbench/conversations` includes them with
 `kind: "staff_agent"` so the staff member can resume them from Claim conversations.
+
+Staff Agent session creation, model capabilities, session lists, and message history require the
+server-derived `workbench:read` capability. Message submission and confirmed draft execution require
+`workbench:write`. The same capability checks run at the application-service boundary before session
+or Claim lookup, so an authenticated operations-only identity receives `403 ACCESS_DENIED` without
+revealing whether a supplied session or Claim identifier exists.
 
 `POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
 `model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that

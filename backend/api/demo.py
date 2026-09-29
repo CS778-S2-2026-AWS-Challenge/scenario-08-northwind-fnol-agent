@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Header, Request
 
-from backend.core.auth import Principal, require_staff
+from backend.core.auth import Principal, require_workbench_write
 from backend.core.errors import ApiError
 from backend.domain.models import DemoResetResponse, DemoSeedResponse
 from backend.services.demo_reset import reset_demo_components
@@ -21,7 +21,7 @@ def require_local_demo(request: Request) -> None:
 @router.post('/reset', response_model=DemoResetResponse)
 def reset_demo(
     request: Request,
-    _principal: Principal = Depends(require_staff),
+    _principal: Principal = Depends(require_workbench_write),
 ) -> DemoResetResponse:
     require_local_demo(request)
     cleared = reset_demo_components(
@@ -40,7 +40,7 @@ def reset_demo(
 @router.post('/seed-scenarios', response_model=DemoSeedResponse)
 def seed_scenarios(
     request: Request,
-    _principal: Principal = Depends(require_staff),
+    _principal: Principal = Depends(require_workbench_write),
 ) -> DemoSeedResponse:
     require_local_demo(request)
     result = seed_workbench_demo_scenarios(request.app.state.claim_repository)
@@ -54,7 +54,7 @@ def seed_scenarios(
 @router.post('/seed-validation', response_model=DemoSeedResponse)
 def seed_validation(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
 ) -> DemoSeedResponse:
     require_local_demo(request)

@@ -3,48 +3,10 @@
 This React/Vite application is the supported, componentised staff client. It replaces the retired
 static employee frontend.
 
-## Local run
+## About this client
 
-Install dependencies:
-
-```powershell
-npm ci --prefix workbench
-```
-
-For normal-mode local staff authentication, configure a persistent staff identity store and one
-initial claims-professional account before starting the backend:
-
-```powershell
-$env:NORTHWIND_IDENTITY_MODE='normal'
-$env:NORTHWIND_STAFF_IDENTITY_DB_PATH='.northwind-staff-identity.sqlite3'
-$env:NORTHWIND_STAFF_BOOTSTRAP_EMAIL='claims@example.test'
-$env:NORTHWIND_STAFF_BOOTSTRAP_PASSWORD='<a strong local password>'
-$env:NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME='Claims Professional'
-py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-The bootstrap values only create the account when the email is absent. Remove the password from
-the process environment after provisioning; the database stores a salted scrypt hash, not the
-plaintext password.
-
-Start the client:
-
-```powershell
-npm run dev --prefix workbench
-```
-
-Open `http://127.0.0.1:5174/workbench/` (or the port printed by Vite). The client proxies `/api`
-to `http://127.0.0.1:8000`. Supported deep links include `/workbench/claims/{claim_id}`,
-`/workbench/conversations/{session_id}`, and `/workbench/agent/sessions/{session_id}`.
-
-In explicit developer identity mode, the isolated fixture staff account is:
-
-```text
-staff.one@example.invalid
-northwind-demo-staff
-```
-
-It is available only in development and test and is not a deployment credential.
+Supported deep links include `/workbench/claims/{claim_id}`, `/workbench/conversations/{session_id}`,
+and `/workbench/agent/sessions/{session_id}`.
 
 ## Current application boundary
 

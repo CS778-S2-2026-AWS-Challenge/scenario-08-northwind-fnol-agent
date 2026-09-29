@@ -2,7 +2,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from backend.core.auth import Principal, require_staff
+from backend.core.auth import Principal, require_workbench_read, require_workbench_write
 from backend.domain.staff_identity import (
     StaffPresencePage,
     StaffPresenceRecord,
@@ -22,7 +22,7 @@ def repository_for(request: Request) -> PersistenceRepository:
 def put_presence(
     payload: StaffPresenceUpdate,
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_write),
 ) -> StaffPresenceRecord:
     return update_presence(repository_for(request), principal, payload)
 
@@ -30,7 +30,7 @@ def put_presence(
 @router.get('/presence', response_model=StaffPresenceRecord)
 def get_presence(
     request: Request,
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> StaffPresenceRecord:
     return read_presence(repository_for(request), principal)
 
@@ -40,6 +40,6 @@ def get_online_staff(
     request: Request,
     limit: int = Query(default=25, ge=1),
     cursor: str | None = Query(default=None),
-    principal: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_workbench_read),
 ) -> StaffPresencePage:
     return list_online_staff(repository_for(request), principal, limit, cursor)

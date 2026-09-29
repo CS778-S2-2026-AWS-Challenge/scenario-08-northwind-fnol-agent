@@ -1,6 +1,6 @@
 """Authorised Workbench ownership, cowork, transfer, and requeue actions."""
 
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError
 from backend.domain.audit import AuditEventEnvelope
 from backend.domain.ids import new_id
@@ -51,8 +51,7 @@ def _error(status: int, code: str, message: str, *, revision: int | None = None)
 
 
 def _claim(repository: PersistenceRepository, principal: Principal, claim_id: str) -> WorkingClaim:
-    if principal.actor_type != 'staff':
-        raise _error(403, 'ACCESS_DENIED', 'Staff Workbench access is required.')
+    require_staff_capability(principal, 'workbench:write')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _error(404, 'RESOURCE_NOT_FOUND', 'The claim was not found.')
@@ -198,6 +197,7 @@ def create_cowork_request(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/cowork-requests'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
@@ -282,6 +282,7 @@ def create_transfer_request(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/transfer-requests'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
@@ -348,6 +349,7 @@ def decide_collaboration_request(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/{request_id}'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
@@ -489,6 +491,7 @@ def requeue_claim(
     if_match: str | None,
     source: StaffAgentDraftSource | None = None,
 ) -> CollaborationMutationResponse:
+    require_staff_capability(principal, 'workbench:write')
     key = require_idempotency_key(idempotency_key)
     route = f'/api/v1/workbench/claims/{claim_id}/requeue'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))

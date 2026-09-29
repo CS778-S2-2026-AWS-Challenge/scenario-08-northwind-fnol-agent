@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, TypeVar
 
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
@@ -226,14 +226,6 @@ _QUEUE_VIEW_GROUPS: dict[WorkbenchQueueView, WorkbenchQueueViewGroup] = {
 }
 
 
-def _staff_access_required() -> ApiError:
-    return ApiError(
-        status_code=403,
-        code='ACCESS_DENIED',
-        message='Staff workbench access is required.',
-    )
-
-
 def _claim_not_found() -> ApiError:
     return ApiError(
         status_code=404,
@@ -247,8 +239,7 @@ def _authorised_claim(
     principal: Principal,
     claim_id: str,
 ) -> WorkingClaim:
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _claim_not_found()
@@ -1106,6 +1097,8 @@ def _allowed_actions(
     external_results: Sequence[ExternalTaskResult],
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
+    if 'workbench:write' not in principal.scopes:
+        return []
     external_attention = _external_staff_attention(
         external_tasks,
         external_requests,
@@ -1540,6 +1533,7 @@ def require_workbench_action(
     Raises:
         ApiError: The revision is stale or the exact action is not executable.
     """
+    require_staff_capability(principal, 'workbench:write')
     if claim.revision != expected_revision:
         raise ApiError(
             status_code=409,
@@ -1661,8 +1655,7 @@ def get_workbench_claim_filter_metadata(
         ApiError: The caller is not an authenticated staff principal.
     """
 
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     return WorkbenchClaimFilterMetadata(
         views=[
             WorkbenchQueueFilterOption(
@@ -1763,6 +1756,7 @@ def _build_projection(
     *,
     include_detail: bool,
 ) -> WorkbenchClaimListItem | WorkbenchClaimDetail:
+    require_staff_capability(principal, 'workbench:read')
     evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
     pending_evidence = _pending_evidence(evidence)
     handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
@@ -2008,8 +2002,7 @@ def list_workbench_claims(
     limit: int = 25,
     cursor: str | None = None,
 ) -> WorkbenchClaimListResponse:
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     for field_name, value in (
         ('updated_before', updated_before),
         ('updated_after', updated_after),
@@ -2184,8 +2177,7 @@ def list_workbench_conversations(
     limit: int,
     cursor: str | None,
 ) -> WorkbenchConversationsResponse:
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     items: list[WorkbenchConversationSummary] = []
     for claim in repository.list_claims_internal():
         handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
