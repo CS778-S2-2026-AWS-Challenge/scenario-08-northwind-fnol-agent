@@ -16,6 +16,7 @@ from backend.services.agent import (
     AgentTurnContext,
     InvariantGuardedAgent,
     _controlled_requirement_value,
+    _initial_form_changes,
     authorised_state_changes,
     detect_safety_interrupt,
     validate_proposal,
@@ -126,6 +127,32 @@ def test_safety_interrupt_treats_negated_danger_subjects_as_negated(
     )
 
     assert (interrupt is not None and interrupt.kind == 'urgent_safety') is urgent
+
+
+@pytest.mark.parametrize(
+    ('message_text', 'injury_or_danger'),
+    [
+        ('No one is injured and nobody is in immediate danger.', False),
+        (
+            'No one is injured. Nobody was in danger earlier, but now we are in immediate danger.',
+            True,
+        ),
+    ],
+)
+def test_safety_is_clear_only_when_no_unnegated_signal_remains(
+    message_text: str,
+    injury_or_danger: bool,
+) -> None:
+    initial_values = [
+        change.value
+        for change in _initial_form_changes(message_text, 'motor')
+        if change.field_code == 'incident.injury_or_danger'
+    ]
+
+    assert _controlled_requirement_value('incident.injury_or_danger', message_text) is (
+        injury_or_danger
+    )
+    assert initial_values == [injury_or_danger]
 
 
 def test_action_registry_defines_every_action_and_separates_tools_from_semantics() -> None:
