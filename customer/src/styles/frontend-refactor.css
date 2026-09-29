@@ -1284,27 +1284,12 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.conversation-start-title-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-2);
-}
-.conversation-start-title-row h1 {
-  margin: 0;
+.conversation-start-intro h1 {
+  margin: 0 0 var(--space-2);
   color: var(--color-text-primary);
   font-size: var(--font-size-page);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-heading);
-}
-.conversation-start-status {
-  flex: 0 0 auto;
-  color: var(--color-accent-strong);
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-body);
-  white-space: nowrap;
 }
 .conversation-start-intro p {
   max-width: var(--measure-reading);

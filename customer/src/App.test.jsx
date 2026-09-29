@@ -2269,12 +2269,14 @@ describe('claimant intake projection', () => {
 
     const { container } = render(<App />)
 
-    const titleRow = container.querySelector('.conversation-start-title-row')
-    expect(within(titleRow).getByRole('heading', {
+    const startIntro = container.querySelector('.conversation-start-intro')
+    expect(within(startIntro).getByRole('heading', {
       level: 1,
       name: "Let's get your claim started",
     })).toBeVisible()
-    expect(within(titleRow).getByText('Ready to start')).toBeVisible()
+    expect(within(startIntro).queryByText('Ready to start')).not.toBeInTheDocument()
+    expect(within(container.querySelector('.conversation-heading'))
+      .getByText('Ready to start')).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'New conversation' })).not.toBeInTheDocument()
     expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()

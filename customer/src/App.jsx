@@ -259,10 +259,7 @@ function ConversationStart({ onChoosePrompt }) {
           <ClaimStartIcon name="shield" />
         </span>
         <div>
-          <div className="conversation-start-title-row">
-            <h1 id="conversation-title">Let&apos;s get your claim started</h1>
-            <span className="conversation-start-status">Ready to start</span>
-          </div>
+          <h1 id="conversation-title">Let&apos;s get your claim started</h1>
           <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
         </div>
       </div>
@@ -4159,19 +4156,21 @@ function App() {
                 )
               )}
             </div>
-            {claim && (
-              <div className="conversation-heading">
+            <div className="conversation-heading">
+              {claim && (
                 <div className="conversation-heading-main">
                   <div className="claim-heading-identity">
                     <span>Claim:</span>
                     <h1 id="conversation-title">{claim.claim_id}</h1>
                   </div>
                 </div>
-                <div className="claim-status">{claim.external_claim?.creation_status === 'created'
+              )}
+              <div className="claim-status">{claim
+                ? claim.external_claim?.creation_status === 'created'
                   ? 'Claim created'
-                  : handoff ? 'Staff assistance active' : 'In progress'}</div>
-              </div>
-            )}
+                  : handoff ? 'Staff assistance active' : 'In progress'
+                : 'Ready to start'}</div>
+            </div>
 
             {claim && (
               <ClaimProgressDisclosure
