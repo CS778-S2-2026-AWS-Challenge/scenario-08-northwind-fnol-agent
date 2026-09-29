@@ -299,6 +299,147 @@ function readyDynamicForm() {
   }
 }
 
+function configureAgreementSubmissionJourney() {
+  const paymentDestination = {
+    payment_destination_id: 'pyd_1234567890abcdef1234',
+    account_type: 'cheque',
+    masked_account_number: '***************6700',
+    revision: 1,
+    active: true,
+  }
+  const readyForPayout = primaryAction({
+    actionCode: 'claimant.review_payout_contact',
+    available: true,
+    requiredInputs: ['payment_destination_id', 'claimant.contact_preference'],
+    revision: 2,
+  })
+  const reviewAgreementAction = primaryAction({
+    actionCode: 'claimant.review_agreement',
+    available: true,
+    revision: 3,
+  })
+  const createClaimAction = primaryAction({
+    actionCode: 'claimant.create_claim',
+    actionType: 'claim_creation',
+    available: true,
+    revision: 4,
+  })
+  const agreement = {
+    agreement_id: 'northwind-fnol-claim-submission',
+    version: '1',
+    display_copy: 'I have reviewed the information shown for this claim.',
+    confirmations: [{
+      key: 'reviewed_and_confirmed',
+      label: 'I confirm this submission.',
+      required: true,
+    }],
+  }
+
+  api.hasClaimantAccessToken.mockReturnValue(true)
+  api.getAuthenticatedAccount.mockResolvedValue({
+    customer_id: 'cus_demo',
+    profile: {
+      display_name: 'Test claimant',
+      email: 'test@example.test',
+      phone: '',
+    },
+    preferences: { email: true, sms: false },
+    revision: 2,
+  })
+  api.listPaymentDestinations.mockResolvedValue({
+    items: [paymentDestination],
+    page: { next_cursor: null },
+  })
+  api.submitClaimMessage.mockResolvedValue({
+    ...initialTurn(),
+    dynamic_form: readyDynamicForm(),
+    claim_revision: 2,
+    decision: {
+      customer_next_step: {
+        status: 'ready_to_create',
+        summary: 'Review payout and contact details.',
+        required_items: [],
+      },
+    },
+    primary_action: readyForPayout,
+  })
+  api.selectClaimPayoutContact.mockResolvedValue({
+    claim_id: initialClaim.claim_id,
+    revision: 3,
+    payment_destination_id: paymentDestination.payment_destination_id,
+    contact_preference: {
+      value: 'email',
+      status: 'confirmed',
+      source: 'claimant',
+    },
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: reviewAgreementAction,
+  })
+  api.getClaim.mockResolvedValue({
+    ...initialClaim,
+    revision: 3,
+    payment_destination_id: paymentDestination.payment_destination_id,
+    submission_agreement: agreement,
+    form: {
+      ...initialClaim.form,
+      'claimant.contact_preference': {
+        value: 'email',
+        status: 'confirmed',
+        source: 'claimant',
+      },
+    },
+    dynamic_form: readyDynamicForm(),
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: reviewAgreementAction,
+  })
+  api.acceptClaimAgreement.mockResolvedValue({
+    claim_id: initialClaim.claim_id,
+    revision: 4,
+    agreement,
+    acceptance: {
+      acceptance_id: 'aga_test',
+      agreement_id: agreement.agreement_id,
+      version: agreement.version,
+      confirmations: { reviewed_and_confirmed: true },
+      accepted_at: '2026-09-23T10:00:00Z',
+    },
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: createClaimAction,
+  })
+
+  return { agreement }
+}
+
+async function openAgreementForSubmission(user, agreement) {
+  render(<App />)
+  await user.type(
+    screen.getByPlaceholderText('Tell us what happened…'),
+    'My claim details are complete.',
+  )
+  await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+  await screen.findByRole('heading', { name: 'Payout & contact' })
+  await user.click(screen.getByRole('radio', { name: /cheque .*6700/i }))
+  await user.click(screen.getByRole('radio', { name: /Email test@example.test/i }))
+  await user.click(screen.getByRole('button', { name: 'Continue to agreement' }))
+  await screen.findByText(agreement.display_copy)
+  await user.click(screen.getByRole('checkbox', {
+    name: 'I confirm this submission.',
+  }))
+}
+
 describe('claimant intake projection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -3031,6 +3172,101 @@ describe('claimant intake projection', () => {
     )
     expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
   })
+
+
+  it.each(['acceptance', 'creation'])(
+    'shows and safely retries a visible network failure during %s',
+    async (phase) => {
+      const user = userEvent.setup()
+      let requestSequence = 0
+      api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+      const { agreement } = configureAgreementSubmissionJourney()
+      const networkError = Object.assign(
+        new api.ApiRequestError('We could not reach the claim service. Check your connection and try again.'),
+        { code: 'NETWORK_ERROR', retryable: true },
+      )
+
+      if (phase === 'acceptance') {
+        api.acceptClaimAgreement.mockRejectedValue(networkError)
+      } else {
+        api.createExternalClaim.mockRejectedValue(networkError)
+      }
+
+      await openAgreementForSubmission(user, agreement)
+      await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+      const alert = await screen.findByRole('alert')
+      expect(alert).toBeVisible()
+      expect(alert).toHaveFocus()
+      expect(alert).toHaveTextContent('Submission interrupted')
+      expect(alert).toHaveTextContent(
+        phase === 'acceptance'
+          ? 'recording your agreement'
+          : 'submitting your Claim',
+      )
+      expect(alert).toHaveTextContent('This screen does not show your Claim as created.')
+      expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
+
+      if (phase === 'acceptance') {
+        const firstRequest = api.acceptClaimAgreement.mock.calls[0][0]
+        const retry = screen.getByRole('button', { name: 'Submit claim' })
+        expect(retry).toBeEnabled()
+        await user.click(retry)
+        await waitFor(() => expect(api.acceptClaimAgreement).toHaveBeenCalledTimes(2))
+        expect(api.acceptClaimAgreement.mock.calls[1][0].idempotencyKey)
+          .toBe(firstRequest.idempotencyKey)
+      } else {
+        const firstRequest = api.createExternalClaim.mock.calls[0][0]
+        const retry = await screen.findByRole('button', { name: 'Retry claim submission' })
+        expect(retry).toBeEnabled()
+        await user.click(retry)
+        await waitFor(() => expect(api.createExternalClaim).toHaveBeenCalledTimes(2))
+        expect(api.createExternalClaim.mock.calls[1][0].idempotencyKey)
+          .toBe(firstRequest.idempotencyKey)
+      }
+    },
+  )
+
+  it.each([
+    {
+      status: 409,
+      code: 'REVISION_CONFLICT',
+      expectedTitle: 'Submission was not accepted',
+      expectedText: 'Review the latest claim information and try again.',
+    },
+    {
+      status: 422,
+      code: 'AGREEMENT_CONFIRMATION_REQUIRED',
+      expectedTitle: 'Submission was not accepted',
+      expectedText: 'Review the latest claim information and try again.',
+    },
+    {
+      status: 503,
+      code: 'CLAIM_SERVICE_UNAVAILABLE',
+      expectedTitle: 'Submission result is unclear',
+      expectedText: 'Do not assume your Claim was created.',
+    },
+  ])(
+    'distinguishes a $status Step 4 failure without claiming success',
+    async ({ status, code, expectedTitle, expectedText }) => {
+      const user = userEvent.setup()
+      const { agreement } = configureAgreementSubmissionJourney()
+      api.acceptClaimAgreement.mockRejectedValue(Object.assign(
+        new api.ApiRequestError('The claim service could not complete this request.'),
+        { code, status, retryable: status >= 500 },
+      ))
+
+      await openAgreementForSubmission(user, agreement)
+      await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+      const alert = await screen.findByRole('alert')
+      expect(alert).toBeVisible()
+      expect(alert).toHaveTextContent(expectedTitle)
+      expect(alert).toHaveTextContent(expectedText)
+      expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Submit claim' })).toBeEnabled()
+    },
+  )
 
   it('keeps agreement review in the Agent message flow before final submission', async () => {
     const user = userEvent.setup()
