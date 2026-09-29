@@ -24,7 +24,8 @@ describe('ClaimAutoFillChoices presentation', () => {
       expect(screen.getByRole('combobox', { name: choice.label })).toHaveValue('hide')
     }
     expect(screen.getByRole('button', { name: 'Save Claim auto-fill choices' })).toBeDisabled()
-    expect(screen.getByText(/payment details and identity information only prompt/i)).toBeInTheDocument()
+    expect(screen.getByText(/one saved policy or asset is added automatically for review/i)).toBeInTheDocument()
+    expect(screen.getByText(/full account and document numbers are never copied/i)).toBeInTheDocument()
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Payment details' }), 'show')
     expect(onChange).toHaveBeenCalledWith('d', true)

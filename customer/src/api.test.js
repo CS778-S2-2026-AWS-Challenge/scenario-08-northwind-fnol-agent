@@ -11,11 +11,15 @@ import {
   listAccountPaymentDestinations,
   listAccountPolicies,
   createPaymentDestination,
+  getClaimAutoFillSuggestions,
   listEvidenceHistory,
   listClaims,
+  listClaimAssetSnapshots,
   listPaymentDestinations,
   pauseClaimSession,
   requestEvidenceUpload,
+  selectClaimAsset,
+  selectClaimPolicy,
   selectClaimPayoutContact,
   setClaimantAccessToken,
   streamClaimUpdates,
@@ -29,6 +33,80 @@ import {
   updateAccountPaymentDestination,
   updateAccountPolicy,
 } from './api.js'
+
+describe('Claim saved-data selection clients', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('loads the owner-scoped suggestion manifest and immutable asset snapshots', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ suggestions: [] }), { status: 200 }))
+    await getClaimAutoFillSuggestions('clm/synthetic')
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm%2Fsynthetic/auto-fill-suggestions',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify(pageResponse()), { status: 200 }))
+    await listClaimAssetSnapshots('clm/synthetic', { cursor: 'snapshot-cursor' })
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm%2Fsynthetic/asset-snapshots?limit=100&cursor=snapshot-cursor',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+  })
+
+  it('selects a policy or asset with explicit Claim revision and idempotency authority', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ claim_id: 'clm_synthetic', revision: 8 }), { status: 201 }))
+    await selectClaimPolicy({
+      claimId: 'clm_synthetic',
+      revision: 7,
+      policyId: 'pol_synthetic',
+      idempotencyKey: 'policy-selection-key',
+    })
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm_synthetic/policy-selections',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer synthetic-claimant-token',
+          'Idempotency-Key': 'policy-selection-key',
+          'If-Match': '7',
+        }),
+        body: JSON.stringify({ policy_id: 'pol_synthetic' }),
+      }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ claim_id: 'clm_synthetic', revision: 9 }), { status: 201 }))
+    await selectClaimAsset({
+      claimId: 'clm_synthetic',
+      revision: 8,
+      assetId: 'ase_synthetic',
+      idempotencyKey: 'asset-selection-key',
+    })
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm_synthetic/asset-selections',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer synthetic-claimant-token',
+          'Idempotency-Key': 'asset-selection-key',
+          'If-Match': '8',
+        }),
+        body: JSON.stringify({ asset_id: 'ase_synthetic' }),
+      }),
+    )
+  })
+})
+
+function pageResponse(items = []) {
+  return { items, page: { next_cursor: null } }
+}
 
 describe('claim message contract', () => {
   beforeEach(() => {

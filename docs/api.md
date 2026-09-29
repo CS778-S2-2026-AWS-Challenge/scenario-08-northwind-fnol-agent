@@ -606,9 +606,19 @@ the preference is enabled and a supported active owner-scoped source exists. Per
 `review_and_confirm`; Policies and Assets use their existing `select_policy` and `select_asset`
 contracts; Payment and Identity use `confirm_separately`. Reading the manifest does not change the
 Claim, Dynamic Form, Branch Evaluation, idempotency, audit, realtime, Agent, or external services.
-The response contains no saved record IDs, raw values, masked values, or ciphertext. A preference
-is suggestion permission only: it is not claimant confirmation, coverage authority, payment
-authority, identity verification, or third-party disclosure consent.
+The response contains no saved record IDs, raw values, masked values, or ciphertext. In the
+claimant client, an enabled Policy or Asset preference permits orchestration through the existing
+revisioned selection route: when the corresponding Claim information is empty, one active record
+is selected automatically and written only as proposed Claim information, while multiple active
+records require a compact claimant choice. Existing claimant-supplied information is not
+overwritten. The client re-reads the authoritative Claim after selection and uses asset snapshots
+to avoid applying the same asset revision twice. An enabled Payment preference may preselect the
+sole active or designated common destination only when the payout step is reached; the claimant
+must still confirm that step. Identity information is offered only in a supported separate
+verification step.
+Full payment-account and identity-document numbers are never copied into the Claim. These
+preferences are not coverage authority, payment authority, identity verification, or third-party
+disclosure consent, and reading this manifest remains side-effect free.
 
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
