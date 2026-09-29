@@ -124,15 +124,27 @@ def test_agent_participant_commit_reads_replay_and_correction(
 
 
 @pytest.mark.parametrize('status', [FormStatus.PROPOSED, FormStatus.DISPUTED])
+@pytest.mark.parametrize('has_confirmed_driver', [False, True])
 def test_unsettled_agent_participant_requires_confirmation(
     app: FastAPI,
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
+    staff_auth_headers: dict[str, str],
     status: FormStatus,
+    has_confirmed_driver: bool,
 ) -> None:
     created = create_claim(client, auth_headers).json()
     claim_id = created['claim']['claim_id']
+    revision = created['claim']['revision']
+    if has_confirmed_driver:
+        initialized = client.patch(
+            f'/api/v1/claims/{claim_id}/form',
+            headers={**auth_headers, 'If-Match': str(revision)},
+            json={'updates': [{'field_code': 'driver.name', 'value': 'Previous Driver'}]},
+        )
+        assert initialized.status_code == 200, initialized.text
+        revision = initialized.json()['revision']
     app.state.agent_turn_provider = ParticipantAgent(
         [
             ProposedFormChange(
@@ -148,12 +160,23 @@ def test_unsettled_agent_participant_requires_confirmation(
         auth_headers,
         claim_id,
         created['session']['session_id'],
-        text='The driver may be Unsettled Driver.',
+        revision=revision,
+        text='Correction: the driver may be Unsettled Driver.',
     )
     assert turn.status_code == 200, turn.text
     stored = repository.get_claim(claim_id, 'cus_demo')
     assert stored is not None
-    assert stored.driver is None or stored.driver.name is None
+    assert stored.driver is None
+    assert stored.form['driver.name'].status is status
+    assert stored.form['driver.name'].source_refs
+    assert stored.form['driver.name'].assertions
+    for route, headers in [
+        (f'/api/v1/claims/{claim_id}', auth_headers),
+        (f'/api/v1/workbench/claims/{claim_id}', staff_auth_headers),
+    ]:
+        view = client.get(route, headers=headers)
+        assert view.status_code == 200, view.text
+        assert view.json()['driver'] is None
     if status is FormStatus.PROPOSED:
         confirmed = client.post(
             f'/api/v1/claims/{claim_id}/form/confirmations',
@@ -168,6 +191,13 @@ def test_unsettled_agent_participant_requires_confirmation(
         stored = repository.get_claim(claim_id, 'cus_demo')
         assert stored is not None and stored.driver is not None
         assert stored.driver.name == 'Unsettled Driver'
+        for route, headers in [
+            (f'/api/v1/claims/{claim_id}', auth_headers),
+            (f'/api/v1/workbench/claims/{claim_id}', staff_auth_headers),
+        ]:
+            view = client.get(route, headers=headers)
+            assert view.status_code == 200, view.text
+            assert view.json()['driver']['name'] == 'Unsettled Driver'
 
 
 def test_witness_no_then_yes_does_not_resurrect_old_contacts(
