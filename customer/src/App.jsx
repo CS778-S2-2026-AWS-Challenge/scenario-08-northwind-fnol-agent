@@ -3299,6 +3299,32 @@ function App() {
     setPage('home')
   }
 
+  function workspaceBackLabel() {
+    if (workspaceView === 'claim-evidence') return 'Back to Claim features'
+    if (workspaceView === 'claim-features') return 'Back to Claim history'
+    return 'Back to conversation'
+  }
+
+  function navigateBackFromWorkspaceUtility() {
+    if (workspaceView === 'claim-evidence') {
+      setWorkspaceView('claim-features')
+      return
+    }
+    if (workspaceView === 'claim-features') {
+      openClaimHistory()
+      return
+    }
+    leaveWorkspaceUtility()
+  }
+
+  function handleWorkspaceHeaderBack() {
+    if (workspaceView !== 'chat') {
+      navigateBackFromWorkspaceUtility()
+      return
+    }
+    returnToLanding()
+  }
+
   function openProfileFromWorkspace(section = null) {
     if (!account) {
       setPage('login')
@@ -3613,8 +3639,8 @@ function App() {
             <button
               className="header-back-to-start"
               type="button"
-              aria-label="Back to start"
-              onClick={returnToLanding}
+              aria-label={workspaceView === 'chat' ? 'Back to start' : 'Back to previous page'}
+              onClick={handleWorkspaceHeaderBack}
               disabled={isBusy}
             >
               <span aria-hidden="true">←</span>
@@ -4038,7 +4064,7 @@ function App() {
                 <PrivacyPage
                   claimType={claim?.incident_type || null}
                   hasCurrentClaim={Boolean(claim?.claim_id)}
-                  onBack={leaveWorkspaceUtility}
+                  onBack={navigateBackFromWorkspaceUtility}
                   onViewClaim={claim ? () => openClaimFeatures(claim) : null}
                 />
               ) : (
@@ -4046,18 +4072,10 @@ function App() {
                   <button
                     className="back-link"
                     type="button"
-                    onClick={workspaceView === 'claim-evidence'
-                      ? () => setWorkspaceView('claim-features')
-                      : workspaceView === 'claim-features'
-                        ? openClaimHistory
-                        : leaveWorkspaceUtility}
+                    onClick={navigateBackFromWorkspaceUtility}
                   >
                     <span className="back-link-arrow" aria-hidden="true">←</span>
-                    {workspaceView === 'claim-evidence'
-                      ? 'Back to Claim features'
-                      : workspaceView === 'claim-features'
-                        ? 'Back to Claim history'
-                        : 'Back to conversation'}
+                    {workspaceBackLabel()}
                   </button>
                   <h1>
                     {workspaceView === 'history'

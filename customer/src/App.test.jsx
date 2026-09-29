@@ -1214,6 +1214,35 @@ describe('claimant intake projection', () => {
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['Privacy & your data', 'Privacy & your data'],
+    ['Claim history', 'Claim history'],
+    ['External services', 'External services'],
+  ])('returns from the %s utility view to the conversation with the persistent header', async (
+    navigationLabel,
+    headingLabel,
+  ) => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await startActiveClaim(user)
+
+    const header = container.querySelector('.product-header')
+    expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: navigationLabel }))
+    expect(await screen.findByRole('heading', { level: 1, name: headingLabel })).toBeVisible()
+
+    const utilityBack = within(header).getByRole('button', { name: 'Back to previous page' })
+    await user.click(utilityBack)
+
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Start your insurance claim' }))
+      .not.toBeInTheDocument()
+  })
+
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage
