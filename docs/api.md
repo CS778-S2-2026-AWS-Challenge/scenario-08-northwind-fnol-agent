@@ -4524,10 +4524,15 @@ abandonment. Expiry wins at deadline equality and uses the existing terminal
 disposition contract. Claimant and Workbench incomplete projections derive their
 deadline and attempt evidence from these authoritative records.
 
-`GET /api/v1/workbench/claims/{claim_id}/retention` requires staff authentication
-and returns the typed StaffRetentionProjection: operation status, closure,
+`GET /api/v1/workbench/claims/{claim_id}/retention` requires the `workbench:read`
+capability and returns the typed StaffRetentionProjection: operation status, closure,
 holds, derived record-content state and reconciliation evidence. It grants no
 cleanup command and exposes no claimant permission to reopen retained resources.
+
+`POST /api/v1/workbench/claims/{claim_id}/abandon` requires the `workbench:write`
+capability at both the route and the application-service boundary. A read-only
+staff principal receives `403 ACCESS_DENIED` and no Claim, Follow-up, or audit
+state changes.
 
 Once retention reserves access closure, old Session, Claim/evidence reads and
 claimant idempotent retries use the existing concealed RESOURCE_NOT_FOUND

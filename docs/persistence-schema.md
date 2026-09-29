@@ -1368,11 +1368,31 @@ deleted/already_absent/failed/unknown; failed or unknown results require reconci
 Approved classifications, source-linked holds and scalar tombstone authority fields are defined
 in `backend/domain/retention.py`. Holds block destruction without reopening claimant access.
 
-Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
-read-only by default, derives the deadline only from the source Session's persisted interruption
-time, conditionally updates records with missing policy/deadline fields under `--apply`, and
-reports records with missing or contradictory source state instead of guessing. It never derives
-a deadline from the migration execution time, deployment time, or current wall clock.
+Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The script is a
+thin operator entry point over the same repository migration rule the fixture adapter uses
+(`backfill_legacy_follow_up_record`); there is no second migration implementation. The rule is:
+
+- An open record is a candidate when `policy_id`, `policy_version`, or `deadline_at` is unbound,
+  or when it is `blocked` without a typed `blocked_reason`. An absent field and an explicit
+  `null` are the same unbound state.
+- Only unbound, compatible fields are filled. An existing `policy_id`, `policy_version`, or
+  `deadline_at` that contradicts `incomplete_claim_follow_up` version `1` or the derived deadline
+  is never rewritten; the record fails closed as `blocked` with `policy_binding_invalid`, keeping
+  its stored coordinates and contact authority.
+- The deadline is derived only from the source Session's `SessionRecoveryContext.interrupted_at`.
+  A missing, mismatched, or inconsistent source fails closed as `source_state_inconsistent`
+  without inventing a clock. Migration, deployment, and wall-clock time are used only as the
+  audit `created_at` of the migration evidence.
+- `created_at`, `due_at`, `source_refs`, and `attempt_count` are preserved. No
+  `FollowUpOperation` is fabricated.
+- Each record commits alone. The MongoDB write matches the exact Follow-up document read
+  (including fields that were absent) and fences the exact source Session snapshot, so a
+  concurrent change to either aborts that record with a conflict; a rerun re-decides from the
+  current state. A stored document that cannot be validated is reported as `unreadable` and is
+  not written.
+
+The script is read-only by default and writes only under `--apply`. One append-only
+`action.completed` or `action.failed` audit event records each bound or failed-closed record.
 
 ## P17.2 Bounded Terminal Disposition and Reopen Slice
 
@@ -1443,3 +1463,21 @@ Claimant access closure is checked before historical idempotency replay. Cleanup
 retires claimant retry records and preserves staff/internal source evidence and
 minimum Audit/tombstones. Cross-store deletion uses the durable RetentionOperation
 step ledger; database completion alone cannot prove object bytes were removed.
+
+### Durable recovery record decision table
+
+The following table states, for each durable P17 record, what is immutable, what may change, and
+how each adapter guards the change. It describes the implemented contract; MongoDB atomicity
+assumes a transaction-capable deployment, and the mongomock-based tests prove adapter control
+flow and conditional predicates rather than cluster-level concurrency.
+
+| Record | Immutable identity | Mutable state and legal transitions | Write guard | Replay and conflict | Indexes | Authority |
+| --- | --- | --- | --- | --- | --- | --- |
+| `FollowUpRecord` | `follow_up_id`, `claim_id`, `source_session_id`, `created_at`, bound `policy_id`/`policy_version`/`deadline_at` | `pending` or `blocked` to `resolved`; `pending` and `blocked` switch on typed reasons; `attempt_count` only increases with committed attempts | Claim revision CAS inside the same fixture lock or MongoDB transaction as the Claim and Session mutation | A stale Claim revision or resolved obligation rejects the write; a worker reloads authoritative state | `follow_up_due_ordered`, `follow_up_deadline_ordered` | P17 recovery obligation |
+| `FollowUpOperation` | `operation_id`, `follow_up_id`, `claim_id`, `sequence`, `policy_id`, `policy_version`, `based_on_claim_revision`, `scheduled_at`, `created_at` | `reserved` to `committed` or `cancelled`; `committed` to `settled`; settled and cancelled are final | Insert-only creation checked against the next sequence and current Claim revision; transitions replace only when the stored status equals the expected prior status | An exact replay succeeds; a different immutable payload, a stale prior status, a competing sequence, or a final-state rewrite raises `IdempotencyConflict` | `follow_up_operation_id_unique`, `follow_up_operation_sequence_unique` | P17 execution history |
+| `RetentionOperation` | `operation_id`, `claim_id`, `source_terminal_ref`, `source_claim_revision`, integer `policy_version`, `source_refs`, `access_closed_at` | Status moves among `reserved`, `held`, and `reconciliation_required` and ends at `completed`, which is immutable; `revision` advances by exactly one; targets freeze once; step evidence and hold references are append-only | Insert-only creation, at most one per Claim; progress requires the expected operation `revision` | An exact replay returns the stored operation; a different payload conflicts; a stale revision raises `RevisionConflict` | `retention_operation_claim_unique`, `retention_operation_claim_updated` | Destructive cleanup execution |
+| `RetentionHoldRecord` | `hold_id`, `claim_id`, `reason`, `authority_ref`, `source_refs`, `applied_at` | Active to released, once | Insert-only creation; release matches the stored unreleased state | An exact replay succeeds; a changed coordinate or second release is rejected | `retention_hold_claim_state` | Blocks destructive cleanup only |
+
+Retention eligibility and cleanup refuse to proceed while any `FollowUpOperation` for the Claim is
+`reserved` or `committed`, while an ExternalTask outcome is unknown, or while staff responsibility
+is open. An unknown object-deletion outcome never counts as success.
