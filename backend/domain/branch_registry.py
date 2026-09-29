@@ -175,7 +175,13 @@ FAMILY_REQUIRED = {
     'contents': frozenset({'contents.items'}),
 }
 SYSTEM_OWNED_FIELDS = frozenset({'claimant.client_number'})
-CLAIMANT_HIDDEN_FIELDS = frozenset({'claimant.client_number'})
+CLAIMANT_HIDDEN_FIELDS = frozenset(
+    {
+        'claimant.client_number',
+        'driver.licence_number',
+        'other_party.policy_number',
+    }
+)
 BranchKind = Literal['fact', 'workflow', 'record', 'projection']
 CollectionDeadline = Literal[
     'required_now', 'before_creation', 'before_dispatch', 'optional', 'staff_only'
@@ -869,13 +875,17 @@ class BranchRuleEvaluator:
         elif pending_text:
             add('evidence.pending', 'candidate', 'The claimant message describes pending material.')
 
-        witness = claim.form.get('witness.details')
-        if witness is not None and witness.status is FormStatus.CONFIRMED and bool(witness.value):
+        witness = claim.form.get('witness.present')
+        if (
+            witness is not None
+            and witness.status is FormStatus.CONFIRMED
+            and witness.value == 'yes'
+        ):
             add(
                 'participant.witness',
                 'active',
                 'A confirmed fact records a witness.',
-                ('witness.details',),
+                ('witness.present',),
             )
         elif re.search(r'\bwitness\b', text, re.I):
             add('participant.witness', 'candidate', 'The claimant message mentions a witness.')

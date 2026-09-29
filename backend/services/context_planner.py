@@ -14,6 +14,7 @@ from backend.domain.agent_context_runtime import (
     TurnRoute,
     VerifiedConversationSummary,
 )
+from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS
 from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
 from backend.domain.turn_field_contract import TurnFieldContract
@@ -51,7 +52,11 @@ def _claim_projection(
             'precision': field.precision.value,
         }
         for code, field in claim.form.items()
-        if code in allowed_fields and field.needed_for is NeededFor.CURRENT_ACTION
+        if (
+            code in allowed_fields
+            and code not in CLAIMANT_HIDDEN_FIELDS
+            and field.needed_for is NeededFor.CURRENT_ACTION
+        )
     }
     projection: dict[str, object] = {
         'claim_id': claim.claim_id,

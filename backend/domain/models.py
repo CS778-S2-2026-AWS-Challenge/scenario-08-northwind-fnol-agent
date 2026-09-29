@@ -668,7 +668,17 @@ class MotorOtherDriverRecord(ContractModel):
 
     @model_validator(mode='after')
     def require_supplied_detail(self) -> 'MotorOtherDriverRecord':
-        if not any((self.name, self.phone, self.email, self.vehicle_registration)):
+        if not any(
+            (
+                self.name,
+                self.phone,
+                self.email,
+                self.vehicle_registration,
+                self.insurer_name,
+                self.policy_number,
+                self.claim_reference,
+            )
+        ):
             raise ValueError('An other-driver record requires at least one supplied detail.')
         if self.updated_at < self.created_at:
             raise ValueError('An other-driver record cannot be updated before it was created.')

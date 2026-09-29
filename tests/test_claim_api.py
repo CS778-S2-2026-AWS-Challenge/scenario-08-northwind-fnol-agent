@@ -405,6 +405,50 @@ def submit_message(
     )
 
 
+def test_form_participant_fields_materialize_role_safe_records(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='participant-records').json()
+    claim_id = created['claim']['claim_id']
+    revision = created['claim']['revision']
+
+    patched = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(revision)},
+        json={
+            'updates': [
+                {'field_code': 'policyholder.name', 'value': 'Synthetic Policyholder'},
+                {'field_code': 'driver.name', 'value': 'Synthetic Driver'},
+                {'field_code': 'driver.licence_number', 'value': 'DL-SYNTH-1234'},
+                {'field_code': 'driver.licence_status', 'value': 'valid'},
+                {'field_code': 'witness.present', 'value': 'yes'},
+                {'field_code': 'witness.name', 'value': 'Synthetic Witness'},
+                {'field_code': 'witness.phone', 'value': '+64 21 555 0101'},
+            ]
+        },
+    )
+
+    assert patched.status_code == 200, patched.text
+    view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+    assert view.status_code == 200, view.text
+    body = view.json()
+    assert body['policyholder']['name'] == 'Synthetic Policyholder'
+    assert body['driver']['name'] == 'Synthetic Driver'
+    assert body['driver']['licence_number_masked'] == '****1234'
+    assert 'licence_number' not in body['driver']
+    assert body['witnesses'][0]['name'] == 'Synthetic Witness'
+    assert body['witnesses'][0]['phone'] == '+64 21 555 0101'
+
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    assert stored.driver is not None
+    assert stored.driver.licence_number is not None
+    assert stored.driver.licence_number != 'DL-SYNTH-1234'
+    assert stored.form['driver.licence_number'].value == '****1234'
+
+
 @pytest.mark.parametrize(
     ('failure', 'expected_code'),
     [

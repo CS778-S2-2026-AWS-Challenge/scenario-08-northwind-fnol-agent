@@ -178,6 +178,30 @@ def test_motor_other_driver_rejects_blank_text_without_any_mutation(
     assert repository.find_idempotency('cus_demo', route, idempotency_key) is None
 
 
+def test_motor_other_driver_accepts_insurer_only_detail(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    claim = _create_claim(
+        client,
+        auth_headers,
+        incident_type='motor',
+        key='motor-other-driver-insurer-only',
+    )
+    response = client.post(
+        f'/api/v1/claims/{claim["claim_id"]}/motor-other-driver',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'motor-other-driver-insurer-only-create',
+            'If-Match': str(claim['revision']),
+        },
+        json={'insurer_name': 'Synthetic Mutual'},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()['participant']['insurer_name'] == 'Synthetic Mutual'
+
+
 def test_motor_other_driver_is_optional_and_rejected_outside_motor(
     client: TestClient,
     auth_headers: dict[str, str],

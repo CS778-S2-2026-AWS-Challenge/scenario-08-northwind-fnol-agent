@@ -29,6 +29,7 @@ from backend.domain.models import (
     CreateClaimRequest,
     CreateClaimResponse,
     CustomerNextStep,
+    DriverRecord,
     FieldSelectionState,
     FollowUpContactPermission,
     FollowUpRecord,
@@ -44,6 +45,7 @@ from backend.domain.models import (
     NeededFor,
     PageInfo,
     PauseSessionResponse,
+    PolicyholderRecord,
     PreferredChannel,
     ProposedFormChange,
     ResponsibleParty,
@@ -54,6 +56,7 @@ from backend.domain.models import (
     StaffActionStatus,
     StartSessionRequest,
     StructuredFormField,
+    WitnessRecord,
     WorkflowState,
     WorkingClaim,
 )
@@ -91,6 +94,7 @@ from backend.services.incomplete_claims import (
     find_incomplete_recovery,
     recovery_checkpoint_allowed,
 )
+from backend.services.protected_values import ProtectedValueAdapter, masked_value
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -1037,6 +1041,105 @@ def get_session(
     return _claimant_session(session, claim.customer_next_step)
 
 
+def _materialize_participant_records(
+    claim: WorkingClaim,
+    updated_fields: dict[str, StructuredFormField],
+    *,
+    protected_values: ProtectedValueAdapter | None,
+) -> tuple[
+    dict[str, StructuredFormField],
+    PolicyholderRecord | None,
+    DriverRecord | None,
+    list[WitnessRecord],
+]:
+    """Keep participant records authoritative when fields arrive through the form API."""
+    fields = {**claim.form, **updated_fields}
+
+    def value(code: str) -> object | None:
+        field = fields.get(code)
+        return None if field is None else field.value
+
+    policyholder = claim.policyholder
+    if value('policyholder.identity_ref') is not None or value('policyholder.name') is not None:
+        policyholder = PolicyholderRecord(
+            identity_ref=value('policyholder.identity_ref')
+            if value('policyholder.identity_ref') is not None
+            else (policyholder.identity_ref if policyholder else None),
+            name=value('policyholder.name')
+            if value('policyholder.name') is not None
+            else (policyholder.name if policyholder else None),
+        )
+
+    driver = claim.driver
+    licence_update = updated_fields.get('driver.licence_number')
+    raw_licence = licence_update.value if licence_update is not None else None
+    if any(value(code) is not None for code in (
+        'driver.identity_ref', 'driver.name', 'driver.phone', 'driver.email',
+        'driver.relationship_to_policyholder', 'driver.owner_permission',
+        'driver.licence_number', 'driver.licence_status',
+    )):
+        protected_licence: str | None
+        if raw_licence is not None:
+            if protected_values is None:
+                raise ValueError('Protected driver licence storage is not configured.')
+            assert licence_update is not None
+            protected_licence = protected_values.seal(str(raw_licence))
+            updated_fields['driver.licence_number'] = licence_update.model_copy(
+                update={'value': masked_value(str(raw_licence))}
+            )
+        else:
+            protected_licence = driver.licence_number if driver else None
+        driver = DriverRecord(
+            identity_ref=(
+                value('driver.identity_ref')
+                if value('driver.identity_ref') is not None
+                else (driver.identity_ref if driver else None)
+            ),
+            name=(
+                value('driver.name')
+                if value('driver.name') is not None
+                else (driver.name if driver else None)
+            ),
+            phone=(
+                value('driver.phone')
+                if value('driver.phone') is not None
+                else (driver.phone if driver else None)
+            ),
+            email=(
+                value('driver.email')
+                if value('driver.email') is not None
+                else (driver.email if driver else None)
+            ),
+            relationship_to_policyholder=value('driver.relationship_to_policyholder')
+            if value('driver.relationship_to_policyholder') is not None
+            else (driver.relationship_to_policyholder if driver else None),
+            owner_permission=value('driver.owner_permission')
+            if value('driver.owner_permission') is not None
+            else (driver.owner_permission if driver else None),
+            licence_number=protected_licence,
+            licence_number_masked=(masked_value(str(raw_licence)) if raw_licence is not None
+                                   else (driver.licence_number_masked if driver else None)),
+            licence_status=value('driver.licence_status')
+            if value('driver.licence_status') is not None
+            else (driver.licence_status if driver else None),
+        )
+
+    witnesses = list(claim.witnesses)
+    if value('witness.present') == 'no':
+        witnesses = []
+    elif value('witness.present') == 'yes' or any(
+        value(code) is not None for code in ('witness.name', 'witness.phone', 'witness.email')
+    ):
+        current = witnesses[0] if witnesses else WitnessRecord(witness_id=new_id('wit'))
+        witnesses = [WitnessRecord(
+            witness_id=current.witness_id,
+            name=value('witness.name') if value('witness.name') is not None else current.name,
+            phone=value('witness.phone') if value('witness.phone') is not None else current.phone,
+            email=value('witness.email') if value('witness.email') is not None else current.email,
+        ), *witnesses[1:]]
+    return updated_fields, policyholder, driver, witnesses
+
+
 def update_form(
     repository: PersistenceRepository,
     principal: Principal,
@@ -1044,6 +1147,7 @@ def update_form(
     payload: FormPatchRequest,
     if_match: str | None,
     identity_repository: IdentityRepository | None = None,
+    protected_values: ProtectedValueAdapter | None = None,
 ) -> FormPatchResponse:
     expected_revision = parse_if_match(if_match)
     claim = repository.get_claim(claim_id, principal.subject)
@@ -1068,6 +1172,18 @@ def update_form(
                 message='The field code is not registered.',
                 details=[
                     ErrorDetail(field='field_code', reason=f'Unknown field: {update.field_code}.')
+                ],
+            )
+        if update.field_code == 'other_party.policy_number':
+            raise ApiError(
+                status_code=422,
+                code='PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE',
+                message='Other-party policy numbers must use the protected participant route.',
+                details=[
+                    ErrorDetail(
+                        field=update.field_code,
+                        reason='The generic form cannot store this protected value.',
+                    )
                 ],
             )
         try:
@@ -1126,11 +1242,28 @@ def update_form(
             explicit_correction=update.correction_reason is not None,
         )
 
+    try:
+        updated_fields, policyholder, driver, witnesses = _materialize_participant_records(
+            claim,
+            updated_fields,
+            protected_values=protected_values,
+        )
+    except ValueError as error:
+        raise ApiError(
+            status_code=422,
+            code='PROTECTED_DATA_UNAVAILABLE',
+            message='The protected participant value could not be stored.',
+            details=[ErrorDetail(field='driver.licence_number', reason=str(error))],
+        ) from error
+
     incident_type = _apply_product_family_transition(claim, updated_fields)
     projected_claim = claim.model_copy(
         update={
             'form': {**claim.form, **updated_fields},
             'incident_type': incident_type,
+            'policyholder': policyholder,
+            'driver': driver,
+            'witnesses': witnesses,
             'payment_destination_id': (
                 None
                 if 'claimant.contact_preference' in updated_fields

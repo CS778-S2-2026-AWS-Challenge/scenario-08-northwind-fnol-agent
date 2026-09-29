@@ -846,6 +846,7 @@ def patch_form(
         payload,
         if_match,
         identity_repository_for(request),
+        protected_values_for(request),
     )
 
 

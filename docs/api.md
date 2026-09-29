@@ -1079,11 +1079,15 @@ damage, loss, theft, ownership, value, or coverage.
 | `POST /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Link one same-Claim Evidence record to a ContentsItem with a bounded purpose. Requires `Idempotency-Key` and Claim `If-Match`. |
 | `GET /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Cursor-page the item's role-safe immutable associations. |
 
-The Motor record contains only supplied `name`, `phone`, `email`, and
-`vehicle_registration`; at least one value is required and each Motor Claim has zero or one
-record. Contact data appears only in authorised claimant and Workbench Claim detail projections.
-It is not embedded in WorkingClaim, model context, RAG context, unrelated lists, logs, or audit
-reasons. Missing other-driver data never blocks initial capture.
+The Motor record stores only supplied participant details: `name`, `phone`, `email`,
+`vehicle_registration`, `insurer_name`, `policy_number`, and `claim_reference`. At least one
+value is required and each Motor Claim has zero or one record. `policy_number` is encrypted at
+the protected-value boundary and exposed only as `policy_number_masked` in role-safe projections.
+Contact data appears only in authorised claimant and Workbench Claim detail projections. It is
+not embedded in model context, RAG context, unrelated lists, logs, or audit reasons. Missing
+other-driver data never blocks initial capture. The generic form route rejects
+`other_party.policy_number`; callers must use the protected Motor other-driver route so the
+plaintext value never enters the generic form store.
 
 Contents association purposes are `proof_of_purchase`, `item_condition`, `repair_assessment`, and
 `authority_document`. Both item and Evidence must belong to the same owned Claim. Cross-Claim or
