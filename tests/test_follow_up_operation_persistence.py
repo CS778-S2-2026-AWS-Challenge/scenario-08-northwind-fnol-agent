@@ -962,6 +962,7 @@ def test_unmigratable_follow_up_is_quarantined_without_blocking_healthy_expiry(
     assert stored['deadline_at'] == legacy['deadline_at']
     assert stored['recovery_discovery_ready'] is False
     assert stored['recovery_migration_reason'] == 'source_state_inconsistent'
+    assert healthy.deadline_at is not None
     assert [
         item.follow_up_id
         for item in repository.list_expiring_follow_ups(
