@@ -1124,11 +1124,10 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    expect(screen.queryByRole('button', { name: 'Back to Claim history' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Claim history' }))
 
     expect(screen.getByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
     expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
   })
@@ -1212,6 +1211,37 @@ describe('claimant intake projection', () => {
     expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
     expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['Privacy & your data', 'Privacy & your data'],
+    ['Claim history', 'Claim history'],
+    ['External services', 'External services'],
+  ])('returns from the %s utility view to the conversation with the persistent header', async (
+    navigationLabel,
+    headingLabel,
+  ) => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await startActiveClaim(user)
+
+    const header = container.querySelector('.product-header')
+    expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: navigationLabel }))
+    expect(await screen.findByRole('heading', { level: 1, name: headingLabel })).toBeVisible()
+    expect(within(container.querySelector('.workspace-utility-page'))
+      .queryByRole('button', { name: /^Back/ })).not.toBeInTheDocument()
+
+    const utilityBack = within(header).getByRole('button', { name: 'Back to previous page' })
+    await user.click(utilityBack)
+
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Start your insurance claim' }))
+      .not.toBeInTheDocument()
   })
 
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
@@ -1782,7 +1812,7 @@ describe('claimant intake projection', () => {
     })
     expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.startClaimSession).not.toHaveBeenCalled()
-    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
     expect(screen.getByText('Ready to start')).toBeVisible()
     expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Start claim' })).not.toBeInTheDocument()
@@ -1837,7 +1867,7 @@ describe('claimant intake projection', () => {
     expect(api.pauseClaimSession.mock.calls[1][0].idempotencyKey).toBe(
       api.pauseClaimSession.mock.calls[0][0].idempotencyKey,
     )
-    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
   })
 
   it('prevents duplicate interruption saves while New chat is pending', async () => {
@@ -1861,7 +1891,7 @@ describe('claimant intake projection', () => {
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
 
-    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
   })
 
   it('uses authoritative Claim readback when the pause response is lost', async () => {
@@ -1878,8 +1908,29 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
     expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
-    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('opens the claim-aware privacy page and routes its claim-data action to the existing view', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await startActiveClaim(user)
+
+    const privacyNavigation = screen.getByRole('button', { name: 'Privacy & your data' })
+    await user.click(privacyNavigation)
+
+    expect(privacyNavigation).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('heading', { level: 1, name: 'Privacy & your data' })).toBeVisible()
+    expect(screen.getByText('Home & Contents claim information is shown first for your current claim.'))
+      .toBeVisible()
+    expect(within(container.querySelector('.privacy-page')).queryByText(initialClaim.claim_id))
+      .not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'View information recorded for this claim' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Claim features' })).toBeVisible()
   })
 
   it.each([
@@ -1945,7 +1996,7 @@ describe('claimant intake projection', () => {
     render(<App />)
     await startActiveClaim(user)
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
     await act(async () => {
       if (responseIsLost) pause.reject(new api.ApiRequestError('Response lost.'))
       else pause.resolve({
@@ -1954,7 +2005,7 @@ describe('claimant intake projection', () => {
       })
     })
 
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.type(
       screen.getByPlaceholderText('Write the details you know...'),
       'One more detail after returning.',
@@ -2012,12 +2063,12 @@ describe('claimant intake projection', () => {
     await startActiveClaim(user)
     const turnKeysBeforeFollowUp = api.requestId.mock.calls.filter(([prefix]) => prefix === 'turn').length
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
     await act(async () => pause.resolve({
       claim: pausedClaim(),
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.type(screen.getByPlaceholderText('Write the details you know...'), 'Retry this detail safely.')
 
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2070,7 +2121,7 @@ describe('claimant intake projection', () => {
     render(<App />)
     await startActiveClaim(user)
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
     await act(async () => {
       if (responseIsLost) pause.reject(new api.ApiRequestError('Response lost.'))
       else pause.resolve({
@@ -2082,7 +2133,7 @@ describe('claimant intake projection', () => {
       await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(1))
     }
 
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.type(screen.getByPlaceholderText('Write the details you know...'), pendingText)
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(responseIsLost ? 2 : 1))
@@ -2173,8 +2224,8 @@ describe('claimant intake projection', () => {
     render(<App />)
     await startActiveClaim(user)
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
-    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
+    await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     await user.click(screen.getByRole('button', { name: 'New chat' }))
     await act(async () => oldPause.reject(new api.ApiRequestError('Old pause failed.')))
 
@@ -2185,7 +2236,7 @@ describe('claimant intake projection', () => {
       claim: pausedClaim(),
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
-    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
   })
 
   it('uses the homepage rail to return to the existing empty conversation workspace', async () => {
@@ -2207,7 +2258,7 @@ describe('claimant intake projection', () => {
 
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
     expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'Start your insurance claim' })).not.toBeInTheDocument()
   })
@@ -2218,7 +2269,16 @@ describe('claimant intake projection', () => {
 
     const { container } = render(<App />)
 
-    expect(screen.getByRole('heading', { name: "Let's get your claim started" })).toBeVisible()
+    const startIntro = container.querySelector('.conversation-start-intro')
+    expect(within(startIntro).getByRole('heading', {
+      level: 1,
+      name: "Let's get your claim started",
+    })).toBeVisible()
+    expect(within(startIntro).queryByText('Ready to start')).not.toBeInTheDocument()
+    const emptyHeading = container.querySelector('.conversation-heading')
+    expect(emptyHeading).toHaveClass('is-empty')
+    expect(within(emptyHeading).getByText('Ready to start')).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'New conversation' })).not.toBeInTheDocument()
     expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()
     expect(screen.getByText(/Your information stays private/)).toBeVisible()
@@ -2276,7 +2336,7 @@ describe('claimant intake projection', () => {
     unmount()
 
     render(<App />)
-    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
     await user.click(screen.getByRole('button', { name: /home.*Continue this conversation/i }))
 
     expect(api.listClaims).not.toHaveBeenCalled()
@@ -2731,7 +2791,7 @@ describe('claimant intake projection', () => {
     expect(
       screen.getByRole('textbox', { name: 'Add more information' }),
     ).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
     expect(api.getClaim).not.toHaveBeenCalled()
 
