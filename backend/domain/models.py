@@ -708,13 +708,27 @@ class MotorOtherDriverRecord(ContractModel):
     phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
     email: StrippedNonEmptyText | None = Field(default=None, min_length=3, max_length=254)
     vehicle_registration: StrippedNonEmptyText | None = Field(default=None, max_length=40)
+    insurer_name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
+    policy_number: StrippedNonEmptyText | None = Field(default=None, max_length=1024)
+    policy_number_masked: str | None = Field(default=None, max_length=40)
+    claim_reference: StrippedNonEmptyText | None = Field(default=None, max_length=120)
     source_refs: list[str] = Field(default_factory=list, max_length=10)
     created_at: datetime
     updated_at: datetime
 
     @model_validator(mode='after')
     def require_supplied_detail(self) -> 'MotorOtherDriverRecord':
-        if not any((self.name, self.phone, self.email, self.vehicle_registration)):
+        if not any(
+            (
+                self.name,
+                self.phone,
+                self.email,
+                self.vehicle_registration,
+                self.insurer_name,
+                self.policy_number,
+                self.claim_reference,
+            )
+        ):
             raise ValueError('An other-driver record requires at least one supplied detail.')
         if self.updated_at < self.created_at:
             raise ValueError('An other-driver record cannot be updated before it was created.')
@@ -728,6 +742,9 @@ class MotorOtherDriverProjection(ContractModel):
     phone: str | None = None
     email: str | None = None
     vehicle_registration: str | None = None
+    insurer_name: str | None = None
+    policy_number_masked: str | None = None
+    claim_reference: str | None = None
     updated_at: datetime
 
 
@@ -736,10 +753,23 @@ class CreateMotorOtherDriverRequest(ContractModel):
     phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
     email: StrippedNonEmptyText | None = Field(default=None, min_length=3, max_length=254)
     vehicle_registration: StrippedNonEmptyText | None = Field(default=None, max_length=40)
+    insurer_name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
+    policy_number: StrippedNonEmptyText | None = Field(default=None, max_length=120)
+    claim_reference: StrippedNonEmptyText | None = Field(default=None, max_length=120)
 
     @model_validator(mode='after')
     def require_supplied_detail(self) -> 'CreateMotorOtherDriverRequest':
-        if not any((self.name, self.phone, self.email, self.vehicle_registration)):
+        if not any(
+            (
+                self.name,
+                self.phone,
+                self.email,
+                self.vehicle_registration,
+                self.insurer_name,
+                self.policy_number,
+                self.claim_reference,
+            )
+        ):
             raise ValueError('At least one other-driver detail is required.')
         return self
 
@@ -1014,6 +1044,59 @@ class AcceptClaimAgreementRequest(ContractModel):
     confirmations: dict[str, bool] = Field(min_length=1, max_length=20)
 
 
+class PolicyholderRecord(ContractModel):
+    """Claim-scoped policyholder identity when the reporter is another person."""
+
+    identity_ref: str | None = Field(default=None, min_length=1, max_length=120)
+    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
+
+
+class DriverRecord(ContractModel):
+    """Claim-scoped actual driver details; licence number is never projected to clients."""
+
+    identity_ref: str | None = Field(default=None, min_length=1, max_length=120)
+    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
+    phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
+    email: StrippedNonEmptyText | None = Field(default=None, max_length=254)
+    relationship_to_policyholder: str | None = Field(default=None, max_length=80)
+    owner_permission: str | None = Field(default=None, max_length=40)
+    licence_number: StrippedNonEmptyText | None = Field(default=None, max_length=1024)
+    licence_number_masked: str | None = Field(default=None, max_length=40)
+    licence_status: str | None = Field(default=None, max_length=40)
+
+
+class WitnessRecord(ContractModel):
+    """Repeatable witness contact record, kept separate from other participants."""
+
+    witness_id: str = Field(min_length=1, max_length=120)
+    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
+    phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
+    email: StrippedNonEmptyText | None = Field(default=None, max_length=254)
+
+
+class PolicyholderProjection(ContractModel):
+    identity_ref: str | None = None
+    name: str | None = None
+
+
+class DriverProjection(ContractModel):
+    identity_ref: str | None = None
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    relationship_to_policyholder: str | None = None
+    owner_permission: str | None = None
+    licence_number_masked: str | None = None
+    licence_status: str | None = None
+
+
+class WitnessProjection(ContractModel):
+    witness_id: str
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
 class WorkingClaim(ContractModel):
     claim_id: str
     customer_id: str
@@ -1023,6 +1106,9 @@ class WorkingClaim(ContractModel):
     incident_type: str | None = None
     claim_state: ClaimState = Field(default_factory=ClaimState)
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
+    policyholder: 'PolicyholderRecord | None' = None
+    driver: 'DriverRecord | None' = None
+    witnesses: list['WitnessRecord'] = Field(default_factory=list)
     contents_items: list[ContentsItem] = Field(default_factory=list)
     evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
@@ -1049,6 +1135,9 @@ class WorkingClaim(ContractModel):
         item_ids = [item.item_id for item in self.contents_items]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError('Contents item identifiers must be unique within a Claim.')
+        witness_ids = [witness.witness_id for witness in self.witnesses]
+        if len(witness_ids) != len(set(witness_ids)):
+            raise ValueError('Witness identifiers must be unique within a Claim.')
         acceptance_ids = [acceptance.acceptance_id for acceptance in self.agreement_acceptances]
         if len(acceptance_ids) != len(set(acceptance_ids)):
             raise ValueError('Agreement acceptance identifiers must be unique within a Claim.')
@@ -1981,6 +2070,9 @@ class WorkbenchClaimDetail(ContractModel):
     incident_type: str | None = None
     claim_state: ClaimState
     form: dict[str, StructuredFormField]
+    policyholder: PolicyholderProjection | None = None
+    driver: DriverProjection | None = None
+    witnesses: list[WitnessProjection] = Field(default_factory=list)
     route: str | None = None
     active_session_id: str | None = None
     evidence_summary: EvidenceSummary
@@ -2377,6 +2469,9 @@ class ClaimantClaim(ContractModel):
     workflow_state: WorkflowState
     form: dict[str, StructuredFormField]
     contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
+    policyholder: PolicyholderProjection | None = None
+    driver: DriverProjection | None = None
+    witnesses: list[WitnessProjection] = Field(default_factory=list)
     motor_other_driver: MotorOtherDriverProjection | None = None
     evidence_summary: EvidenceSummary
     payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
@@ -2693,5 +2788,6 @@ class DynamicFormProjection(ContractModel):
 
 
 ClaimantClaim.model_rebuild()
+WorkingClaim.model_rebuild()
 MessageTurnResponse.model_rebuild()
 ContentsItemEvidenceAssociationListResponse.model_rebuild()

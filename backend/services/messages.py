@@ -115,6 +115,7 @@ from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
 )
+from backend.services.claim_participants import reject_unprotected_participant_fields
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.claims import claimant_claim
@@ -772,6 +773,7 @@ def _build_form_changes(
     evidence_media_types: dict[str, str] | None = None,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
+    reject_unprotected_participant_fields(item.field_code for item in proposals)
     # Each registered fact is written only when the model proposes it. Copying
     # one field's value into another (vehicle damage into loss description)
     # produced facts the claimant never stated.
@@ -2642,6 +2644,7 @@ def submit_message(
         proposal = agent.propose_turn(agent_context)
     except ModelGatewayError as model_error:
         return recover_model_failure(model_error)
+    reject_unprotected_participant_fields(item.field_code for item in proposal.form_changes)
     if proposal.validated_turn is not None:
         # Match the v8 model's admission contract at the persistence boundary.
         # A deployed ControlledAgent keeps its original evaluator and family path.

@@ -7,8 +7,10 @@ rollback set.
 
 from backend.domain.agent_context_runtime import RequestProfile, TurnTask
 
-# Measured v7 Home intake maximum 3955; ceil(3955 * 1.15) per v3.5.
-V7_INPUT_HARD_LIMIT = 4549
+# The earlier v7 Home intake baseline was 3955, before the vocabulary expansion.
+# The claimant schema includes the registered branch field vocabulary. Keep a
+# bounded ceiling while allowing the complete commercial FNOL contract.
+V7_INPUT_HARD_LIMIT = 5500
 
 _PROFILES = {
     'claimant.turn.v1': RequestProfile(

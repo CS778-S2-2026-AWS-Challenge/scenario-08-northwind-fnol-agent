@@ -785,6 +785,9 @@ The canonical backend record has these fields. API projections omit fields the c
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
 | `contents_items` | object array | Yes | Optional source-aware `ContentsItem` records; empty unless the Claim is a contents path |
+| `policyholder` | object/null | No | Claim-scoped policyholder record for a non-policyholder reporter; never duplicates account Profile data |
+| `driver` | object/null | No | Claim-scoped actual-driver record for Motor; licence number is protected and excluded from model/RAG and claimant projections |
+| `witnesses` | object array | Yes | Repeatable Claim-scoped witness records; empty when no witness is known |
 | `motor_other_driver` | object/null | Yes | Optional bounded other-driver name/contact/vehicle projection on Claim detail only; never included in Claim lists or model/RAG context |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
 | `route` | string | No | Configured processing route, not a decision outcome |
@@ -1015,6 +1018,9 @@ Initial common field codes:
 | `claimant.client_number` | string | Staff-only Northwind client reference supplied by identity |
 | `claimant.role` | enum | Policyholder, authorised representative, or other reporter |
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
+| `claimant.relationship_to_policyholder` | enum | Reporter relationship to the policyholder |
+| `policyholder.identity_ref` | string | Claim-scoped policyholder identity reference when the reporter is not the policyholder |
+| `policyholder.name` | string | Policyholder fallback name when no durable identity reference is available |
 | `claim.product_family` | enum | `motor`, `home`, or `contents`; source-aware family field projected through top-level `incident_type` for compatibility |
 | `incident.type` | enum | `collision`, `fire`, `water`, `theft`, `weather`, or `other`; never the product family |
 | `incident.occurred_at` | timestamp | When the incident occurred |
@@ -1029,10 +1035,31 @@ Initial common field codes:
 | `vehicle.registration` | string | Motor-specific vehicle reference |
 | `vehicle.damage_description` | string | Motor-specific damage account |
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
+| `vehicle.use` | enum | `private`, `commuting`, `business`, `rideshare_delivery`, `other`, or `unknown` |
+| `vehicle.towing_required` | enum | `required`, `not_required`, `already_towed`, or `unknown` |
+| `vehicle.towing_location` | object/string | Current or intended towing location |
+| `driver.identity_ref` | string | Actual-driver identity reference when available |
+| `driver.name` | string | Actual-driver name when no identity reference is available |
+| `driver.phone` | string | Actual-driver phone |
+| `driver.email` | string | Actual-driver email |
+| `driver.relationship_to_policyholder` | enum | Actual-driver relationship to the policyholder |
+| `driver.owner_permission` | enum | Permission fact: `confirmed`, `not_confirmed`, `unknown`, or `not_applicable` |
+| `driver.licence_number` | protected string | Protected licence value; never sent to model/RAG |
+| `driver.licence_status` | enum | `valid`, `expired`, `suspended`, `learner`, `restricted`, or `unknown` |
+| `other_party.insurer_name` | string | Other-party insurer on the existing Motor other-driver record |
+| `other_party.policy_number` | protected string | Other-party policy number; protected and masked in projections |
+| `other_party.claim_reference` | string | Other-party insurer claim reference |
+| `witness.present` | enum | `yes`, `no`, or `unknown` |
+| `witness.name` | string | Repeatable typed witness record name |
+| `witness.phone` | string | Repeatable typed witness record phone |
+| `witness.email` | string | Repeatable typed witness record email |
+| `police.status` | enum | `not_reported`, `reported`, `reference_pending`, `reference_available`, `not_required`, or `unknown` |
 | `property.address` | object | Home or contents risk location |
 | `property.affected_areas` | array | Home-specific affected areas |
 | `property.ongoing_risk` | enum | `none`, `active_leak`, `fire`, `collapse`, `exposure`, or `other`; current home safety condition |
 | `property.habitable` | boolean | Whether the home is currently safe to occupy; does not replace professional safety advice |
+| `property.occupancy_relationship` | enum | `owner`, `tenant`, `landlord`, `authorised_representative`, or `other` |
+| `property.occupancy` | enum | `occupied`, `vacant`, `partially_occupied`, or `unknown` |
 
 ### Contents items
 
@@ -1078,11 +1105,36 @@ damage, loss, theft, ownership, value, or coverage.
 | `POST /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Link one same-Claim Evidence record to a ContentsItem with a bounded purpose. Requires `Idempotency-Key` and Claim `If-Match`. |
 | `GET /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Cursor-page the item's role-safe immutable associations. |
 
-The Motor record contains only supplied `name`, `phone`, `email`, and
-`vehicle_registration`; at least one value is required and each Motor Claim has zero or one
-record. Contact data appears only in authorised claimant and Workbench Claim detail projections.
-It is not embedded in WorkingClaim, model context, RAG context, unrelated lists, logs, or audit
-reasons. Missing other-driver data never blocks initial capture.
+The Motor record stores only supplied participant details: `name`, `phone`, `email`,
+`vehicle_registration`, `insurer_name`, `policy_number`, and `claim_reference`. At least one
+value is required and each Motor Claim has zero or one record. `policy_number` is encrypted at
+the protected-value boundary and exposed only as `policy_number_masked` in role-safe projections.
+Contact data appears only in authorised claimant and Workbench Claim detail projections. It is
+not embedded in model context, RAG context, unrelated lists, logs, or audit reasons. Missing
+other-driver data never blocks initial capture. The generic form route rejects
+`other_party.policy_number`; callers must use the protected Motor other-driver route so the
+plaintext value never enters the generic form store.
+
+If a policy number is supplied without working protection, the service returns retryable
+`503 PROTECTED_DATA_UNAVAILABLE` before changing the participant, Claim revision, or successful
+idempotency result. Insurer-only and claim-reference-only submissions do not require protection.
+
+Participant form facts synchronize the Claim-scoped `policyholder`, `driver`, and first witness
+record through one service boundary before the existing atomic Claim write. This applies to
+form PATCH, accepted Agent form changes, form confirmation, and Evidence fact decisions.
+Only confirmed facts populate typed participant values; proposed, disputed, and unavailable
+changes remain in the form with their status and source/assertion history. They do not appear
+as settled values in typed participant projections. Corrections retain participant identity.
+A confirmed `witness.present=no` clears witness records; a later `yes` alone does not restore
+old contacts. Additional witness records retain their identities when the first is corrected.
+
+The form PATCH route accepts `driver.licence_number` only with confirmed status and working
+protection. It stores ciphertext in the driver record and masks the form value and assertion
+history before persistence. Unavailable protection returns the same safe retryable `503`.
+Agent and Evidence extraction writes for licence numbers or other-party policy numbers return
+`422 PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE`; these paths cannot persist raw protected facts.
+The raw-value input limit remains 120 characters; durable ciphertext has a separate 1024-character
+limit to accommodate encryption overhead. These changes do not select Agent questions.
 
 Contents association purposes are `proof_of_purchase`, `item_condition`, `repair_assessment`, and
 `authority_document`. Both item and Evidence must belong to the same owned Claim. Cross-Claim or

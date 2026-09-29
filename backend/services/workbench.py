@@ -150,6 +150,7 @@ from backend.domain.workbench_action_registry import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.claim_data import (
+    project_claim_participants,
     project_contents_item_evidence_association,
     project_motor_other_driver,
 )
@@ -1904,11 +1905,15 @@ def _build_projection(
         except (InvalidExternalLifecycleTransition, ValueError):
             external_section_limitation = _INCONSISTENT_EXTERNAL_LIFECYCLE
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
+    policyholder, driver, witnesses = project_claim_participants(claim)
     return WorkbenchClaimDetail(
         **base,
         active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
         contents_items=claim.contents_items,
+        policyholder=policyholder,
+        driver=driver,
+        witnesses=witnesses,
         contents_item_evidence_associations=[
             project_contents_item_evidence_association(item)
             for item in repository.list_contents_item_evidence_associations(
