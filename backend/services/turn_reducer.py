@@ -64,6 +64,7 @@ from backend.domain.runtime import (
 )
 from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.protocols import IdempotencyRecord
+from backend.services.claim_participants import synchronize_participants
 from backend.services.external_service_offers import (
     build_offer_metadata,
     detected_service_intents,
@@ -810,6 +811,7 @@ def reduce_turn(
                 'updated_at': timestamp,
             }
         )
+    updated_claim = synchronize_participants(updated_claim, form_changes)
     # A handoff owns responsibility; later model next-action proposals cannot
     # release it or create a second owner.
     if open_handoffs and handoff is None:

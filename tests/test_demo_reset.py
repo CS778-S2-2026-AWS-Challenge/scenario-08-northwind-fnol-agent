@@ -16,6 +16,7 @@ from backend.domain.models import AssessorLocation, CreateExternalClaimRequest, 
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.handoff_guard import HandoffPersistenceGuard
 from scripts import reset_demo as reset_command
+from tests.media_support import synthetic_image
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
@@ -70,7 +71,7 @@ def _populate_demo(
         },
     )
     assert upload.status_code == 201
-    content = b'a' * 100
+    content = synthetic_image(media_type='image/png', size_bytes=100)
     storage = cast(MockEvidenceStorage, cast(Any, client.app).state.evidence_storage)
     storage.put_upload(
         claim_id=claim['claim_id'],
@@ -86,7 +87,7 @@ def _populate_demo(
         },
         json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
-    assert completed.status_code == 202
+    assert completed.status_code == 200
 
     claim_outcome = claims_adapter.create_claim(
         CreateExternalClaimRequest(
@@ -135,7 +136,8 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
         assert first.json()['cleared']['sessions'] == 1
         assert first.json()['cleared']['evidence'] == 1
         assert first.json()['cleared']['handoffs'] == 1
-        assert first.json()['cleared']['idempotency_records'] == 4
+        # Claim creation, message, safety action, upload intent, and completion.
+        assert first.json()['cleared']['idempotency_records'] == 5
         assert first.json()['cleared']['mock_claim_results'] == 1
         assert first.json()['cleared']['mock_assessor_results'] == 1
         assert first.json()['cleared']['mock_pending_uploads'] == 1

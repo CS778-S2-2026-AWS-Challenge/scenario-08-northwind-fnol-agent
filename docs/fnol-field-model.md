@@ -37,7 +37,7 @@ the current backend produces three distinct groups:
   agreement acceptance, vehicle Asset identity/make/model/year, collision branch evaluation,
   the canonical incident discovery field, and receipt Evidence state. They must not be
   duplicated in the Dynamic Form registry.
-- 24 commercially necessary fields remain unregistered. They cover Policyholder identity and
+- The 24 commercially necessary fields approved by #1082 are now implemented in the backend registry and Claim contracts. They cover Policyholder identity and
   reporter relationship; the insured vehicle's Driver; vehicle use and towing; other-party
   insurance; Witness presence and contact; Police reporting status; and Home occupancy. Their
   exact storage boundaries appear in the inventories below.
@@ -108,7 +108,7 @@ fixed questionnaire.
 | Applicability | Field codes |
 | --- | --- |
 | `common` | `claimant.role`, `claimant.client_number`, `claimant.contact_preference`, `claimant.relationship_to_policyholder`, `policyholder.identity_ref`, `policyholder.name`, `policy.policy_number`, `claim.product_family`, `incident.type`, `incident.description`, `incident.occurred_at`, `incident.location`, `incident.cause`, `loss.description`, `incident.injury_or_danger`, `parties.other_parties`, `evidence.availability`, `declaration.factual_accuracy`, `consent.sharing_scope`, `report.channel`, `claim.created_at`, `claim.registry_version` |
-| `motor` | `vehicle.identity`, `vehicle.registration`, `vehicle.make`, `vehicle.model`, `vehicle.year`, `vehicle.use`, `vehicle.damage_description`, `vehicle.drivable`, `vehicle.towing_required`, `vehicle.towing_location`, `driver.identity_ref`, `driver.name`, `driver.phone`, `driver.email`, `driver.relationship_to_policyholder`, `driver.owner_permission`, `driver.licence_number`, `driver.licence_status`, `collision.occurred`, `other_vehicle.identity`, `other_party.contact`, `other_party.insurer_name`, `other_party.policy_number`, `other_party.claim_reference`, `witness.present`, `witness.name`, `witness.phone`, `witness.email`, `police.status`, `authority.police_reference`, `motor.evidence_refs` |
+| `motor` | `vehicle.identity`, `vehicle.registration`, `vehicle.make`, `vehicle.model`, `vehicle.year`, `vehicle.use`, `vehicle.damage_description`, `vehicle.drivable`, `vehicle.towing_required`, `vehicle.towing_location`, `driver.identity_ref`, `driver.name`, `driver.phone`, `driver.email`, `driver.relationship_to_policyholder`, `driver.owner_permission`, `driver.licence_number`, `driver.licence_status`, `collision.occurred`, `other_vehicle.identity`, `other_party.contact`, `other_party.insurer_name`, `other_party.policy_number`, `other_party.claim_reference`, `witness.present`, `witness.name`, `witness.phone`, `witness.email`, `authority.police_reference`, `motor.evidence_refs` |
 | `home` | `property.address`, `property.occupancy_relationship`, `property.occupancy`, `property.affected_areas`, `property.ongoing_risk`, `property.habitable`, `mitigation.emergency_action`, `mitigation.temporary_repair`, `mitigation.contractor`, `home.evidence_refs` |
 | `contents` | `contents.items`, `contents.item.description`, `contents.item.category`, `contents.item.quantity`, `contents.item.brand`, `contents.item.model`, `contents.item.ownership`, `contents.item.estimated_value`, `contents.item.loss_type`, `contents.discovery_at`, `theft.entry_context`, `contents.receipt_availability`, `contents.proof_of_ownership`, `contents.police_reference`, `contents.item.evidence_refs`, `contents.item_group` |
 | `conditional cross-path` | `incident.discovered_at`, `parties.other_parties`, `evidence.availability`, `declaration.factual_accuracy`, `consent.sharing_scope`, `collision.*`, `other_party.*`, `witness.*`, `police.*`, `authority.police_*`, `safety/injury`, `mitigation.*`, `incident.theft_or_burglary`, `professional_review`, `human_support` |
@@ -116,7 +116,7 @@ fixed questionnaire.
 `common` and `conditional cross-path` may both apply: common describes reusable meaning;
 conditional describes collection-time branch activation. A record code is an explicit
 reference/aggregate identity and must not be implemented as an unbounded form string.
-The 24 unregistered fields describe capabilities the commercial intake must support, not a
+The 24 newly registered fields describe capabilities the commercial intake must support, not a
 universal creation checklist. A conditional value may remain unknown, unavailable, or pending
 without blocking Claim creation unless a later published rule explicitly assigns a collection
 deadline.
@@ -130,9 +130,9 @@ make their boundary explicit.
 | Code | Meaning | Applies/type/multi | src/NL/conf/infer | safe/now/status | Current implementation | vis/auth |
 | --- | --- | --- | --- | --- | --- | --- |
 | `claimant.role` | Reporter classification | common/scalar/no | C/y/y/y | n/c/registered | Registered as text; #1084 must bound the approved reporter roles without creating a duplicate field | C/S; privacy |
-| `policyholder.identity_ref` | Account or Policyholder identity reference when the reporter is not the Policyholder | conditional/reference/no | C,P/y/y/n | authority/c/unregistered | Not implemented; belongs to a typed Policyholder/participant boundary | S; privacy/authority |
-| `policyholder.name` | Policyholder name when no durable identity reference is available | conditional/scalar/no | C,P/y/y/n | authority/c/unregistered | Not implemented; fallback member of the Policyholder/participant record | C/S; privacy/authority |
-| `claimant.relationship_to_policyholder` | Reporter relationship to the Policyholder | conditional/enum/no | C/y/y/y | authority/c/unregistered | Not implemented; required only when the reporter is not the Policyholder | C/S; privacy/authority |
+| `policyholder.identity_ref` | Account or Policyholder identity reference when the reporter is not the Policyholder | conditional/reference/no | C,P/y/y/n | authority/c/registered | Implemented as the Claim-scoped Policyholder record member | S; privacy/authority |
+| `policyholder.name` | Policyholder name when no durable identity reference is available | conditional/scalar/no | C,P/y/y/n | authority/c/registered | Implemented as the Claim-scoped Policyholder record member | C/S; privacy/authority |
+| `claimant.relationship_to_policyholder` | Reporter relationship to the Policyholder | conditional/enum/no | C/y/y/y | authority/c/registered | Implemented as a bounded Dynamic Form field | C/S; privacy/authority |
 | `claimant.client_number` | Authenticated customer reference | common/scalar/no | Y/n/n/n | n/n/registered | Registry; identity supplies value | S; privacy |
 | `claimant.contact_preference` | Preferred safe contact channel | common/enum/no | C/y/y/y | support/c/registered | Registry/profile | C/S; privacy |
 | `policy.policy_number` | Policy reference | common/scalar/no | C,P/y/y/y | lookup/c/registered | Registry; bounded lookup | C/S; privacy |
@@ -162,30 +162,30 @@ make their boundary explicit.
 | `vehicle.make` | Make | scalar/no | C,E/y/y/y | n/c/record | Optional `VehicleAssetDetails` and immutable Claim snapshot member; not a form field | C/S; privacy |
 | `vehicle.model` | Model | scalar/no | C,E/y/y/y | n/c/record | Optional `VehicleAssetDetails` and immutable Claim snapshot member; not a form field | C/S; privacy |
 | `vehicle.year` | Model year | scalar/no | C,E/y/y/y | n/c/record | Optional `VehicleAssetDetails` and immutable Claim snapshot member; not a form field | C/S; privacy |
-| `vehicle.use` | Private, commuting, business, rideshare/delivery, other, or unknown use at the incident | enum/no | C/y/y/y | routing/c/unregistered | Not implemented; proposed Dynamic Form field | C/S; policy/privacy |
+| `vehicle.use` | Private, commuting, business, rideshare/delivery, other, or unknown use at the incident | enum/no | C/y/y/y | routing/c/registered | Implemented as a bounded Dynamic Form field | C/S; policy/privacy |
 | `vehicle.damage_description` | Visible damage account | scalar/no | C,E/y/y/y | safety/y/registered | Registered; evidence link separate | C/S; privacy |
 | `vehicle.drivable` | Whether the vehicle is safe and able to be driven | boolean/no | C/y/y/y | safety/y/registered | Registered; towing rule gap | C/S; safety |
-| `vehicle.towing_required` | Required, not required, already towed, or unknown | enum/no | C,S/y/y/y | safety/y/unregistered | Recovery services exist, but no structured Claim value exists; proposed Dynamic Form field | C/S; consent |
-| `vehicle.towing_location` | Current or intended tow location | location/no | C/y/y/y | safety/c/unregistered | Recovery services exist, but no structured Claim value exists; proposed Dynamic Form field | C/S; privacy/consent |
-| `driver.identity_ref` | Existing account identity reference for the actual Driver | reference/no | C,Y/y/y/n | authority/c/unregistered | Not implemented; optional typed Driver record member | S; privacy/authority |
-| `driver.name` | Actual Driver name when no identity reference is available | scalar/no | C/y/y/n | authority/c/unregistered | Not implemented; typed Driver record fallback identity | C/S; privacy/authority |
-| `driver.phone` | Actual Driver phone | scalar/no | C/y/y/n | contact/c/unregistered | Not implemented; optional typed Driver record member | C/S; privacy |
-| `driver.email` | Actual Driver email | scalar/no | C/y/y/n | contact/c/unregistered | Not implemented; optional typed Driver record member | C/S; privacy |
-| `driver.relationship_to_policyholder` | Driver relationship to the Policyholder | enum/no | C/y/y/y | authority/c/unregistered | Not implemented; typed Driver record member | C/S; authority |
-| `driver.owner_permission` | Confirmed, not confirmed, unknown, or not applicable | enum/no | C/y/y/y | authority/c/unregistered | Not implemented; typed Driver record member without liability inference | C/S; authority |
-| `driver.licence_number` | Protected Driver licence number | protected scalar/no | C,E/y/y/n | authority/pending/unregistered | Not implemented; requires protected storage and masked role-safe projection | S; privacy/authority |
-| `driver.licence_status` | Valid, expired, suspended, learner, restricted, or unknown | enum/no | C,E/y/y/y | review/pending/unregistered | Not implemented; typed Driver record member and bounded review semantics | S; privacy/review |
+| `vehicle.towing_required` | Required, not required, already towed, or unknown | enum/no | C,S/y/y/y | safety/y/registered | Implemented as a bounded Dynamic Form field | C/S; consent |
+| `vehicle.towing_location` | Current or intended tow location | location/no | C/y/y/y | safety/c/registered | Implemented as a bounded Dynamic Form field | C/S; privacy/consent |
+| `driver.identity_ref` | Existing account identity reference for the actual Driver | reference/no | C,Y/y/y/n | authority/c/registered | Implemented as a typed Driver record member | S; privacy/authority |
+| `driver.name` | Actual Driver name when no identity reference is available | scalar/no | C/y/y/n | authority/c/registered | Implemented as a typed Driver record member | C/S; privacy/authority |
+| `driver.phone` | Actual Driver phone | scalar/no | C/y/y/n | contact/c/registered | Implemented as a typed Driver record member | C/S; privacy |
+| `driver.email` | Actual Driver email | scalar/no | C/y/y/n | contact/c/registered | Implemented as a typed Driver record member | C/S; privacy |
+| `driver.relationship_to_policyholder` | Driver relationship to the Policyholder | enum/no | C/y/y/y | authority/c/registered | Implemented as a typed Driver record member | C/S; authority |
+| `driver.owner_permission` | Confirmed, not confirmed, unknown, or not applicable | enum/no | C/y/y/y | authority/c/registered | Implemented as a typed Driver record member without liability inference | C/S; authority |
+| `driver.licence_number` | Protected Driver licence number | protected scalar/no | C,E/y/y/n | authority/pending/registered | Stored in the protected Driver boundary and omitted from model/RAG and claimant projections | S; privacy/authority |
+| `driver.licence_status` | Valid, expired, suspended, learner, restricted, or unknown | enum/no | C,E/y/y/y | review/pending/registered | Implemented as a typed Driver record member and bounded review semantics | S; privacy/review |
 | `collision.occurred` | Collision branch fact | enum/no | C/y/y/y | routing/y/record | Covered by collision branch evaluation; not a lifecycle or form field | C/S; privacy |
 | `other_vehicle.identity` | Other vehicle reference/details | object/yes | C,E/y/y/y | provider/pending/record | Bounded `MotorOtherDriverRecord.vehicle_registration`; zero or one per Motor Claim | C/S; privacy |
 | `other_party.contact` | Other party name, phone, and email | object/no | C/y/y/y | external/pending/record | Bounded `MotorOtherDriverRecord`; excluded from model/RAG context | C/S; privacy |
-| `other_party.insurer_name` | Other party insurer when known | scalar/no | C/y/y/n | external/pending/unregistered | Not implemented; extend the existing `MotorOtherDriverRecord` | C/S; privacy |
-| `other_party.policy_number` | Other party Policy number when supplied | protected scalar/no | C/y/y/n | external/pending/unregistered | Not implemented; extend the existing restricted participant record | S; privacy |
-| `other_party.claim_reference` | Other party insurer Claim reference when one exists | scalar/no | C/y/y/n | external/pending/unregistered | Not implemented; extend the existing restricted participant record | C/S; privacy |
-| `witness.present` | Yes, no, or unknown Witness presence | enum/no | C/y/y/y | evidence/c/unregistered | Not implemented; proposed Dynamic Form field distinguishes no Witness from not yet asked | C/S; privacy |
-| `witness.name` | Witness name | scalar/yes | C/y/y/n | evidence/pending/unregistered | Not implemented; repeatable typed Witness record member | S; privacy/consent |
-| `witness.phone` | Witness phone | scalar/yes | C/y/y/n | evidence/pending/unregistered | Not implemented; repeatable typed Witness record member | S; privacy/consent |
-| `witness.email` | Witness email | scalar/yes | C/y/y/n | evidence/pending/unregistered | Not implemented; repeatable typed Witness record member | S; privacy/consent |
-| `police.status` | Not reported, reported, reference pending/available, not required, or unknown | enum/no | C,S/y/y/y | authority/y/unregistered | Police branches, reference, and Evidence exist; no unified status value exists | C/S; authority |
+| `other_party.insurer_name` | Other party insurer when known | scalar/no | C/y/y/n | external/pending/registered | Implemented on the existing `MotorOtherDriverRecord` | C/S; privacy |
+| `other_party.policy_number` | Other party Policy number when supplied | protected scalar/no | C/y/y/n | external/pending/registered | Implemented on the existing restricted participant record with masked projection | S; privacy |
+| `other_party.claim_reference` | Other party insurer Claim reference when one exists | scalar/no | C/y/y/n | external/pending/registered | Implemented on the existing restricted participant record | C/S; privacy |
+| `witness.present` | Yes, no, or unknown Witness presence | enum/no | C/y/y/y | evidence/c/registered | Implemented as a bounded Dynamic Form field | C/S; privacy |
+| `witness.name` | Witness name | scalar/yes | C/y/y/n | evidence/pending/registered | Implemented as a repeatable typed Witness record member | S; privacy/consent |
+| `witness.phone` | Witness phone | scalar/yes | C/y/y/n | evidence/pending/registered | Implemented as a repeatable typed Witness record member | S; privacy/consent |
+| `witness.email` | Witness email | scalar/yes | C/y/y/n | evidence/pending/registered | Implemented as a repeatable typed Witness record member | S; privacy/consent |
+| `police.status` | Not reported, reported, reference pending/available, not required, or unknown | enum/no | C,S/y/y/y | authority/y/registered | Implemented as a bounded Dynamic Form field; existing Police references remain canonical | C/S; authority |
 | `authority.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/c/alias | Catalogue alias for registered `authorities.police_report_reference`; submit only the canonical code | C/S; privacy/authority |
 | `motor.evidence_refs` | Vehicle photo/video/estimate refs | list/yes | E,C/y/y/y | evidence/y/record | Evidence API + item links | C/S; privacy |
 
@@ -194,8 +194,8 @@ make their boundary explicit.
 | Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
 | --- | --- | --- | --- | --- | --- | --- |
 | `property.address` | Insured property address | location/no | C,P/y/y/y | routing/y/registered | Registry + form | C/S; privacy |
-| `property.occupancy_relationship` | Owner, tenant, landlord, authorised representative, or other | enum/no | C/y/y/y | authority/c/unregistered | Not implemented; proposed Dynamic Form field | C/S; privacy |
-| `property.occupancy` | Occupied, vacant, partially occupied, or unknown | enum/no | C/y/y/y | safety/c/unregistered | Not implemented; proposed Dynamic Form field | C/S; safety |
+| `property.occupancy_relationship` | Owner, tenant, landlord, authorised representative, or other | enum/no | C/y/y/y | authority/c/registered | Implemented as a bounded Dynamic Form field | C/S; privacy |
+| `property.occupancy` | Occupied, vacant, partially occupied, or unknown | enum/no | C/y/y/y | safety/c/registered | Implemented as a bounded Dynamic Form field | C/S; safety |
 | `property.affected_areas` | Rooms, structures, outdoor areas | list/yes | C,E/y/y/y | triage/y/registered | Registered; branch shape gap | C/S; privacy |
 | `property.ongoing_risk` | Leak, fire, collapse, exposure | enum/no | C/y/y/y | urgent/y/registered | Registry + home family; may trigger emergency mitigation | C/S; safety |
 | `property.habitable` | Safe/usable to occupy | boolean/no | C,S/y/y/y | support/y/registered | Registry + home family; may trigger accommodation support | C/S; safety/review |
@@ -496,7 +496,7 @@ merely to make a Dynamic Form table appear complete.
 | Required-now projection | Deterministic current-action requirements and next-item selection | `requirements` on Dynamic Form responses | Selection and requirement result retained in Branch Evaluation | Agent, Dynamic Form, UI | Implemented VP baseline |
 | Item/evidence provenance | Evidence API plus same-Claim association validation | Item links on claimant and staff detail | Immutable `ContentsItemEvidenceAssociation` | Evidence, claimant, staff | Implemented bounded journey baseline |
 | Consent/agreement | External consent and Claim agreement acceptance exist as separate records | Route-specific role-safe projections | Consent and agreement acceptance records; catalogue-wide scopes remain absent | Agent/integrations/UI | Implemented bounded records; broader scope remains an open decision |
-| Commercial FNOL gaps | No executable support for the approved 24-field set | No projection for the unregistered values | No authoritative storage for the unregistered values | Agent, claimant, staff | Follow-up #1084; no implementation in this document change |
+| Commercial FNOL fields | Executable registry, typed Claim participant records, and role-safe projections for the approved 24-field set | Conditional values may be absent or pending | Claim revision and existing record boundaries remain authoritative | Agent, claimant, staff | #1084 implemented |
 | Registry versioning | Constant exists | No publication API | Claim version not retained | Agent/audit/staff | `liyang6620` + Control Plane owner |
 
 ## API/domain/persistence/projection impact
@@ -524,14 +524,11 @@ merely to make a Dynamic Form table appear complete.
 
 ## Current implementation statement
 
-The backend implements a bounded VP baseline for motor, home, and contents. It includes 28
-registered Dynamic Form codes, typed contents items, account Assets and immutable Claim asset
+The backend implements a bounded VP baseline for motor, home, and contents. It includes the
+registered Dynamic Form codes, typed contents and participant records, account Assets and immutable Claim asset
 snapshots, Evidence and agreement records, mutually exclusive family selection, conditional
 branches, deterministic current-action requirements, assertion history, role-safe projections,
-and claim creation for each family. The broader catalogue remains design input: partial support
-does not make a catalogue code executable, and an unregistered field is not implemented until its type,
-visibility, persistence boundary, registry or typed-record ownership, consumers, and tests are
-approved together.
+and claim creation for each family. The remaining catalogue candidates are explicitly outside #1084.
 
 ## Requested-data inventory and ownership
 
@@ -554,8 +551,8 @@ file, and operational data remain typed records.
 | Bank account number | Encrypted and ordinarily masked Payment Destination member | #923 implemented |
 | Driver licence number | Encrypted and ordinarily masked Identity Record member | #923 implemented |
 | Passport number | Encrypted and ordinarily masked Identity Record member | #923 implemented |
-| Policyholder identity/name for a non-Policyholder reporter | Unregistered typed Policyholder/participant record members | Follow-up #1084 |
-| Reporter relationship to Policyholder | Unregistered conditional Dynamic Form field | Follow-up #1084 |
+| Policyholder identity/name for a non-Policyholder reporter | Claim-scoped typed Policyholder record members | #1084 implemented |
+| Reporter relationship to Policyholder | Bounded conditional Dynamic Form field | #1084 implemented |
 | Reusable insured vehicle | Existing vehicle Asset and immutable Claim asset snapshot | #921 |
 | Vehicle registration | Reuse `vehicle.registration` and vehicle Asset snapshot | #921 |
 | Vehicle registered owner | Existing optional `VehicleAssetDetails.registered_owner`; copied into the immutable vehicle snapshot | #921 |
@@ -567,19 +564,19 @@ file, and operational data remain typed records.
 | Other driver name | Optional member of the bounded zero-or-one `MotorOtherDriverRecord` | #919 implemented |
 | Other driver contact | Optional phone/email members on the role-safe Motor other-driver projection; excluded from model/RAG context | #919 implemented |
 | Other vehicle registration | Optional `vehicle_registration` on the bounded Motor other-driver record | #919 implemented |
-| Actual Driver identity, contact, relationship, owner permission, and licence | Unregistered typed Driver record members; protected licence storage required | Follow-up #1084 |
-| Vehicle use | Unregistered conditional Dynamic Form field | Follow-up #1084 |
-| Vehicle towing requirement and location | Unregistered conditional Dynamic Form fields; existing recovery service remains separate | Follow-up #1084 |
-| Other-party insurer, Policy number, and Claim reference | Unregistered extension of the existing Motor other-driver record | Follow-up #1084 |
-| Witness presence | Unregistered conditional Dynamic Form field | Follow-up #1084 |
-| Witness name, phone, and email | Unregistered repeatable typed Witness record members | Follow-up #1084 |
-| Police reporting status | Unregistered conditional Dynamic Form field; existing Police references and Evidence remain canonical | Follow-up #1084 |
+| Actual Driver identity, contact, relationship, owner permission, and licence | Claim-scoped typed Driver record; licence is omitted from role-safe projections | #1084 implemented |
+| Vehicle use | Bounded conditional Dynamic Form field | #1084 implemented |
+| Vehicle towing requirement and location | Bounded conditional Dynamic Form fields; existing recovery service remains separate | #1084 implemented |
+| Other-party insurer, Policy number, and Claim reference | Extension of the existing Motor other-driver record | #1084 implemented |
+| Witness presence | Bounded conditional Dynamic Form field | #1084 implemented |
+| Witness name, phone, and email | Repeatable typed Witness record members | #1084 implemented |
+| Police reporting status | Bounded conditional Dynamic Form field; existing Police references and Evidence remain canonical | #1084 implemented |
 | Motor Police reference | Reuse `authorities.police_report_reference` | Existing registry |
 | Motor repair quote, invoice, or estimate | Reuse Evidence | Existing Evidence baseline |
 | Reusable insured property | Existing property Asset and immutable Claim asset snapshot | #921 |
 | Property address | Reuse `property.address`; property Asset snapshot supplies the reusable detail | #920 |
 | Property owner/name | Existing optional `PropertyAssetDetails.owner_name`; copied into the immutable property snapshot | #921 |
-| Reporter relationship to property and occupancy state | Unregistered conditional Dynamic Form fields | Follow-up #1084 |
+| Reporter relationship to property and occupancy state | Bounded conditional Dynamic Form fields | #1084 implemented |
 | Home incident time | Reuse `incident.occurred_at` | Existing registry |
 | Home account of what happened | Reuse `incident.description` | Existing registry |
 | Damaged property areas | Reuse `property.affected_areas` | Existing registry |

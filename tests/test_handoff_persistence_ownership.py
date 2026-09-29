@@ -138,11 +138,15 @@ def handoff_audit_events(
         subject_id=claim_id,
         claim_id=claim_id,
     )
-    return [
+    events = [
         event
         for event in repository.list_audit_events_internal(subject)
         if event.event_id.startswith('aud_handoff_')
     ]
+    return sorted(
+        events,
+        key=lambda event: (event.claim_revision, event.created_at, event.event_id),
+    )
 
 
 def test_handoff_guard_fails_closed_without_matching_atomic_audit(

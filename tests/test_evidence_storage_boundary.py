@@ -22,6 +22,7 @@ from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.core.errors import ApiError
 from backend.repositories.fixture import FixtureRepository
+from tests.media_support import synthetic_image
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
@@ -368,7 +369,7 @@ def test_claimant_upload_content_is_available_to_authorised_staff(
 ) -> None:
     upload_size = cast(int, UPLOAD_PAYLOAD['size_bytes'])
     media_type = cast(str, UPLOAD_PAYLOAD['media_type'])
-    content = b'fixture-image-bytes' + (b'.' * (upload_size - 19))
+    content = synthetic_image(size_bytes=upload_size)
     assert len(content) == upload_size
 
     with storage_client as client:
@@ -404,7 +405,7 @@ def test_claimant_upload_content_is_available_to_authorised_staff(
         )
 
     assert uploaded.status_code == 204
-    assert completed.status_code == 202
+    assert completed.status_code == 200
     assert staff_view.status_code == 200
     assert staff_view.content == content
     assert staff_view.headers['content-type'] == 'image/jpeg'

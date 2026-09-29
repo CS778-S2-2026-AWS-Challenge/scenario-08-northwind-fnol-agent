@@ -3063,6 +3063,16 @@
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
           },
+          "driver": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriverProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "dynamic_form": {
             "anyOf": [
               {
@@ -3163,6 +3173,16 @@
             ],
             "title": "Payment Destination Id"
           },
+          "policyholder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyholderProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "primary_action": {
             "$ref": "#/components/schemas/ClaimantPrimaryAction"
           },
@@ -3194,6 +3214,13 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "witnesses": {
+            "items": {
+              "$ref": "#/components/schemas/WitnessProjection"
+            },
+            "title": "Witnesses",
+            "type": "array"
           },
           "workflow_state": {
             "$ref": "#/components/schemas/WorkflowState"
@@ -4077,6 +4104,18 @@
       "ClaimantIncompleteContext": {
         "additionalProperties": false,
         "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
           "follow_up_due_at": {
             "anyOf": [
               {
@@ -5724,6 +5763,19 @@
       "CreateMotorOtherDriverRequest": {
         "additionalProperties": false,
         "properties": {
+          "claim_reference": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Reference"
+          },
           "email": {
             "anyOf": [
               {
@@ -5736,6 +5788,19 @@
               }
             ],
             "title": "Email"
+          },
+          "insurer_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurer Name"
           },
           "name": {
             "anyOf": [
@@ -5762,6 +5827,19 @@
               }
             ],
             "title": "Phone"
+          },
+          "policy_number": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Number"
           },
           "vehicle_registration": {
             "anyOf": [
@@ -6314,6 +6392,101 @@
         "title": "DemoSeedResponse",
         "type": "object"
       },
+      "DriverProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "identity_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Ref"
+          },
+          "licence_number_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Licence Number Masked"
+          },
+          "licence_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Licence Status"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "owner_permission": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Permission"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "relationship_to_policyholder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship To Policyholder"
+          }
+        },
+        "title": "DriverProjection",
+        "type": "object"
+      },
       "DynamicFormProjection": {
         "additionalProperties": false,
         "description": "Claimant-safe projection of the latest valid branch evaluation.",
@@ -6807,7 +6980,34 @@
         "title": "EvidenceActionRequestPayload",
         "type": "object"
       },
-      "EvidenceCompleteResponse": {
+      "EvidenceCompleteResponse-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "customer_next_step": {
+            "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/ClaimantEvidence"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence",
+          "revision",
+          "status_url",
+          "customer_next_step"
+        ],
+        "title": "EvidenceCompleteResponse",
+        "type": "object"
+      },
+      "EvidenceCompleteResponse-Output": {
         "additionalProperties": false,
         "properties": {
           "customer_next_step": {
@@ -10689,6 +10889,17 @@
             "title": "Claim Id",
             "type": "string"
           },
+          "claim_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Reference"
+          },
           "email": {
             "anyOf": [
               {
@@ -10699,6 +10910,17 @@
               }
             ],
             "title": "Email"
+          },
+          "insurer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurer Name"
           },
           "name": {
             "anyOf": [
@@ -10725,6 +10947,17 @@
               }
             ],
             "title": "Phone"
+          },
+          "policy_number_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Number Masked"
           },
           "updated_at": {
             "format": "date-time",
@@ -11506,6 +11739,35 @@
           "retrieved_at"
         ],
         "title": "PolicySearchResponse",
+        "type": "object"
+      },
+      "PolicyholderProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "identity_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Ref"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "PolicyholderProjection",
         "type": "object"
       },
       "PreferencesPatchRequest": {
@@ -15002,6 +15264,53 @@
         "title": "VehicleAssetDetails",
         "type": "object"
       },
+      "WitnessProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "witness_id": {
+            "title": "Witness Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "witness_id"
+        ],
+        "title": "WitnessProjection",
+        "type": "object"
+      },
       "WorkPriorityLevel": {
         "enum": [
           "routine",
@@ -15405,6 +15714,16 @@
             "title": "Display Reference",
             "type": "string"
           },
+          "driver": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriverProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "external_capabilities": {
             "items": {
               "$ref": "#/components/schemas/ExternalCapabilityProjection"
@@ -15433,6 +15752,16 @@
           },
           "ownership": {
             "$ref": "#/components/schemas/WorkbenchOwnershipProjection"
+          },
+          "policyholder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyholderProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "priority_projection": {
             "$ref": "#/components/schemas/WorkbenchPriorityProjection"
@@ -15469,6 +15798,13 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "witnesses": {
+            "items": {
+              "$ref": "#/components/schemas/WitnessProjection"
+            },
+            "title": "Witnesses",
+            "type": "array"
           },
           "work_summary": {
             "$ref": "#/components/schemas/WorkbenchWorkSummary"
@@ -21733,11 +22069,21 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCompleteResponse-Input"
+                }
+              }
+            },
+            "description": "OK"
+          },
           "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EvidenceCompleteResponse"
+                  "$ref": "#/components/schemas/EvidenceCompleteResponse-Output"
                 }
               }
             },

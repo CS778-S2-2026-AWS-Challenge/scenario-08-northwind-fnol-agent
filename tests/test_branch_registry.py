@@ -27,15 +27,19 @@ from backend.domain.models import (
     Coverage,
     CustomerNextStep,
     CustomerSupport,
+    DriverRecord,
     FieldSelectionState,
     FormSource,
     FormStatus,
     MessageRecord,
     MessageVisibility,
+    MotorOtherDriverRecord,
+    PolicyholderRecord,
     ResponsibleParty,
     SessionRecord,
     StructuredFormField,
     Urgency,
+    WitnessRecord,
     WorkflowState,
     WorkingClaim,
 )
@@ -104,21 +108,24 @@ def contents_item(item_id: str = 'item_1') -> ContentsItem:
 def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record() -> None:
     registry = build_default_registry()
 
-    assert registry.field_registry_version == '6'
+    assert registry.field_registry_version == '7'
     assert registry.field_by_code['property.ongoing_risk'].value_type == 'enum'
     assert registry.field_by_code['property.habitable'].value_type == 'boolean'
     assert registry.branch_by_id['family.home'].fields >= {
         'property.ongoing_risk',
         'property.habitable',
     }
-    assert registry.branch_by_id['family.contents'].fields == registry.branch_by_id[
-        'family.motor'
-    ].fields - {
-        'authorities.police_report_reference',
-        'vehicle.registration',
-        'vehicle.damage_description',
-        'vehicle.drivable',
-    }
+    assert 'police.status' in registry.branch_by_id['family.motor'].fields
+    assert 'police.status' in registry.branch_by_id['family.contents'].fields
+    assert not registry.branch_by_id['family.contents'].fields.intersection(
+        {
+            'vehicle.registration',
+            'vehicle.use',
+            'driver.name',
+            'other_party.insurer_name',
+            'witness.name',
+        }
+    )
 
 
 def test_working_claim_rejects_duplicate_contents_item_ids() -> None:
@@ -142,6 +149,96 @@ def test_claimant_form_hides_system_owned_client_number() -> None:
 
     assert 'claimant.client_number' not in projected
     assert 'incident.description' in projected
+
+
+def test_commercial_fnol_fields_are_registered_with_family_boundaries() -> None:
+    registry = build_default_registry()
+    expected = {
+        'claimant.relationship_to_policyholder',
+        'policyholder.identity_ref',
+        'policyholder.name',
+        'vehicle.use',
+        'vehicle.towing_required',
+        'vehicle.towing_location',
+        'driver.identity_ref',
+        'driver.name',
+        'driver.phone',
+        'driver.email',
+        'driver.relationship_to_policyholder',
+        'driver.owner_permission',
+        'driver.licence_number',
+        'driver.licence_status',
+        'other_party.insurer_name',
+        'other_party.policy_number',
+        'other_party.claim_reference',
+        'witness.present',
+        'witness.name',
+        'witness.phone',
+        'witness.email',
+        'police.status',
+        'property.occupancy_relationship',
+        'property.occupancy',
+    }
+    assert expected <= REGISTERED_FIELD_CODES
+    assert expected <= registry.field_codes
+    assert registry.field_by_code['driver.licence_status'].allowed_values >= {
+        'valid',
+        'expired',
+        'suspended',
+        'unknown',
+    }
+    for code in expected:
+        definition = registry.field_by_code[code]
+        if code.startswith(('vehicle.', 'driver.', 'other_party.', 'witness.')):
+            assert 'motor' in definition.families
+    assert 'home' in registry.field_by_code['property.occupancy'].families
+
+
+def test_participant_records_are_claim_scoped_and_licence_is_role_safe() -> None:
+    claim = make_claim().model_copy(
+        update={
+            'policyholder': PolicyholderRecord(
+                identity_ref='cus_policyholder', name='Policyholder'
+            ),
+            'driver': DriverRecord(
+                name='Driver',
+                licence_number='DL-SYNTH-1234',
+                licence_number_masked='****1234',
+                licence_status='valid',
+            ),
+            'witnesses': [WitnessRecord(witness_id='wit_1', name='Witness')],
+        }
+    )
+    assert claim.driver is not None
+    assert claim.driver.licence_number == 'DL-SYNTH-1234'
+    from backend.services.claim_data import project_claim_participants
+
+    _, driver, witnesses = project_claim_participants(claim)
+    assert driver is not None
+    assert driver.licence_number_masked == '****1234'
+    assert 'DL-SYNTH-1234' not in driver.model_dump_json()
+    assert witnesses[0].witness_id == 'wit_1'
+
+
+def test_other_party_policy_projection_is_masked() -> None:
+    record = MotorOtherDriverRecord(
+        participant_id='par_0123456789abcdef0123',
+        claim_id='clm_branch',
+        customer_id='cus_branch',
+        name='Other Driver',
+        policy_number='POLICY-123456',
+        policy_number_masked='****3456',
+        created_at=FIXED_TIME,
+        updated_at=FIXED_TIME,
+    )
+
+    from backend.services.claim_data import project_motor_other_driver
+
+    projection = project_motor_other_driver(record)
+
+    assert projection.policy_number_masked == '****3456'
+    assert not hasattr(projection, 'policy_number')
+    assert 'POLICY-123456' not in projection.model_dump_json()
 
 
 def test_claimant_contents_projection_hides_internal_assessment_metadata() -> None:

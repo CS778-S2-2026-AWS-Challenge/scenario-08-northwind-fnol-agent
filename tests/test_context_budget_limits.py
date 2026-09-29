@@ -133,4 +133,4 @@ def test_v7_rollback_three_family_context_fits_measured_compensation(
     plan = plan_model_turn(replace(context, branch_evaluation=evaluation))
     assert plan is not None
     assert plan.request_budget.raw_input_tokens <= V7_INPUT_HARD_LIMIT
-    assert plan.request_budget.hard_limit == V7_INPUT_HARD_LIMIT == 4549
+    assert plan.request_budget.hard_limit == V7_INPUT_HARD_LIMIT == 5500

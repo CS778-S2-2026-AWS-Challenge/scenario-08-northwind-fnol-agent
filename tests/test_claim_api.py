@@ -405,6 +405,50 @@ def submit_message(
     )
 
 
+def test_form_participant_fields_materialize_role_safe_records(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='participant-records').json()
+    claim_id = created['claim']['claim_id']
+    revision = created['claim']['revision']
+
+    patched = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(revision)},
+        json={
+            'updates': [
+                {'field_code': 'policyholder.name', 'value': 'Synthetic Policyholder'},
+                {'field_code': 'driver.name', 'value': 'Synthetic Driver'},
+                {'field_code': 'driver.licence_number', 'value': 'DL-SYNTH-1234'},
+                {'field_code': 'driver.licence_status', 'value': 'valid'},
+                {'field_code': 'witness.present', 'value': 'yes'},
+                {'field_code': 'witness.name', 'value': 'Synthetic Witness'},
+                {'field_code': 'witness.phone', 'value': '+64 21 555 0101'},
+            ]
+        },
+    )
+
+    assert patched.status_code == 200, patched.text
+    view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+    assert view.status_code == 200, view.text
+    body = view.json()
+    assert body['policyholder']['name'] == 'Synthetic Policyholder'
+    assert body['driver']['name'] == 'Synthetic Driver'
+    assert body['driver']['licence_number_masked'] == '****1234'
+    assert 'licence_number' not in body['driver']
+    assert body['witnesses'][0]['name'] == 'Synthetic Witness'
+    assert body['witnesses'][0]['phone'] == '+64 21 555 0101'
+
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    assert stored.driver is not None
+    assert stored.driver.licence_number is not None
+    assert stored.driver.licence_number != 'DL-SYNTH-1234'
+    assert stored.form['driver.licence_number'].value == '****1234'
+
+
 @pytest.mark.parametrize(
     ('failure', 'expected_code'),
     [
@@ -459,7 +503,9 @@ def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
     first_body = first.json()
     claim_id = first_body['claim']['claim_id']
     session_id = first_body['session']['session_id']
-    content = b'authorised-image'
+    from tests.media_support import synthetic_image
+
+    content = synthetic_image(media_type='image/png')
     upload = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
         headers={**auth_headers, 'Idempotency-Key': 'multimodal-upload', 'If-Match': '1'},
@@ -483,7 +529,7 @@ def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
         },
         json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
-    assert completed.status_code == 202, completed.text
+    assert completed.status_code == 200, completed.text
 
     turn = submit_message(
         client,
@@ -650,6 +696,10 @@ def test_message_turn_persists_contents_attachment_provenance(
         (target_media_type, target_filename, b'authoritative-target'),
     ]
     for index, (media_type, filename, content) in enumerate(attachments):
+        if media_type.startswith('image/'):
+            from tests.media_support import synthetic_image
+
+            content = synthetic_image(media_type=media_type)
         upload = client.post(
             f'/api/v1/claims/{claim_id}/evidence/uploads',
             headers={
@@ -681,7 +731,9 @@ def test_message_turn_persists_contents_attachment_provenance(
             },
             json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
         )
-        assert completed.status_code == 202, completed.text
+        assert completed.status_code == (200 if media_type.startswith('image/') else 202), (
+            completed.text
+        )
         revision = completed.json()['revision']
         uploaded_ids.append(evidence_id)
 

@@ -14,6 +14,7 @@ from backend.domain.agent_context_runtime import (
     TurnRoute,
     VerifiedConversationSummary,
 )
+from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS
 from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
 from backend.domain.turn_field_contract import TurnFieldContract
@@ -32,7 +33,6 @@ def _message_projection(message: MessageRecord) -> dict[str, object]:
 def _claim_projection(
     context: AgentTurnContext,
     route: TurnRoute,
-    field_contract: TurnFieldContract | None = None,
 ) -> dict[str, object]:
     claim = context.claim
     branch = context.branch_evaluation
@@ -52,18 +52,26 @@ def _claim_projection(
             'precision': field.precision.value,
         }
         for code, field in claim.form.items()
-        if code in allowed_fields and field.needed_for is NeededFor.CURRENT_ACTION
+        if (
+            code in allowed_fields
+            and code not in CLAIMANT_HIDDEN_FIELDS
+            and field.needed_for is NeededFor.CURRENT_ACTION
+        )
     }
-    return {
+    projection: dict[str, object] = {
         'claim_id': claim.claim_id,
         'revision': claim.revision,
         'product_family': route.product_family,
-        'family_resolution': route.family_resolution,
-        'handoff_open': bool(getattr(context, 'open_handoffs', ())),
-        'safety_interrupt': (getattr(getattr(context, 'safety_interrupt', None), 'kind', None)),
-        'eligible_services': _external_service_projection(context, route),
         'workflow_state': claim.claim_state.workflow_state.value,
         'next_action': claim.claim_state.next_action.value,
+    }
+    v8 = (
+        context.runtime_policy is not None
+        and context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
+    )
+    optional_sections: dict[str, object] = {
+        'handoff_open': bool(getattr(context, 'open_handoffs', ())),
+        'safety_interrupt': getattr(getattr(context, 'safety_interrupt', None), 'kind', None),
         'current_fields': current_fields,
         'contents_items': [item.model_dump(mode='json') for item in claim.contents_items],
         # The form as it stands, bucketed by what still needs the claimant, what
@@ -71,12 +79,11 @@ def _claim_projection(
         # decides what to do; Runtime does not pre-select a next question.
         'requirements': (
             {
-                'by_state': branch.requirements.by_state,
                 'unresolved': branch.requirements.unresolved,
                 'ready': branch.requirements.ready,
             }
             if branch is not None
-            else {}
+            else None
         ),
         'last_question': getattr(context, 'last_question', None),
         'remaining_questions': getattr(context, 'remaining_questions', None),
@@ -87,8 +94,11 @@ def _claim_projection(
             {'evidence_id': item.evidence_id, 'media_type': item.media_type}
             for item in getattr(context, 'unattached_evidence', ())
         ],
-        'field_contract': field_contract.prompt_projection() if field_contract is not None else {},
     }
+    if v8:
+        optional_sections['eligible_services'] = _external_service_projection(context, route)
+    projection.update({key: value for key, value in optional_sections.items() if value})
+    return projection
 
 
 def _external_service_projection(context: AgentTurnContext, route: TurnRoute) -> list[object]:
@@ -126,11 +136,10 @@ def _catalogue(
     context: AgentTurnContext,
     route: TurnRoute,
     summary: VerifiedConversationSummary | None,
-    field_contract: TurnFieldContract | None,
 ) -> tuple[list[ContextCatalogueEntry], dict[str, object], bool]:
     claim_scope = f'claim:{context.claim.claim_id}:revision:{context.claim.revision}'
     values: dict[str, object] = {
-        'claim.current': _claim_projection(context, route, field_contract),
+        'claim.current': _claim_projection(context, route),
         'message.latest': context.message_text or '',
     }
     entries = [
@@ -139,9 +148,7 @@ def _catalogue(
             resource_type='claim_projection',
             load_mode=ContextLoadMode.ALWAYS,
             priority=1,
-            estimated_tokens=estimate_json_tokens(
-                _claim_projection(context, route, field_contract)
-            ),
+            estimated_tokens=estimate_json_tokens(_claim_projection(context, route)),
             authority_scope=claim_scope,
             cache_segment='claim',
         ),
@@ -348,9 +355,7 @@ def plan_context(
     summary: VerifiedConversationSummary | None = None,
     field_contract: TurnFieldContract | None = None,
 ) -> ContextPlan:
-    catalogue, resource_values, summary_state_mismatch = _catalogue(
-        context, route, summary, field_contract
-    )
+    catalogue, resource_values, summary_state_mismatch = _catalogue(context, route, summary)
     available = max(0, budget_limit - reserved_tokens)
     turn_focus = {
         'claim_revision': context.claim.revision,
@@ -360,17 +365,6 @@ def plan_context(
             context.branch_evaluation.requirements.next_required_item
             if context.branch_evaluation is not None
             else None
-        ),
-        'allowed_field_scope': sorted(
-            {
-                item.field_code
-                for item in (
-                    context.branch_evaluation.field_selection
-                    if context.branch_evaluation is not None
-                    else []
-                )
-                if item.selection_state.value not in {'inactive', 'system_owned'}
-            }
         ),
     }
     inline: dict[str, Any] = {'turn_focus': turn_focus}
