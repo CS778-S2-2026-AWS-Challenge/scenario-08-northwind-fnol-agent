@@ -371,8 +371,9 @@ the append-only audit collection through a bounded, filterable projection.
     active owned record into the existing `policy.policy_number` Claim field without treating it
     as a coverage decision or exposing/inventing provider data.
 46. Create/read zero or one `MotorOtherDriverRecord` per authorised Motor Claim, containing only
-    supplied name, phone, email, and other-vehicle registration. Keep it outside model/RAG context
-    and reject a second record without advancing Claim revision.
+    supplied name, phone, email, other-vehicle registration, insurer name, policy number, and
+    claim reference. Keep it outside model/RAG context, protect the policy number at the
+    protected-value boundary, and reject a second record without advancing Claim revision.
 47. Append/list immutable same-Claim ContentsItem-to-Evidence associations and reject links when
     either side belongs to another Claim or customer.
 48. Create/revise/list emergency-repair mitigation records and their Evidence/WorkItem links in
