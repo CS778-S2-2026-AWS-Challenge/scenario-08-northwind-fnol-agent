@@ -539,6 +539,38 @@ function protectedAccountPageForPath(pathname) {
   return null
 }
 
+function agreementSubmissionFailure(requestError, stage) {
+  const action = stage === 'acceptance'
+    ? 'recording your agreement'
+    : 'submitting your Claim'
+
+  if (requestError instanceof ApiRequestError && requestError.code === 'NETWORK_ERROR') {
+    return {
+      kind: 'network',
+      title: 'Submission interrupted',
+      message: `Northwind could not be reached while ${action}, so no result was received. Check your connection and try again. This screen does not show your Claim as created.`,
+    }
+  }
+
+  if (
+    requestError instanceof ApiRequestError
+    && (requestError.status === 409 || requestError.status === 422)
+  ) {
+    const reason = requestError.message || 'Northwind refused this request.'
+    return {
+      kind: 'refused',
+      title: 'Submission was not accepted',
+      message: `${reason} Review the latest claim information and try again. This screen does not show your Claim as created.`,
+    }
+  }
+
+  return {
+    kind: 'unknown',
+    title: 'Submission result is unclear',
+    message: `Northwind returned a result that does not confirm whether ${action} completed. Do not assume your Claim was created. Try again; the same submission identity will be reused so Northwind can reconcile the attempt without creating a duplicate.`,
+  }
+}
+
 function App() {
   const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialDraftWorkspaceActive = globalThis.location?.pathname === '/claims/new'
@@ -577,6 +609,7 @@ function App() {
   const [status, setStatus] = useState('idle')
   const [autoFillBusy, setAutoFillBusy] = useState(false)
   const [error, setError] = useState('')
+  const [agreementSubmissionError, setAgreementSubmissionError] = useState(null)
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
@@ -2778,7 +2811,10 @@ function App() {
     if (!canAccept && !alreadyAccepted) return
 
     setError('')
+    setAgreementSubmissionError(null)
     setStatus('creating-claim')
+
+    let submissionStage = canAccept ? 'acceptance' : 'creation'
 
     try {
       let revision = claim.revision
@@ -2818,6 +2854,7 @@ function App() {
         }))
         setNextStep(accepted.customer_next_step)
         pendingAgreementAcceptance.current = null
+        submissionStage = 'creation'
       }
 
       if (!pendingClaimCreation.current) {
@@ -2842,8 +2879,13 @@ function App() {
       setNextStep(response.customer_next_step)
       pendingClaimCreation.current = null
       pendingAgreementAcceptance.current = null
+      setAgreementSubmissionError(null)
       setStatus('idle')
     } catch (requestError) {
+      setAgreementSubmissionError({
+        claimId: claim.claim_id,
+        ...agreementSubmissionFailure(requestError, submissionStage),
+      })
       showError(requestError)
     }
   }
@@ -4103,6 +4145,11 @@ function App() {
                   claim={claim}
                   busy={isBusy}
                   status={status}
+                  submissionError={
+                    agreementSubmissionError?.claimId === claim?.claim_id
+                      ? agreementSubmissionError
+                      : null
+                  }
                   onSubmit={submitAgreementAndCreate}
                   onReviewInformation={() => {
                     setDetailsOpen(true)
