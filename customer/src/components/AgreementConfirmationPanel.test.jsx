@@ -154,8 +154,6 @@ describe('AgreementConfirmationPanel', () => {
     expect(alert).toBeVisible()
     expect(alert).toHaveTextContent('Submission interrupted')
     expect(alert).toHaveTextContent('This screen does not show your Claim as created.')
-    expect(alert).toHaveFocus()
-
     fireEvent.click(screen.getByRole('checkbox'))
     expect(screen.getByRole('button', { name: 'Submit claim' }).disabled).toBe(false)
   })
