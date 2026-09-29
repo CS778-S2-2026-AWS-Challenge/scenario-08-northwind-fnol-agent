@@ -1896,6 +1896,152 @@ describe('claimant intake projection', () => {
     }))
   })
 
+  it('reuses message idempotency after current-workspace reconciliation fails', async () => {
+    const user = userEvent.setup()
+    const pause = deferredRequest()
+    const resumedClaim = {
+      ...initialClaim,
+      revision: 5,
+      active_session_id: 'ses_after_retry',
+    }
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockResolvedValueOnce({
+        ...initialTurn(),
+        claimant_message: {
+          ...claimantMessage,
+          message_id: 'msg_after_reconciliation_retry',
+          content: { type: 'text', text: 'Retry this detail safely.' },
+        },
+        claim_revision: 6,
+        primary_action: primaryAction({ revision: 6 }),
+      })
+    api.pauseClaimSession.mockReturnValue(pause.promise)
+    api.getClaim
+      .mockRejectedValueOnce(new api.ApiRequestError('Reconciliation unavailable.'))
+      .mockResolvedValueOnce(pausedClaim())
+      .mockResolvedValueOnce(resumedClaim)
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_after_retry',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-16T01:06:00Z',
+      resume: { summary: 'A pipe burst.', pending_items: [], prior_commitments: [] },
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await startActiveClaim(user)
+    const turnKeysBeforeFollowUp = api.requestId.mock.calls.filter(([prefix]) => prefix === 'turn').length
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await act(async () => pause.resolve({
+      claim: pausedClaim(),
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
+    }))
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'Retry this detail safely.')
+
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Reconciliation unavailable.')
+    expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(2))
+    expect(api.requestId.mock.calls.filter(([prefix]) => prefix === 'turn')).toHaveLength(
+      turnKeysBeforeFollowUp + 1,
+    )
+    expect(api.submitClaimMessage.mock.calls[1][0]).toEqual(expect.objectContaining({
+      sessionId: 'ses_after_retry',
+      idempotencyKey: expect.stringMatching(/^turn-/),
+    }))
+  })
+
+  it.each([
+    ['successful pause response', 'sign-out', 'resolution', false, false, false],
+    ['successful pause response', 'account switch', 'rejection', false, true, true],
+    ['unknown pause outcome', 'sign-out', 'rejection', true, false, true],
+    ['unknown pause outcome', 'account switch', 'resolution', true, true, false],
+  ])('discards a deferred-session %s after %s when reconciliation ends by %s', async (
+    _pauseScenario,
+    _identityScenario,
+    _settlementScenario,
+    responseIsLost,
+    switchAccount,
+    reconciliationRejects,
+  ) => {
+    const user = userEvent.setup()
+    const pause = deferredRequest()
+    const reconciliation = deferredRequest()
+    const pendingText = 'This message belongs only to Account A.'
+    mockAuthenticatedAccounts(
+      testAccount('cus_pause_a', 'Account A'),
+      ...(switchAccount ? [testAccount('cus_pause_b', 'Account B')] : []),
+    )
+    api.loginClaimant.mockResolvedValue({ access_token: 'account-b-token' })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockReturnValue(pause.promise)
+    if (responseIsLost) {
+      api.getClaim
+        .mockResolvedValueOnce(pausedClaim())
+        .mockReturnValueOnce(reconciliation.promise)
+    } else {
+      api.getClaim.mockReturnValueOnce(reconciliation.promise)
+    }
+
+    render(<App />)
+    await startActiveClaim(user)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await act(async () => {
+      if (responseIsLost) pause.reject(new api.ApiRequestError('Response lost.'))
+      else pause.resolve({
+        claim: pausedClaim(),
+        session: { session_id: 'ses_ui_vp', status: 'paused' },
+      })
+    })
+    if (responseIsLost) {
+      await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(1))
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), pendingText)
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(responseIsLost ? 2 : 1))
+
+    await user.click(screen.getByRole('button', { name: /Open Profile for Account A/ }))
+    await user.click(await screen.findByRole('button', { name: 'Log out' }))
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Log in' }))
+      await user.type(screen.getByLabelText('Email address'), 'b@example.test')
+      await user.type(screen.getByLabelText('Password'), 'account-b-password')
+      await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
+      await screen.findByRole('button', { name: 'Profile' })
+    }
+
+    await act(async () => {
+      if (reconciliationRejects) {
+        reconciliation.reject(new api.ApiRequestError('Old reconciliation failed.'))
+      } else {
+        reconciliation.resolve(pausedClaim())
+      }
+    })
+
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+    expect(screen.queryByText(pendingText)).not.toBeInTheDocument()
+    expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    expect(screen.queryByText('Delivery not confirmed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+      expect(await screen.findByText('No saved conversations yet')).toBeVisible()
+    } else {
+      expect(globalThis.location.pathname).toBe('/')
+    }
+  })
+
   it.each([
     ['sign-out', false],
     ['account switch', true],

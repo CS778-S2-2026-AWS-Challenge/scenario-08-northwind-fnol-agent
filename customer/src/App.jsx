@@ -551,6 +551,9 @@ function App() {
   const pendingSessionPause = useRef(null)
   const deferredSessionPauses = useRef(new Map())
   const sessionPauseGeneration = useRef(0)
+  const pendingMessageReconciliation = useRef(null)
+  const messageReconciliationGeneration = useRef(0)
+  const workspaceGeneration = useRef(0)
   const claimantIdentityGeneration = useRef(0)
   const latestRevision = useRef(0)
   const latestRevisionClaimId = useRef(null)
@@ -668,12 +671,46 @@ function App() {
       && currentPauseContextKey() === operation.contextKey
   }
 
+  function beginMessageReconciliation(currentClaim, currentSessionId) {
+    messageReconciliationGeneration.current += 1
+    const operation = {
+      generation: messageReconciliationGeneration.current,
+      workspaceGeneration: workspaceGeneration.current,
+      identityKey: currentClaimantIdentityKey(),
+      claimId: currentClaim?.claim_id || null,
+      sessionId: currentSessionId || null,
+      contextKey: currentPauseContextKey(),
+    }
+    pendingMessageReconciliation.current = operation
+    return operation
+  }
+
+  function isMessageReconciliationCurrent(operation) {
+    return operation
+      && pendingMessageReconciliation.current === operation
+      && messageReconciliationGeneration.current === operation.generation
+      && workspaceGeneration.current === operation.workspaceGeneration
+      && currentClaimantIdentityKey() === operation.identityKey
+      && activeClaimRef.current?.claim_id === operation.claimId
+      && activeSessionIdRef.current === operation.sessionId
+      && currentPauseContextKey() === operation.contextKey
+  }
+
+  function finishMessageReconciliation(operation) {
+    if (pendingMessageReconciliation.current === operation) {
+      pendingMessageReconciliation.current = null
+    }
+  }
+
   function invalidateSessionPause({ identityChanged = false } = {}) {
     const operation = pendingSessionPause.current
     const hadPendingPause = Boolean(operation)
     if (identityChanged) {
       claimantIdentityGeneration.current += 1
       deferredSessionPauses.current.clear()
+      messageReconciliationGeneration.current += 1
+      pendingMessageReconciliation.current = null
+      pendingSubmission.current = null
     } else if (operation) {
       rememberDeferredSessionPause(operation)
     }
@@ -683,6 +720,7 @@ function App() {
   }
 
   useEffect(() => {
+    workspaceGeneration.current += 1
     const operation = pendingSessionPause.current
     if (operation && !isSessionPauseCurrent(operation)) invalidateSessionPause()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1883,10 +1921,17 @@ function App() {
     setStatus('error')
   }
 
-  async function reconcileDeferredSessionPause(currentClaim, currentSessionId) {
+  async function reconcileDeferredSessionPause(
+    currentClaim,
+    currentSessionId,
+    reconciliationOperation,
+  ) {
     if (!currentClaim?.claim_id || !currentSessionId) {
       return null
     }
+    const reconciliationIsCurrent = () => (
+      isMessageReconciliationCurrent(reconciliationOperation)
+    )
     const recoveryKey = sessionPauseRecoveryKey(
       currentClaimantIdentityKey(),
       currentClaim.claim_id,
@@ -1895,7 +1940,7 @@ function App() {
     if (!operation) return { claim: currentClaim, sessionId: currentSessionId }
 
     await operation.settled
-    if (!isSessionPauseIdentityCurrent(operation)) {
+    if (!reconciliationIsCurrent() || !isSessionPauseIdentityCurrent(operation)) {
       return null
     }
     if (deferredSessionPauses.current.get(recoveryKey) !== operation) {
@@ -1904,8 +1949,8 @@ function App() {
 
     const latestClaim = await getClaim(currentClaim.claim_id)
     if (
-      !isSessionPauseIdentityCurrent(operation)
-      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
     ) {
       return null
     }
@@ -1917,21 +1962,21 @@ function App() {
 
     const resumedSession = await resumeClaimSession({ claimId: currentClaim.claim_id })
     if (
-      !isSessionPauseIdentityCurrent(operation)
-      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
     ) return null
     const authoritativeClaim = await getClaim(currentClaim.claim_id)
     if (
-      !isSessionPauseIdentityCurrent(operation)
-      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
     ) return null
     const conversation = await getClaimMessages(
       currentClaim.claim_id,
       resumedSession.session_id,
     )
     if (
-      !isSessionPauseIdentityCurrent(operation)
-      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
     ) {
       return null
     }
@@ -1981,7 +2026,12 @@ function App() {
       : attachments.filter(isSendableComposerAttachment)
     const hasUploadingAttachment = !recoveryMessage
       && attachments.some((attachment) => attachment.status === 'uploading')
-    if ((!text && selectedAttachments.length === 0) || hasUploadingAttachment || isBusy) return
+    if (
+      (!text && selectedAttachments.length === 0)
+      || hasUploadingAttachment
+      || isBusy
+      || isMessageReconciliationCurrent(pendingMessageReconciliation.current)
+    ) return
     const selectedModelOption = runtimeCapabilities.models.find((model) => model.id === selectedModel)
     const modelCompatibility = modelAttachmentCompatibility(selectedAttachments, selectedModelOption)
     if (!modelCompatibility.compatible) {
@@ -2003,40 +2053,73 @@ function App() {
     const isAssistanceReply = assistanceState?.key === 'response_needed'
     let presentedAttachments = selectedAttachments
 
+    if (recoveryMessage) {
+      pendingSubmission.current = {
+        signature: submissionSignature,
+        text,
+        claimKey: requestId('claim'),
+        turnKey: requestId('turn'),
+        clientMessageId: recoveryMessage.client_message_id,
+        evidenceRefs: recoveryEvidenceRefs,
+      }
+    }
+    if (!recoveryMessage && pendingSubmission.current?.signature !== submissionSignature) {
+      pendingSubmission.current = {
+        signature: submissionSignature,
+        text,
+        claimKey: requestId('claim'),
+        turnKey: requestId('turn'),
+        clientMessageId: requestId('message'),
+      }
+    }
+    const operation = pendingSubmission.current
+    let activeClaim = hasStarted ? claim : null
+    let activeSessionId = hasStarted ? sessionId : null
+
+    if (activeClaim && activeSessionId) {
+      const reconciliationOperation = beginMessageReconciliation(activeClaim, activeSessionId)
+      let reconciled
+      try {
+        reconciled = await reconcileDeferredSessionPause(
+          activeClaim,
+          activeSessionId,
+          reconciliationOperation,
+        )
+      } catch (requestError) {
+        const mayMutateCurrentWorkspace = isMessageReconciliationCurrent(
+          reconciliationOperation,
+        )
+        finishMessageReconciliation(reconciliationOperation)
+        if (mayMutateCurrentWorkspace) {
+          showError(requestError)
+        } else if (pendingSubmission.current === operation) {
+          pendingSubmission.current = null
+        }
+        return
+      }
+      finishMessageReconciliation(reconciliationOperation)
+      if (!reconciled) {
+        if (pendingSubmission.current === operation) pendingSubmission.current = null
+        return
+      }
+      activeClaim = reconciled.claim
+      activeSessionId = reconciled.sessionId
+    }
+
     forceLatestMessages.current = true
     setError('')
     setFailedMessage(null)
     setRecoveryFailure(null)
     if (isAssistanceReply) {
       setAssistanceReplyReview({
-        claimId: claim.claim_id,
+        claimId: activeClaim.claim_id,
         handoffId: handoff.handoff_id,
         messageId: null,
       })
     }
-    setStatus(hasStarted ? 'sending' : 'starting')
-    let messageWasSubmitted = hasStarted
+    setStatus(activeClaim ? 'sending' : 'starting')
+    let messageWasSubmitted = Boolean(activeClaim)
     try {
-      if (recoveryMessage) {
-        pendingSubmission.current = {
-          signature: submissionSignature,
-          text,
-          claimKey: requestId('claim'),
-          turnKey: requestId('turn'),
-          clientMessageId: recoveryMessage.client_message_id,
-          evidenceRefs: recoveryEvidenceRefs,
-        }
-      }
-      if (!recoveryMessage && pendingSubmission.current?.signature !== submissionSignature) {
-        pendingSubmission.current = {
-          signature: submissionSignature,
-          text,
-          claimKey: requestId('claim'),
-          turnKey: requestId('turn'),
-          clientMessageId: requestId('message'),
-        }
-      }
-      const operation = pendingSubmission.current
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
       setPendingMessage({
@@ -2047,14 +2130,6 @@ function App() {
         turnId: operation.clientMessageId,
         retrying: Boolean(recoveryMessage),
       })
-      let activeClaim = hasStarted ? claim : null
-      let activeSessionId = hasStarted ? sessionId : null
-      if (activeClaim && activeSessionId) {
-        const reconciled = await reconcileDeferredSessionPause(activeClaim, activeSessionId)
-        if (!reconciled) return
-        activeClaim = reconciled.claim
-        activeSessionId = reconciled.sessionId
-      }
       if (!activeClaim) {
         const created = await createClaim({
           idempotencyKey: operation.claimKey,
@@ -3027,6 +3102,14 @@ function App() {
     setNextStep(null)
     setHandoff(null)
     clearComposerAttachments()
+    setDraft('')
+    setError('')
+    setFailedMessage(null)
+    setRecoveryFailure(null)
+    setPendingMessage(null)
+    activeTurnProgressRef.current = null
+    setActiveTurnProgress(null)
+    setStatus('idle')
     setEvidenceItems([])
     setResumeContext(null)
     setExpandedConversationPanels({})
