@@ -54,6 +54,7 @@ import {
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
 import UserProfile from './components/UserProfile.jsx'
+import PrivacyPage from './privacy/PrivacyPage.jsx'
 import './styles/profile-shell.css'
 import './styles/profile-records.css'
 import './styles/profile-assets.css'
@@ -3929,7 +3930,7 @@ function App() {
           </section>
         </main>
       ) : (
-        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'}`}>
+        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''}`}>
           <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
             {[
               ['history', 'History'],
@@ -3950,7 +3951,17 @@ function App() {
               >
                 {status === 'pausing-session' ? 'Saving...' : 'New chat'}
               </button>
-              <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
+              <button
+                className={workspaceView === 'privacy' ? 'is-active' : undefined}
+                type="button"
+                aria-current={workspaceView === 'privacy' ? 'page' : undefined}
+                onClick={() => {
+                  setWorkspaceView('privacy')
+                  setMobileView('chat')
+                }}
+              >
+                Privacy &amp; your data
+              </button>
               <button type="button" onClick={openClaimHistory}>Claim history</button>
               <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
               <button
@@ -4020,29 +4031,36 @@ function App() {
           </aside>
           <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
-              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''}`}
+              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''} ${workspaceView === 'privacy' ? 'is-privacy-page' : ''}`}
               hidden={workspaceView === 'chat'}
             >
-              <button
-                className="back-link"
-                type="button"
-                onClick={workspaceView === 'claim-evidence'
-                  ? () => setWorkspaceView('claim-features')
-                  : workspaceView === 'claim-features'
-                    ? openClaimHistory
-                    : leaveWorkspaceUtility}
-              >
-                <span className="back-link-arrow" aria-hidden="true">←</span>
-                {workspaceView === 'claim-evidence'
-                  ? 'Back to Claim features'
-                  : workspaceView === 'claim-features'
-                    ? 'Back to Claim history'
-                    : 'Back to conversation'}
-              </button>
-              <h1>
-                {workspaceView === 'privacy'
-                  ? 'Privacy policy'
-                  : workspaceView === 'history'
+              {workspaceView === 'privacy' ? (
+                <PrivacyPage
+                  claimType={claim?.incident_type || null}
+                  hasCurrentClaim={Boolean(claim?.claim_id)}
+                  onBack={leaveWorkspaceUtility}
+                  onViewClaim={claim ? () => openClaimFeatures(claim) : null}
+                />
+              ) : (
+                <>
+                  <button
+                    className="back-link"
+                    type="button"
+                    onClick={workspaceView === 'claim-evidence'
+                      ? () => setWorkspaceView('claim-features')
+                      : workspaceView === 'claim-features'
+                        ? openClaimHistory
+                        : leaveWorkspaceUtility}
+                  >
+                    <span className="back-link-arrow" aria-hidden="true">←</span>
+                    {workspaceView === 'claim-evidence'
+                      ? 'Back to Claim features'
+                      : workspaceView === 'claim-features'
+                        ? 'Back to Claim history'
+                        : 'Back to conversation'}
+                  </button>
+                  <h1>
+                    {workspaceView === 'history'
                     ? 'Claim history'
                     : workspaceView === 'claim-features'
                       ? 'Claim features'
@@ -4051,11 +4069,9 @@ function App() {
                         : workspaceView === 'agreement'
                             ? 'Agreement & confirmation'
                             : 'Evidence history'}
-              </h1>
-              <p>
-                {workspaceView === 'privacy'
-                  ? 'We only use the information needed to handle your Claim and show you what has been recorded.'
-                  : workspaceView === 'history'
+                  </h1>
+                  <p>
+                    {workspaceView === 'history'
                     ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
                     : workspaceView === 'claim-features'
                       ? 'Review this Claim\'s current status and available information.'
@@ -4066,7 +4082,9 @@ function App() {
                             : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
-              </p>
+                  </p>
+                </>
+              )}
               {workspaceView === 'history' && (
                 account ? (
                   <ClaimHistory

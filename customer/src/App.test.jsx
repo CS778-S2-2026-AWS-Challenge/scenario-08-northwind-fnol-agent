@@ -1882,6 +1882,27 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('opens the claim-aware privacy page and routes its claim-data action to the existing view', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await startActiveClaim(user)
+
+    const privacyNavigation = screen.getByRole('button', { name: 'Privacy & your data' })
+    await user.click(privacyNavigation)
+
+    expect(privacyNavigation).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('heading', { level: 1, name: 'Privacy & your data' })).toBeVisible()
+    expect(screen.getByText('Home & Contents claim information is shown first for your current claim.'))
+      .toBeVisible()
+    expect(within(container.querySelector('.privacy-page')).queryByText(initialClaim.claim_id))
+      .not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'View information recorded for this claim' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Claim features' })).toBeVisible()
+  })
+
   it.each([
     ['a successful pause response', false],
     ['an unknown pause outcome', true],
@@ -1945,7 +1966,7 @@ describe('claimant intake projection', () => {
     render(<App />)
     await startActiveClaim(user)
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
     await act(async () => {
       if (responseIsLost) pause.reject(new api.ApiRequestError('Response lost.'))
       else pause.resolve({
@@ -2012,7 +2033,7 @@ describe('claimant intake projection', () => {
     await startActiveClaim(user)
     const turnKeysBeforeFollowUp = api.requestId.mock.calls.filter(([prefix]) => prefix === 'turn').length
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
     await act(async () => pause.resolve({
       claim: pausedClaim(),
       session: { session_id: 'ses_ui_vp', status: 'paused' },
@@ -2070,7 +2091,7 @@ describe('claimant intake projection', () => {
     render(<App />)
     await startActiveClaim(user)
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
     await act(async () => {
       if (responseIsLost) pause.reject(new api.ApiRequestError('Response lost.'))
       else pause.resolve({
@@ -2173,7 +2194,7 @@ describe('claimant intake projection', () => {
     render(<App />)
     await startActiveClaim(user)
     await user.click(screen.getByRole('button', { name: 'New chat' }))
-    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy & your data' }))
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
     await user.click(screen.getByRole('button', { name: 'New chat' }))
     await act(async () => oldPause.reject(new api.ApiRequestError('Old pause failed.')))
