@@ -132,6 +132,11 @@ class FollowUpResolutionCode(str, Enum):
     AUTHORISED_CLOSURE = 'authorised_closure'
 
 
+UNSAFE_FOLLOW_UP_REASONS = frozenset(
+    {FollowUpReasonCode.POLICY_BINDING_INVALID, FollowUpReasonCode.SOURCE_STATE_INCONSISTENT}
+)
+
+
 class FollowUpOperationStatus(str, Enum):
     RESERVED = 'reserved'
     COMMITTED = 'committed'
@@ -1117,8 +1122,10 @@ class FollowUpRecord(ContractModel):
     claim_id: str
     source_session_id: str
     purpose: str = Field(default='resume_incomplete_claim', min_length=1, max_length=100)
-    policy_id: str = Field(default='incomplete_claim_follow_up', min_length=1, max_length=120)
-    policy_version: int = Field(default=1, ge=1)
+    policy_id: str | None = Field(
+        default='incomplete_claim_follow_up', min_length=1, max_length=120
+    )
+    policy_version: int | None = Field(default=1, ge=1)
     responsible_party: ResponsibleParty
     source_refs: list[str] = Field(default_factory=list, max_length=20)
     contact_permission: FollowUpContactPermission = FollowUpContactPermission.NOT_AUTHORISED
@@ -1135,6 +1142,13 @@ class FollowUpRecord(ContractModel):
 
     @model_validator(mode='after')
     def validate_recovery_follow_up(self) -> 'FollowUpRecord':
+        if (self.policy_id is None or self.policy_version is None) and not (
+            self.status is FollowUpStatus.BLOCKED
+            and self.blocked_reason in UNSAFE_FOLLOW_UP_REASONS
+            and self.due_at is None
+            and self.deadline_at is None
+        ):
+            raise ValueError('An incomplete policy binding requires an unscheduled unsafe record.')
         if self.updated_at < self.created_at:
             raise ValueError('A Follow-up cannot be updated before it is created.')
         if not self.source_refs:

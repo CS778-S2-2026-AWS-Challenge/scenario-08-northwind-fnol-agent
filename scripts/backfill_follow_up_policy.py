@@ -16,6 +16,7 @@ from pymongo.errors import PyMongoError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.domain.models import UNSAFE_FOLLOW_UP_REASONS, FollowUpRecord
 from backend.domain.recovery_time import RECOVERY_TIMESTAMP_PATTERN, recovery_timestamp
 from backend.repositories.mongodb import MongoDBConfigurationError, MongoDBConnectionConfig
 
@@ -37,6 +38,7 @@ def backfill_follow_ups(
             {
                 'record_type': 'follow_up',
                 '$or': [
+                    {'blocked_reason': {'$in': sorted(UNSAFE_FOLLOW_UP_REASONS)}},
                     {'recovery_discovery_ready': {'$ne': True}},
                     {'policy_id': None},
                     {'policy_version': None},
@@ -66,6 +68,12 @@ def backfill_follow_ups(
         )
         reason_code = 'source_state_inconsistent'
         try:
+            if follow_up.get('blocked_reason') in UNSAFE_FOLLOW_UP_REASONS:
+                reason_code = follow_up['blocked_reason']
+                raise ValueError(
+                    'Authoritative blocked reason requires evidence-backed operator repair '
+                    'and a coherent state transition before migration.'
+                )
             interrupted_at = (session or {}).get('recovery_context', {}).get('interrupted_at')
             interrupted_at = _DATETIME.validate_python(interrupted_at)
             if interrupted_at.tzinfo is None or interrupted_at.utcoffset() is None:
@@ -89,6 +97,17 @@ def backfill_follow_ups(
                 if follow_up.get('due_at') is not None
                 else None
             )
+            # Re-entry must be a coherent domain state, not just canonical timestamps.
+            candidate = {
+                key: value for key, value in follow_up.items() if key in FollowUpRecord.model_fields
+            }
+            candidate.update(
+                policy_id=follow_up.get('policy_id') or 'incomplete_claim_follow_up',
+                policy_version=follow_up.get('policy_version') or 1,
+                due_at=canonical_due,
+                deadline_at=canonical_deadline,
+            )
+            FollowUpRecord.model_validate(candidate)
         except (AttributeError, TypeError, ValidationError, ValueError) as error:
             report['rejected'].append(
                 {

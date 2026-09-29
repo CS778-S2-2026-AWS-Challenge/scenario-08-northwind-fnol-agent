@@ -45,6 +45,7 @@ from backend.domain.message import (
     validate_message_record,
 )
 from backend.domain.models import (
+    UNSAFE_FOLLOW_UP_REASONS,
     ActorType,
     AgentDecisionRecord,
     AssessorRoutingOperation,
@@ -60,7 +61,6 @@ from backend.domain.models import (
     EvidenceRecord,
     FollowUpOperation,
     FollowUpOperationStatus,
-    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpResolutionCode,
     FollowUpStatus,
@@ -93,6 +93,7 @@ from backend.domain.realtime import (
 )
 from backend.domain.recovery import (
     follow_up_commit_fingerprint,
+    require_follow_up_authority,
     validate_follow_up_commit,
     validate_follow_up_transition,
     validate_retention_transition,
@@ -1485,11 +1486,7 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(record)
             for record in self._follow_ups.values()
             if record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
-            and record.blocked_reason
-            not in {
-                FollowUpReasonCode.POLICY_BINDING_INVALID,
-                FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
-            }
+            and record.blocked_reason not in UNSAFE_FOLLOW_UP_REASONS
             and record.deadline_at is not None
             and record.deadline_at <= deadline_before
         ]
@@ -1549,6 +1546,7 @@ class FixtureRepository(PersistenceRepository):
                 or follow_up.policy_version != operation.policy_version
             ):
                 raise ValueError('Follow-up operation policy does not match its obligation.')
+            require_follow_up_authority(follow_up)
             self._follow_up_operations[operation.operation_id] = deepcopy(operation)
 
     def get_retention_operation(self, operation_id: str) -> RetentionOperation | None:
@@ -1845,6 +1843,7 @@ class FixtureRepository(PersistenceRepository):
                     or resolved_follow_up.updated_at < stored_follow_up.updated_at
                 ):
                     raise KeyError(claim.claim_id)
+                require_follow_up_authority(stored_follow_up)
                 expected_follow_up = stored_follow_up.model_copy(
                     update={
                         'status': FollowUpStatus.RESOLVED,

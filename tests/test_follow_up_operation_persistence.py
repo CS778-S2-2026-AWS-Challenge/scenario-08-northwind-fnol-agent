@@ -221,6 +221,89 @@ def test_blocked_exhaustion_preserves_contact_authority_and_deadline() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    'reason',
+    [FollowUpReasonCode.SOURCE_STATE_INCONSISTENT, FollowUpReasonCode.POLICY_BINDING_INVALID],
+)
+@pytest.mark.parametrize('incomplete_binding', [False, True])
+def test_resume_cannot_launder_unsafe_follow_up_or_mutate_claim(
+    recovery_repository: Any, reason: FollowUpReasonCode, incomplete_binding: bool
+) -> None:
+    from copy import deepcopy
+
+    from backend.core.auth import Principal
+    from backend.core.errors import ApiError
+    from backend.domain.models import SessionRecoveryContext, StartSessionRequest
+    from backend.services.claims import start_session
+
+    repository = recovery_repository
+    claim, original = _seed(repository)
+    session = repository.get_session(claim.claim_id, original.source_session_id, claim.customer_id)
+    assert session is not None
+    session = session.model_copy(
+        update={
+            'recovery_context': SessionRecoveryContext(
+                interrupted_at=original.created_at,
+                last_meaningful_activity_at=original.created_at,
+                last_meaningful_activity_source_ref='message:synthetic',
+                resume_point='Continue saved claim.',
+            )
+        }
+    )
+    payload = original.model_dump()
+    payload.update(status='blocked', blocked_reason=reason, due_at=None, deadline_at=None)
+    if incomplete_binding:
+        payload.update(policy_id=None, policy_version=None)
+    blocked = FollowUpRecord.model_validate(payload)
+    if isinstance(repository, FixtureRepository):
+        repository._sessions[session.session_id] = session
+        repository._follow_ups[blocked.follow_up_id] = blocked
+    else:
+        repository._put(
+            'session',
+            session.session_id,
+            session,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+        )
+        repository._put(
+            'follow_up',
+            blocked.follow_up_id,
+            blocked,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+        )
+
+    def snapshot() -> Any:
+        if isinstance(repository, MongoDBRepository):
+            return list(repository._collection.find())
+        return deepcopy(
+            (
+                repository._claims,
+                repository._sessions,
+                repository._follow_ups,
+                repository._idempotency,
+                repository._audit_events,
+            )
+        )
+
+    before = snapshot()
+    principal = Principal(subject=claim.customer_id, actor_type='claimant', auth_source='test')
+    with pytest.raises(ApiError) as captured:
+        start_session(
+            repository,
+            principal,
+            claim.claim_id,
+            StartSessionRequest(intent='resume'),
+            'unsafe-resume',
+        )
+    assert captured.value.status_code == 409
+    assert captured.value.code == 'INVALID_STATE_TRANSITION'
+    assert captured.value.details is not None
+    assert captured.value.details[0].reason == 'recovery_unavailable'
+    assert snapshot() == before
+
+
 @pytest.mark.parametrize('replay', [False, True])
 def test_mongo_concurrent_retention_insert_is_immutable(
     monkeypatch: pytest.MonkeyPatch, replay: bool
@@ -612,6 +695,9 @@ def test_migration_partial_null_and_conflicting_bindings(
         'follow_up_id': 'f',
         'claim_id': 'c',
         'source_session_id': 's',
+        'responsible_party': 'system',
+        'created_at': '2026-09-09T00:00:00+00:00',
+        'updated_at': '2026-09-09T00:00:00+00:00',
         **fields,
     }
     collection.insert_many([source, original])
@@ -652,6 +738,9 @@ def test_migration_conflicting_source_or_binding_does_not_apply(
                 'follow_up_id': 'f',
                 'claim_id': 'c',
                 'source_session_id': 's',
+                'responsible_party': 'system',
+                'created_at': '2026-09-09T00:00:00+00:00',
+                'updated_at': '2026-09-09T00:00:00+00:00',
             },
         ]
     )
@@ -1090,6 +1179,254 @@ def test_unsafe_blocked_obligation_is_not_expiry_candidate(
         )
     assert original.deadline_at is not None
     assert repository.list_expiring_follow_ups(original.deadline_at, limit=1) == []
+    if isinstance(repository, MongoDBRepository):
+        repository._collection.update_one(
+            {'_id': 'follow_up:' + blocked.follow_up_id},
+            {'$set': {'recovery_discovery_ready': True}},
+        )
+        assert repository.list_expiring_follow_ups(original.deadline_at, limit=1) == []
+    with pytest.raises(ValueError):
+        repository.save_follow_up_operation(_operation())
+    assert repository.get_follow_up_operation(_operation().operation_id) is None
+
+
+@pytest.mark.parametrize(
+    'reason',
+    [FollowUpReasonCode.SOURCE_STATE_INCONSISTENT, FollowUpReasonCode.POLICY_BINDING_INVALID],
+)
+def test_backfill_requires_explicit_repair_of_authoritative_unsafe_reason(
+    monkeypatch: pytest.MonkeyPatch, reason: FollowUpReasonCode
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'unsafe_reason_repair')
+    claim, original = _seed(repository)
+    collection = repository._collection
+    collection.update_one(
+        {'_id': 'session:' + original.source_session_id},
+        {'$set': {'recovery_context': {'interrupted_at': original.created_at.isoformat()}}},
+    )
+    blocked = original.model_copy(
+        update={'status': FollowUpStatus.BLOCKED, 'blocked_reason': reason, 'due_at': None}
+    )
+    repository._put(
+        'follow_up',
+        blocked.follow_up_id,
+        blocked,
+        customer_id=claim.customer_id,
+        claim_id=claim.claim_id,
+    )
+    before = collection.find_one({'_id': 'follow_up:' + blocked.follow_up_id})
+    assert before is not None
+    assert original.deadline_at is not None
+    assert repository.list_expiring_follow_ups(original.deadline_at, limit=10) == []
+    for apply in (False, True, True):
+        report = backfill_follow_ups(collection, apply=apply)
+        assert report['eligible'] == report['applied'] == []
+        assert report['rejected'][0]['reason_code'] == reason.value
+        assert report['rejected'][0]['repair_owner'] == 'backend_data_operator'
+        assert repository.list_expiring_follow_ups(original.deadline_at, limit=10) == []
+    quarantined = collection.find_one({'_id': before['_id']})
+    assert quarantined is not None
+    assert {key: quarantined[key] for key in before} == before
+    assert quarantined['blocked_reason'] == reason.value
+    # Clearing only the reason leaves an authorised blocked record incoherent;
+    # a migration must validate the proposed domain state before granting readiness.
+    collection.update_one(dict(quarantined), {'$set': {'blocked_reason': None}})
+    malformed = collection.find_one({'_id': before['_id']})
+    assert malformed is not None
+    rejected = backfill_follow_ups(collection, apply=True)
+    assert rejected['applied'] == [] and len(rejected['rejected']) == 1
+    assert repository.list_expiring_follow_ups(original.deadline_at, limit=10) == []
+    quarantined = collection.find_one({'_id': before['_id']})
+    assert quarantined is not None
+    # Evidence-backed operator repair changes the domain reason and state together;
+    # migration alone is never authority to clear a business blocking condition.
+    repaired = collection.update_one(
+        dict(quarantined),
+        {
+            '$set': {
+                'status': 'pending',
+                'blocked_reason': None,
+                'due_at': recovery_timestamp(original.created_at),
+                'updated_at': (original.updated_at + timedelta(seconds=1)).isoformat(),
+            }
+        },
+    )
+    assert repaired.matched_count == 1
+    transaction = MagicMock()
+    transaction.__enter__.return_value = transaction
+    transaction.with_transaction.side_effect = lambda callback: callback(None)
+    monkeypatch.setattr(collection.database.client, 'start_session', lambda: transaction)
+    report = backfill_follow_ups(collection, apply=True)
+    assert report['rejected'] == []
+    assert report['applied'] == [original.follow_up_id]
+    assert [
+        item.follow_up_id for item in repository.list_due_follow_ups(original.created_at, limit=10)
+    ] == [original.follow_up_id]
+    assert [
+        item.follow_up_id
+        for item in repository.list_expiring_follow_ups(original.deadline_at, limit=10)
+    ] == [original.follow_up_id]
+    repository.save_follow_up_operation(_operation())
+    assert repository.get_follow_up_operation(_operation().operation_id) == _operation()
+
+
+def test_reservation_exact_replay_survives_later_incomplete_binding_quarantine(
+    recovery_repository: Any,
+) -> None:
+    repository = recovery_repository
+    claim, original = _seed(repository)
+    operation = _operation()
+    repository.save_follow_up_operation(operation)
+    blocked = FollowUpRecord.model_validate(
+        {
+            **original.model_dump(),
+            'status': 'blocked',
+            'blocked_reason': 'policy_binding_invalid',
+            'due_at': None,
+            'deadline_at': None,
+            'policy_id': None,
+            'policy_version': None,
+        }
+    )
+    if isinstance(repository, FixtureRepository):
+        repository._follow_ups[blocked.follow_up_id] = blocked
+    else:
+        repository._put(
+            'follow_up',
+            blocked.follow_up_id,
+            blocked,
+            claim_id=claim.claim_id,
+            customer_id=claim.customer_id,
+        )
+    before = repository.get_follow_up(claim.claim_id, original.follow_up_id, claim.customer_id)
+    repository.save_follow_up_operation(operation)
+    assert repository.get_follow_up_operation(operation.operation_id) == operation
+    with pytest.raises(ValueError):
+        repository.save_follow_up_operation(
+            operation.model_copy(
+                update={
+                    'operation_id': 'fop_abcdef0123456789abcd',
+                    'sequence': 2,
+                }
+            )
+        )
+    assert repository.list_follow_up_operations(original.follow_up_id) == [operation]
+    assert (
+        repository.get_follow_up(claim.claim_id, original.follow_up_id, claim.customer_id) == before
+    )
+
+
+@pytest.mark.parametrize('binding', ['missing', 'null', 'contradictory'])
+@pytest.mark.parametrize('source_problem', ['missing', 'contradictory'])
+def test_quarantined_legacy_binding_has_truthful_public_reads_and_projections(
+    binding: str, source_problem: str
+) -> None:
+    from backend.services.claims import _claimant_incomplete_context
+    from backend.services.workbench import _incomplete_context
+
+    repository = MongoDBRepository(mongomock.MongoClient(), 'legacy_binding_read')
+    claim, original = _seed(repository)
+    collection = repository._collection
+    selector = {'_id': 'follow_up:' + original.follow_up_id}
+    if binding == 'missing':
+        collection.update_one(selector, {'$unset': {'policy_id': '', 'policy_version': ''}})
+    else:
+        collection.update_one(
+            selector,
+            {
+                '$set': {
+                    'policy_id': None if binding == 'null' else 'unapproved-policy',
+                    'policy_version': None if binding == 'null' else 9,
+                }
+            },
+        )
+    collection.update_one(selector, {'$set': {'recovery_discovery_ready': False}})
+    if source_problem == 'missing':
+        collection.update_one(selector, {'$set': {'source_session_id': 'ses_missing'}})
+    else:
+        collection.update_one(
+            {'_id': 'session:' + original.source_session_id},
+            {
+                '$set': {
+                    'recovery_context': {
+                        'interrupted_at': (original.created_at + timedelta(days=1)).isoformat(),
+                        'last_meaningful_activity_at': original.created_at.isoformat(),
+                        'last_meaningful_activity_source_ref': 'message:synthetic',
+                        'resume_point': 'Continue saved claim.',
+                    }
+                }
+            },
+        )
+    raw_before = collection.find_one(selector)
+    assert raw_before is not None
+    report = backfill_follow_ups(collection, apply=True)
+    assert report['applied'] == []
+    assert len(report['rejected']) == 1
+    raw_after = collection.find_one(selector)
+    assert raw_after is not None
+    assert {key: raw_after[key] for key in raw_before} == raw_before
+    if binding == 'missing':
+        assert 'policy_id' not in raw_after and 'policy_version' not in raw_after
+    read = repository.get_follow_up(claim.claim_id, original.follow_up_id, claim.customer_id)
+    assert read is not None
+    assert repository.list_follow_ups(claim.claim_id, claim.customer_id) == [read]
+    assert read.status is FollowUpStatus.BLOCKED
+    assert read.due_at is None and read.deadline_at is None
+    assert read.policy_id == ('unapproved-policy' if binding == 'contradictory' else None)
+    assert read.policy_version == (9 if binding == 'contradictory' else None)
+    serialized = read.model_dump(mode='json')
+    assert serialized['deadline_at'] is None and serialized['due_at'] is None
+    sessions = repository.list_sessions_for_claim(claim.claim_id, claim.customer_id)
+    contexts = (
+        _claimant_incomplete_context(repository, claim),
+        _incomplete_context(repository, claim, sessions),
+    )
+    for context in contexts:
+        if source_problem == 'missing':
+            assert context is None
+        else:
+            assert context is not None
+            assert context.follow_up_status == 'blocked'
+            assert context.expires_at is None and context.follow_up_due_at is None
+            assert context.model_dump(mode='json')['expires_at'] is None
+    assert original.deadline_at is not None
+    assert repository.list_due_follow_ups(original.deadline_at, limit=10) == []
+    assert repository.list_expiring_follow_ups(original.deadline_at, limit=10) == []
+    with pytest.raises(ValueError):
+        repository.save_follow_up_operation(_operation())
+    assert repository.get_follow_up_operation(_operation().operation_id) is None
+    assert collection.find_one(selector) == raw_after
+
+
+@pytest.mark.parametrize('unsafe_variant', ['both_null', 'id_null', 'version_null'])
+def test_incomplete_policy_binding_only_accepts_unscheduled_unsafe_model(
+    unsafe_variant: str,
+) -> None:
+    payload = _follow_up().model_dump()
+    payload.update(
+        status='blocked',
+        blocked_reason='policy_binding_invalid',
+        due_at=None,
+        deadline_at=None,
+    )
+    if unsafe_variant in {'both_null', 'id_null'}:
+        payload['policy_id'] = None
+    if unsafe_variant in {'both_null', 'version_null'}:
+        payload['policy_version'] = None
+    assert FollowUpRecord.model_validate(payload).status is FollowUpStatus.BLOCKED
+    for change in (
+        {'status': 'pending'},
+        {'status': 'resolved', 'resolution_code': 'claimant_resumed', 'blocked_reason': None},
+        {
+            'blocked_reason': 'contact_not_authorised',
+            'contact_permission': 'not_authorised',
+            'channel': None,
+        },
+        {'due_at': _follow_up().created_at},
+        {'deadline_at': _follow_up().deadline_at},
+    ):
+        with pytest.raises(ValueError, match='incomplete policy binding'):
+            FollowUpRecord.model_validate({**payload, **change})
 
 
 def _follow_up() -> FollowUpRecord:
@@ -1191,6 +1528,9 @@ def test_follow_up_policy_backfill_is_read_only_until_apply() -> None:
                 'source_session_id': 'ses_migration',
                 'status': 'blocked',
                 'contact_permission': 'not_authorised',
+                'responsible_party': 'system',
+                'created_at': now.isoformat(),
+                'updated_at': now.isoformat(),
             },
         ]
     )

@@ -5,6 +5,7 @@ import json
 
 from backend.domain.audit import AuditEventEnvelope
 from backend.domain.models import (
+    UNSAFE_FOLLOW_UP_REASONS,
     FollowUpOperation,
     FollowUpOperationStatus,
     FollowUpRecord,
@@ -15,6 +16,24 @@ from backend.domain.models import (
     SessionStatus,
     WorkingClaim,
 )
+
+
+class RecoveryAuthorityError(ValueError):
+    """Recovery evidence requires operator repair before a state transition."""
+
+
+def require_follow_up_authority(record: FollowUpRecord) -> None:
+    """Reject unsafe obligations without treating readiness as business authority.
+
+    Args:
+        record: Current persisted or compatibility-projected obligation.
+    Returns:
+        None.
+    Raises:
+        RecoveryAuthorityError: The authoritative blocking condition remains unresolved.
+    """
+    if record.blocked_reason in UNSAFE_FOLLOW_UP_REASONS:
+        raise RecoveryAuthorityError('Follow-up requires authoritative migration repair.')
 
 
 def follow_up_commit_fingerprint(

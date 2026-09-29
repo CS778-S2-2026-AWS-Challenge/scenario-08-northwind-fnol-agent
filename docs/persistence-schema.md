@@ -1431,8 +1431,13 @@ retention policy or implement destructive cleanup and access closure.
 Missing or contradictory source records are quarantined with adapter-only
 `recovery_migration_reason=policy_binding_invalid|source_state_inconsistent` and readiness false.
 Raw timestamps, bindings, source references, and audit evidence remain unchanged. Repository
-reads expose the existing blocked reason with no executable schedule or authoritative deadline;
-normal replacement is rejected to preserve raw evidence. Reservation and commit both require
+reads expose the existing blocked reason with no executable schedule or authoritative deadline.
+Missing or explicit-null policy coordinates remain null in that compatibility representation;
+present coordinates are preserved as evidence, not certified by the read. Null coordinates are
+valid only for unsafe blocked records without a schedule or deadline. Ordinary executable
+records and operation identities still require complete policy coordinates. These are existing
+internal fields, not additional external API fields. Normal repository replacement
+is rejected to preserve raw evidence. Reservation and commit both require
 readiness; discovery never grants execution authority. Fixture uses the same blocked reasons
 to exclude unsafe obligations. Valid contact-blocked and exhausted obligations remain eligible
 for expiry. No new domain state, external API field, or operation store is introduced.
@@ -1440,7 +1445,18 @@ for expiry. No new domain state, external API field, or operation store is intro
 The backend data operator owns reconciliation: retain the migration report, restore missing
 source evidence or correct contradictory data only from approved original evidence, then run
 dry-run and apply again. Apply revalidates source and target before setting readiness true and
-clearing the migration reason. No automatic deadline guess or source recreation is permitted.
+clearing the migration reason. A persisted business blocked reason of
+source_state_inconsistent or policy_binding_invalid is never cleared by backfill, even when
+timestamps and policy coordinates match. The same unsafe-reason exclusion applies to ordinary
+writes, migration, discovery and new reservations. Previously marked-ready unsafe records are
+also excluded and reported. The operator must first reconcile the original blocking condition
+from approved evidence and conditionally update the complete original record to a coherent
+state/reason/schedule; metadata remains unready until source-fenced backfill succeeds.
+Backfill validates the resulting FollowUpRecord before accepting that transition.
+Metadata-only quarantine can re-enter after source repair without inventing a business
+transition. Resume rejects unsafe obligations before any mutation in both adapters; it cannot
+launder a compatibility record into resolved state. No automatic deadline guess or source
+recreation is permitted.
 
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
 read-only by default, derives the deadline only from the source Session's persisted interruption

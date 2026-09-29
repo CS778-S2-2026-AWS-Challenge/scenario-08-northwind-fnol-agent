@@ -903,6 +903,14 @@ changing the represented instant. Exhaustion is not equivalent to contact withdr
 or Claim abandonment. Legacy blocked records without a reason retain their previous
 not-authorised/no-channel interpretation. No new recovery or retention HTTP endpoint is added.
 
+Quarantined recovery obligations remain readable without an invented deadline. Incomplete
+internal policy coordinates are not exposed as verified policy bindings. If a valid checkpoint
+is unavailable, incomplete projections remain absent; otherwise they show blocked with no
+schedule or deadline. Resuming an obligation blocked by inconsistent source evidence or an
+invalid policy binding returns `409 INVALID_STATE_TRANSITION`, with
+`details[].reason=recovery_unavailable`, before Claim, Session, or idempotency mutation.
+Operator repair is required; resume does not clear an unresolved authority error.
+
 Only one active claimant session per claim is permitted.
 
 Messages MUST NOT be accepted for a closed or paused session.

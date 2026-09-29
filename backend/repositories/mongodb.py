@@ -58,6 +58,7 @@ from backend.domain.message import (
     validate_message_record,
 )
 from backend.domain.models import (
+    UNSAFE_FOLLOW_UP_REASONS,
     ActorType,
     AgentDecisionRecord,
     AssessorRoutingOperation,
@@ -73,7 +74,6 @@ from backend.domain.models import (
     EvidenceRecord,
     FollowUpOperation,
     FollowUpOperationStatus,
-    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpResolutionCode,
     FollowUpStatus,
@@ -106,6 +106,7 @@ from backend.domain.realtime import (
 )
 from backend.domain.recovery import (
     follow_up_commit_fingerprint,
+    require_follow_up_authority,
     validate_follow_up_commit,
     validate_follow_up_transition,
     validate_retention_transition,
@@ -1406,11 +1407,7 @@ class MongoDBRepository:
                 raise ValueError('Quarantined Follow-up requires authoritative migration repair.')
             document['recovery_discovery_ready'] = (
                 model.deadline_at is not None
-                and model.blocked_reason
-                not in {
-                    FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
-                    FollowUpReasonCode.POLICY_BINDING_INVALID,
-                }
+                and model.blocked_reason not in UNSAFE_FOLLOW_UP_REASONS
             )
         if kind == 'claim':
             if not isinstance(model, WorkingClaim):
@@ -1516,6 +1513,8 @@ class MongoDBRepository:
                 due_at=None,
                 deadline_at=None,
                 resolution_code=None,
+                policy_id=document.get('policy_id'),
+                policy_version=document.get('policy_version'),
             )
         if model_type in {AssetRecord, ClaimAssetSnapshot}:
             details = payload.get('details')
@@ -2330,6 +2329,7 @@ class MongoDBRepository:
             'record_type': 'follow_up',
             'recovery_discovery_ready': True,
             'status': FollowUpStatus.PENDING.value,
+            'blocked_reason': {'$nin': sorted(UNSAFE_FOLLOW_UP_REASONS)},
             'due_at': {'$lte': recovery_timestamp(due_before)},
         }
         if cursor is not None:
@@ -2369,6 +2369,7 @@ class MongoDBRepository:
             'record_type': 'follow_up',
             'recovery_discovery_ready': True,
             'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            'blocked_reason': {'$nin': sorted(UNSAFE_FOLLOW_UP_REASONS)},
             'deadline_at': {'$lte': recovery_timestamp(deadline_before)},
         }
         if cursor is not None:
@@ -2420,6 +2421,11 @@ class MongoDBRepository:
             if self.get_follow_up_operation(operation.operation_id) == operation:
                 return
             raise ValueError('Create a reservation before committing or cancelling it.')
+        existing = self.get_follow_up_operation(operation.operation_id)
+        if existing is not None:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
         follow_up = self._get('follow_up', operation.follow_up_id, FollowUpRecord)
         if follow_up is None or follow_up.claim_id != operation.claim_id:
             raise KeyError(operation.follow_up_id)
@@ -2428,11 +2434,6 @@ class MongoDBRepository:
             or follow_up.policy_version != operation.policy_version
         ):
             raise ValueError('Follow-up operation policy does not match its obligation.')
-        existing = self.get_follow_up_operation(operation.operation_id)
-        if existing is not None:
-            if existing != operation:
-                raise IdempotencyConflict(operation.operation_id)
-            return
         if (
             self._collection.find_one(
                 {
@@ -2444,6 +2445,7 @@ class MongoDBRepository:
             is None
         ):
             raise ValueError('Follow-up requires authoritative migration repair.')
+        require_follow_up_authority(follow_up)
         duplicate = self._collection.find_one(
             {
                 'record_type': 'follow_up_operation',
@@ -7108,6 +7110,7 @@ class MongoDBRepository:
                 or resolved_follow_up.updated_at < open_follow_up.updated_at
             ):
                 raise KeyError(claim.claim_id)
+            require_follow_up_authority(open_follow_up)
             expected_follow_up = open_follow_up.model_copy(
                 update={
                     'status': FollowUpStatus.RESOLVED,

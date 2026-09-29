@@ -59,6 +59,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.recovery import RecoveryAuthorityError
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     ClaimRepository,
@@ -1027,6 +1028,13 @@ def start_session(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The session resume request conflicted with an existing retry or session.',
             ) from conflict
+        except RecoveryAuthorityError as error:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='Saved recovery information needs repair before this claim can resume.',
+                details=[ErrorDetail(field='incomplete_context', reason='recovery_unavailable')],
+            ) from error
         claim = updated_claim
 
     return _claimant_session(session, claim.customer_next_step)
