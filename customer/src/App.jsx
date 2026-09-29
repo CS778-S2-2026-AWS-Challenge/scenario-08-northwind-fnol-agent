@@ -480,6 +480,7 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const pendingSessionPause = useRef(null)
+  const deferredSessionPauses = useRef(new Map())
   const sessionPauseGeneration = useRef(0)
   const claimantIdentityGeneration = useRef(0)
   const latestRevision = useRef(0)
@@ -544,7 +545,7 @@ function App() {
     ? documentAttentionCount(evidenceItems)
     : null
 
-  function currentPauseContextKey() {
+  function currentClaimantIdentityKey() {
     const authenticated = hasClaimantAccessToken()
     let identityKey = `account:${accountRef.current?.customer_id || ''}`
     if (!authenticated) {
@@ -552,14 +553,39 @@ function App() {
         identityKey = `anonymous:${globalThis.sessionStorage?.getItem('northwind.anonymousSession') || ''}`
       } catch { identityKey = 'anonymous:' }
     }
+    return [claimantIdentityGeneration.current, identityKey].join(':')
+  }
+
+  function currentPauseContextKey() {
     return [
-      claimantIdentityGeneration.current,
-      identityKey,
+      currentClaimantIdentityKey(),
       globalThis.location?.pathname || '/',
       workspaceViewRef.current,
       activeClaimRef.current?.claim_id || '',
       activeSessionIdRef.current || '',
     ].join(':')
+  }
+
+  function sessionPauseRecoveryKey(identityKey, claimId) {
+    return `${identityKey}:${claimId}`
+  }
+
+  function isSessionPauseIdentityCurrent(operation) {
+    return operation?.identityKey === currentClaimantIdentityKey()
+  }
+
+  function rememberDeferredSessionPause(operation) {
+    if (!isSessionPauseIdentityCurrent(operation)) return false
+    const existing = deferredSessionPauses.current.get(operation.recoveryKey)
+    if (existing && existing !== operation && existing.generation > operation.generation) return false
+    deferredSessionPauses.current.set(operation.recoveryKey, operation)
+    return true
+  }
+
+  function forgetDeferredSessionPause(operation) {
+    if (deferredSessionPauses.current.get(operation?.recoveryKey) === operation) {
+      deferredSessionPauses.current.delete(operation.recoveryKey)
+    }
   }
 
   function isSessionPauseCurrent(operation) {
@@ -570,9 +596,15 @@ function App() {
   }
 
   function invalidateSessionPause({ identityChanged = false } = {}) {
-    if (identityChanged) claimantIdentityGeneration.current += 1
+    const operation = pendingSessionPause.current
+    const hadPendingPause = Boolean(operation)
+    if (identityChanged) {
+      claimantIdentityGeneration.current += 1
+      deferredSessionPauses.current.clear()
+    } else if (operation) {
+      rememberDeferredSessionPause(operation)
+    }
     sessionPauseGeneration.current += 1
-    const hadPendingPause = Boolean(pendingSessionPause.current)
     pendingSessionPause.current = null
     if (hadPendingPause) setStatus((current) => current === 'pausing-session' ? 'idle' : current)
   }
@@ -1723,6 +1755,79 @@ function App() {
     setStatus('error')
   }
 
+  async function reconcileDeferredSessionPause(currentClaim, currentSessionId) {
+    if (!currentClaim?.claim_id || !currentSessionId) {
+      return null
+    }
+    const recoveryKey = sessionPauseRecoveryKey(
+      currentClaimantIdentityKey(),
+      currentClaim.claim_id,
+    )
+    const operation = deferredSessionPauses.current.get(recoveryKey)
+    if (!operation) return { claim: currentClaim, sessionId: currentSessionId }
+
+    await operation.settled
+    if (!isSessionPauseIdentityCurrent(operation)) {
+      return null
+    }
+    if (deferredSessionPauses.current.get(recoveryKey) !== operation) {
+      return { claim: currentClaim, sessionId: currentSessionId }
+    }
+
+    const latestClaim = await getClaim(currentClaim.claim_id)
+    if (
+      !isSessionPauseIdentityCurrent(operation)
+      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+    ) {
+      return null
+    }
+    if (latestClaim.active_session_id === currentSessionId) {
+      forgetDeferredSessionPause(operation)
+      applyClaimSnapshot(latestClaim)
+      return { claim: latestClaim, sessionId: currentSessionId }
+    }
+
+    const resumedSession = await resumeClaimSession({ claimId: currentClaim.claim_id })
+    if (
+      !isSessionPauseIdentityCurrent(operation)
+      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+    ) return null
+    const authoritativeClaim = await getClaim(currentClaim.claim_id)
+    if (
+      !isSessionPauseIdentityCurrent(operation)
+      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+    ) return null
+    const conversation = await getClaimMessages(
+      currentClaim.claim_id,
+      resumedSession.session_id,
+    )
+    if (
+      !isSessionPauseIdentityCurrent(operation)
+      || activeClaimRef.current?.claim_id !== currentClaim.claim_id
+    ) {
+      return null
+    }
+
+    forgetDeferredSessionPause(operation)
+    replaceActiveClaimContext(authoritativeClaim, resumedSession.session_id)
+    if (resumedSession.model_profile_id) setSelectedModel(resumedSession.model_profile_id)
+    commitMessages(conversation.items)
+    setRecoveryFailure(null)
+    setForm(authoritativeClaim.form)
+    setContentsItems(authoritativeClaim.contents_items || [])
+    setDynamicForm(authoritativeClaim.dynamic_form || null)
+    setNextStep(authoritativeClaim.customer_next_step)
+    setHandoff(authoritativeClaim.handoff || null)
+    setResumeContext({
+      ...resumedSession.resume,
+      resumed_at: resumedSession.started_at,
+      resumed_after_message_id: orderMessages(conversation.items).at(-1)?.message_id || null,
+      has_resume_boundary: true,
+    })
+    rememberClaimInHistory(authoritativeClaim)
+    return { claim: authoritativeClaim, sessionId: resumedSession.session_id }
+  }
+
   async function sendMessage(event, recoveryMessage = null) {
     event.preventDefault()
     const text = recoveryMessage ? messageText(recoveryMessage) : draft.trim()
@@ -1782,6 +1887,12 @@ function App() {
       setPendingMessage({ text, turnId: operation.clientMessageId, retrying: Boolean(recoveryMessage) })
       let activeClaim = hasStarted ? claim : null
       let activeSessionId = hasStarted ? sessionId : null
+      if (activeClaim && activeSessionId) {
+        const reconciled = await reconcileDeferredSessionPause(activeClaim, activeSessionId)
+        if (!reconciled) return
+        activeClaim = reconciled.claim
+        activeSessionId = reconciled.sessionId
+      }
       if (!activeClaim) {
         const created = await createClaim({
           idempotencyKey: operation.claimKey,
@@ -1957,6 +2068,7 @@ function App() {
   function resetForNewChat(stayInWorkspace, pauseOperation = null) {
     if (pauseOperation && !isSessionPauseCurrent(pauseOperation)) return
     if (pauseOperation) {
+      deferredSessionPauses.current.delete(pauseOperation.recoveryKey)
       pendingSessionPause.current = null
       sessionPauseGeneration.current += 1
     } else invalidateSessionPause()
@@ -2035,6 +2147,7 @@ function App() {
 
     const fingerprint = `${currentClaim.claim_id}:${currentSessionId}:${currentClaim.revision}`
     const contextKey = currentPauseContextKey()
+    const identityKey = currentClaimantIdentityKey()
     let pauseRequest = pendingSessionPause.current
     if (
       !pauseRequest
@@ -2043,13 +2156,18 @@ function App() {
       || pauseRequest.stayInWorkspace !== stayInWorkspace
     ) {
       sessionPauseGeneration.current += 1
+      let settle
       pauseRequest = {
         fingerprint,
         idempotencyKey: requestId('pause-session'),
         generation: sessionPauseGeneration.current,
         contextKey,
+        identityKey,
+        recoveryKey: sessionPauseRecoveryKey(identityKey, currentClaim.claim_id),
         stayInWorkspace,
         inFlight: false,
+        settled: new Promise((resolve) => { settle = resolve }),
+        settle,
       }
     }
     pauseRequest.inFlight = true
@@ -2064,11 +2182,16 @@ function App() {
         revision: currentClaim.revision,
         idempotencyKey: pauseRequest.idempotencyKey,
       })
-      if (!isSessionPauseCurrent(pauseRequest)) return
+      if (!isSessionPauseCurrent(pauseRequest)) {
+        rememberDeferredSessionPause(pauseRequest)
+        return
+      }
+      forgetDeferredSessionPause(pauseRequest)
       rememberClaimInHistory(paused.claim)
       resetForNewChat(stayInWorkspace, pauseRequest)
     } catch (requestError) {
-      if (!isSessionPauseCurrent(pauseRequest)) return
+      const mayMutateCurrentNavigation = isSessionPauseCurrent(pauseRequest)
+      if (!mayMutateCurrentNavigation && !isSessionPauseIdentityCurrent(pauseRequest)) return
       pauseRequest.inFlight = false
 
       if (!(requestError instanceof ApiRequestError) || !Number.isInteger(requestError.status)) {
@@ -2078,6 +2201,15 @@ function App() {
         } catch {
           // Retain the current projection and original idempotency key. A retry safely
           // replays a pause that may already have reached the service.
+        }
+        if (!isSessionPauseIdentityCurrent(pauseRequest)) return
+        if (!mayMutateCurrentNavigation) {
+          if (latestClaim?.active_session_id === currentSessionId) {
+            forgetDeferredSessionPause(pauseRequest)
+          } else {
+            rememberDeferredSessionPause(pauseRequest)
+          }
+          return
         }
         if (!isSessionPauseCurrent(pauseRequest)) return
         if (latestClaim) {
@@ -2095,6 +2227,10 @@ function App() {
         return
       }
 
+      if (!mayMutateCurrentNavigation) {
+        forgetDeferredSessionPause(pauseRequest)
+        return
+      }
       if (requestError.code === 'REVISION_CONFLICT') {
         let latestClaim = null
         try {
@@ -2109,6 +2245,9 @@ function App() {
         setError(`${requestError.message || 'We could not save your place before starting a new conversation.'} Your current conversation is still open. Review the report and select New chat again.`)
       }
       setStatus('error')
+    } finally {
+      pauseRequest.inFlight = false
+      pauseRequest.settle?.()
     }
   }
 
