@@ -2,8 +2,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_serializer,
+    model_validator,
+)
 
+from backend.domain.recovery_time import recovery_timestamp
 from backend.domain.tag_registry import StaffTag
 
 
@@ -108,6 +116,48 @@ class FollowUpStatus(str, Enum):
     PENDING = 'pending'
     BLOCKED = 'blocked'
     RESOLVED = 'resolved'
+
+
+class FollowUpReasonCode(str, Enum):
+    CONTACT_NOT_AUTHORISED = 'contact_not_authorised'
+    ATTEMPT_LIMIT_REACHED = 'attempt_limit_reached'
+    POLICY_BINDING_INVALID = 'policy_binding_invalid'
+    SOURCE_STATE_INCONSISTENT = 'source_state_inconsistent'
+
+
+class FollowUpResolutionCode(str, Enum):
+    CLAIMANT_RESUMED = 'claimant_resumed'
+    RECOVERY_EXPIRED = 'recovery_expired'
+    STAFF_ABANDONED = 'staff_abandoned'
+    AUTHORISED_CLOSURE = 'authorised_closure'
+
+
+UNSAFE_FOLLOW_UP_REASONS = frozenset(
+    {FollowUpReasonCode.POLICY_BINDING_INVALID, FollowUpReasonCode.SOURCE_STATE_INCONSISTENT}
+)
+
+
+class FollowUpOperationStatus(str, Enum):
+    RESERVED = 'reserved'
+    COMMITTED = 'committed'
+    CANCELLED = 'cancelled'
+
+
+class FollowUpOperationResult(str, Enum):
+    IN_APP_COMMITTED = 'in_app_committed'
+    STALE_REVISION = 'stale_revision'
+    DEADLINE_REACHED = 'deadline_reached'
+    AUTHORITY_LOST = 'authority_lost'
+    FOLLOW_UP_ALREADY_RESOLVED = 'follow_up_already_resolved'
+    SUPERSEDED_BY_RESUME = 'superseded_by_resume'
+
+
+class RetentionOperationStatus(str, Enum):
+    ELIGIBLE = 'eligible'
+    HELD = 'held'
+    EXECUTING = 'executing'
+    RECONCILIATION_REQUIRED = 'reconciliation_required'
+    COMPLETED = 'completed'
 
 
 class FollowUpContactPermission(str, Enum):
@@ -1161,19 +1211,33 @@ class FollowUpRecord(ContractModel):
     claim_id: str
     source_session_id: str
     purpose: str = Field(default='resume_incomplete_claim', min_length=1, max_length=100)
+    policy_id: str | None = Field(
+        default='incomplete_claim_follow_up', min_length=1, max_length=120
+    )
+    policy_version: int | None = Field(default=1, ge=1)
     responsible_party: ResponsibleParty
     source_refs: list[str] = Field(default_factory=list, max_length=20)
     contact_permission: FollowUpContactPermission = FollowUpContactPermission.NOT_AUTHORISED
     attempt_count: int = Field(default=0, ge=0)
     channel: PreferredChannel | None = None
     outcome: str | None = Field(default=None, max_length=1000)
+    blocked_reason: FollowUpReasonCode | None = None
+    resolution_code: FollowUpResolutionCode | None = None
     status: FollowUpStatus = FollowUpStatus.BLOCKED
     due_at: datetime | None = None
+    deadline_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
     @model_validator(mode='after')
     def validate_recovery_follow_up(self) -> 'FollowUpRecord':
+        if (self.policy_id is None or self.policy_version is None) and not (
+            self.status is FollowUpStatus.BLOCKED
+            and self.blocked_reason in UNSAFE_FOLLOW_UP_REASONS
+            and self.due_at is None
+            and self.deadline_at is None
+        ):
+            raise ValueError('An incomplete policy binding requires an unscheduled unsafe record.')
         if self.updated_at < self.created_at:
             raise ValueError('A Follow-up cannot be updated before it is created.')
         if not self.source_refs:
@@ -1187,14 +1251,129 @@ class FollowUpRecord(ContractModel):
                 or self.due_at is None
             ):
                 raise ValueError('A pending Follow-up requires an authorised channel and due time.')
-        elif self.status is FollowUpStatus.BLOCKED and (
-            self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
-            or self.channel is not None
-            or self.due_at is not None
+            if self.blocked_reason is not None or self.resolution_code is not None:
+                raise ValueError('A pending Follow-up cannot have a blocked or resolution reason.')
+            if self.deadline_at is not None and self.due_at >= self.deadline_at:
+                raise ValueError('An executable due time must precede the deadline.')
+        elif self.status is FollowUpStatus.BLOCKED:
+            if self.due_at is not None:
+                raise ValueError('A blocked Follow-up cannot have an executable schedule.')
+            if self.blocked_reason in {None, FollowUpReasonCode.CONTACT_NOT_AUTHORISED} and (
+                self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
+                or self.channel is not None
+            ):
+                raise ValueError(
+                    'A contact-blocked Follow-up must not claim an authorised channel or schedule.'
+                )
+        if self.status is FollowUpStatus.BLOCKED and self.resolution_code is not None:
+            raise ValueError('A blocked Follow-up cannot have a resolution code.')
+        if self.status is FollowUpStatus.RESOLVED:
+            legacy_resolution_codes = {
+                'claimant_resumed': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                'recovery_expired': FollowUpResolutionCode.RECOVERY_EXPIRED,
+                'staff_abandoned': FollowUpResolutionCode.STAFF_ABANDONED,
+                'authorised_closure': FollowUpResolutionCode.AUTHORISED_CLOSURE,
+            }
+            if self.resolution_code is None and self.outcome in legacy_resolution_codes:
+                self.resolution_code = legacy_resolution_codes[self.outcome]
+            if self.resolution_code is None:
+                raise ValueError('A resolved Follow-up requires a resolution code.')
+            if self.blocked_reason is not None:
+                raise ValueError('A resolved Follow-up cannot have a blocked reason.')
+        return self
+
+    @field_serializer('due_at', 'deadline_at', when_used='json')
+    def serialize_recovery_time(self, value: datetime | None) -> str | None:
+        return recovery_timestamp(value) if value is not None else None
+
+
+class FollowUpOperation(ContractModel):
+    """Immutable identity and bounded result for one in-app Follow-up operation."""
+
+    operation_id: str = Field(pattern=r'^fop_[a-f0-9]{20}$')
+    follow_up_id: str = Field(min_length=1, max_length=120)
+    claim_id: str = Field(min_length=1, max_length=120)
+    sequence: int = Field(ge=1)
+    policy_id: str = Field(min_length=1, max_length=120)
+    policy_version: int = Field(ge=1)
+    based_on_claim_revision: int = Field(ge=1)
+    scheduled_at: datetime
+    status: FollowUpOperationStatus
+    result_code: FollowUpOperationResult | None = None
+    committed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    source_refs: list[str] = Field(default_factory=list, max_length=20)
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_operation(self) -> 'FollowUpOperation':
+        if self.updated_at < self.created_at:
+            raise ValueError('Follow-up operation update cannot precede creation.')
+        if self.status is FollowUpOperationStatus.COMMITTED:
+            if self.result_code is not FollowUpOperationResult.IN_APP_COMMITTED:
+                raise ValueError('A committed operation requires in_app_committed.')
+            if self.committed_at is None or self.cancelled_at is not None:
+                raise ValueError('A committed operation requires only committed_at.')
+        elif self.status is FollowUpOperationStatus.CANCELLED:
+            if (
+                self.result_code is None
+                or self.result_code is FollowUpOperationResult.IN_APP_COMMITTED
+            ):
+                raise ValueError('A cancelled operation requires a cancellation result.')
+            if self.cancelled_at is None or self.committed_at is not None:
+                raise ValueError('A cancelled operation requires only cancelled_at.')
+        elif (
+            self.result_code is not None
+            or self.committed_at is not None
+            or self.cancelled_at is not None
         ):
-            raise ValueError(
-                'A blocked Follow-up must not claim an authorised channel or schedule.'
-            )
+            raise ValueError('A reserved operation cannot have a final result or timestamp.')
+        return self
+
+
+class RetentionOperation(ContractModel):
+    """Restart-safe record for an approved cross-store retention action.
+
+    The record tracks execution and reconciliation only; it does not select a
+    retention duration, classification, or deletion policy.
+    """
+
+    operation_id: str = Field(pattern=r'^rop_[a-f0-9]{20}$')
+    claim_id: str = Field(min_length=1, max_length=120)
+    policy_id: str = Field(min_length=1, max_length=120)
+    policy_version: int = Field(ge=1)
+    based_on_claim_revision: int = Field(ge=1)
+    revision: int = Field(default=1, ge=1)
+    target_refs: list[str] = Field(min_length=1, max_length=50)
+    status: RetentionOperationStatus
+    hold_reason: str | None = Field(default=None, max_length=500)
+    step_results: dict[str, str] = Field(default_factory=dict, max_length=50)
+    source_refs: list[str] = Field(min_length=1, max_length=20)
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_retention_operation(self) -> 'RetentionOperation':
+        if self.updated_at < self.created_at:
+            raise ValueError('Retention operation update cannot precede creation.')
+        if self.status is RetentionOperationStatus.HELD and not self.hold_reason:
+            raise ValueError('A held retention operation requires a hold reason.')
+        if self.status is not RetentionOperationStatus.HELD and self.hold_reason is not None:
+            raise ValueError('Only a held operation can have a hold reason.')
+        if len(set(self.target_refs)) != len(self.target_refs):
+            raise ValueError('Retention targets must be unique.')
+        if not set(self.step_results).issubset(self.target_refs):
+            raise ValueError('Retention results must refer to the immutable target set.')
+        if not set(self.step_results.values()).issubset(
+            {'deleted', 'already_absent', 'failed', 'unknown'}
+        ):
+            raise ValueError('Unknown retention step outcome.')
+        if self.status is RetentionOperationStatus.COMPLETED and (
+            set(self.step_results) != set(self.target_refs)
+            or not set(self.step_results.values()).issubset({'deleted', 'already_absent'})
+        ):
+            raise ValueError('Completion requires success evidence for every target.')
         return self
 
 
@@ -2260,6 +2439,7 @@ class ClaimantIncompleteContext(ContractModel):
     last_meaningful_activity_at: datetime
     resume_point: str
     follow_up_due_at: datetime | None = None
+    expires_at: datetime | None = None
     follow_up_status: FollowUpStatus
 
 

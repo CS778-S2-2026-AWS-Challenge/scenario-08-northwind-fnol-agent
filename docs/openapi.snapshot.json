@@ -4104,6 +4104,18 @@
       "ClaimantIncompleteContext": {
         "additionalProperties": false,
         "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
           "follow_up_due_at": {
             "anyOf": [
               {
