@@ -22,8 +22,9 @@ from backend.services.support import now_utc
 
 
 def test_action_registry_owns_every_projected_action_contract_dimension() -> None:
-    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-15.1'
+    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-28.1'
     assert set(WORKBENCH_ACTION_REGISTRY) == {
+        'claim.abandon',
         'claim.reopen',
         'conversation.send_claimant_message',
         'external.accept_review',
@@ -73,6 +74,15 @@ def test_registry_owns_ownership_inputs_and_conditional_completion_requirements(
     )
     assert result_summary.required is False
     assert result_summary.required_when == ('status', 'completed')
+
+    abandon = WORKBENCH_ACTION_REGISTRY['claim.abandon']
+    assert [item.field_code for item in abandon.inputs] == ['reason']
+    assert abandon.expected_effects == (
+        'terminal_disposition.set',
+        'follow_up.resolve',
+        'claim.revision.advance',
+        'audit.append',
+    )
 
     reopen = WORKBENCH_ACTION_REGISTRY['claim.reopen']
     assert [item.field_code for item in reopen.inputs] == ['reason']

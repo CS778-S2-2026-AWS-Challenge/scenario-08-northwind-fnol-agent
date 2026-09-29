@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
+from backend.domain.retention import ResourceAccessClosed
 
 
 class ErrorDetail(BaseModel):
@@ -76,6 +77,24 @@ async def api_error_handler(request: Request, exc: Exception) -> JSONResponse:
             details=exc.details,
             retryable=exc.retryable,
             current_revision=exc.current_revision,
+        ),
+    )
+
+
+async def resource_access_closed_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    if not isinstance(exc, ResourceAccessClosed):
+        raise TypeError('resource_access_closed_handler requires ResourceAccessClosed.')
+
+    return _response(
+        request,
+        404,
+        ErrorBody(
+            code='RESOURCE_NOT_FOUND',
+            message='The requested resource was not found.',
+            request_id=_request_id(request),
         ),
     )
 
@@ -160,6 +179,7 @@ async def model_gateway_error_handler(request: Request, exc: Exception) -> JSONR
 
 def register_exception_handlers(app: FastAPI) -> None:
     handlers: list[tuple[type[Exception], ExceptionHandler]] = [
+        (ResourceAccessClosed, resource_access_closed_handler),
         (ApiError, api_error_handler),
         (ModelGatewayError, model_gateway_error_handler),
         (RequestValidationError, validation_error_handler),

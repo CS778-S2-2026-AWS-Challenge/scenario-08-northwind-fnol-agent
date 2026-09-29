@@ -1,18 +1,10 @@
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    StringConstraints,
-    field_serializer,
-    model_validator,
-)
-
-from backend.domain.recovery_time import recovery_timestamp
 from backend.domain.tag_registry import StaffTag
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 class ContractModel(BaseModel):
@@ -123,6 +115,10 @@ class FollowUpReasonCode(str, Enum):
     ATTEMPT_LIMIT_REACHED = 'attempt_limit_reached'
     POLICY_BINDING_INVALID = 'policy_binding_invalid'
     SOURCE_STATE_INCONSISTENT = 'source_state_inconsistent'
+    CLAIMANT_RESUMED = 'claimant_resumed'
+    RECOVERY_EXPIRED = 'recovery_expired'
+    STAFF_ABANDONED = 'staff_abandoned'
+    AUTHORISED_CLOSURE = 'authorised_closure'
 
 
 class FollowUpResolutionCode(str, Enum):
@@ -132,32 +128,25 @@ class FollowUpResolutionCode(str, Enum):
     AUTHORISED_CLOSURE = 'authorised_closure'
 
 
-UNSAFE_FOLLOW_UP_REASONS = frozenset(
-    {FollowUpReasonCode.POLICY_BINDING_INVALID, FollowUpReasonCode.SOURCE_STATE_INCONSISTENT}
-)
-
-
 class FollowUpOperationStatus(str, Enum):
     RESERVED = 'reserved'
+    SCHEDULED = 'reserved'
     COMMITTED = 'committed'
+    SETTLED = 'settled'
     CANCELLED = 'cancelled'
 
 
 class FollowUpOperationResult(str, Enum):
     IN_APP_COMMITTED = 'in_app_committed'
+    DELIVERED_IN_APP = 'in_app_committed'
+    NO_RESPONSE = 'no_response'
     STALE_REVISION = 'stale_revision'
     DEADLINE_REACHED = 'deadline_reached'
+    EXPIRED_BEFORE_EXECUTION = 'deadline_reached'
     AUTHORITY_LOST = 'authority_lost'
+    AUTHORITY_WITHDRAWN = 'authority_lost'
     FOLLOW_UP_ALREADY_RESOLVED = 'follow_up_already_resolved'
     SUPERSEDED_BY_RESUME = 'superseded_by_resume'
-
-
-class RetentionOperationStatus(str, Enum):
-    ELIGIBLE = 'eligible'
-    HELD = 'held'
-    EXECUTING = 'executing'
-    RECONCILIATION_REQUIRED = 'reconciliation_required'
-    COMPLETED = 'completed'
 
 
 class FollowUpContactPermission(str, Enum):
@@ -181,6 +170,8 @@ class TerminalDispositionValue(str, Enum):
 class TerminalDispositionReasonCode(str, Enum):
     CLAIM_CREATED = 'CLAIM_CREATED'
     ABANDONMENT_POLICY_APPLIED = 'ABANDONMENT_POLICY_APPLIED'
+    RECOVERY_EXPIRED = 'RECOVERY_EXPIRED'
+    AUTHORISED_STAFF_ABANDONMENT = 'AUTHORISED_STAFF_ABANDONMENT'
     AUTHORISED_CLOSURE = 'AUTHORISED_CLOSURE'
 
 
@@ -470,14 +461,20 @@ class ClaimTerminalDisposition(ContractModel):
 
     @model_validator(mode='after')
     def validate_terminal_reason(self) -> 'ClaimTerminalDisposition':
-        expected_reason = {
-            TerminalDispositionValue.COMPLETED: TerminalDispositionReasonCode.CLAIM_CREATED,
-            TerminalDispositionValue.ABANDONED: (
-                TerminalDispositionReasonCode.ABANDONMENT_POLICY_APPLIED
-            ),
-            TerminalDispositionValue.CLOSED: TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
+        allowed_reasons = {
+            TerminalDispositionValue.COMPLETED: {
+                TerminalDispositionReasonCode.CLAIM_CREATED,
+            },
+            TerminalDispositionValue.ABANDONED: {
+                TerminalDispositionReasonCode.ABANDONMENT_POLICY_APPLIED,
+                TerminalDispositionReasonCode.RECOVERY_EXPIRED,
+                TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT,
+            },
+            TerminalDispositionValue.CLOSED: {
+                TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
+            },
         }[self.value]
-        if self.reason_code is not expected_reason:
+        if self.reason_code not in allowed_reasons:
             raise ValueError('The terminal disposition reason must match its registered value.')
         if len(self.source_refs) != len(set(self.source_refs)):
             raise ValueError('Terminal disposition source references must be unique.')
@@ -708,27 +705,13 @@ class MotorOtherDriverRecord(ContractModel):
     phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
     email: StrippedNonEmptyText | None = Field(default=None, min_length=3, max_length=254)
     vehicle_registration: StrippedNonEmptyText | None = Field(default=None, max_length=40)
-    insurer_name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
-    policy_number: StrippedNonEmptyText | None = Field(default=None, max_length=1024)
-    policy_number_masked: str | None = Field(default=None, max_length=40)
-    claim_reference: StrippedNonEmptyText | None = Field(default=None, max_length=120)
     source_refs: list[str] = Field(default_factory=list, max_length=10)
     created_at: datetime
     updated_at: datetime
 
     @model_validator(mode='after')
     def require_supplied_detail(self) -> 'MotorOtherDriverRecord':
-        if not any(
-            (
-                self.name,
-                self.phone,
-                self.email,
-                self.vehicle_registration,
-                self.insurer_name,
-                self.policy_number,
-                self.claim_reference,
-            )
-        ):
+        if not any((self.name, self.phone, self.email, self.vehicle_registration)):
             raise ValueError('An other-driver record requires at least one supplied detail.')
         if self.updated_at < self.created_at:
             raise ValueError('An other-driver record cannot be updated before it was created.')
@@ -742,9 +725,6 @@ class MotorOtherDriverProjection(ContractModel):
     phone: str | None = None
     email: str | None = None
     vehicle_registration: str | None = None
-    insurer_name: str | None = None
-    policy_number_masked: str | None = None
-    claim_reference: str | None = None
     updated_at: datetime
 
 
@@ -753,23 +733,10 @@ class CreateMotorOtherDriverRequest(ContractModel):
     phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
     email: StrippedNonEmptyText | None = Field(default=None, min_length=3, max_length=254)
     vehicle_registration: StrippedNonEmptyText | None = Field(default=None, max_length=40)
-    insurer_name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
-    policy_number: StrippedNonEmptyText | None = Field(default=None, max_length=120)
-    claim_reference: StrippedNonEmptyText | None = Field(default=None, max_length=120)
 
     @model_validator(mode='after')
     def require_supplied_detail(self) -> 'CreateMotorOtherDriverRequest':
-        if not any(
-            (
-                self.name,
-                self.phone,
-                self.email,
-                self.vehicle_registration,
-                self.insurer_name,
-                self.policy_number,
-                self.claim_reference,
-            )
-        ):
+        if not any((self.name, self.phone, self.email, self.vehicle_registration)):
             raise ValueError('At least one other-driver detail is required.')
         return self
 
@@ -1044,59 +1011,6 @@ class AcceptClaimAgreementRequest(ContractModel):
     confirmations: dict[str, bool] = Field(min_length=1, max_length=20)
 
 
-class PolicyholderRecord(ContractModel):
-    """Claim-scoped policyholder identity when the reporter is another person."""
-
-    identity_ref: str | None = Field(default=None, min_length=1, max_length=120)
-    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
-
-
-class DriverRecord(ContractModel):
-    """Claim-scoped actual driver details; licence number is never projected to clients."""
-
-    identity_ref: str | None = Field(default=None, min_length=1, max_length=120)
-    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
-    phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
-    email: StrippedNonEmptyText | None = Field(default=None, max_length=254)
-    relationship_to_policyholder: str | None = Field(default=None, max_length=80)
-    owner_permission: str | None = Field(default=None, max_length=40)
-    licence_number: StrippedNonEmptyText | None = Field(default=None, max_length=1024)
-    licence_number_masked: str | None = Field(default=None, max_length=40)
-    licence_status: str | None = Field(default=None, max_length=40)
-
-
-class WitnessRecord(ContractModel):
-    """Repeatable witness contact record, kept separate from other participants."""
-
-    witness_id: str = Field(min_length=1, max_length=120)
-    name: StrippedNonEmptyText | None = Field(default=None, max_length=200)
-    phone: StrippedNonEmptyText | None = Field(default=None, max_length=40)
-    email: StrippedNonEmptyText | None = Field(default=None, max_length=254)
-
-
-class PolicyholderProjection(ContractModel):
-    identity_ref: str | None = None
-    name: str | None = None
-
-
-class DriverProjection(ContractModel):
-    identity_ref: str | None = None
-    name: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    relationship_to_policyholder: str | None = None
-    owner_permission: str | None = None
-    licence_number_masked: str | None = None
-    licence_status: str | None = None
-
-
-class WitnessProjection(ContractModel):
-    witness_id: str
-    name: str | None = None
-    phone: str | None = None
-    email: str | None = None
-
-
 class WorkingClaim(ContractModel):
     claim_id: str
     customer_id: str
@@ -1106,9 +1020,6 @@ class WorkingClaim(ContractModel):
     incident_type: str | None = None
     claim_state: ClaimState = Field(default_factory=ClaimState)
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
-    policyholder: 'PolicyholderRecord | None' = None
-    driver: 'DriverRecord | None' = None
-    witnesses: list['WitnessRecord'] = Field(default_factory=list)
     contents_items: list[ContentsItem] = Field(default_factory=list)
     evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
@@ -1135,9 +1046,6 @@ class WorkingClaim(ContractModel):
         item_ids = [item.item_id for item in self.contents_items]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError('Contents item identifiers must be unique within a Claim.')
-        witness_ids = [witness.witness_id for witness in self.witnesses]
-        if len(witness_ids) != len(set(witness_ids)):
-            raise ValueError('Witness identifiers must be unique within a Claim.')
         acceptance_ids = [acceptance.acceptance_id for acceptance in self.agreement_acceptances]
         if len(acceptance_ids) != len(set(acceptance_ids)):
             raise ValueError('Agreement acceptance identifiers must be unique within a Claim.')
@@ -1205,45 +1113,146 @@ class SessionRecoveryContext(ContractModel):
 
 
 class FollowUpRecord(ContractModel):
-    """Claim-scoped recovery work with an explicit contact-authority boundary."""
+    """Authoritative Claim-scoped P17 recovery obligation.
+
+    Policy coordinates and ``deadline_at`` are persisted when the obligation is
+    bound to a published recovery policy. Legacy P17.1 records may temporarily
+    lack that binding until deterministic migration/backfill is applied.
+    """
 
     follow_up_id: str
     claim_id: str
     source_session_id: str
     purpose: str = Field(default='resume_incomplete_claim', min_length=1, max_length=100)
-    policy_id: str | None = Field(
-        default='incomplete_claim_follow_up', min_length=1, max_length=120
-    )
-    policy_version: int | None = Field(default=1, ge=1)
+    policy_id: str | None = Field(default=None, min_length=1, max_length=120)
+    policy_version: int | None = Field(default=None, ge=1)
+    deadline_at: datetime | None = None
     responsible_party: ResponsibleParty
     source_refs: list[str] = Field(default_factory=list, max_length=20)
     contact_permission: FollowUpContactPermission = FollowUpContactPermission.NOT_AUTHORISED
     attempt_count: int = Field(default=0, ge=0)
+    active_operation_id: str | None = Field(
+        default=None, pattern=r'^(fop_[a-f0-9]{20}|fuo_[a-f0-9]{24})$'
+    )
     channel: PreferredChannel | None = None
     outcome: str | None = Field(default=None, max_length=1000)
     blocked_reason: FollowUpReasonCode | None = None
     resolution_code: FollowUpResolutionCode | None = None
     status: FollowUpStatus = FollowUpStatus.BLOCKED
     due_at: datetime | None = None
-    deadline_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
+    @model_validator(mode='before')
+    @classmethod
+    def normalise_legacy_coordinates(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if data.get('policy_version') == 'v1':
+            data['policy_version'] = 1
+        reason = data.pop('reason_code', None)
+        if reason is not None:
+            field = (
+                'resolution_code'
+                if data.get('status') == FollowUpStatus.RESOLVED
+                else 'blocked_reason'
+            )
+            if data.get(field) is not None and data[field] != reason:
+                raise ValueError('Conflicting Follow-up reason authorities.')
+            data[field] = reason
+        if (
+            data.get('status') == FollowUpStatus.RESOLVED
+            and data.get('resolution_code') is None
+            and data.get('outcome') in {item.value for item in FollowUpResolutionCode}
+        ):
+            data['resolution_code'] = data['outcome']
+        if (
+            data.get('deadline_at') is not None
+            and (data.get('policy_id') is None or data.get('policy_version') is None)
+            and data.get('status', FollowUpStatus.PENDING) != FollowUpStatus.RESOLVED
+        ):
+            data['status'] = FollowUpStatus.BLOCKED
+            data['blocked_reason'] = FollowUpReasonCode.POLICY_BINDING_INVALID
+            data['active_operation_id'] = None
+        return data
+
+    @property
+    def reason_code(self) -> FollowUpReasonCode | None:
+        reason = self.resolution_code or self.blocked_reason
+        return FollowUpReasonCode(reason.value) if reason is not None else None
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> 'FollowUpRecord':
+        data = dict(update or {})
+        if 'reason_code' in data:
+            reason = data.pop('reason_code')
+            status = data.get('status', self.status)
+            if status == FollowUpStatus.RESOLVED:
+                data['blocked_reason'] = None
+                data['resolution_code'] = (
+                    FollowUpResolutionCode(reason) if reason is not None else None
+                )
+            else:
+                data['resolution_code'] = None
+                data['blocked_reason'] = FollowUpReasonCode(reason) if reason is not None else None
+        if data.get('policy_version') == 'v1':
+            data['policy_version'] = 1
+        return super().model_copy(update=data, deep=deep)
+
     @model_validator(mode='after')
     def validate_recovery_follow_up(self) -> 'FollowUpRecord':
-        if (self.policy_id is None or self.policy_version is None) and not (
-            self.status is FollowUpStatus.BLOCKED
-            and self.blocked_reason in UNSAFE_FOLLOW_UP_REASONS
-            and self.due_at is None
-            and self.deadline_at is None
-        ):
-            raise ValueError('An incomplete policy binding requires an unscheduled unsafe record.')
         if self.updated_at < self.created_at:
             raise ValueError('A Follow-up cannot be updated before it is created.')
+
         if not self.source_refs:
             self.source_refs = [f'session:{self.source_session_id}']
+
         if len(self.source_refs) != len(set(self.source_refs)):
             raise ValueError('Follow-up source references must be unique.')
+
+        if self.status is FollowUpStatus.BLOCKED and self.resolution_code is not None:
+            raise ValueError('A blocked Follow-up cannot have a resolution code.')
+        if self.status is FollowUpStatus.RESOLVED and self.blocked_reason is not None:
+            raise ValueError('A resolved Follow-up cannot have a blocked reason.')
+
+        binding_values = (
+            self.policy_id,
+            self.policy_version,
+            self.deadline_at,
+        )
+        binding_count = sum(value is not None for value in binding_values)
+
+        if self.deadline_at is not None and self.deadline_at.tzinfo is None:
+            raise ValueError('A Follow-up recovery deadline must be timezone-aware.')
+
+        if (
+            self.deadline_at is not None
+            and binding_count < len(binding_values)
+            and self.status is not FollowUpStatus.RESOLVED
+            and not (
+                self.status is FollowUpStatus.BLOCKED
+                and self.reason_code is FollowUpReasonCode.POLICY_BINDING_INVALID
+            )
+        ):
+            raise ValueError(
+                'A partial Follow-up policy binding must fail closed as policy_binding_invalid.'
+            )
+
+        blocked_reasons = {
+            FollowUpReasonCode.CONTACT_NOT_AUTHORISED,
+            FollowUpReasonCode.ATTEMPT_LIMIT_REACHED,
+            FollowUpReasonCode.POLICY_BINDING_INVALID,
+            FollowUpReasonCode.SOURCE_STATE_INCONSISTENT,
+        }
+        resolution_reasons = {
+            FollowUpReasonCode.CLAIMANT_RESUMED,
+            FollowUpReasonCode.RECOVERY_EXPIRED,
+            FollowUpReasonCode.STAFF_ABANDONED,
+            FollowUpReasonCode.AUTHORISED_CLOSURE,
+        }
+
         if self.status is FollowUpStatus.PENDING:
             if (
                 self.contact_permission is not FollowUpContactPermission.AUTHORISED
@@ -1251,46 +1260,68 @@ class FollowUpRecord(ContractModel):
                 or self.due_at is None
             ):
                 raise ValueError('A pending Follow-up requires an authorised channel and due time.')
-            if self.blocked_reason is not None or self.resolution_code is not None:
-                raise ValueError('A pending Follow-up cannot have a blocked or resolution reason.')
+
+            if self.reason_code is not None:
+                raise ValueError('A pending Follow-up must not carry a blocked/resolution reason.')
+
             if self.deadline_at is not None and self.due_at >= self.deadline_at:
-                raise ValueError('An executable due time must precede the deadline.')
+                raise ValueError(
+                    'A pending Follow-up due time must be before its recovery deadline.'
+                )
+
         elif self.status is FollowUpStatus.BLOCKED:
-            if self.due_at is not None:
-                raise ValueError('A blocked Follow-up cannot have an executable schedule.')
-            if self.blocked_reason in {None, FollowUpReasonCode.CONTACT_NOT_AUTHORISED} and (
-                self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
-                or self.channel is not None
+            if self.reason_code is None:
+                # Legacy P17.1 compatibility until deterministic backfill.
+                if (
+                    self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
+                    or self.channel is not None
+                ):
+                    raise ValueError(
+                        'A blocked Follow-up without a typed reason must not claim '
+                        'an authorised channel or schedule.'
+                    )
+
+            elif self.reason_code not in blocked_reasons:
+                raise ValueError('A blocked Follow-up requires a blocked reason code.')
+
+            elif self.reason_code is FollowUpReasonCode.CONTACT_NOT_AUTHORISED:
+                if (
+                    self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
+                    or self.channel is not None
+                ):
+                    raise ValueError(
+                        'contact_not_authorised must not claim an authorised contact '
+                        'channel or executable schedule.'
+                    )
+
+            elif self.reason_code is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED and (
+                self.contact_permission is not FollowUpContactPermission.AUTHORISED
+                or self.channel is None
+                or self.due_at is not None
             ):
                 raise ValueError(
-                    'A contact-blocked Follow-up must not claim an authorised channel or schedule.'
+                    'attempt_limit_reached preserves the authorised contact path '
+                    'while stopping automatic scheduling.'
                 )
-        if self.status is FollowUpStatus.BLOCKED and self.resolution_code is not None:
-            raise ValueError('A blocked Follow-up cannot have a resolution code.')
-        if self.status is FollowUpStatus.RESOLVED:
-            legacy_resolution_codes = {
-                'claimant_resumed': FollowUpResolutionCode.CLAIMANT_RESUMED,
-                'recovery_expired': FollowUpResolutionCode.RECOVERY_EXPIRED,
-                'staff_abandoned': FollowUpResolutionCode.STAFF_ABANDONED,
-                'authorised_closure': FollowUpResolutionCode.AUTHORISED_CLOSURE,
-            }
-            if self.resolution_code is None and self.outcome in legacy_resolution_codes:
-                self.resolution_code = legacy_resolution_codes[self.outcome]
+
+        elif self.status is FollowUpStatus.RESOLVED:
+            if self.active_operation_id is not None:
+                raise ValueError('A resolved Follow-up cannot retain an active operation.')
             if self.resolution_code is None:
                 raise ValueError('A resolved Follow-up requires a resolution code.')
-            if self.blocked_reason is not None:
-                raise ValueError('A resolved Follow-up cannot have a blocked reason.')
-        return self
+            if self.due_at is not None:
+                raise ValueError('A resolved Follow-up must not retain scheduled due work.')
 
-    @field_serializer('due_at', 'deadline_at', when_used='json')
-    def serialize_recovery_time(self, value: datetime | None) -> str | None:
-        return recovery_timestamp(value) if value is not None else None
+            if self.reason_code is not None and self.reason_code not in resolution_reasons:
+                raise ValueError('A resolved Follow-up requires a resolution reason code.')
+
+        return self
 
 
 class FollowUpOperation(ContractModel):
-    """Immutable identity and bounded result for one in-app Follow-up operation."""
+    """Durable P17-specific recovery execution identity and history."""
 
-    operation_id: str = Field(pattern=r'^fop_[a-f0-9]{20}$')
+    operation_id: str = Field(min_length=1, max_length=120)
     follow_up_id: str = Field(min_length=1, max_length=120)
     claim_id: str = Field(min_length=1, max_length=120)
     sequence: int = Field(ge=1)
@@ -1298,83 +1329,185 @@ class FollowUpOperation(ContractModel):
     policy_version: int = Field(ge=1)
     based_on_claim_revision: int = Field(ge=1)
     scheduled_at: datetime
-    status: FollowUpOperationStatus
+    status: FollowUpOperationStatus = FollowUpOperationStatus.SCHEDULED
     result_code: FollowUpOperationResult | None = None
+    created_at: datetime
+    updated_at: datetime
     committed_at: datetime | None = None
+    settled_at: datetime | None = None
     cancelled_at: datetime | None = None
     source_refs: list[str] = Field(default_factory=list, max_length=20)
-    created_at: datetime
-    updated_at: datetime
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalise_legacy_operation(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if data.get('policy_version') == 'v1':
+            data['policy_version'] = 1
+        if data.get('status') == 'scheduled':
+            data['status'] = FollowUpOperationStatus.RESERVED
+        result = data.pop('result', None)
+        if result is not None:
+            aliases = {
+                'delivered_in_app': 'in_app_committed',
+                'expired_before_execution': 'deadline_reached',
+                'authority_withdrawn': 'authority_lost',
+            }
+            result = aliases.get(result, result)
+            if data.get('result_code') is not None and data['result_code'] != result:
+                raise ValueError('Conflicting Follow-up operation result authorities.')
+            data['result_code'] = result
+        data.setdefault('created_at', data.get('scheduled_at'))
+        data.setdefault(
+            'updated_at',
+            data.get('settled_at')
+            or data.get('cancelled_at')
+            or data.get('committed_at')
+            or data.get('scheduled_at'),
+        )
+        return data
+
+    @property
+    def result(self) -> FollowUpOperationResult | None:
+        return self.result_code
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> 'FollowUpOperation':
+        data = dict(update or {})
+        if 'result' in data:
+            data['result_code'] = data.pop('result')
+        timestamp = data.get('settled_at') or data.get('cancelled_at') or data.get('committed_at')
+        if timestamp is not None:
+            data.setdefault('updated_at', timestamp)
+        return super().model_copy(update=data, deep=deep)
 
     @model_validator(mode='after')
-    def validate_operation(self) -> 'FollowUpOperation':
+    def validate_follow_up_operation(self) -> 'FollowUpOperation':
         if self.updated_at < self.created_at:
             raise ValueError('Follow-up operation update cannot precede creation.')
-        if self.status is FollowUpOperationStatus.COMMITTED:
-            if self.result_code is not FollowUpOperationResult.IN_APP_COMMITTED:
-                raise ValueError('A committed operation requires in_app_committed.')
-            if self.committed_at is None or self.cancelled_at is not None:
-                raise ValueError('A committed operation requires only committed_at.')
-        elif self.status is FollowUpOperationStatus.CANCELLED:
+        timestamps = (
+            self.scheduled_at,
+            self.committed_at,
+            self.settled_at,
+            self.cancelled_at,
+        )
+
+        if any(value is not None and value.tzinfo is None for value in timestamps):
+            raise ValueError('Follow-up operation timestamps must be timezone-aware.')
+
+        if not self.source_refs:
+            self.source_refs = [f'follow-up:{self.follow_up_id}']
+
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError('Follow-up operation source references must be unique.')
+
+        if self.committed_at is not None and self.committed_at < self.scheduled_at:
+            raise ValueError('Follow-up operation commit cannot precede its schedule.')
+
+        if self.settled_at is not None and (
+            self.committed_at is None or self.settled_at < self.committed_at
+        ):
+            raise ValueError('Follow-up operation settlement requires a prior commit.')
+
+        if self.cancelled_at is not None and self.cancelled_at < self.scheduled_at:
+            raise ValueError('Follow-up operation cancellation cannot precede its schedule.')
+
+        if self.status is FollowUpOperationStatus.SCHEDULED:
             if (
-                self.result_code is None
-                or self.result_code is FollowUpOperationResult.IN_APP_COMMITTED
+                self.result_code is not None
+                or self.committed_at is not None
+                or self.settled_at is not None
+                or self.cancelled_at is not None
             ):
-                raise ValueError('A cancelled operation requires a cancellation result.')
-            if self.cancelled_at is None or self.committed_at is not None:
-                raise ValueError('A cancelled operation requires only cancelled_at.')
-        elif (
-            self.result_code is not None
-            or self.committed_at is not None
-            or self.cancelled_at is not None
+                raise ValueError('A scheduled Follow-up operation cannot carry execution evidence.')
+
+        elif self.status is FollowUpOperationStatus.COMMITTED:
+            if (
+                self.committed_at is None
+                or self.settled_at is not None
+                or self.cancelled_at is not None
+            ):
+                raise ValueError('A committed Follow-up operation requires commit evidence only.')
+            if self.result_code not in {
+                None,
+                FollowUpOperationResult.DELIVERED_IN_APP,
+            }:
+                raise ValueError('A committed Follow-up operation may only record in-app delivery.')
+
+        elif self.status is FollowUpOperationStatus.SETTLED:
+            if (
+                self.committed_at is None
+                or self.settled_at is None
+                or self.cancelled_at is not None
+                or self.result_code is None
+            ):
+                raise ValueError(
+                    'A settled Follow-up operation requires commit, settlement and result evidence.'
+                )
+
+        elif self.status is FollowUpOperationStatus.CANCELLED and (
+            self.committed_at is not None
+            or self.settled_at is not None
+            or self.cancelled_at is None
+            or self.result_code
+            not in {
+                FollowUpOperationResult.SUPERSEDED_BY_RESUME,
+                FollowUpOperationResult.EXPIRED_BEFORE_EXECUTION,
+                FollowUpOperationResult.AUTHORITY_WITHDRAWN,
+                FollowUpOperationResult.STALE_REVISION,
+            }
         ):
-            raise ValueError('A reserved operation cannot have a final result or timestamp.')
+            raise ValueError(
+                'A cancelled Follow-up operation requires a pre-commit cancellation result.'
+            )
+
         return self
 
 
-class RetentionOperation(ContractModel):
-    """Restart-safe record for an approved cross-store retention action.
+def assert_follow_up_operation_transition(
+    current: FollowUpOperation,
+    incoming: FollowUpOperation,
+) -> None:
+    """Reject identity rewrites and invalid P17 operation lifecycle jumps."""
 
-    The record tracks execution and reconciliation only; it does not select a
-    retention duration, classification, or deletion policy.
-    """
+    immutable_fields = (
+        'operation_id',
+        'follow_up_id',
+        'claim_id',
+        'sequence',
+        'policy_id',
+        'policy_version',
+        'based_on_claim_revision',
+        'scheduled_at',
+        'source_refs',
+    )
 
-    operation_id: str = Field(pattern=r'^rop_[a-f0-9]{20}$')
-    claim_id: str = Field(min_length=1, max_length=120)
-    policy_id: str = Field(min_length=1, max_length=120)
-    policy_version: int = Field(ge=1)
-    based_on_claim_revision: int = Field(ge=1)
-    revision: int = Field(default=1, ge=1)
-    target_refs: list[str] = Field(min_length=1, max_length=50)
-    status: RetentionOperationStatus
-    hold_reason: str | None = Field(default=None, max_length=500)
-    step_results: dict[str, str] = Field(default_factory=dict, max_length=50)
-    source_refs: list[str] = Field(min_length=1, max_length=20)
-    created_at: datetime
-    updated_at: datetime
+    if any(getattr(current, field) != getattr(incoming, field) for field in immutable_fields):
+        raise ValueError('Follow-up operation immutable execution identity cannot change.')
 
-    @model_validator(mode='after')
-    def validate_retention_operation(self) -> 'RetentionOperation':
-        if self.updated_at < self.created_at:
-            raise ValueError('Retention operation update cannot precede creation.')
-        if self.status is RetentionOperationStatus.HELD and not self.hold_reason:
-            raise ValueError('A held retention operation requires a hold reason.')
-        if self.status is not RetentionOperationStatus.HELD and self.hold_reason is not None:
-            raise ValueError('Only a held operation can have a hold reason.')
-        if len(set(self.target_refs)) != len(self.target_refs):
-            raise ValueError('Retention targets must be unique.')
-        if not set(self.step_results).issubset(self.target_refs):
-            raise ValueError('Retention results must refer to the immutable target set.')
-        if not set(self.step_results.values()).issubset(
-            {'deleted', 'already_absent', 'failed', 'unknown'}
-        ):
-            raise ValueError('Unknown retention step outcome.')
-        if self.status is RetentionOperationStatus.COMPLETED and (
-            set(self.step_results) != set(self.target_refs)
-            or not set(self.step_results.values()).issubset({'deleted', 'already_absent'})
-        ):
-            raise ValueError('Completion requires success evidence for every target.')
-        return self
+    allowed = {
+        FollowUpOperationStatus.SCHEDULED: {
+            FollowUpOperationStatus.COMMITTED,
+            FollowUpOperationStatus.CANCELLED,
+        },
+        FollowUpOperationStatus.COMMITTED: {
+            FollowUpOperationStatus.SETTLED,
+        },
+        FollowUpOperationStatus.SETTLED: set(),
+        FollowUpOperationStatus.CANCELLED: set(),
+    }
+
+    if incoming.status not in allowed[current.status]:
+        raise ValueError(
+            f'Follow-up operation cannot transition from '
+            f'{current.status.value} to {incoming.status.value}.'
+        )
+
+    if current.committed_at is not None and incoming.committed_at != current.committed_at:
+        raise ValueError('Follow-up operation commit evidence cannot be rewritten.')
 
 
 class SessionRecord(ContractModel):
@@ -1960,6 +2093,10 @@ class RequeueClaimRequest(ContractModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class AbandonClaimRequest(ContractModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class ReopenClaimRequest(ContractModel):
     reason: str = Field(min_length=1, max_length=1000)
 
@@ -2070,9 +2207,6 @@ class WorkbenchClaimDetail(ContractModel):
     incident_type: str | None = None
     claim_state: ClaimState
     form: dict[str, StructuredFormField]
-    policyholder: PolicyholderProjection | None = None
-    driver: DriverProjection | None = None
-    witnesses: list[WitnessProjection] = Field(default_factory=list)
     route: str | None = None
     active_session_id: str | None = None
     evidence_summary: EvidenceSummary
@@ -2469,9 +2603,6 @@ class ClaimantClaim(ContractModel):
     workflow_state: WorkflowState
     form: dict[str, StructuredFormField]
     contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
-    policyholder: PolicyholderProjection | None = None
-    driver: DriverProjection | None = None
-    witnesses: list[WitnessProjection] = Field(default_factory=list)
     motor_other_driver: MotorOtherDriverProjection | None = None
     evidence_summary: EvidenceSummary
     payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
@@ -2788,6 +2919,338 @@ class DynamicFormProjection(ContractModel):
 
 
 ClaimantClaim.model_rebuild()
-WorkingClaim.model_rebuild()
 MessageTurnResponse.model_rebuild()
 ContentsItemEvidenceAssociationListResponse.model_rebuild()
+
+
+class RetentionClassification(str, Enum):
+    DELETE = 'delete'
+    ANONYMISE = 'anonymise'
+    RETAIN = 'retain'
+    TOMBSTONE = 'tombstone'
+
+
+class RetentionOperationStatus(str, Enum):
+    RESERVED = 'reserved'
+    HELD = 'held'
+    RECONCILIATION_REQUIRED = 'reconciliation_required'
+    COMPLETED = 'completed'
+
+
+class RetentionTargetKind(str, Enum):
+    OBJECT_BYTES = 'object_bytes'
+    MONGO_RECORD = 'mongo_record'
+    TOMBSTONE = 'tombstone'
+
+
+class RetentionStepStatus(str, Enum):
+    PENDING = 'pending'
+    SATISFIED = 'satisfied'
+    FAILED = 'failed'
+    UNKNOWN = 'unknown'
+
+
+class ObjectDeletionOutcome(str, Enum):
+    DELETED = 'deleted'
+    ALREADY_ABSENT = 'already_absent'
+    FAILED = 'failed'
+    UNKNOWN = 'unknown'
+
+
+class RetentionHoldReason(str, Enum):
+    LEGAL_HOLD = 'legal_hold'
+    DISPUTE = 'dispute'
+    INVESTIGATION = 'investigation'
+    AUTHORISED_STAFF_REVIEW = 'authorised_staff_review'
+
+
+class RetentionHoldRecord(ContractModel):
+    """Source-linked authority that blocks destructive retention work."""
+
+    hold_id: str = Field(min_length=1, max_length=160)
+    claim_id: str = Field(min_length=1, max_length=160)
+    reason: RetentionHoldReason
+    authority_ref: str = Field(min_length=1, max_length=240)
+    source_refs: list[str] = Field(min_length=1, max_length=30)
+    applied_at: datetime
+    released_at: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_hold(self) -> 'RetentionHoldRecord':
+        if self.applied_at.utcoffset() is None:
+            raise ValueError('Retention hold applied_at must be timezone-aware.')
+
+        if self.released_at is not None:
+            if self.released_at.utcoffset() is None:
+                raise ValueError('Retention hold released_at must be timezone-aware.')
+            if self.released_at < self.applied_at:
+                raise ValueError('Retention hold cannot be released before it is applied.')
+
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError('Retention hold source references must be unique.')
+
+        return self
+
+    @property
+    def active(self) -> bool:
+        return self.released_at is None
+
+
+class RetentionCleanupTarget(ContractModel):
+    """One frozen cleanup target selected before destructive execution."""
+
+    target_id: str = Field(min_length=1, max_length=200)
+    kind: RetentionTargetKind
+    record_type: str = Field(min_length=1, max_length=120)
+    record_id: str = Field(min_length=1, max_length=240)
+    classification: RetentionClassification
+    storage_key: str | None = Field(default=None, max_length=1000)
+    source_refs: list[str] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode='after')
+    def validate_target(self) -> 'RetentionCleanupTarget':
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError('Retention cleanup target source references must be unique.')
+
+        if self.kind is RetentionTargetKind.OBJECT_BYTES:
+            if self.classification is not RetentionClassification.DELETE:
+                raise ValueError('Object-byte retention targets must use DELETE.')
+            if self.storage_key is None:
+                raise ValueError('Object-byte retention targets require a storage key.')
+        elif self.storage_key is not None:
+            raise ValueError('Only object-byte targets may carry a storage key.')
+
+        if (
+            self.kind is RetentionTargetKind.TOMBSTONE
+            and self.classification is not RetentionClassification.TOMBSTONE
+        ):
+            raise ValueError('Tombstone targets must use TOMBSTONE classification.')
+
+        return self
+
+
+class RetentionStepEvidence(ContractModel):
+    """Immutable evidence for one execution attempt against one target."""
+
+    evidence_id: str = Field(min_length=1, max_length=200)
+    target_id: str = Field(min_length=1, max_length=200)
+    attempt: int = Field(ge=1)
+    status: RetentionStepStatus
+    object_outcome: ObjectDeletionOutcome | None = None
+    diagnostic_code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+    )
+    source_refs: list[str] = Field(default_factory=list, max_length=30)
+    recorded_at: datetime
+
+    @model_validator(mode='after')
+    def validate_step_evidence(self) -> 'RetentionStepEvidence':
+        if self.recorded_at.utcoffset() is None:
+            raise ValueError('Retention step evidence time must be timezone-aware.')
+
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError('Retention step source references must be unique.')
+
+        if self.object_outcome is not None:
+            expected = {
+                ObjectDeletionOutcome.DELETED: RetentionStepStatus.SATISFIED,
+                ObjectDeletionOutcome.ALREADY_ABSENT: RetentionStepStatus.SATISFIED,
+                ObjectDeletionOutcome.FAILED: RetentionStepStatus.FAILED,
+                ObjectDeletionOutcome.UNKNOWN: RetentionStepStatus.UNKNOWN,
+            }[self.object_outcome]
+
+            if self.status is not expected:
+                raise ValueError('Object deletion outcome and retention step status disagree.')
+
+        if (
+            self.status
+            in {
+                RetentionStepStatus.FAILED,
+                RetentionStepStatus.UNKNOWN,
+            }
+            and self.diagnostic_code is None
+        ):
+            raise ValueError(
+                'Failed or unknown retention evidence requires a safe diagnostic code.'
+            )
+
+        return self
+
+
+class RetentionOperation(ContractModel):
+    """Durable authority for one logical destructive cleanup execution."""
+
+    operation_id: str = Field(min_length=1, max_length=200)
+    claim_id: str = Field(min_length=1, max_length=160)
+
+    # Reference to the existing Claim terminal/recovery authority.  Retention
+    # consumes this fact; it does not replace it.
+    source_terminal_ref: str = Field(min_length=1, max_length=240)
+    source_claim_revision: int = Field(ge=1)
+
+    policy_id: str = Field(min_length=1, max_length=120)
+    policy_version: int = Field(ge=1)
+
+    # CAS coordinate for the RetentionOperation itself.
+    revision: int = Field(default=1, ge=1)
+
+    status: RetentionOperationStatus
+
+    # Once this is committed, claimant resource access remains closed even when
+    # a hold pauses destructive cleanup or cleanup requires reconciliation.
+    access_closed_at: datetime
+
+    targets_frozen_at: datetime | None = None
+    targets: list[RetentionCleanupTarget] = Field(
+        default_factory=list,
+        max_length=500,
+    )
+    step_evidence: list[RetentionStepEvidence] = Field(
+        default_factory=list,
+        max_length=2000,
+    )
+
+    hold_refs: list[str] = Field(default_factory=list, max_length=50)
+    diagnostic_code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+    )
+
+    source_refs: list[str] = Field(min_length=1, max_length=50)
+
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalise_legacy_policy_version(cls, value: Any) -> Any:
+        # Pre-integration documents stored the prototype label ``'v1'``.
+        if isinstance(value, dict) and value.get('policy_version') == 'v1':
+            return {**value, 'policy_version': 1}
+        return value
+
+    @model_validator(mode='after')
+    def validate_operation(self) -> 'RetentionOperation':
+        for name, value in (
+            ('access_closed_at', self.access_closed_at),
+            ('created_at', self.created_at),
+            ('updated_at', self.updated_at),
+        ):
+            if value.utcoffset() is None:
+                raise ValueError(f'Retention operation {name} must be timezone-aware.')
+
+        if self.updated_at < self.created_at:
+            raise ValueError('Retention operation updated_at cannot precede created_at.')
+
+        if self.access_closed_at < self.created_at:
+            raise ValueError('Resource-access closure cannot precede operation creation.')
+
+        if self.targets_frozen_at is not None:
+            if self.targets_frozen_at.utcoffset() is None:
+                raise ValueError('Retention target freeze time must be timezone-aware.')
+            if self.targets_frozen_at < self.created_at:
+                raise ValueError('Retention targets cannot be frozen before creation.')
+
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError('Retention operation source references must be unique.')
+
+        if len(self.hold_refs) != len(set(self.hold_refs)):
+            raise ValueError('Retention operation hold references must be unique.')
+
+        target_ids = [target.target_id for target in self.targets]
+
+        if len(target_ids) != len(set(target_ids)):
+            raise ValueError('Retention cleanup target identities must be unique.')
+
+        target_id_set = set(target_ids)
+        evidence_keys: set[tuple[str, int]] = set()
+        evidence_ids: set[str] = set()
+
+        for evidence in self.step_evidence:
+            if evidence.target_id not in target_id_set:
+                raise ValueError('Retention step evidence references an unknown target.')
+
+            if evidence.evidence_id in evidence_ids:
+                raise ValueError('Retention step evidence identities must be unique.')
+
+            evidence_ids.add(evidence.evidence_id)
+
+            key = (evidence.target_id, evidence.attempt)
+
+            if key in evidence_keys:
+                raise ValueError('A retention target attempt may have only one evidence record.')
+
+            evidence_keys.add(key)
+
+        current = retention_target_statuses(
+            self.targets,
+            self.step_evidence,
+        )
+
+        all_satisfied = (
+            bool(self.targets)
+            and self.targets_frozen_at is not None
+            and all(status is RetentionStepStatus.SATISFIED for status in current.values())
+        )
+
+        needs_reconciliation = any(
+            status
+            in {
+                RetentionStepStatus.FAILED,
+                RetentionStepStatus.UNKNOWN,
+            }
+            for status in current.values()
+        )
+
+        if self.status is RetentionOperationStatus.COMPLETED:
+            if not all_satisfied:
+                raise ValueError(
+                    'Retention cannot complete until every frozen target is satisfied.'
+                )
+            if self.completed_at is None:
+                raise ValueError('Completed retention requires completed_at.')
+        elif self.completed_at is not None:
+            raise ValueError('Only completed retention may carry completed_at.')
+
+        if self.completed_at is not None:
+            if self.completed_at.utcoffset() is None:
+                raise ValueError('Retention completed_at must be timezone-aware.')
+            if self.completed_at < self.created_at:
+                raise ValueError('Retention cannot complete before creation.')
+
+        if (
+            self.status is RetentionOperationStatus.RECONCILIATION_REQUIRED
+            and not needs_reconciliation
+        ):
+            raise ValueError(
+                'Reconciliation-required retention needs failed or unknown current step evidence.'
+            )
+
+        if needs_reconciliation and self.status is RetentionOperationStatus.COMPLETED:
+            raise ValueError('Failed or unknown cleanup cannot be reported as completed.')
+
+        return self
+
+
+def retention_target_statuses(
+    targets: Sequence[RetentionCleanupTarget],
+    evidence: Sequence[RetentionStepEvidence],
+) -> dict[str, RetentionStepStatus]:
+    """Return each target's current status from its latest immutable attempt."""
+
+    current = {target.target_id: RetentionStepStatus.PENDING for target in targets}
+    latest_attempt = {target.target_id: 0 for target in targets}
+
+    for item in evidence:
+        if item.target_id not in current:
+            continue
+
+        if item.attempt > latest_attempt[item.target_id]:
+            latest_attempt[item.target_id] = item.attempt
+            current[item.target_id] = item.status
+
+    return current

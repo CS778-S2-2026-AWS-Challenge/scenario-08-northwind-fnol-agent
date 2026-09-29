@@ -114,7 +114,12 @@ def test_safety_handoff_commits_before_failed_provider_then_silences_new_message
     body = response.json()
     assert body['claim_revision'] == 3
     assert body['agent_message'] is not None
-    assert body['agent_message']['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    expected_recovery_rule = {
+        ModelGatewayErrorCode.TIMEOUT: 'claimant_turn.model_timeout',
+        ModelGatewayErrorCode.MALFORMED_RESPONSE: ('claimant_turn.model_invalid_response'),
+    }[failure]
+
+    assert body['agent_message']['recovery']['rule_id'] == expected_recovery_rule
     assert 'Northwind support has been notified' in body['agent_message']['content']['text']
     assert body['handoff'] is not None
     if 'injured' in text:

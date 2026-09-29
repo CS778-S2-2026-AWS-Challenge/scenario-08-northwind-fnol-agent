@@ -1,8 +1,9 @@
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import mongomock
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.core.auth import Principal
@@ -29,6 +30,11 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.retention import (
+    execute_retention_cleanup,
+    freeze_retention_cleanup_targets,
+    reserve_retention_from_terminal,
+)
 from backend.services.terminal_claims import reopen_claim
 
 
@@ -409,3 +415,94 @@ def test_reopen_persists_terminal_clear_staff_idempotency_and_audit(
     )
     assert len(events) == 1
     assert events[0].source_refs == terminal.source_refs
+
+
+def test_retention_workbench_projection_survives_working_claim_tombstone(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim = _store_terminal_claim(
+        repository,
+        'clm_retention_workbench',
+        TerminalDispositionValue.CLOSED,
+    )
+
+    operation = reserve_retention_from_terminal(
+        repository,
+        claim.claim_id,
+        now=claim.updated_at + timedelta(minutes=1),
+    )
+
+    frozen = freeze_retention_cleanup_targets(
+        repository,
+        operation.operation_id,
+        now=claim.updated_at + timedelta(minutes=2),
+    )
+
+    completed = execute_retention_cleanup(
+        repository,
+        cast(FastAPI, client.app).state.evidence_storage,
+        frozen.operation_id,
+        now=claim.updated_at + timedelta(minutes=3),
+    )
+
+    assert completed.status.value == 'completed'
+
+    assert repository.get_claim_internal(claim.claim_id) is None
+
+    ordinary = client.get(
+        f'/api/v1/workbench/claims/{claim.claim_id}',
+        headers=staff_auth_headers,
+    )
+
+    assert ordinary.status_code == 404
+
+    retention = client.get(
+        f'/api/v1/workbench/claims/{claim.claim_id}/retention',
+        headers=staff_auth_headers,
+    )
+
+    assert retention.status_code == 200
+
+    body = retention.json()
+
+    assert body['claim_id'] == claim.claim_id
+    assert body['operation_status'] == 'completed'
+    assert body['completed_at'] is not None
+    assert body['hold_active'] is False
+    assert body['reconciliation_required'] is False
+
+    states = {
+        (
+            item['record_type'],
+            item['content_state'],
+        )
+        for item in body['resources']
+    }
+
+    assert (
+        'WorkingClaim',
+        'anonymised',
+    ) in states
+
+    assert (
+        'SessionRecord',
+        'anonymised',
+    ) in states
+
+    assert (
+        'RetentionOperation',
+        'retained_for_audit',
+    ) in states
+
+    serialised = retention.text
+
+    for forbidden in (
+        'storage_key',
+        'diagnostic_code',
+        'policy_id',
+        'policy_version',
+        'source_refs',
+    ):
+        assert forbidden not in serialised

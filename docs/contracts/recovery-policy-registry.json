@@ -1,0 +1,2353 @@
+{
+  "policies": [
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but I could not respond just now. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "legacy_model_dependency_failure"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "claimant_turn.model_dependency_failure",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_dependency_failure",
+      "staff_projection": null,
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but this step is currently unavailable.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "authentication",
+        "configuration",
+        "evidence_unavailable",
+        "unsupported_capability"
+      ],
+      "permitted_events": [
+        "authentication",
+        "configuration",
+        "evidence_unavailable",
+        "unsupported_capability"
+      ],
+      "policy_id": "claimant_turn.model_dependency_terminal",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_dependency_terminal",
+      "staff_projection": "The model dependency cannot safely continue without system remediation.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but I could not produce a safe response. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "incomplete_response",
+        "malformed_response",
+        "refused_response"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "recovery.model_malformed_response",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_invalid_response",
+      "staff_projection": "The model result was incomplete, refused or malformed and no proposed fact was accepted.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but the service is temporarily unavailable. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "provider"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "claimant_turn.model_provider_retryable",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": true,
+      "rule_id": "claimant_turn.model_provider_retryable",
+      "staff_projection": "A retryable model-provider failure occurred before Claim mutation.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but this step is currently unavailable.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "provider"
+      ],
+      "permitted_events": [
+        "provider"
+      ],
+      "policy_id": "claimant_turn.model_provider_terminal",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": false,
+      "rule_id": "claimant_turn.model_provider_terminal",
+      "staff_projection": "The provider returned a non-retryable model failure.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but the service is temporarily busy. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "rate_limit"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "claimant_turn.model_rate_limited",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_rate_limited",
+      "staff_projection": "The model provider rate-limited this turn before Claim mutation.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but I could not respond just now. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "timeout"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "recovery.model_timeout",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_timeout",
+      "staff_projection": "The model timed out before an approved Claim mutation was committed.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "external_task"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "The request was not submitted. You can retry the same request safely.",
+      "continuation": "runtime.wait_for_user",
+      "deadline_seconds": null,
+      "decision_code": "retry_same_operation",
+      "delivery_states": [
+        "not_submitted"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "retryable_failure"
+      ],
+      "permitted_events": [
+        "claimant_retry",
+        "staff_retry"
+      ],
+      "policy_id": "recovery.external_not_submitted_retryable",
+      "preservation": "external_operation_and_delivery_evidence",
+      "required_actions": [
+        "external.retry_same_operation",
+        "audit.append"
+      ],
+      "requires_operation_identity": true,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "external_retry",
+      "resume_triggers": [
+        "claimant_retry",
+        "staff_retry"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "same_operation",
+      "retryable": null,
+      "rule_id": "external.not_submitted_retryable",
+      "staff_projection": "Retry is permitted only under the existing external operation identity.",
+      "trigger_source": "external",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.unknown_outcome",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "external_task",
+        "work_item"
+      ],
+      "blocking": null,
+      "blocks_action": "external.retry",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "The provider may already have received the request. Northwind is checking the existing request before anything is sent again.",
+      "continuation": "runtime.wait_for_external",
+      "deadline_seconds": null,
+      "decision_code": "reconcile_existing_operation",
+      "delivery_states": [
+        "submitted",
+        "unknown"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unknown_outcome"
+      ],
+      "permitted_events": [
+        "provider_reconciled",
+        "provider_result",
+        "scheduled_reconciliation",
+        "staff_action",
+        "staff_reconciled"
+      ],
+      "policy_id": "recovery.external_submitted_unknown",
+      "preservation": "external_operation_and_delivery_evidence",
+      "required_actions": [
+        "external.reconcile",
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": true,
+      "requires_reconciliation": true,
+      "responsibility": "staff",
+      "resume_entrypoint": "external_reconcile",
+      "resume_triggers": [
+        "provider_reconciled",
+        "provider_result",
+        "scheduled_reconciliation",
+        "staff_action",
+        "staff_reconciled"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "reconcile_before_retry",
+      "retryable": null,
+      "rule_id": "external.submitted_unknown",
+      "staff_projection": "Reconcile the existing external operation. Blind resubmission is prohibited.",
+      "trigger_source": "external",
+      "version": "v1",
+      "work_item_kind": "external"
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "external_task",
+        "work_item"
+      ],
+      "blocking": null,
+      "blocks_action": "external.retry",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "The external service could not complete this request. Northwind needs to review the next step.",
+      "continuation": "runtime.pause_for_review",
+      "deadline_seconds": null,
+      "decision_code": "pause_for_review",
+      "delivery_states": [
+        "not_submitted",
+        "submitted",
+        "unknown"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "terminal_failure"
+      ],
+      "permitted_events": [
+        "staff_decision"
+      ],
+      "policy_id": "recovery.external_terminal_failure",
+      "preservation": "external_operation_and_delivery_evidence",
+      "required_actions": [
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": true,
+      "requires_reconciliation": false,
+      "responsibility": "staff",
+      "resume_entrypoint": "staff_review",
+      "resume_triggers": [
+        "staff_decision"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "external.terminal_failure",
+      "staff_projection": "The external operation ended terminally and requires authorised review.",
+      "trigger_source": "external",
+      "version": "v1",
+      "work_item_kind": "external"
+    },
+    {
+      "audit_event_type": "action.completed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Automatic follow-up has stopped, but the Claim may still be resumed.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "block_follow_up",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "attempt_limit_reached"
+      ],
+      "permitted_events": [
+        "claimant_resumed",
+        "staff_abandoned"
+      ],
+      "policy_id": "recovery.attempt_exhaustion",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "follow_up.block",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "start_session",
+      "resume_triggers": [
+        "claimant_resumed",
+        "staff_abandoned"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.attempt_exhaustion",
+      "staff_projection": "Automatic contact attempts are exhausted; the Claim is not abandoned.",
+      "trigger_source": "timer",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "permission.rejected",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Automatic follow-up contact is no longer authorised.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "block_follow_up",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "contact_authority_withdrawn",
+        "contact_withdrawn"
+      ],
+      "permitted_events": [
+        "contact_authority_withdrawn",
+        "contact_withdrawn"
+      ],
+      "policy_id": "recovery.contact_withdrawal",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "follow_up.block",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "start_session",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.contact_withdrawal",
+      "staff_projection": "The recovery obligation remains open but automatic contact is blocked.",
+      "trigger_source": "human",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.completed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Your incomplete Claim can still be resumed.",
+      "continuation": "runtime.wait_for_user",
+      "deadline_seconds": 604800,
+      "decision_code": "execute_follow_up",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 3,
+      "outcome_codes": [
+        "follow_up_due"
+      ],
+      "permitted_events": [
+        "claimant_resume",
+        "contact_withdrawn",
+        "follow_up_committed_no_response",
+        "follow_up_due",
+        "recovery_deadline"
+      ],
+      "policy_id": "incomplete_claim_follow_up",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "follow_up.execute",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "follow_up_worker",
+      "resume_triggers": [
+        "claimant_resumed",
+        "next_policy_due"
+      ],
+      "retry_interval_seconds": 86400,
+      "retry_mode": "scheduled_policy",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.due",
+      "staff_projection": "The published P17 follow-up obligation is due.",
+      "trigger_source": "timer",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.completed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "terminal_transition_via_existing_contract",
+      "claimant_projection": "This recovery window has expired.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "expire_recovery",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "recovery_expired"
+      ],
+      "permitted_events": [
+        "claim_reopened"
+      ],
+      "policy_id": "recovery.incomplete_claim_expiry",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "claim.expire",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "claim.reopen",
+      "resume_triggers": [
+        "claim_reopened"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.recovery_expiry",
+      "staff_projection": "Recovery expiry must use the existing terminal-disposition contract.",
+      "trigger_source": "timer",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "RETENTION_ELIGIBLE",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This Claim is no longer available through the previous recovery session.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "retention_eligible",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "eligible"
+      ],
+      "permitted_events": [
+        "retention_execute",
+        "retention_hold"
+      ],
+      "policy_id": "retention.eligible",
+      "preservation": "source_expiry_terminal_ref_policy_coordinate_claim_revision_and_hold_evidence",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "retention_worker",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "retention.eligible",
+      "staff_projection": "Retention is eligible only from the authoritative expiry/terminal source.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "RETENTION_HELD",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This Claim is not available through the previous recovery session.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "retention_hold",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "hold"
+      ],
+      "permitted_events": [
+        "retention_hold_released"
+      ],
+      "policy_id": "retention.hold",
+      "preservation": "retention_hold_authority_reason_source_and_release_condition",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "staff",
+      "resume_entrypoint": "retention_worker",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "retention.hold",
+      "staff_projection": "A source-linked retention hold blocks destructive cleanup.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "RETENTION_ACCESS_DENIED",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This previous recovery session is no longer available.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "deny_access",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "old_session_denied"
+      ],
+      "permitted_events": [
+        "access_denied"
+      ],
+      "policy_id": "retention.old_session_denied",
+      "preservation": "retention_access_closure_tombstone_and_minimum_audit_evidence",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "none",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "retention.old_session_denied",
+      "staff_projection": "Retention access closure denied the stale session or recovery credential.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "RETENTION_RECONCILIATION_REQUIRED",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This Claim is not available through the previous recovery session.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "retention_reconcile",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "failed",
+        "unknown"
+      ],
+      "permitted_events": [
+        "scheduled_reconciliation",
+        "staff_action"
+      ],
+      "policy_id": "retention.reconciliation_required",
+      "preservation": "retention_operation_targets_completed_steps_failed_steps_and_diagnostics",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": true,
+      "responsibility": "system",
+      "resume_entrypoint": "retention_reconcile",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "reconcile_before_retry",
+      "retryable": null,
+      "rule_id": "retention.reconciliation_required",
+      "staff_projection": "Retention is incomplete; reconcile and retry only unfinished steps.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "action.prepared",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "handoff"
+      ],
+      "blocking": null,
+      "blocks_action": "high_impact_action",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This step needs authorised staff review before it can continue.",
+      "continuation": "runtime.pause_for_review",
+      "deadline_seconds": null,
+      "decision_code": "pause_for_review",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "high_impact_review_required"
+      ],
+      "permitted_events": [
+        "staff_approved",
+        "staff_rejected"
+      ],
+      "policy_id": "recovery.high_impact_review_required",
+      "preservation": "review_request_and_evidence",
+      "required_actions": [
+        "handoff.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "staff",
+      "resume_entrypoint": "staff_review",
+      "resume_triggers": [
+        "staff_approved",
+        "staff_rejected"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "runtime.high_impact_review_required",
+      "staff_projection": "Review the proposed high-impact action and its supporting evidence.",
+      "trigger_source": "human",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "work_item"
+      ],
+      "blocking": true,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Required supporting information is unavailable, so this step cannot safely continue yet.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "policy_id": "recovery.retrieval_unavailable",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "runtime.retrieval_unavailable.blocking",
+      "staff_projection": "A blocking retrieval dependency requires recovery before continuation.",
+      "trigger_source": "retrieval",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim"
+      ],
+      "blocking": false,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Some supporting information is unavailable, but the safe parts of your Claim can continue.",
+      "continuation": "runtime.continue",
+      "deadline_seconds": null,
+      "decision_code": "continue_with_limitation",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "unavailable"
+      ],
+      "policy_id": "runtime.retrieval_unavailable.non_blocking",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "runtime.retrieval_unavailable.non_blocking",
+      "staff_projection": "A non-blocking retrieval dependency is unavailable.",
+      "trigger_source": "retrieval",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "reload_authoritative_state",
+      "claimant_projection": "Your Claim changed while this step was being processed. The latest state must be reloaded.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "reload_authoritative_state",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "revision_conflict"
+      ],
+      "permitted_events": [
+        "authoritative_state_reloaded"
+      ],
+      "policy_id": "recovery.revision_conflict",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.reload",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [
+        "authoritative_state_reloaded"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "reload_authoritative",
+      "retryable": null,
+      "rule_id": "runtime.revision_conflict",
+      "staff_projection": "Discard the stale proposal and recompute from the current authoritative revision.",
+      "trigger_source": "repository",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "work_item"
+      ],
+      "blocking": true,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "A required capability is unavailable, so this step cannot safely continue yet.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "policy_id": "recovery.tool_unavailable",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "runtime.tool_unavailable.blocking",
+      "staff_projection": "A blocking tool dependency requires recovery before continuation.",
+      "trigger_source": "tool",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim"
+      ],
+      "blocking": false,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "One supporting capability is unavailable, but the safe parts of your Claim can continue.",
+      "continuation": "runtime.continue",
+      "deadline_seconds": null,
+      "decision_code": "continue_with_limitation",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "unavailable"
+      ],
+      "policy_id": "runtime.tool_unavailable.non_blocking",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "runtime.tool_unavailable.non_blocking",
+      "staff_projection": "A non-blocking tool dependency is unavailable.",
+      "trigger_source": "tool",
+      "version": "v1",
+      "work_item_kind": null
+    }
+  ],
+  "registry_version": "2026-09-28.1",
+  "rules": [
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but I could not respond just now. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "legacy_model_dependency_failure"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "claimant_turn.model_dependency_failure",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_dependency_failure",
+      "staff_projection": null,
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but this step is currently unavailable.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "authentication",
+        "configuration",
+        "evidence_unavailable",
+        "unsupported_capability"
+      ],
+      "permitted_events": [
+        "authentication",
+        "configuration",
+        "evidence_unavailable",
+        "unsupported_capability"
+      ],
+      "policy_id": "claimant_turn.model_dependency_terminal",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_dependency_terminal",
+      "staff_projection": "The model dependency cannot safely continue without system remediation.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but I could not produce a safe response. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "incomplete_response",
+        "malformed_response",
+        "refused_response"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "recovery.model_malformed_response",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_invalid_response",
+      "staff_projection": "The model result was incomplete, refused or malformed and no proposed fact was accepted.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but the service is temporarily unavailable. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "provider"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "claimant_turn.model_provider_retryable",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": true,
+      "rule_id": "claimant_turn.model_provider_retryable",
+      "staff_projection": "A retryable model-provider failure occurred before Claim mutation.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but this step is currently unavailable.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "provider"
+      ],
+      "permitted_events": [
+        "provider"
+      ],
+      "policy_id": "claimant_turn.model_provider_terminal",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": false,
+      "rule_id": "claimant_turn.model_provider_terminal",
+      "staff_projection": "The provider returned a non-retryable model failure.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but the service is temporarily busy. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "rate_limit"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "claimant_turn.model_rate_limited",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_rate_limited",
+      "staff_projection": "The model provider rate-limited this turn before Claim mutation.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "AGENT_TURN_RECOVERY",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "message"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "revision_unchanged_no_unapproved_write",
+      "claimant_projection": "Your message is saved, but I could not respond just now. You can try again.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "timeout"
+      ],
+      "permitted_events": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "policy_id": "recovery.model_timeout",
+      "preservation": "inbound_message_and_checkpoint",
+      "required_actions": [
+        "message.preserve_checkpoint",
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "submit_message",
+      "resume_triggers": [
+        "claimant_reply",
+        "explicit_retry_request"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "claimant_initiated",
+      "retryable": null,
+      "rule_id": "claimant_turn.model_timeout",
+      "staff_projection": "The model timed out before an approved Claim mutation was committed.",
+      "trigger_source": "model",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "external_task"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "The request was not submitted. You can retry the same request safely.",
+      "continuation": "runtime.wait_for_user",
+      "deadline_seconds": null,
+      "decision_code": "retry_same_operation",
+      "delivery_states": [
+        "not_submitted"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "retryable_failure"
+      ],
+      "permitted_events": [
+        "claimant_retry",
+        "staff_retry"
+      ],
+      "policy_id": "recovery.external_not_submitted_retryable",
+      "preservation": "external_operation_and_delivery_evidence",
+      "required_actions": [
+        "external.retry_same_operation",
+        "audit.append"
+      ],
+      "requires_operation_identity": true,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "external_retry",
+      "resume_triggers": [
+        "claimant_retry",
+        "staff_retry"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "same_operation",
+      "retryable": null,
+      "rule_id": "external.not_submitted_retryable",
+      "staff_projection": "Retry is permitted only under the existing external operation identity.",
+      "trigger_source": "external",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.unknown_outcome",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "external_task",
+        "work_item"
+      ],
+      "blocking": null,
+      "blocks_action": "external.retry",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "The provider may already have received the request. Northwind is checking the existing request before anything is sent again.",
+      "continuation": "runtime.wait_for_external",
+      "deadline_seconds": null,
+      "decision_code": "reconcile_existing_operation",
+      "delivery_states": [
+        "submitted",
+        "unknown"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unknown_outcome"
+      ],
+      "permitted_events": [
+        "provider_reconciled",
+        "provider_result",
+        "scheduled_reconciliation",
+        "staff_action",
+        "staff_reconciled"
+      ],
+      "policy_id": "recovery.external_submitted_unknown",
+      "preservation": "external_operation_and_delivery_evidence",
+      "required_actions": [
+        "external.reconcile",
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": true,
+      "requires_reconciliation": true,
+      "responsibility": "staff",
+      "resume_entrypoint": "external_reconcile",
+      "resume_triggers": [
+        "provider_reconciled",
+        "provider_result",
+        "scheduled_reconciliation",
+        "staff_action",
+        "staff_reconciled"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "reconcile_before_retry",
+      "retryable": null,
+      "rule_id": "external.submitted_unknown",
+      "staff_projection": "Reconcile the existing external operation. Blind resubmission is prohibited.",
+      "trigger_source": "external",
+      "version": "v1",
+      "work_item_kind": "external"
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "external_task",
+        "work_item"
+      ],
+      "blocking": null,
+      "blocks_action": "external.retry",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "The external service could not complete this request. Northwind needs to review the next step.",
+      "continuation": "runtime.pause_for_review",
+      "deadline_seconds": null,
+      "decision_code": "pause_for_review",
+      "delivery_states": [
+        "not_submitted",
+        "submitted",
+        "unknown"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "terminal_failure"
+      ],
+      "permitted_events": [
+        "staff_decision"
+      ],
+      "policy_id": "recovery.external_terminal_failure",
+      "preservation": "external_operation_and_delivery_evidence",
+      "required_actions": [
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": true,
+      "requires_reconciliation": false,
+      "responsibility": "staff",
+      "resume_entrypoint": "staff_review",
+      "resume_triggers": [
+        "staff_decision"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "external.terminal_failure",
+      "staff_projection": "The external operation ended terminally and requires authorised review.",
+      "trigger_source": "external",
+      "version": "v1",
+      "work_item_kind": "external"
+    },
+    {
+      "audit_event_type": "action.completed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Automatic follow-up has stopped, but the Claim may still be resumed.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "block_follow_up",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "attempt_limit_reached"
+      ],
+      "permitted_events": [
+        "claimant_resumed",
+        "staff_abandoned"
+      ],
+      "policy_id": "recovery.attempt_exhaustion",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "follow_up.block",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "start_session",
+      "resume_triggers": [
+        "claimant_resumed",
+        "staff_abandoned"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.attempt_exhaustion",
+      "staff_projection": "Automatic contact attempts are exhausted; the Claim is not abandoned.",
+      "trigger_source": "timer",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "permission.rejected",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Automatic follow-up contact is no longer authorised.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "block_follow_up",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "contact_authority_withdrawn",
+        "contact_withdrawn"
+      ],
+      "permitted_events": [
+        "contact_authority_withdrawn",
+        "contact_withdrawn"
+      ],
+      "policy_id": "recovery.contact_withdrawal",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "follow_up.block",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "claimant",
+      "resume_entrypoint": "start_session",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.contact_withdrawal",
+      "staff_projection": "The recovery obligation remains open but automatic contact is blocked.",
+      "trigger_source": "human",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.completed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Your incomplete Claim can still be resumed.",
+      "continuation": "runtime.wait_for_user",
+      "deadline_seconds": 604800,
+      "decision_code": "execute_follow_up",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 3,
+      "outcome_codes": [
+        "follow_up_due"
+      ],
+      "permitted_events": [
+        "claimant_resume",
+        "contact_withdrawn",
+        "follow_up_committed_no_response",
+        "follow_up_due",
+        "recovery_deadline"
+      ],
+      "policy_id": "incomplete_claim_follow_up",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "follow_up.execute",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "follow_up_worker",
+      "resume_triggers": [
+        "claimant_resumed",
+        "next_policy_due"
+      ],
+      "retry_interval_seconds": 86400,
+      "retry_mode": "scheduled_policy",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.due",
+      "staff_projection": "The published P17 follow-up obligation is due.",
+      "trigger_source": "timer",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.completed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "follow_up",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "terminal_transition_via_existing_contract",
+      "claimant_projection": "This recovery window has expired.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "expire_recovery",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "recovery_expired"
+      ],
+      "permitted_events": [
+        "claim_reopened"
+      ],
+      "policy_id": "recovery.incomplete_claim_expiry",
+      "preservation": "follow_up_obligation_and_operation_history",
+      "required_actions": [
+        "claim.expire",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "claim.reopen",
+      "resume_triggers": [
+        "claim_reopened"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "incomplete_claim_follow_up.recovery_expiry",
+      "staff_projection": "Recovery expiry must use the existing terminal-disposition contract.",
+      "trigger_source": "timer",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "RETENTION_ELIGIBLE",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This Claim is no longer available through the previous recovery session.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "retention_eligible",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "eligible"
+      ],
+      "permitted_events": [
+        "retention_execute",
+        "retention_hold"
+      ],
+      "policy_id": "retention.eligible",
+      "preservation": "source_expiry_terminal_ref_policy_coordinate_claim_revision_and_hold_evidence",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "retention_worker",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "retention.eligible",
+      "staff_projection": "Retention is eligible only from the authoritative expiry/terminal source.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "RETENTION_HELD",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This Claim is not available through the previous recovery session.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "retention_hold",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "hold"
+      ],
+      "permitted_events": [
+        "retention_hold_released"
+      ],
+      "policy_id": "retention.hold",
+      "preservation": "retention_hold_authority_reason_source_and_release_condition",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "staff",
+      "resume_entrypoint": "retention_worker",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "retention.hold",
+      "staff_projection": "A source-linked retention hold blocks destructive cleanup.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "RETENTION_ACCESS_DENIED",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This previous recovery session is no longer available.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "deny_access",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "old_session_denied"
+      ],
+      "permitted_events": [
+        "access_denied"
+      ],
+      "policy_id": "retention.old_session_denied",
+      "preservation": "retention_access_closure_tombstone_and_minimum_audit_evidence",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "none",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "retention.old_session_denied",
+      "staff_projection": "Retention access closure denied the stale session or recovery credential.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "RETENTION_RECONCILIATION_REQUIRED",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "retention_operation",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This Claim is not available through the previous recovery session.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "retention_reconcile",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "failed",
+        "unknown"
+      ],
+      "permitted_events": [
+        "scheduled_reconciliation",
+        "staff_action"
+      ],
+      "policy_id": "retention.reconciliation_required",
+      "preservation": "retention_operation_targets_completed_steps_failed_steps_and_diagnostics",
+      "required_actions": [
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": true,
+      "responsibility": "system",
+      "resume_entrypoint": "retention_reconcile",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "reconcile_before_retry",
+      "retryable": null,
+      "rule_id": "retention.reconciliation_required",
+      "staff_projection": "Retention is incomplete; reconcile and retry only unfinished steps.",
+      "trigger_source": "retention",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "action.prepared",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "handoff"
+      ],
+      "blocking": null,
+      "blocks_action": "high_impact_action",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "This step needs authorised staff review before it can continue.",
+      "continuation": "runtime.pause_for_review",
+      "deadline_seconds": null,
+      "decision_code": "pause_for_review",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "high_impact_review_required"
+      ],
+      "permitted_events": [
+        "staff_approved",
+        "staff_rejected"
+      ],
+      "policy_id": "recovery.high_impact_review_required",
+      "preservation": "review_request_and_evidence",
+      "required_actions": [
+        "handoff.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "staff",
+      "resume_entrypoint": "staff_review",
+      "resume_triggers": [
+        "staff_approved",
+        "staff_rejected"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "runtime.high_impact_review_required",
+      "staff_projection": "Review the proposed high-impact action and its supporting evidence.",
+      "trigger_source": "human",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "work_item"
+      ],
+      "blocking": true,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Required supporting information is unavailable, so this step cannot safely continue yet.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "policy_id": "recovery.retrieval_unavailable",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "runtime.retrieval_unavailable.blocking",
+      "staff_projection": "A blocking retrieval dependency requires recovery before continuation.",
+      "trigger_source": "retrieval",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim"
+      ],
+      "blocking": false,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "Some supporting information is unavailable, but the safe parts of your Claim can continue.",
+      "continuation": "runtime.continue",
+      "deadline_seconds": null,
+      "decision_code": "continue_with_limitation",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "unavailable"
+      ],
+      "policy_id": "runtime.retrieval_unavailable.non_blocking",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "runtime.retrieval_unavailable.non_blocking",
+      "staff_projection": "A non-blocking retrieval dependency is unavailable.",
+      "trigger_source": "retrieval",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "session"
+      ],
+      "blocking": null,
+      "blocks_action": null,
+      "claim_effect": "reload_authoritative_state",
+      "claimant_projection": "Your Claim changed while this step was being processed. The latest state must be reloaded.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "reload_authoritative_state",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "revision_conflict"
+      ],
+      "permitted_events": [
+        "authoritative_state_reloaded"
+      ],
+      "policy_id": "recovery.revision_conflict",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.reload",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [
+        "authoritative_state_reloaded"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "reload_authoritative",
+      "retryable": null,
+      "rule_id": "runtime.revision_conflict",
+      "staff_projection": "Discard the stale proposal and recompute from the current authoritative revision.",
+      "trigger_source": "repository",
+      "version": "v1",
+      "work_item_kind": null
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim",
+        "work_item"
+      ],
+      "blocking": true,
+      "blocks_action": "runtime.continue",
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "A required capability is unavailable, so this step cannot safely continue yet.",
+      "continuation": "runtime.fail_safe",
+      "deadline_seconds": null,
+      "decision_code": "fail_safe",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "policy_id": "recovery.tool_unavailable",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "work_item.ensure",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [
+        "staff_retry",
+        "system_recovered"
+      ],
+      "retry_interval_seconds": null,
+      "retry_mode": "staff_authorised",
+      "retryable": null,
+      "rule_id": "runtime.tool_unavailable.blocking",
+      "staff_projection": "A blocking tool dependency requires recovery before continuation.",
+      "trigger_source": "tool",
+      "version": "v1",
+      "work_item_kind": "system"
+    },
+    {
+      "audit_event_type": "action.failed",
+      "authoritative_records": [
+        "audit",
+        "claim"
+      ],
+      "blocking": false,
+      "blocks_action": null,
+      "claim_effect": "existing_authority_only",
+      "claimant_projection": "One supporting capability is unavailable, but the safe parts of your Claim can continue.",
+      "continuation": "runtime.continue",
+      "deadline_seconds": null,
+      "decision_code": "continue_with_limitation",
+      "delivery_states": [
+        "not_applicable"
+      ],
+      "handoff_required": false,
+      "max_auto_retry": 0,
+      "outcome_codes": [
+        "unavailable"
+      ],
+      "permitted_events": [
+        "unavailable"
+      ],
+      "policy_id": "runtime.tool_unavailable.non_blocking",
+      "preservation": "authoritative_records_only",
+      "required_actions": [
+        "claim.preserve_revision",
+        "audit.append"
+      ],
+      "requires_operation_identity": false,
+      "requires_reconciliation": false,
+      "responsibility": "system",
+      "resume_entrypoint": "reload_authoritative_state",
+      "resume_triggers": [],
+      "retry_interval_seconds": null,
+      "retry_mode": "none",
+      "retryable": null,
+      "rule_id": "runtime.tool_unavailable.non_blocking",
+      "staff_projection": "A non-blocking tool dependency is unavailable.",
+      "trigger_source": "tool",
+      "version": "v1",
+      "work_item_kind": null
+    }
+  ]
+}

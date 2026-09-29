@@ -4609,3 +4609,31 @@ claimant realtime publication. The resulting projection exposes `claimant.create
 Existing exact replay and accepted-result recovery execute before the new Issue #928 gate.
 Before any new provider operation, current payout/contact authority and a current
 revision-bound agreement acceptance are required.
+
+### Complete P17 recovery and retention projection (#1076)
+
+The existing pause/resume routes retain their ownership, Idempotency-Key and
+If-Match requirements. Pause stores an absolute recovery deadline from the source
+interruption. Resume continues the same WorkingClaim and atomically resolves the
+FollowUp and reconciles its existing operation; no retry/recovery endpoint or
+second Claim is introduced. Attempt exhaustion stops contact without terminal
+abandonment. Expiry wins at deadline equality and uses the existing terminal
+disposition contract. Claimant and Workbench incomplete projections derive their
+deadline and attempt evidence from these authoritative records.
+
+`GET /api/v1/workbench/claims/{claim_id}/retention` requires the `workbench:read`
+capability and returns the typed StaffRetentionProjection: operation status, closure,
+holds, derived record-content state and reconciliation evidence. It grants no
+cleanup command and exposes no claimant permission to reopen retained resources.
+
+`POST /api/v1/workbench/claims/{claim_id}/abandon` requires the `workbench:write`
+capability at both the route and the application-service boundary. A read-only
+staff principal receives `403 ACCESS_DENIED` and no Claim, Follow-up, or audit
+state changes.
+
+Once retention reserves access closure, old Session, Claim/evidence reads and
+claimant idempotent retries use the existing concealed RESOURCE_NOT_FOUND
+response. A historical success response must not bypass current closure.
+Staff/internal evidence follows existing staff authorization and minimum
+tombstone/audit preservation. Object deletion and DB cleanup failures remain
+explicitly incomplete; an unknown result is never projected as completed.

@@ -911,6 +911,9 @@ def _incomplete_context(
         resume_point=recovery.resume_point,
         follow_up_due_at=follow_up.due_at,
         follow_up_status=follow_up.status.value,
+        follow_up_reason=(
+            follow_up.reason_code.value if follow_up.reason_code is not None else None
+        ),
         follow_up_attempts=follow_up.attempt_count,
         expires_at=follow_up.deadline_at,
     )
@@ -1089,6 +1092,7 @@ def _registered_action(
 def _allowed_actions(
     claim: WorkingClaim,
     ownership: WorkbenchOwnershipProjection,
+    has_incomplete_recovery: bool,
     active_handoffs: Sequence[HandoffRecord],
     staff_actions: Sequence[StaffActionRecord],
     risk_signals: Sequence[WorkbenchRiskSignal],
@@ -1136,6 +1140,22 @@ def _allowed_actions(
             )
         ]
     actions: list[WorkbenchAllowedAction] = []
+
+    if (
+        has_incomplete_recovery
+        and claim.terminal_disposition is None
+        and ownership.current_staff_access is CurrentStaffAccess.PRIMARY
+    ):
+        actions.append(
+            _registered_action(
+                'claim.abandon',
+                claim.claim_id,
+                claim.revision,
+                source_refs=[claim.claim_id],
+                result_state='pending_confirmation',
+            )
+        )
+
     for task, result, attention_type, review_action in external_attention:
         other_owner = (
             ownership.primary_assignee is not None
@@ -1783,9 +1803,11 @@ def _build_projection(
         external_limitation,
     )
     current_work = _current_work_item(active_handoffs, actions)
+    incomplete_context = _incomplete_context(repository, claim, sessions)
     allowed_actions = _allowed_actions(
         claim,
         ownership,
+        incomplete_context is not None,
         active_handoffs,
         actions,
         projected_risk_signals,
@@ -1803,7 +1825,6 @@ def _build_projection(
     )
     claimant_messages = [item for item in messages if item.actor.value == 'claimant']
     lifecycle = _lifecycle(claim, active_handoffs, pending_evidence)
-    incomplete_context = _incomplete_context(repository, claim, sessions)
     work_summary = WorkbenchWorkSummary(
         queue_key=_queue_key(
             claim,
