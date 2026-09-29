@@ -2275,8 +2275,9 @@ describe('claimant intake projection', () => {
       name: "Let's get your claim started",
     })).toBeVisible()
     expect(within(startIntro).queryByText('Ready to start')).not.toBeInTheDocument()
-    expect(within(container.querySelector('.conversation-heading'))
-      .getByText('Ready to start')).toBeVisible()
+    const emptyHeading = container.querySelector('.conversation-heading')
+    expect(emptyHeading).toHaveClass('is-empty')
+    expect(within(emptyHeading).getByText('Ready to start')).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'New conversation' })).not.toBeInTheDocument()
     expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()

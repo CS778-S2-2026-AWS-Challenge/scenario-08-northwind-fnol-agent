@@ -4156,7 +4156,7 @@ function App() {
                 )
               )}
             </div>
-            <div className="conversation-heading">
+            <div className={`conversation-heading ${claim ? '' : 'is-empty'}`}>
               {claim && (
                 <div className="conversation-heading-main">
                   <div className="claim-heading-identity">
