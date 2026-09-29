@@ -24,3 +24,37 @@
 .claim-review-section .field-value {
   overflow-wrap: anywhere;
 }
+
+.claim-summary-empty {
+  display: grid;
+  grid-template-columns: var(--space-8) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.claim-summary-empty-icon {
+  width: var(--space-6);
+  height: var(--space-6);
+  margin-top: var(--space-1);
+  fill: none;
+  stroke: var(--color-accent-strong);
+  stroke-width: calc(var(--space-1) / 2);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.claim-summary-empty h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-heading);
+}
+
+.claim-summary-empty p {
+  margin: 0;
+  color: var(--claimant-workspace-supporting-text);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}

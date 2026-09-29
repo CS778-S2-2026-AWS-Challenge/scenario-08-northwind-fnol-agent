@@ -1246,7 +1246,7 @@ describe('claimant intake projection', () => {
     messageList.scrollTop = 0
     fireEvent.scroll(messageList)
 
-    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'It happened at 8pm.')
+    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'It happened at 8pm.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await screen.findByText('Thank you. I have recorded the incident time.')).toBeVisible()
@@ -1784,13 +1784,13 @@ describe('claimant intake projection', () => {
     expect(api.startClaimSession).not.toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
     expect(screen.getByText('Ready to start')).toBeVisible()
-    expect(screen.getByPlaceholderText('Write the details you know...')).toHaveValue('')
+    expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Start claim' })).not.toBeInTheDocument()
     expect(screen.queryByText('clm_ui_second')).not.toBeInTheDocument()
     expect(globalThis.location.pathname).toBe('/claims/new')
 
     await user.type(
-      screen.getByPlaceholderText('Write the details you know...'),
+      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
       'A second incident happened today.',
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -1956,7 +1956,7 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
     await user.type(
-      screen.getByPlaceholderText('Write the details you know...'),
+      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
       'One more detail after returning.',
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2018,7 +2018,7 @@ describe('claimant intake projection', () => {
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
-    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'Retry this detail safely.')
+    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'Retry this detail safely.')
 
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Reconciliation unavailable.')
@@ -2083,7 +2083,7 @@ describe('claimant intake projection', () => {
     }
 
     await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
-    await user.type(screen.getByPlaceholderText('Write the details you know...'), pendingText)
+    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), pendingText)
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(responseIsLost ? 2 : 1))
 
@@ -2208,8 +2208,46 @@ describe('claimant intake projection', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
-    expect(screen.getByPlaceholderText('Write the details you know...')).toBeVisible()
+    expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'Start your insurance claim' })).not.toBeInTheDocument()
+  })
+
+  it('guides a new conversation and fills the composer without sending', async () => {
+    const user = userEvent.setup()
+    globalThis.history.replaceState({}, '', '/claims/new')
+
+    const { container } = render(<App />)
+
+    expect(screen.getByRole('heading', { name: "Let's get your claim started" })).toBeVisible()
+    expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()
+    expect(screen.getByText(/Your information stays private/)).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Your summary will build as you chat' })).toBeVisible()
+    expect(screen.getByText(/Key dates, people, damage and supporting items/)).toBeVisible()
+
+    const composer = screen.getByPlaceholderText('Write what happened, or choose a prompt above…')
+    const send = screen.getByRole('button', { name: 'Send' })
+    const prompt = screen.getByRole('button', { name: 'I was in a car accident' })
+    const messageList = container.querySelector('.message-list')
+    Object.defineProperty(messageList, 'scrollHeight', { configurable: true, value: 960 })
+    messageList.scrollTop = 240
+    expect(send).toBeDisabled()
+
+    prompt.focus()
+    await user.keyboard('{Enter}')
+
+    expect(prompt).toHaveFocus()
+    expect(messageList.scrollTop).toBe(0)
+    expect(composer).toHaveValue('I was in a car accident')
+    expect(send).toBeEnabled()
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+
+    await user.click(composer)
+    await user.type(composer, ' near my home.')
+    expect(composer).toHaveValue('I was in a car accident near my home.')
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
   })
 
   it('restores anonymous session-local history through the existing Claim APIs after reload', async () => {
@@ -2307,7 +2345,7 @@ describe('claimant intake projection', () => {
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
     await screen.findByText(initialClaim.claim_id)
 
-    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
+    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'The water is now turned off.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await screen.findByText('Thanks, I recorded that update.')).toBeVisible()
@@ -2406,7 +2444,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
     await screen.findByText('Claim resumed')
-    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
+    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'The water is now turned off.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await screen.findByText('Thanks, I recorded that update.')
 
@@ -2748,7 +2786,7 @@ describe('claimant intake projection', () => {
     await screen.findByText(agentMessage.content.text)
 
     await user.type(
-      screen.getByPlaceholderText('Write the details you know...'),
+      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
       newerClaimantMessage.content.text,
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2774,7 +2812,7 @@ describe('claimant intake projection', () => {
     })
 
     await user.type(
-      screen.getByPlaceholderText('Write the details you know...'),
+      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
       'One more conflicting update.',
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -3519,7 +3557,7 @@ describe('claimant intake projection', () => {
     ))
 
     await user.type(
-      screen.getByPlaceholderText('Write the details you know...'),
+      screen.getByPlaceholderText('Write what happened, or choose a prompt above…'),
       newerClaimantMessage.content.text,
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -4483,13 +4521,13 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    await screen.findByPlaceholderText('Write the details you know...')
+    await screen.findByPlaceholderText('Write what happened, or choose a prompt above…')
     // Evidence sent on an earlier message is historical: it must never sit
     // in the composer tray as if it were staged to ride the next message.
     expect((await screen.findByText('already-sent.jpg')).closest('.user-bubble')).not.toBeNull()
     expect(container.querySelector('.composer-attachments')).not.toBeInTheDocument()
 
-    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'One more detail.')
+    await user.type(screen.getByPlaceholderText('Write what happened, or choose a prompt above…'), 'One more detail.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))

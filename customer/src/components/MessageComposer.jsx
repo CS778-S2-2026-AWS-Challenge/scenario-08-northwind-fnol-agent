@@ -163,7 +163,7 @@ export default function MessageComposer({
   disabledNote = 'Confirm or correct the details before continuing.',
   buttonLabel,
   error,
-  placeholder = 'Write the details you know...',
+  placeholder = 'Write what happened, or choose a prompt above…',
   variant = 'default',
   showModelControl = false,
   models = [],
