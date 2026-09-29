@@ -1295,6 +1295,16 @@ entering this normative HTTP contract.
 
 Signal status is `proposed`, `review_required`, `confirmed`, `dismissed`, `overridden`, or `resolved`. A signal records evidence for professional review; it MUST NOT state that the claimant committed fraud.
 
+Policy judgment proposals use the existing review-signal and SignalDecisionRecord workflow. The
+bounded taxonomy covers liability split, excess multiplicity, driver permission, unsafe-use,
+gradual-damage discoverability, natural-hazard allocation, occupancy change, theft circumstance,
+unsecured property, multi-event, and contents classification judgment points. The backend accepts
+one proposal only when its configured product family and minimum registered facts are present;
+open handoffs suppress proposals and duplicate kinds are rejected. A valid proposal becomes a
+staff-only `POLICY_JUDGMENT_PROPOSAL` signal carrying its source references, advisory assessment,
+and rationale. It never decides coverage, liability, fraud, or settlement, writes claimant facts,
+or changes the existing four-state staff adjudication workflow.
+
 ### Handoff
 
 ```json

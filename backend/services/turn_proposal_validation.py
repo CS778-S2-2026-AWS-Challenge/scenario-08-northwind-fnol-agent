@@ -16,6 +16,7 @@ from backend.domain.agent_v8 import (
     V8EvidenceInterpretation,
     V8FieldChange,
     V8NextQuestion,
+    V8PolicyJudgmentProposal,
     V8ServiceSuggestion,
     V8StateProposal,
     V8TurnProposal,
@@ -286,6 +287,7 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
         prepared['field_changes'] = accepted_fields
     for part, model in (
         ('service_suggestions', V8ServiceSuggestion),
+        ('policy_judgment_proposals', V8PolicyJudgmentProposal),
         ('state_proposals', V8StateProposal),
     ):
         accepted = []
@@ -299,7 +301,7 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
                 rejected.append(
                     {'part': part, 'value': 'invalid_structure', 'reason': 'optional_part_invalid'}
                 )
-        limit = 3 if part == 'service_suggestions' else 2
+        limit = 3 if part in {'service_suggestions', 'policy_judgment_proposals'} else 2
         if len(accepted) > limit:
             rejected.append(
                 {

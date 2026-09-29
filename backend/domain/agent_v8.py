@@ -89,6 +89,23 @@ class V8ServiceSuggestion(ContractModel):
     rationale: str = Field(min_length=1, max_length=150)
 
 
+class V8PolicyJudgmentProposal(ContractModel):
+    """Advisory policy application proposal for staff adjudication."""
+
+    kind: Literal[
+        'liability_split', 'excess_multiplicity', 'driver_permission_status',
+        'unsafe_use_applicability', 'gradual_damage_discoverability',
+        'natural_hazard_allocation', 'occupancy_change_applicability',
+        'theft_circumstance', 'unsecured_property_dispute',
+        'multi_event_dispute', 'item_classification_dispute',
+    ]
+    assessment: str = Field(min_length=1, max_length=500)
+    rationale: str = Field(min_length=1, max_length=500)
+    source_refs: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        min_length=1, max_length=10
+    )
+
+
 class V8DocumentRequest(ContractModel):
     """The model asks for a document this kind of report should carry."""
 
@@ -132,6 +149,9 @@ class V8TurnProposal(ContractModel):
     # Any action may leave this None: the model decides whether this turn asks.
     next_question: V8NextQuestion | None = None
     service_suggestions: list[V8ServiceSuggestion] = Field(default_factory=list, max_length=3)
+    policy_judgment_proposals: list[V8PolicyJudgmentProposal] = Field(
+        default_factory=list, max_length=3
+    )
     document_requests: list[V8DocumentRequest] = Field(default_factory=list, max_length=2)
     evidence_interpretations: list[V8EvidenceInterpretation] = Field(
         default_factory=list, max_length=4

@@ -77,6 +77,9 @@ class ReviewSignalRecord(ContractModel):
     reason_codes: list[str] = Field(min_length=1, max_length=100)
     summary: str = Field(min_length=1, max_length=1000)
     created_at: datetime
+    judgment_point_kind: str | None = Field(default=None, max_length=100)
+    proposed_assessment: str | None = Field(default=None, max_length=500)
+    proposal_rationale: str | None = Field(default=None, max_length=500)
 
 
 class RetrievalStatus(str, Enum):
