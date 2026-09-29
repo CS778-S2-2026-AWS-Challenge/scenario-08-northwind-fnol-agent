@@ -177,9 +177,10 @@ function Split-CredentialEnvironments {
 # 1. Pull model credentials from the team secrets endpoint. The fetch and parse logic is a
 #    Python function (backend/core/dev_secrets.py), a config-layer integration point this
 #    script calls through scripts/fetch_secrets.py but does not own or duplicate. The bearer
-#    token that unlocks the bundle is itself a credential and is never stored in the
-#    repository: it comes from the NORTHWIND_SECRETS_TOKEN environment variable, which each
-#    developer sets once (see README).
+#    token that unlocks the bundle defaults to the developer's own `gh auth token` -- the
+#    endpoint verifies that token can read this private repo, so nothing needs to be requested
+#    from a teammate or configured locally. NORTHWIND_SECRETS_TOKEN remains a manual override
+#    if set (see README), and either way the token itself is never stored in the repository.
 $fetchOutput = & py -3.12 (Join-Path $repoRoot 'scripts/fetch_secrets.py') 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw ($fetchOutput | Out-String).Trim()

@@ -7,6 +7,7 @@ tests and is wired into CI, unlike the old orphaned PowerShell-only credential t
 """
 
 import json
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -16,6 +17,7 @@ from backend.core.dev_secrets import (
     configured_model_credential_names,
     fetch_dev_model_secrets,
     parse_secrets_bundle,
+    resolve_secrets_token,
 )
 
 
@@ -114,3 +116,54 @@ def test_fetch_dev_model_secrets_raises_on_an_http_error_status(
     )
     with pytest.raises(httpx.HTTPStatusError):
         fetch_dev_model_secrets('a-wrong-token')
+
+
+def test_resolve_secrets_token_prefers_the_environment_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_SECRETS_TOKEN', 'env-token')
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError('gh should not be invoked when the env override is set')
+
+    monkeypatch.setattr('backend.core.dev_secrets.subprocess.run', fail_if_called)
+    assert resolve_secrets_token() == 'env-token'
+
+
+def test_resolve_secrets_token_falls_back_to_gh_auth_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv('NORTHWIND_SECRETS_TOKEN', raising=False)
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args == ['gh', 'auth', 'token']
+        return subprocess.CompletedProcess(args, 0, stdout='gh-token\n', stderr='')
+
+    monkeypatch.setattr('backend.core.dev_secrets.subprocess.run', fake_run)
+    assert resolve_secrets_token() == 'gh-token'
+
+
+def test_resolve_secrets_token_raises_when_gh_auth_token_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv('NORTHWIND_SECRETS_TOKEN', raising=False)
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, stdout='', stderr='not logged in')
+
+    monkeypatch.setattr('backend.core.dev_secrets.subprocess.run', fake_run)
+    with pytest.raises(RuntimeError, match='gh auth login'):
+        resolve_secrets_token()
+
+
+def test_resolve_secrets_token_raises_when_gh_is_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv('NORTHWIND_SECRETS_TOKEN', raising=False)
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError('gh not found')
+
+    monkeypatch.setattr('backend.core.dev_secrets.subprocess.run', fake_run)
+    with pytest.raises(RuntimeError, match='gh auth login'):
+        resolve_secrets_token()

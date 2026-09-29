@@ -99,22 +99,21 @@ frontends — with one command:
 ```
 
 Requires Docker Desktop running and PowerShell 7.3+ (`pwsh`); there is no fixture or
-controlled-agent fallback in this script. One-time setup: the model credentials live on a team
-secrets endpoint, and the bearer token that unlocks it is itself a credential, so it is never
-stored in this repository. Get it from a teammate out of band and set it once for your Windows
-user, then open a new terminal:
+controlled-agent fallback in this script. No manual setup: the model credentials live on a team
+secrets endpoint that authorises the request by checking whether your GitHub identity can read
+this private repository, so the same `gh auth login` you already needed to clone it is enough —
+run `gh auth login` once if you have not, and `start-dev.ps1` fetches your token itself via
+`gh auth token`. `NORTHWIND_SECRETS_TOKEN` remains available as a manual override if you set it
+(for example, to use a fixed token instead of the GitHub CLI), but it is never required and is
+never stored in this repository.
 
-```powershell
-[Environment]::SetEnvironmentVariable('NORTHWIND_SECRETS_TOKEN', '<token from a teammate>', 'User')
-```
+Fetching and parsing the bundle is a config-layer integration point
+(`backend/core/dev_secrets.py`, called through `scripts/fetch_secrets.py`), not launcher logic;
+`start-dev.ps1` calls it but does not own or duplicate it. The script:
 
-The script refuses to start without it and tells you so. Fetching and parsing the bundle is a
-config-layer integration point (`backend/core/dev_secrets.py`, called through
-`scripts/fetch_secrets.py`), not launcher logic; `start-dev.ps1` calls it but does not own or
-duplicate it. The script:
-
-1. pulls model credentials from the team secrets endpoint using that token, and hands them to
-   the backend process only — the three Vite frontends never receive them, and neither does the
+1. resolves a bearer token (your `gh auth token` by default, or `NORTHWIND_SECRETS_TOKEN` if
+   set) and pulls model credentials from the team secrets endpoint with it, handing them to the
+   backend process only — the three Vite frontends never receive them, and neither does the
    token itself;
 2. brings up MongoDB and MinIO through `docker-compose.yml` and waits for each to report
    healthy, then runs the one-shot `mongo-init`/`minio-init` containers and checks their real
@@ -169,10 +168,10 @@ credentials away from the frontends the way the script does, so only use this fo
 manual check, not as a standing alternative to `start-dev.ps1`:
 
 ```powershell
-# 1. Pull the credentials with your NORTHWIND_SECRETS_TOKEN (set up above), through the same
-#    scripts/fetch_secrets.py the launcher calls. Doing it by hand puts them in this shell's
-#    environment, so run the backend from this same shell and start the frontends from a
-#    different one.
+# 1. Pull the credentials through the same scripts/fetch_secrets.py the launcher calls; it
+#    resolves your `gh auth token` (or NORTHWIND_SECRETS_TOKEN if set) as the bearer token.
+#    Doing it by hand puts them in this shell's environment, so run the backend from this same
+#    shell and start the frontends from a different one.
 $credentials = py -3.12 scripts/fetch_secrets.py | ConvertFrom-Json
 foreach ($property in $credentials.secrets.PSObject.Properties) {
     Set-Item -Path "env:$($property.Name)" -Value $property.Value

@@ -10,7 +10,9 @@ credentials through their own approved secret mechanism, never through this endp
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -18,6 +20,31 @@ import httpx
 TEAM_SECRETS_ENDPOINT = 'https://ysoseri.us/secret/northwind-dev'
 _BINDINGS_PATH = Path(__file__).resolve().parents[2] / 'config' / 'model-runtime-bindings.json'
 _KEY_VALUE_LINE = re.compile(r'^([A-Z][A-Z0-9_]*)=(.*)$')
+
+
+def resolve_secrets_token() -> str:
+    """The bearer token scripts/fetch_secrets.py presents to the team secrets endpoint.
+
+    NORTHWIND_SECRETS_TOKEN is an optional override, not the primary path: the endpoint now
+    verifies the presented token against GitHub itself (does it read this private repo?), so
+    the same GitHub CLI session a developer already needs to clone this repo is enough. Raises
+    RuntimeError with a message meant to be shown to the developer as-is when neither works.
+    """
+    env_token = os.environ.get('NORTHWIND_SECRETS_TOKEN', '')
+    if env_token:
+        return env_token
+    try:
+        result = subprocess.run(
+            ['gh', 'auth', 'token'], capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        result = None
+    if result is not None and result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    raise RuntimeError(
+        'Could not get a GitHub token: run `gh auth login` (needed to clone this private repo '
+        'anyway), or set NORTHWIND_SECRETS_TOKEN as a manual override.'
+    )
 
 
 def configured_model_credential_names(bindings_path: Path = _BINDINGS_PATH) -> list[str]:
