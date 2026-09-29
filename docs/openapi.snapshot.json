@@ -6980,7 +6980,34 @@
         "title": "EvidenceActionRequestPayload",
         "type": "object"
       },
-      "EvidenceCompleteResponse": {
+      "EvidenceCompleteResponse-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "customer_next_step": {
+            "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/ClaimantEvidence"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence",
+          "revision",
+          "status_url",
+          "customer_next_step"
+        ],
+        "title": "EvidenceCompleteResponse",
+        "type": "object"
+      },
+      "EvidenceCompleteResponse-Output": {
         "additionalProperties": false,
         "properties": {
           "customer_next_step": {
@@ -22042,11 +22069,21 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceCompleteResponse-Input"
+                }
+              }
+            },
+            "description": "OK"
+          },
           "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EvidenceCompleteResponse"
+                  "$ref": "#/components/schemas/EvidenceCompleteResponse-Output"
                 }
               }
             },
