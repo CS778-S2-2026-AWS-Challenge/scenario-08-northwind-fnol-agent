@@ -11,14 +11,20 @@ import {
   listAccountPaymentDestinations,
   listAccountPolicies,
   createPaymentDestination,
+  getClaimAutoFillSuggestions,
   listEvidenceHistory,
   listClaims,
+  listClaimAssetSnapshots,
   listPaymentDestinations,
+  pauseClaimSession,
   requestEvidenceUpload,
+  selectClaimAsset,
+  selectClaimPolicy,
   selectClaimPayoutContact,
   setClaimantAccessToken,
   streamClaimUpdates,
   streamRealtimeEvents,
+  submitClaimMessage,
   updateAccountAsset,
   updateClaimAutoFillPreferences,
   updateAccountProfile,
@@ -27,6 +33,129 @@ import {
   updateAccountPaymentDestination,
   updateAccountPolicy,
 } from './api.js'
+
+describe('Claim saved-data selection clients', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('loads the owner-scoped suggestion manifest and immutable asset snapshots', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ suggestions: [] }), { status: 200 }))
+    await getClaimAutoFillSuggestions('clm/synthetic')
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm%2Fsynthetic/auto-fill-suggestions',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify(pageResponse()), { status: 200 }))
+    await listClaimAssetSnapshots('clm/synthetic', { cursor: 'snapshot-cursor' })
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm%2Fsynthetic/asset-snapshots?limit=100&cursor=snapshot-cursor',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }) }),
+    )
+  })
+
+  it('selects a policy or asset with explicit Claim revision and idempotency authority', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({ claim_id: 'clm_synthetic', revision: 8 }), { status: 201 }))
+    await selectClaimPolicy({
+      claimId: 'clm_synthetic',
+      revision: 7,
+      policyId: 'pol_synthetic',
+      idempotencyKey: 'policy-selection-key',
+    })
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm_synthetic/policy-selections',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer synthetic-claimant-token',
+          'Idempotency-Key': 'policy-selection-key',
+          'If-Match': '7',
+        }),
+        body: JSON.stringify({ policy_id: 'pol_synthetic' }),
+      }),
+    )
+
+    fetch.mockResolvedValue(new Response(JSON.stringify({ claim_id: 'clm_synthetic', revision: 9 }), { status: 201 }))
+    await selectClaimAsset({
+      claimId: 'clm_synthetic',
+      revision: 8,
+      assetId: 'ase_synthetic',
+      idempotencyKey: 'asset-selection-key',
+    })
+    expect(fetch).toHaveBeenLastCalledWith(
+      '/api/v1/claims/clm_synthetic/asset-selections',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer synthetic-claimant-token',
+          'Idempotency-Key': 'asset-selection-key',
+          'If-Match': '8',
+        }),
+        body: JSON.stringify({ asset_id: 'ase_synthetic' }),
+      }),
+    )
+  })
+})
+
+function pageResponse(items = []) {
+  return { items, page: { next_cursor: null } }
+}
+
+describe('claim message contract', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setClaimantAccessToken('synthetic-claimant-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setClaimantAccessToken(null)
+  })
+
+  it('sends Evidence references with or without message text', async () => {
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 201 }))
+    await submitClaimMessage({
+      claimId: 'clm_message_contract',
+      sessionId: 'ses_message_contract',
+      revision: 4,
+      text: '   ',
+      evidenceRefs: ['evd_photo'],
+      idempotencyKey: 'turn-file-only',
+      clientMessageId: 'msg-file-only',
+    })
+
+    const fileOnlyBody = JSON.parse(fetch.mock.calls[0][1].body)
+    expect(fileOnlyBody).toEqual({
+      client_message_id: 'msg-file-only',
+      evidence_refs: ['evd_photo'],
+    })
+
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 201 }))
+    await submitClaimMessage({
+      claimId: 'clm_message_contract',
+      sessionId: 'ses_message_contract',
+      revision: 5,
+      text: '  Kitchen damage  ',
+      evidenceRefs: ['evd_photo'],
+      idempotencyKey: 'turn-text-and-file',
+      clientMessageId: 'msg-text-and-file',
+    })
+
+    const textAndFileBody = JSON.parse(fetch.mock.calls[1][1].body)
+    expect(textAndFileBody).toEqual({
+      client_message_id: 'msg-text-and-file',
+      content: { type: 'text', text: 'Kitchen damage' },
+      evidence_refs: ['evd_photo'],
+    })
+  })
+})
 
 describe('payment account clients', () => {
   beforeEach(() => {
@@ -728,6 +857,32 @@ describe('Claim history contract', () => {
       expect.objectContaining({
         signal: controller.signal,
         headers: expect.objectContaining({ Authorization: 'Bearer claimant-session-token' }),
+      }),
+    )
+  })
+
+  it('pauses the active claimant session with revision and idempotency authority', async () => {
+    fetch.mockResolvedValue(new Response(JSON.stringify({
+      claim: { claim_id: 'clm_1', revision: 8 },
+      session: { session_id: 'ses_1', status: 'paused' },
+    }), { status: 200 }))
+
+    await pauseClaimSession({
+      claimId: 'clm_1',
+      sessionId: 'ses_1',
+      revision: 7,
+      idempotencyKey: 'pause-session-1',
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims/clm_1/sessions/ses_1/pause',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer claimant-session-token',
+          'Idempotency-Key': 'pause-session-1',
+          'If-Match': '7',
+        }),
       }),
     )
   })
