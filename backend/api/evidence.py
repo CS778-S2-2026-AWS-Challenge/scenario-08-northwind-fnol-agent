@@ -310,17 +310,19 @@ async def upload_evidence_content(
     '/{claim_id}/evidence/{evidence_id}/complete',
     response_model=EvidenceCompleteResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    responses={200: {'model': EvidenceCompleteResponse}},
 )
 def finish_evidence_upload(
     claim_id: str,
     evidence_id: str,
     payload: CompleteEvidenceUploadRequest,
     request: Request,
+    response: Response,
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> EvidenceCompleteResponse:
-    return complete_upload(
+    result = complete_upload(
         repository_for(request),
         storage_for(request),
         principal,
@@ -330,6 +332,9 @@ def finish_evidence_upload(
         idempotency_key,
         if_match,
     )
+    if result.evidence.file_status.value in {'ready', 'failed'}:
+        response.status_code = status.HTTP_200_OK
+    return result
 
 
 @router.post(

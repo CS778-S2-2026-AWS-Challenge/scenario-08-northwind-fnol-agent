@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import InvariantGuardedAgent
 from tests.journey_v8_support import CLAIMANT, V8JourneyProvider, envelope, fact
+from tests.media_support import synthetic_image
 from tests.test_claim_api import create_claim
 
 
@@ -54,7 +55,9 @@ def _upload(
         },
         json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
-    assert completed.status_code == 202, completed.text
+    assert completed.status_code == (200 if media_type.startswith('image/') else 202), (
+        completed.text
+    )
     return evidence_id, completed.json()['revision']
 
 
@@ -81,7 +84,7 @@ def test_photo_without_text_starts_the_report_and_facts_are_document_sourced(
         kind='incident_image',
         filename='bumper.jpg',
         media_type='image/jpeg',
-        content=b'synthetic rear bumper photo',
+        content=synthetic_image(),
         key='photo-only',
     )
     scripted = envelope(

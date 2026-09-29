@@ -2581,10 +2581,24 @@ is never the sole size control. Provider-backed profiles return an object-store 
 fixture-only content route before consuming its request body, without changing the upload-target
 contract.
 
-The Sprint 2 mock adapter returns `202` and records the public `file_status` as
-`processing` after an image or PDF upload is accepted. Filename, media type,
-size, and processing status can be read back from the evidence list. Storage
-keys, checksums, processing references, and file contents remain internal.
+JPEG/PNG completion validates the final object's actual size and checksum, declared format,
+and full image decoding, with a 25-million-pixel limit and no animated images. It returns `200`
+with `ready` for a decodable image or `failed` for invalid image content. Missing bytes or a
+storage outage returns retryable `503 DEPENDENCY_UNAVAILABLE` without a Claim mutation; an
+object size/checksum mismatch returns `409 INVALID_STATE_TRANSITION`. Readiness means the
+image is usable, not malware-scanned, fact-verified, or sufficient for every business requirement.
+Completion does not extract or confirm Claim fields. Both persistence profiles use this boundary.
+PDF remains `202 processing`; no automatic PDF processor is dispatched by this change.
+Filename, media type, size, and file status can be read from the evidence list. Storage keys,
+checksums, processing references, and file contents remain internal.
+
+On persistent data profiles, backend startup also runs bounded background recovery of legacy
+claimant JPEG/PNG records still marked `processing` with queued provenance. It validates each
+record's current final object and applies the same terminal result with Claim revision and
+material-generation checks. Storage outages and conflicts remain retryable on later passes.
+Clients observe recovery through the existing Evidence reads and realtime invalidations;
+GET requests do not perform repair. Old completion idempotency responses remain historical,
+so clients refresh the authoritative Evidence resource after recovery. PDF is excluded.
 
 Authorised staff can read completed fixture evidence through
 `GET /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content`. This applies the same
@@ -3970,6 +3984,11 @@ and provider reference remain explicitly synthetic.
 
 Records the typed result of image or document extraction after an accepted
 upload reaches `processing`.
+
+A JPEG/PNG already made `ready` by synchronous image validation may also accept its first
+`ready` extraction result while it has no extraction state. The internal validation marker
+must identify the current material generation. Other terminal images cannot be reprocessed
+through this exception; `failed` and `retry` outcomes retain their existing state guards.
 
 Request:
 

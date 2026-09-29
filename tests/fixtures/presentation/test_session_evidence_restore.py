@@ -73,7 +73,9 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     assert isinstance(evidence_id, str)
     assert requested.json()['revision'] == 2
 
-    content = b'a' * 2048
+    from tests.media_support import synthetic_image
+
+    content = synthetic_image(size_bytes=2048)
     storage = cast(MockEvidenceStorage, cast(Any, client.app).state.evidence_storage)
     storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=content)
     checksum = f'sha256:{sha256(content).hexdigest()}'
@@ -86,10 +88,10 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
         },
         json={'upload_checksum': checksum},
     )
-    assert completed.status_code == 202
+    assert completed.status_code == 200
     assert completed.json()['revision'] == 3
     assert completed.json()['evidence']['status'] == 'received'
-    assert completed.json()['evidence']['file_status'] == 'processing'
+    assert completed.json()['evidence']['file_status'] == 'ready'
     assert completed.json()['evidence']['source'] == 'claimant'
     assert 'provenance' not in completed.json()['evidence']
 

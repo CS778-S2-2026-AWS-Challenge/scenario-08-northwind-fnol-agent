@@ -747,6 +747,28 @@ the append-only audit collection through a bounded, filterable projection.
 
 ## Evidence Invariants
 
+- Persistent backend startup automatically recovers legacy queued JPEG/PNG uploads. Discovery
+  uses `list_evidence_recovery_page`: ascending Evidence identity, an exclusive after-identity
+  cursor, default 10 records and a hard cap of 50. MongoDB bounds the existing `_id_` index to
+  the `evidence:` record prefix; Fixture preserves the same page order. This background access
+  pattern adds no collection, index or record field and does not scan unrelated record types.
+  Pages include all Evidence states so a persistently unavailable object cannot starve later
+  records. The service selects only claimant-owned, received, available-history, queued,
+  unextracted `processing` JPEG/PNG records and invokes the same generation/revision-checked
+  validation and atomic mutation as targeted repair. Each page is followed by a five-second
+  pause; a completed pass waits sixty seconds before retrying conflicts or storage outages.
+  Multiple backend processes may discover the same record; Claim CAS and operation idempotency
+  prevent duplicate accepted mutations. Shutdown stops discovery and waits for in-flight work
+  before closing persistence. HTTP reads remain read-only and PDF is never selected.
+
+- JPEG/PNG upload completion validates final object bytes before one atomic Evidence mutation.
+  A valid image records `image_validation=decoded-v1` and `processing_state=completed` in internal
+  provenance and becomes `ready`; invalid image content becomes `failed`. The marker belongs to
+  the current material generation and is discarded on replacement. No extraction or fact
+  confirmation is implied. The first subsequent extraction result may populate absent fields
+  as proposals under the existing revision/idempotency boundary. Storage failures leave Claim,
+  Evidence, idempotency and successful mutation events unchanged.
+
 - Evidence metadata and original bytes are separate.
 - A protected object reference is adapter-owned and never appears in claimant responses.
 - Extraction produces source-linked proposals; it does not confirm a claim fact.

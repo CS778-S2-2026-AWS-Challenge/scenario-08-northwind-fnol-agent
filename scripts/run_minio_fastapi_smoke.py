@@ -1,6 +1,7 @@
 import json
 import sys
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ import httpx
 from botocore.client import Config as BotoClientConfig
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
+from PIL import Image
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
@@ -22,7 +24,6 @@ from backend.adapters.evidence_storage import (  # noqa: E402
 from backend.app import create_app  # noqa: E402
 from backend.core.config import ObjectStorageAdapter, Settings  # noqa: E402
 
-PAYLOAD = b'northwind synthetic MinIO evidence smoke check\n'
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 
 
@@ -76,6 +77,10 @@ def _create_claim(client: TestClient, run_id: str) -> str:
 
 
 def main() -> None:
+    image_buffer = BytesIO()
+    with Image.new('RGB', (4, 4), color='blue') as image:
+        image.save(image_buffer, format='JPEG')
+    payload = image_buffer.getvalue()
     settings = Settings.from_environment()
     if settings.object_storage_adapter is not ObjectStorageAdapter.S3_COMPATIBLE:
         raise RuntimeError(
@@ -86,7 +91,7 @@ def main() -> None:
     _ensure_local_bucket(config, object_client)
 
     run_id = f'minio-smoke-{uuid4().hex}'
-    checksum = f'sha256:{sha256(PAYLOAD).hexdigest()}'
+    checksum = f'sha256:{sha256(payload).hexdigest()}'
     claim_id: str | None = None
     evidence_id: str | None = None
     try:
@@ -103,7 +108,7 @@ def main() -> None:
                     'kind': 'incident_image',
                     'original_filename': 'synthetic-damage.jpg',
                     'media_type': 'image/jpeg',
-                    'size_bytes': len(PAYLOAD),
+                    'size_bytes': len(payload),
                 },
             )
             requested.raise_for_status()
@@ -115,7 +120,7 @@ def main() -> None:
                 method=str(upload['method']),
                 url=str(upload['url']),
                 headers=cast(dict[str, str], upload['headers']),
-                content=PAYLOAD,
+                content=payload,
                 timeout=10.0,
             )
             uploaded.raise_for_status()
@@ -130,10 +135,12 @@ def main() -> None:
                 json={'upload_checksum': checksum},
             )
             completed.raise_for_status()
+            if completed.status_code != 200:
+                raise RuntimeError('Image completion did not return a terminal result.')
 
             # The original capability can still be valid, but it addresses only
             # staging. Reusing it must not alter the checksum-bound final object.
-            replacement = b'X' * len(PAYLOAD)
+            replacement = b'X' * len(payload)
             reused = httpx.request(
                 method=str(upload['method']),
                 url=str(upload['url']),
@@ -149,7 +156,7 @@ def main() -> None:
             final_response = object_client.get_object(Bucket=config.bucket, Key=final_key)
             final_body = final_response['Body']
             try:
-                if final_body.read() != PAYLOAD:
+                if final_body.read() != payload:
                     raise RuntimeError('Reusing the upload capability changed final evidence.')
             finally:
                 final_body.close()
@@ -160,10 +167,8 @@ def main() -> None:
             readiness.raise_for_status()
 
         evidence_items = cast(list[dict[str, Any]], listed.json()['items'])
-        if evidence_items[0]['file_status'] != 'processing':
-            raise RuntimeError(
-                'The persisted evidence did not enter the expected processing state.'
-            )
+        if evidence_items[0]['file_status'] != 'ready':
+            raise RuntimeError('The persisted image did not enter the expected ready state.')
         if readiness.json()['checks']['evidence_storage'] != 'configured_service':
             raise RuntimeError('The configured object store did not report ready after the upload.')
 
