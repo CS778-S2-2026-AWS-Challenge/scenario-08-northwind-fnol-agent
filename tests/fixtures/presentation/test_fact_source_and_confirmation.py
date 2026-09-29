@@ -79,7 +79,9 @@ def upload_and_process(
     )
     assert requested.status_code == 201
     evidence_id = str(requested.json()['evidence_id'])
-    content = b'c' * 512
+    from tests.media_support import synthetic_image
+
+    content = synthetic_image(size_bytes=512)
     storage = cast(MockEvidenceStorage, cast(Any, client.app).state.evidence_storage)
     storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=content)
 
@@ -92,7 +94,7 @@ def upload_and_process(
         },
         json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
-    assert completed.status_code == 202
+    assert completed.status_code == 200
 
     processed = client.post(
         f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',

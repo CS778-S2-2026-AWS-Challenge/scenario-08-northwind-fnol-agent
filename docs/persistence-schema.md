@@ -747,6 +747,14 @@ the append-only audit collection through a bounded, filterable projection.
 
 ## Evidence Invariants
 
+- JPEG/PNG upload completion validates final object bytes before one atomic Evidence mutation.
+  A valid image records `image_validation=decoded-v1` and `processing_state=completed` in internal
+  provenance and becomes `ready`; invalid image content becomes `failed`. The marker belongs to
+  the current material generation and is discarded on replacement. No extraction or fact
+  confirmation is implied. The first subsequent extraction result may populate absent fields
+  as proposals under the existing revision/idempotency boundary. Storage failures leave Claim,
+  Evidence, idempotency and successful mutation events unchanged.
+
 - Evidence metadata and original bytes are separate.
 - A protected object reference is adapter-owned and never appears in claimant responses.
 - Extraction produces source-linked proposals; it does not confirm a claim fact.

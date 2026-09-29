@@ -88,6 +88,9 @@ The development requirements include `jsonschema` (MIT) and its typing package
 schemas in contract tests; Pydantic validation of a response alone cannot detect an
 unsatisfiable provider schema. They are not production runtime dependencies.
 
+The backend uses Pillow (MIT-CMU) to decode bounded JPEG/PNG uploads before marking files
+ready. This checks file usability, not malware or the truth of image-derived Claim facts.
+
 ### Run the app
 
 Start the complete system — MongoDB, MinIO with the approved knowledge corpus ingested, the
@@ -262,6 +265,14 @@ The default object store remains the deterministic fixture adapter. To run the s
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
+
+To repair one previously stuck JPEG/PNG upload, open an operator shell with the same persistent
+runtime environment as the backend, then run `py -3.12 scripts/repair_processing_image.py
+--claim-id YOUR-CLAIM-ID --evidence-id YOUR-EVIDENCE-ID --revision CURRENT-REVISION
+--material-version CURRENT-MATERIAL-VERSION`. Inspect this dry-run's predicted file status before
+repeating with `--apply` to persist validation. Obtain both versions from current authoritative
+records; refresh them after a conflict rather than bypassing the guard. Run only for explicitly
+authorized records. Do not use this command for PDF, bulk repairs, or extraction of claim facts.
 
 `start-dev.ps1` above already runs the backend on this persistence path for interactive use. The
 following two smoke-test scripts verify it instead of running it: with the same MongoDB and MinIO

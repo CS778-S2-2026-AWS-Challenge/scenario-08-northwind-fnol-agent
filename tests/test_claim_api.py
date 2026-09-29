@@ -459,7 +459,9 @@ def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
     first_body = first.json()
     claim_id = first_body['claim']['claim_id']
     session_id = first_body['session']['session_id']
-    content = b'authorised-image'
+    from tests.media_support import synthetic_image
+
+    content = synthetic_image(media_type='image/png')
     upload = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
         headers={**auth_headers, 'Idempotency-Key': 'multimodal-upload', 'If-Match': '1'},
@@ -483,7 +485,7 @@ def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
         },
         json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
-    assert completed.status_code == 202, completed.text
+    assert completed.status_code == 200, completed.text
 
     turn = submit_message(
         client,
@@ -650,6 +652,10 @@ def test_message_turn_persists_contents_attachment_provenance(
         (target_media_type, target_filename, b'authoritative-target'),
     ]
     for index, (media_type, filename, content) in enumerate(attachments):
+        if media_type.startswith('image/'):
+            from tests.media_support import synthetic_image
+
+            content = synthetic_image(media_type=media_type)
         upload = client.post(
             f'/api/v1/claims/{claim_id}/evidence/uploads',
             headers={
@@ -681,7 +687,9 @@ def test_message_turn_persists_contents_attachment_provenance(
             },
             json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
         )
-        assert completed.status_code == 202, completed.text
+        assert completed.status_code == (200 if media_type.startswith('image/') else 202), (
+            completed.text
+        )
         revision = completed.json()['revision']
         uploaded_ids.append(evidence_id)
 

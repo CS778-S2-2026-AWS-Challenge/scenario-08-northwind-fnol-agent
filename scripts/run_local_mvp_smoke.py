@@ -3,12 +3,14 @@ import json
 import sys
 from datetime import UTC, datetime
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
 import httpx
 from fastapi.testclient import TestClient
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -33,7 +35,10 @@ def _expect(response: httpx.Response, status_code: int, step: str) -> dict[str, 
 
 
 def _first_process(run_id: str) -> tuple[str, str, str, int, list[str], str]:
-    evidence_bytes = b'northwind-local-mvp-evidence'
+    image_buffer = BytesIO()
+    with Image.new('RGB', (4, 4), color='blue') as image:
+        image.save(image_buffer, format='JPEG')
+    evidence_bytes = image_buffer.getvalue()
     app = create_app()
     with TestClient(app) as client:
         created = _expect(
@@ -110,9 +115,11 @@ def _first_process(run_id: str) -> tuple[str, str, str, int, list[str], str]:
                 },
                 json={'upload_checksum': f'sha256:{sha256(evidence_bytes).hexdigest()}'},
             ),
-            202,
+            200,
             'evidence completion',
         )
+        if completed['evidence']['file_status'] != 'ready':
+            raise RuntimeError('The validated image did not become ready.')
         knowledge = _expect(
             client.post(
                 '/internal/v1/knowledge/search',
