@@ -130,6 +130,12 @@ const INPUT_LABELS = {
   describe_loss: 'Damage or loss',
 }
 
+const CLAIM_START_PROMPTS = [
+  { icon: 'car', text: 'I was in a car accident' },
+  { icon: 'home', text: 'My home or belongings were damaged' },
+  { icon: 'search', text: 'Something was lost or stolen' },
+]
+
 const FIELD_SOURCE_LABELS = {
   claimant: 'Provided by you',
   inference: 'Suggested from your description',
@@ -196,6 +202,91 @@ function fieldValueText(field) {
   }
   if (typeof field.value === 'boolean') return field.value ? 'Yes' : 'No'
   return String(field.value ?? '')
+}
+
+function ClaimStartIcon({ name, className = '' }) {
+  const paths = {
+    arrow: <path d="m9 18 6-6-6-6" />,
+    car: (
+      <>
+        <path d="m5 17-1 2M19 17l1 2M3 13l2-6h14l2 6v5H3v-5Z" />
+        <path d="M5 13h14M7 16h.01M17 16h.01" />
+      </>
+    ),
+    home: (
+      <>
+        <path d="m3 11 9-8 9 8" />
+        <path d="M5 10v10h14V10M9 20v-6h6v6" />
+      </>
+    ),
+    lock: (
+      <>
+        <rect x="5" y="10" width="14" height="10" rx="2" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </>
+    ),
+    search: (
+      <>
+        <circle cx="10" cy="10" r="6" />
+        <path d="m15 15 5 5M8 8h4v4H8z" />
+      </>
+    ),
+    shield: (
+      <>
+        <path d="M12 3 5 6v5c0 4.4 2.8 8.4 7 10 4.2-1.6 7-5.6 7-10V6l-7-3Z" />
+        <path d="m9 12 2 2 4-4" />
+      </>
+    ),
+  }
+
+  return (
+    <svg
+      className={`claim-start-icon ${className}`.trim()}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      {paths[name]}
+    </svg>
+  )
+}
+
+function ConversationStart({ onChoosePrompt }) {
+  return (
+    <section className="conversation-start" aria-labelledby="conversation-start-title">
+      <div className="conversation-start-intro">
+        <span className="conversation-start-shield" aria-hidden="true">
+          <ClaimStartIcon name="shield" />
+        </span>
+        <div>
+          <h2 id="conversation-start-title">Let&apos;s get your claim started</h2>
+          <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
+        </div>
+      </div>
+      <div className="conversation-start-options" aria-labelledby="conversation-start-options-title">
+        <h3 id="conversation-start-options-title">Choose a starting point</h3>
+        <div className="conversation-start-prompt-list">
+          {CLAIM_START_PROMPTS.map((prompt) => (
+            <button
+              className="conversation-start-prompt"
+              type="button"
+              key={prompt.text}
+              onClick={() => onChoosePrompt(prompt.text)}
+            >
+              <span className="conversation-start-prompt-icon" aria-hidden="true">
+                <ClaimStartIcon name={prompt.icon} />
+              </span>
+              <span>{prompt.text}</span>
+              <ClaimStartIcon name="arrow" className="conversation-start-arrow" />
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="conversation-start-privacy">
+        <ClaimStartIcon name="lock" />
+        <span>Your information stays private and is only used to help prepare this claim.</span>
+      </p>
+    </section>
+  )
 }
 
 function messageText(message) {
@@ -949,6 +1040,10 @@ function App() {
     () => buildConversationTimeline(messages, resumeContext),
     [messages, resumeContext],
   )
+  const isNewConversationEmpty = !claim
+    && conversationTimeline.length === 0
+    && !pendingMessage
+    && !failedMessage
   const lastAgentMessageId = useMemo(() => (
     [...conversationTimeline]
       .reverse()
@@ -1054,6 +1149,12 @@ function App() {
   useEffect(() => {
     const messageList = messageListRef.current
     if (!messageList || !isWorkspaceActive || workspaceView !== 'chat') return
+    if (isNewConversationEmpty) {
+      messageList.scrollTop = 0
+      followLatestMessages.current = true
+      forceLatestMessages.current = false
+      return
+    }
     if (!followLatestMessages.current && !forceLatestMessages.current) return
     messageList.scrollTop = messageList.scrollHeight
     followLatestMessages.current = true
@@ -1068,6 +1169,7 @@ function App() {
     error,
     evidenceSyncNotice,
     failedMessage,
+    isNewConversationEmpty,
     isWorkspaceActive,
     pendingMessage,
     selectedModel,
@@ -4061,6 +4163,7 @@ function App() {
               aria-live="polite"
               onScroll={handleMessageListScroll}
             >
+              {isNewConversationEmpty && <ConversationStart onChoosePrompt={setDraft} />}
               {conversationTimeline.map((item) => {
                 if (item.kind === 'conversation-event') {
                   return (
@@ -4314,7 +4417,9 @@ function App() {
                   : null}
               placeholder={assistanceState?.key === 'response_needed'
                 ? 'Reply to Northwind staff...'
-                : 'Write the details you know...'}
+                : isNewConversationEmpty
+                  ? 'Write what happened, or choose a prompt above…'
+                  : 'Write the details you know...'}
               buttonLabel={status === 'sending'
                 ? 'Sending...'
                 : failedMessage
@@ -4408,6 +4513,7 @@ function App() {
                 busy={isBusy}
                 status={status}
                 stepActive={conversationActionKind === 'review-details'}
+                conversationEmpty={isNewConversationEmpty}
               />
             </div>
             <div
