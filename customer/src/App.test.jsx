@@ -1,6 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+
+const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(globalThis.URL, 'createObjectURL')
+const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(globalThis.URL, 'revokeObjectURL')
 
 const api = vi.hoisted(() => ({
   ApiRequestError: class ApiRequestError extends Error {},
@@ -15,6 +18,7 @@ const api = vi.hoisted(() => ({
   getAuthenticatedAccount: vi.fn(),
   hasClaimantAccessToken: vi.fn(),
   getClaim: vi.fn(),
+  getClaimAutoFillSuggestions: vi.fn(),
   getClaimMessages: vi.fn(),
   getClaimEvidence: vi.fn(),
   getRuntimeCapabilities: vi.fn(),
@@ -22,11 +26,13 @@ const api = vi.hoisted(() => ({
   listAccountIdentityDocuments: vi.fn(),
   listAccountPaymentDestinations: vi.fn(),
   listAccountPolicies: vi.fn(),
+  listClaimAssetSnapshots: vi.fn(),
   listClaims: vi.fn(),
   listEvidenceHistory: vi.fn(),
   listPaymentDestinations: vi.fn(),
   loginClaimant: vi.fn(),
   logoutClaimant: vi.fn(),
+  pauseClaimSession: vi.fn(),
   requestId: vi.fn((prefix) => `${prefix}-test`),
   requestHumanSupport: vi.fn(),
   promoteAnonymousClaim: vi.fn(),
@@ -34,6 +40,8 @@ const api = vi.hoisted(() => ({
   registerClaimant: vi.fn(),
   requestEvidenceUpload: vi.fn(),
   selectClaimPayoutContact: vi.fn(),
+  selectClaimAsset: vi.fn(),
+  selectClaimPolicy: vi.fn(),
   uploadEvidenceContent: vi.fn(),
   completeEvidenceUpload: vi.fn(),
   resumeClaimSession: vi.fn(),
@@ -152,6 +160,68 @@ function initialTurn() {
   }
 }
 
+function deferredRequest() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function pausedClaim() {
+  return {
+    ...initialClaim,
+    revision: 3,
+    active_session_id: null,
+    incomplete_context: { interrupted_at: '2026-09-16T01:05:00Z',
+      resume_point: 'Describe what happened', follow_up_status: 'blocked' },
+  }
+}
+
+async function startActiveClaim(user) {
+  await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+  await user.click(screen.getByRole('button', { name: 'Start claim' }))
+  await screen.findByText(agentMessage.content.text)
+}
+
+function testAccount(customerId, displayName) {
+  return { customer_id: customerId,
+    profile: { display_name: displayName, email: `${customerId}@example.test`, phone: '' },
+    preferences: { email: true, sms: false } }
+}
+
+function mockAuthenticatedAccounts(...accounts) {
+  let authenticated = true
+  api.hasClaimantAccessToken.mockImplementation(() => authenticated)
+  api.setClaimantAccessToken.mockImplementation((token) => { authenticated = Boolean(token) })
+  api.logoutClaimant.mockImplementation(() => { authenticated = false })
+  accounts.forEach((account) => api.getAuthenticatedAccount.mockResolvedValueOnce(account))
+  api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+}
+
+function enableAuthenticatedImageAttachments() {
+  api.hasClaimantAccessToken.mockReturnValue(true)
+  api.getAuthenticatedAccount.mockResolvedValue({
+    customer_id: 'cus_attachment_test',
+    profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+    preferences: { email: true, sms: false },
+  })
+  api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+  api.getRuntimeCapabilities.mockResolvedValue({
+    claim_types: ['motor', 'home', 'contents'],
+    models: [{
+      id: 'qwen-local',
+      label: 'qwen3.8-27b',
+      availability: 'available',
+      image_input: true,
+      document_input: true,
+    }],
+    default_model_profile_id: 'qwen-local',
+  })
+}
+
 function realtimeChange(revision, resources = ['claim', 'messages']) {
   return realtimeChangeFor(initialClaim.claim_id, revision, resources)
 }
@@ -232,34 +302,66 @@ function readyDynamicForm() {
 describe('claimant intake projection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    api.requestId.mockImplementation((prefix) => `${prefix}-test`)
     globalThis.localStorage.clear()
     globalThis.sessionStorage.clear()
     globalThis.sessionStorage.setItem('northwind.anonymousSession', 'anonymous-session-test')
     globalThis.history.replaceState({}, '', '/')
+    Object.defineProperty(globalThis.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn((file) => `blob:app/${encodeURIComponent(file.name)}`),
+    })
+    Object.defineProperty(globalThis.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
     api.hasClaimantAccessToken.mockReturnValue(false)
     api.getRuntimeCapabilities.mockResolvedValue({
       claim_types: ['motor', 'home', 'contents'],
       models: [
-        { id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' },
-        { id: 'nowcoding-gpt55', label: 'gpt-5.5', availability: 'available' },
+        {
+          id: 'qwen-local',
+          label: 'qwen3.8-27b',
+          availability: 'available',
+          image_input: false,
+          document_input: false,
+        },
+        {
+          id: 'nowcoding-gpt55',
+          label: 'gpt-5.5',
+          availability: 'available',
+          image_input: false,
+          document_input: false,
+        },
         {
           id: 'bedrock-nova2-lite',
           label: 'global.amazon.nova-2-lite-v1:0',
           availability: 'unavailable',
+          image_input: true,
+          document_input: false,
         },
         {
           id: 'google-gemini35-flash-lite',
           label: 'gemini-3.5-flash-lite',
           availability: 'available',
+          image_input: true,
+          document_input: true,
         },
       ],
       default_model_profile_id: 'qwen-local',
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
+    api.getClaimAutoFillSuggestions.mockImplementation(async (claimId) => ({
+      claim_id: claimId,
+      claim_revision: 1,
+      account_revision: 1,
+      suggestions: [],
+    }))
     api.listAccountAssets.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountIdentityDocuments.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listAccountPolicies.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listClaimAssetSnapshots.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listEvidenceHistory.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.listPaymentDestinations.mockResolvedValue({ items: [], page: { next_cursor: null } })
     api.streamRealtimeEvents.mockImplementation(() => new Promise(() => {}))
@@ -267,6 +369,23 @@ describe('claimant intake projection', () => {
       claim: initialClaim,
       session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
+    api.pauseClaimSession.mockResolvedValue({
+      claim: pausedClaim(),
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
+    })
+  })
+
+  afterEach(() => {
+    if (originalCreateObjectUrl) {
+      Object.defineProperty(globalThis.URL, 'createObjectURL', originalCreateObjectUrl)
+    } else {
+      delete globalThis.URL.createObjectURL
+    }
+    if (originalRevokeObjectUrl) {
+      Object.defineProperty(globalThis.URL, 'revokeObjectURL', originalRevokeObjectUrl)
+    } else {
+      delete globalThis.URL.revokeObjectURL
+    }
   })
 
   it('shows the backend default model before creating a session', async () => {
@@ -281,7 +400,7 @@ describe('claimant intake projection', () => {
     await user.click(model)
     expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
     expect(screen.getByRole('option', {
-      name: 'global.amazon.nova-2-lite-v1:0',
+      name: /global\.amazon\.nova-2-lite-v1:0.*Unavailable/,
     })).toBeDisabled()
     await user.click(screen.getByRole('option', {
       name: 'gemini-3.5-flash-lite',
@@ -289,7 +408,7 @@ describe('claimant intake projection', () => {
     expect(model).toHaveTextContent('gemini-3.5-flash-lite')
 
     await user.click(model)
-    await user.click(screen.getByRole('option', { name: 'gpt-5.5' }))
+    await user.click(screen.getByRole('option', { name: /^gpt-5\.5/ }))
     expect(model).toHaveTextContent('gpt-5.5')
 
     await waitFor(() => expect(model).toHaveFocus())
@@ -335,6 +454,72 @@ describe('claimant intake projection', () => {
     expect(agentArticle.querySelector('time.message-timestamp'))
       .toHaveAttribute('datetime', agentMessage.created_at)
     expect(container.querySelectorAll('.message-list time.message-timestamp')).toHaveLength(1)
+  })
+
+  it('automatically applies a sole saved policy without adding a persistent workspace card', async () => {
+    const user = userEvent.setup()
+    const policy = {
+      policy_id: 'pol_11111111111111111111',
+      policy_number: 'MOTOR-1234',
+      revision: 1,
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_synthetic',
+      revision: 1,
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+      claim_auto_fill_preferences: {
+        personal_details: false,
+        policy_number: true,
+        saved_assets: false,
+        payment_details: false,
+        identity_information: false,
+      },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.listAccountPolicies.mockResolvedValue({ items: [policy], page: { next_cursor: null } })
+    api.getClaimAutoFillSuggestions.mockImplementation(async (claimId) => ({
+      claim_id: claimId,
+      claim_revision: 1,
+      account_revision: 1,
+      suggestions: [{
+        category: 'policy_number',
+        enabled: true,
+        available: true,
+        eligible: true,
+        action: 'select_policy',
+      }],
+    }))
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.selectClaimPolicy.mockResolvedValue({ claim_id: initialClaim.claim_id, revision: 3 })
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 3,
+      form: {
+        'policy.policy_number': {
+          value: policy.policy_number,
+          status: 'proposed',
+          source: 'claimant',
+          source_refs: [`policy:${policy.policy_id}:revision:1`],
+        },
+      },
+      primary_action: primaryAction({ revision: 3 }),
+    })
+
+    render(<App />)
+    await user.type(await screen.findByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await waitFor(() => expect(api.selectClaimPolicy).toHaveBeenCalledWith({
+      claimId: initialClaim.claim_id,
+      revision: 2,
+      policyId: policy.policy_id,
+      idempotencyKey: 'claim-policy-selection-test',
+    }))
+    expect(await screen.findByText(/Policy ••••1234 was added to this Claim as information to review/)).toBeInTheDocument()
+    expect(screen.queryByText('Use your saved details')).not.toBeInTheDocument()
   })
 
   it('shows one truthful Agent placeholder for the first claimant turn', async () => {
@@ -784,13 +969,12 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).toHaveBeenCalledWith(expect.not.objectContaining({ incidentType: expect.anything() }))
 
     const failure = await screen.findByText(
-      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
+      'The model service is temporarily unavailable. The claim is unchanged. Try the message again in a moment.',
     )
     expect(failure).toBeInTheDocument()
-    expect(screen.getByText('Delivery not confirmed')).toBeInTheDocument()
-    expect(container.querySelector('.workspace-composer [role="alert"]')).toHaveTextContent(
-      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
-    )
+    expect(screen.getByText('Not sent')).toBeInTheDocument()
+    expect(failure.closest('[role="alert"]')).toHaveClass('is-failed')
+    expect(container.querySelector('.workspace-composer [role="alert"]')).not.toBeInTheDocument()
     expect(screen.queryByText('We could not confirm delivery. Please try again.')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
   })
@@ -1066,6 +1250,40 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await screen.findByText('Thank you. I have recorded the incident time.')).toBeVisible()
+    await waitFor(() => expect(messageList.scrollTop).toBe(960))
+  })
+
+  it('keeps the latest message visible when an attachment warning grows the composer', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.requestEvidenceUpload.mockReturnValue(new Promise(() => {}))
+
+    const { container } = render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    const messageList = container.querySelector('.message-list')
+    Object.defineProperties(messageList, {
+      clientHeight: { configurable: true, value: 240 },
+      scrollHeight: { configurable: true, value: 960 },
+    })
+    messageList.scrollTop = 720
+    fireEvent.scroll(messageList)
+    messageList.scrollTop = 0
+
+    await user.upload(
+      container.querySelector('.workspace-composer input[type="file"]'),
+      new File(['image'], 'blocked-image.png', { type: 'image/png' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This model cannot process images.')
     await waitFor(() => expect(messageList.scrollTop).toBe(960))
   })
 
@@ -1457,6 +1675,61 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText('Staff assistance completed')).not.toBeInTheDocument()
   })
 
+  it('restores persisted message attachments without adding them back to the composer', async () => {
+    const user = userEvent.setup()
+    const savedClaim = { ...initialClaim, revision: 4, can_resume: true }
+    const savedEvidence = {
+      evidence_id: 'evd_saved_photo',
+      claim_id: initialClaim.claim_id,
+      kind: 'incident_photo',
+      status: 'received',
+      file_status: 'ready',
+      original_filename: 'saved-damage.jpg',
+      media_type: 'image/jpeg',
+      size_bytes: 5,
+      source: 'claimant',
+      created_at: '2026-09-14T01:05:00Z',
+      updated_at: '2026-09-14T01:06:00Z',
+    }
+    const savedFileMessage = {
+      ...claimantMessage,
+      content: { type: 'evidence_reference' },
+      evidence_refs: [savedEvidence.evidence_id],
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [savedClaim], page: { next_cursor: null } })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T01:00:02Z',
+      resume: {
+        customer_next_step: savedClaim.customer_next_step,
+        summary: 'A file was provided.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(savedClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [savedFileMessage, agentMessage] })
+    api.getClaimEvidence.mockResolvedValue({
+      claim_id: savedClaim.claim_id,
+      revision: savedClaim.revision,
+      items: [savedEvidence],
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    const attachmentBubble = (await screen.findByText('saved-damage.jpg')).closest('.user-bubble')
+    expect(attachmentBubble).toHaveTextContent('Ready')
+    expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument()
+  })
+
   it('starts a new local draft without creating a Claim before the first message', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
@@ -1501,6 +1774,12 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
+    expect(api.pauseClaimSession).toHaveBeenCalledWith({
+      claimId: initialClaim.claim_id,
+      sessionId: 'ses_ui_vp',
+      revision: 2,
+      idempotencyKey: expect.stringMatching(/^pause-session-/),
+    })
     expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.startClaimSession).not.toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: 'New conversation' })).toBeVisible()
@@ -1528,6 +1807,387 @@ describe('claimant intake projection', () => {
     }))
   })
 
+  it('keeps the active conversation visible when saving the interruption fails and retries with the same key', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession
+      .mockRejectedValueOnce(Object.assign(
+        new api.ApiRequestError('The interruption checkpoint could not be saved.'),
+        { code: 'DEPENDENCY_UNAVAILABLE', status: 503, retryable: true },
+      ))
+      .mockResolvedValueOnce({
+        claim: pausedClaim(),
+        session: { session_id: 'ses_ui_vp', status: 'paused' },
+      })
+
+    render(<App />)
+    await startActiveClaim(user)
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    expect(screen.getByRole('heading', { name: initialClaim.claim_id })).toBeVisible()
+    expect(screen.getByText(agentMessage.content.text)).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Your current conversation is still open. Review the report and select New chat again.',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    expect(api.pauseClaimSession).toHaveBeenCalledTimes(2)
+    expect(api.pauseClaimSession.mock.calls[1][0].idempotencyKey).toBe(
+      api.pauseClaimSession.mock.calls[0][0].idempotencyKey,
+    )
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+  })
+
+  it('prevents duplicate interruption saves while New chat is pending', async () => {
+    const user = userEvent.setup()
+    const pause = deferredRequest()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockReturnValue(pause.promise)
+
+    render(<App />)
+    await startActiveClaim(user)
+
+    const newChat = screen.getByRole('button', { name: 'New chat' })
+    fireEvent.click(newChat)
+    fireEvent.click(newChat)
+
+    expect(api.pauseClaimSession).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+
+    await act(async () => pause.resolve({
+      claim: pausedClaim(),
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
+    }))
+
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+  })
+
+  it('uses authoritative Claim readback when the pause response is lost', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockRejectedValueOnce(
+      new api.ApiRequestError('We could not reach the claim service.'),
+    )
+    api.getClaim.mockResolvedValue(pausedClaim())
+
+    render(<App />)
+    await startActiveClaim(user)
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['a successful pause response', false],
+    ['an unknown pause outcome', true],
+  ])('resumes a valid session before sending after leaving for a utility page with %s', async (
+    _scenario,
+    responseIsLost,
+  ) => {
+    const user = userEvent.setup()
+    const pause = deferredRequest()
+    const resumedClaim = {
+      ...initialClaim,
+      revision: 5,
+      active_session_id: 'ses_after_utility',
+    }
+    const followUpClaimantMessage = {
+      ...claimantMessage,
+      message_id: 'msg_after_utility',
+      client_message_id: 'message-after-utility',
+      content: { type: 'text', text: 'One more detail after returning.' },
+    }
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockResolvedValueOnce({
+        claimant_message: followUpClaimantMessage,
+        agent_message: {
+          ...agentMessage,
+          message_id: 'msg_agent_after_utility',
+          content: { type: 'text', text: 'Thanks, the resumed conversation is active.' },
+        },
+        form_changes: [],
+        contents_item_changes: [],
+        dynamic_form: null,
+        claim_revision: 6,
+        decision: { customer_next_step: initialClaim.customer_next_step },
+        primary_action: primaryAction({ revision: 6 }),
+      })
+    api.pauseClaimSession.mockReturnValue(pause.promise)
+    if (responseIsLost) {
+      api.getClaim
+        .mockResolvedValueOnce(pausedClaim())
+        .mockResolvedValueOnce(pausedClaim())
+        .mockResolvedValueOnce(resumedClaim)
+    } else {
+      api.getClaim
+        .mockResolvedValueOnce(pausedClaim())
+        .mockResolvedValueOnce(resumedClaim)
+    }
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_after_utility',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-16T01:06:00Z',
+      resume: {
+        summary: 'A pipe burst in the kitchen.',
+        unresolved_questions: [],
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await startActiveClaim(user)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await act(async () => {
+      if (responseIsLost) pause.reject(new api.ApiRequestError('Response lost.'))
+      else pause.resolve({
+        claim: pausedClaim(),
+        session: { session_id: 'ses_ui_vp', status: 'paused' },
+      })
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.type(
+      screen.getByPlaceholderText('Write the details you know...'),
+      'One more detail after returning.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(2))
+    expect(api.resumeClaimSession).toHaveBeenCalledWith({ claimId: initialClaim.claim_id })
+    expect(api.resumeClaimSession.mock.invocationCallOrder[0])
+      .toBeLessThan(api.submitClaimMessage.mock.invocationCallOrder[1])
+    expect(api.submitClaimMessage.mock.calls[1][0]).toEqual(expect.objectContaining({
+      claimId: initialClaim.claim_id,
+      sessionId: 'ses_after_utility',
+      revision: 5,
+      text: 'One more detail after returning.',
+    }))
+  })
+
+  it('reuses message idempotency after current-workspace reconciliation fails', async () => {
+    const user = userEvent.setup()
+    const pause = deferredRequest()
+    const resumedClaim = {
+      ...initialClaim,
+      revision: 5,
+      active_session_id: 'ses_after_retry',
+    }
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockResolvedValueOnce({
+        ...initialTurn(),
+        claimant_message: {
+          ...claimantMessage,
+          message_id: 'msg_after_reconciliation_retry',
+          content: { type: 'text', text: 'Retry this detail safely.' },
+        },
+        claim_revision: 6,
+        primary_action: primaryAction({ revision: 6 }),
+      })
+    api.pauseClaimSession.mockReturnValue(pause.promise)
+    api.getClaim
+      .mockRejectedValueOnce(new api.ApiRequestError('Reconciliation unavailable.'))
+      .mockResolvedValueOnce(pausedClaim())
+      .mockResolvedValueOnce(resumedClaim)
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_after_retry',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-16T01:06:00Z',
+      resume: { summary: 'A pipe burst.', pending_items: [], prior_commitments: [] },
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [claimantMessage, agentMessage] })
+
+    render(<App />)
+    await startActiveClaim(user)
+    const turnKeysBeforeFollowUp = api.requestId.mock.calls.filter(([prefix]) => prefix === 'turn').length
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await act(async () => pause.resolve({
+      claim: pausedClaim(),
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
+    }))
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'Retry this detail safely.')
+
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Reconciliation unavailable.')
+    expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(2))
+    expect(api.requestId.mock.calls.filter(([prefix]) => prefix === 'turn')).toHaveLength(
+      turnKeysBeforeFollowUp + 1,
+    )
+    expect(api.submitClaimMessage.mock.calls[1][0]).toEqual(expect.objectContaining({
+      sessionId: 'ses_after_retry',
+      idempotencyKey: expect.stringMatching(/^turn-/),
+    }))
+  })
+
+  it.each([
+    ['successful pause response', 'sign-out', 'resolution', false, false, false],
+    ['successful pause response', 'account switch', 'rejection', false, true, true],
+    ['unknown pause outcome', 'sign-out', 'rejection', true, false, true],
+    ['unknown pause outcome', 'account switch', 'resolution', true, true, false],
+  ])('discards a deferred-session %s after %s when reconciliation ends by %s', async (
+    _pauseScenario,
+    _identityScenario,
+    _settlementScenario,
+    responseIsLost,
+    switchAccount,
+    reconciliationRejects,
+  ) => {
+    const user = userEvent.setup()
+    const pause = deferredRequest()
+    const reconciliation = deferredRequest()
+    const pendingText = 'This message belongs only to Account A.'
+    mockAuthenticatedAccounts(
+      testAccount('cus_pause_a', 'Account A'),
+      ...(switchAccount ? [testAccount('cus_pause_b', 'Account B')] : []),
+    )
+    api.loginClaimant.mockResolvedValue({ access_token: 'account-b-token' })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockReturnValue(pause.promise)
+    if (responseIsLost) {
+      api.getClaim
+        .mockResolvedValueOnce(pausedClaim())
+        .mockReturnValueOnce(reconciliation.promise)
+    } else {
+      api.getClaim.mockReturnValueOnce(reconciliation.promise)
+    }
+
+    render(<App />)
+    await startActiveClaim(user)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await act(async () => {
+      if (responseIsLost) pause.reject(new api.ApiRequestError('Response lost.'))
+      else pause.resolve({
+        claim: pausedClaim(),
+        session: { session_id: 'ses_ui_vp', status: 'paused' },
+      })
+    })
+    if (responseIsLost) {
+      await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(1))
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), pendingText)
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(responseIsLost ? 2 : 1))
+
+    await user.click(screen.getByRole('button', { name: /Open Profile for Account A/ }))
+    await user.click(await screen.findByRole('button', { name: 'Log out' }))
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Log in' }))
+      await user.type(screen.getByLabelText('Email address'), 'b@example.test')
+      await user.type(screen.getByLabelText('Password'), 'account-b-password')
+      await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
+      await screen.findByRole('button', { name: 'Profile' })
+    }
+
+    await act(async () => {
+      if (reconciliationRejects) {
+        reconciliation.reject(new api.ApiRequestError('Old reconciliation failed.'))
+      } else {
+        reconciliation.resolve(pausedClaim())
+      }
+    })
+
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+    expect(screen.queryByText(pendingText)).not.toBeInTheDocument()
+    expect(screen.queryByText('Not sent')).not.toBeInTheDocument()
+    expect(screen.queryByText('Delivery not confirmed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+      expect(await screen.findByText('No saved conversations yet')).toBeVisible()
+    } else {
+      expect(globalThis.location.pathname).toBe('/')
+    }
+  })
+
+  it.each([
+    ['sign-out', false],
+    ['account switch', true],
+  ])('ignores an old pause readback after %s', async (_scenario, switchAccount) => {
+    const user = userEvent.setup()
+    const readback = deferredRequest()
+    mockAuthenticatedAccounts(
+      testAccount('cus_pause_a', 'Account A'),
+      ...(switchAccount ? [testAccount('cus_pause_b', 'Account B')] : []),
+    )
+    api.loginClaimant.mockResolvedValue({ access_token: 'account-b-token' })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession.mockRejectedValueOnce(new api.ApiRequestError('Response lost.'))
+    api.getClaim.mockReturnValueOnce(readback.promise)
+
+    render(<App />)
+    await startActiveClaim(user)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id))
+    await user.click(screen.getByRole('button', { name: /Open Profile for Account A/ }))
+    await user.click(await screen.findByRole('button', { name: 'Log out' }))
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Log in' }))
+      await user.type(screen.getByLabelText('Email address'), 'b@example.test')
+      await user.type(screen.getByLabelText('Password'), 'account-b-password')
+      await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
+      await screen.findByRole('button', { name: 'Profile' })
+    }
+    await act(async () => readback.resolve(pausedClaim()))
+
+    if (switchAccount) {
+      await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+      expect(await screen.findByText('No saved conversations yet')).toBeVisible()
+    } else {
+      expect(globalThis.sessionStorage.getItem(
+        'northwind.anonymousConversationHistory.v1.anonymous-session-test',
+      )).toBeNull()
+    }
+    expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('ignores an old pause failure after a newer workspace pause starts', async () => {
+    const user = userEvent.setup()
+    const oldPause = deferredRequest()
+    const newerPause = deferredRequest()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.pauseClaimSession
+      .mockReturnValueOnce(oldPause.promise)
+      .mockReturnValueOnce(newerPause.promise)
+
+    render(<App />)
+    await startActiveClaim(user)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await user.click(screen.getByRole('button', { name: 'Privacy policy' }))
+    await user.click(screen.getByRole('button', { name: 'Back to conversation' }))
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    await act(async () => oldPause.reject(new api.ApiRequestError('Old pause failed.')))
+
+    expect(api.pauseClaimSession).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await act(async () => newerPause.resolve({
+      claim: pausedClaim(),
+      session: { session_id: 'ses_ui_vp', status: 'paused' },
+    }))
+    expect(await screen.findByRole('heading', { name: 'New conversation' })).toBeVisible()
+  })
+
   it('uses the homepage rail to return to the existing empty conversation workspace', async () => {
     const user = userEvent.setup()
     render(<App />)
@@ -1538,6 +2198,7 @@ describe('claimant intake projection', () => {
 
     expect(input).toHaveValue('')
     expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.pauseClaimSession).not.toHaveBeenCalled()
     expect(globalThis.location.pathname).toBe('/')
   })
 
@@ -3321,6 +3982,54 @@ describe('claimant intake projection', () => {
     expect(api.completeEvidenceUpload).not.toHaveBeenCalled()
   })
 
+  it('removes a completed upload from the current composer selection', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_detached_photo',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_detached_photo',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'detached-damage.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      },
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'detached-damage.jpg', { type: 'image/jpeg' }),
+    )
+
+    expect(await screen.findByText('Ready')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remove detached-damage.jpg' }))
+
+    expect(screen.queryByText('detached-damage.jpg')).not.toBeInTheDocument()
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('opens account Evidence history directly without creating an empty Claim', async () => {
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -3355,7 +4064,7 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
   })
 
-  it('stages a pre-message attachment, uploads it before the first message, and rides its evidence_id on that turn', async () => {
+  it('uploads a staged file before the first message and shows it in the claimant bubble', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -3363,7 +4072,15 @@ describe('claimant intake projection', () => {
       preferences: { email: true, sms: false },
     })
     api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claimant_message: {
+        ...claimantMessage,
+        evidence_refs: ['evd_staged_photo'],
+      },
+      claim_revision: 5,
+      primary_action: primaryAction({ revision: 5 }),
+    })
     api.requestEvidenceUpload.mockResolvedValue({
       evidence_id: 'evd_staged_photo',
       revision: 3,
@@ -3398,26 +4115,310 @@ describe('claimant intake projection', () => {
     expect(api.requestEvidenceUpload).not.toHaveBeenCalled()
     expect(screen.queryByText('Conversation history')).not.toBeInTheDocument()
 
+    expect(screen.getByRole('alert')).toHaveTextContent('This model cannot process images.')
+    await user.click(screen.getByRole('button', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: /gemini-3\.5-flash-lite.*Supports images/ }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
     await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
-      revision: initialClaim.revision,
+      revision: 1,
     })))
     expect(api.createClaim).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
-    // The model can only read evidence attached to the message it arrives with:
-    // the upload must complete, and its evidence_id must ride the same turn,
-    // not a follow-up message nobody sends.
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
     expect(api.requestEvidenceUpload.mock.invocationCallOrder[0])
       .toBeLessThan(api.submitClaimMessage.mock.invocationCallOrder[0])
     expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 4,
+      text: 'A pipe burst in the kitchen.',
       evidenceRefs: ['evd_staged_photo'],
     }))
-    // Once it has ridden the message, the attachment leaves the composer
-    // tray: it is not a draft waiting to be sent any more.
-    await waitFor(() => expect(screen.queryByText('new-damage.jpg')).not.toBeInTheDocument())
+    await waitFor(() => expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument())
+    const attachmentBubble = (await screen.findByText('new-damage.jpg')).closest('.user-bubble')
+    expect(attachmentBubble).toHaveTextContent('A pipe burst in the kitchen.')
+    expect(attachmentBubble).toHaveTextContent('Ready')
+  })
+
+  it('starts a Claim and sends an attachment without requiring message text', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claimant_message: {
+        ...claimantMessage,
+        content: { type: 'evidence_reference' },
+        evidence_refs: ['evd_file_only'],
+      },
+      claim_revision: 5,
+      primary_action: primaryAction({ revision: 5 }),
+    })
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_file_only',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_file_only',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'file-only-damage.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      },
+    })
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'file-only-damage.jpg', { type: 'image/jpeg' }),
+    )
+    const send = screen.getByRole('button', { name: 'Start claim' })
+    const capabilityWarning = screen.getByRole('alert')
+    expect(capabilityWarning).toHaveTextContent('This model cannot process images.')
+    expect(capabilityWarning).toHaveTextContent('Your file is still attached.')
+    expect(send).toBeDisabled()
+    expect(api.createClaim).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Model' }))
+    expect(screen.getByRole('option', { name: /qwen3\.8-27b.*Does not support images/ })).toBeDisabled()
+    await user.click(screen.getByRole('option', { name: /gemini-3\.5-flash-lite.*Supports images/ }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(send).toBeEnabled()
+    await user.click(send)
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 4,
+      text: '',
+      evidenceRefs: ['evd_file_only'],
+      modelProfileId: 'google-gemini35-flash-lite',
+    })))
+    await waitFor(() => expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument())
+    const attachmentBubble = (await screen.findByText('file-only-damage.jpg')).closest('.user-bubble')
+    expect(attachmentBubble).toHaveTextContent('Ready')
+    const preview = within(attachmentBubble).getByRole('link', {
+      name: 'Open file-only-damage.jpg in a new tab',
+    })
+    expect(preview).toHaveAttribute('href', 'blob:app/file-only-damage.jpg')
+    expect(preview.querySelector('img')).toHaveAttribute('src', 'blob:app/file-only-damage.jpg')
+  })
+
+  it('does not upload an attachment removed while Claim creation is pending', async () => {
+    const user = userEvent.setup()
+    const claimCreation = deferredRequest()
+    enableAuthenticatedImageAttachments()
+    api.createClaim.mockReturnValue(claimCreation.promise)
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'remove-before-claim.jpg', { type: 'image/jpeg' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.createClaim).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Remove remove-before-claim.jpg' }))
+    await act(async () => claimCreation.resolve({
+      claim: initialClaim,
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+    }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled())
+    expect(api.requestEvidenceUpload).not.toHaveBeenCalled()
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+    expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument()
+  })
+
+  it('skips a later staged attachment removed while an earlier upload is pending', async () => {
+    const user = userEvent.setup()
+    const firstUploadRequest = deferredRequest()
+    let requestSequence = 0
+    enableAuthenticatedImageAttachments()
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    api.requestEvidenceUpload.mockReturnValueOnce(firstUploadRequest.promise)
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_first_staged',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'ready',
+        original_filename: 'first-staged.jpg',
+        media_type: 'image/jpeg',
+        size_bytes: 5,
+        source: 'claimant',
+      },
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      claimant_message: {
+        ...claimantMessage,
+        content: { type: 'evidence_reference' },
+        evidence_refs: ['evd_first_staged'],
+      },
+      claim_revision: 5,
+      primary_action: primaryAction({ revision: 5 }),
+    })
+
+    render(<App />)
+    const fileInput = document.querySelector('input[type="file"]')
+    await user.upload(fileInput, new File(['one'], 'first-staged.jpg', { type: 'image/jpeg' }))
+    await user.upload(fileInput, new File(['two'], 'remove-from-queue.jpg', { type: 'image/jpeg' }))
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Remove remove-from-queue.jpg' }))
+    await act(async () => firstUploadRequest.resolve({
+      evidence_id: 'evd_first_staged',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+    expect(api.requestEvidenceUpload).toHaveBeenCalledTimes(1)
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceRefs: ['evd_first_staged'],
+    }))
+  })
+
+  it('aborts an active staged upload and does not send an empty attachment-only turn', async () => {
+    const user = userEvent.setup()
+    enableAuthenticatedImageAttachments()
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_cancelled_upload',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockImplementation(({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(
+        Object.assign(new Error('Upload aborted'), { name: 'AbortError' }),
+      ))
+    }))
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'cancel-active-upload.jpg', { type: 'image/jpeg' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.uploadEvidenceContent).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Remove cancel-active-upload.jpg' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled())
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+    expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument()
+  })
+
+  it('keeps an uploaded image preview available when the model turn fails', async () => {
+    const user = userEvent.setup()
+    api.getRuntimeCapabilities.mockResolvedValue({
+      claim_types: ['motor', 'home', 'contents'],
+      models: [
+        {
+          id: 'qwen-local',
+          label: 'qwen3.8-27b',
+          availability: 'available',
+          image_input: true,
+          document_input: false,
+        },
+        {
+          id: 'nowcoding-gpt55',
+          label: 'gpt-5.5',
+          availability: 'available',
+          image_input: true,
+          document_input: false,
+        },
+      ],
+      default_model_profile_id: 'qwen-local',
+    })
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.requestEvidenceUpload.mockResolvedValue({
+      evidence_id: 'evd_failed_turn_photo',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    api.completeEvidenceUpload.mockResolvedValue({
+      revision: 4,
+      evidence: {
+        evidence_id: 'evd_failed_turn_photo',
+        claim_id: initialClaim.claim_id,
+        kind: 'incident_photo',
+        status: 'received',
+        file_status: 'processing',
+        original_filename: 'failed-turn-photo.png',
+        media_type: 'image/png',
+        size_bytes: 5,
+        source: 'claimant',
+        created_at: '2026-09-14T01:05:00Z',
+        updated_at: '2026-09-14T01:06:00Z',
+      },
+    })
+    api.submitClaimMessage.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('The model service could not complete the request. The claim is unchanged.'),
+      { code: 'DEPENDENCY_FAILED', status: 502, retryable: false },
+    ))
+
+    render(<App />)
+    await user.upload(
+      document.querySelector('input[type="file"]'),
+      new File(['image'], 'failed-turn-photo.png', { type: 'image/png' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    const failureDetail = await screen.findByText(
+      'The model service could not complete the request. The claim is unchanged. Your file upload is preserved and remains attached. Retry the message, or select another available model and retry.',
+    )
+    const failureCard = failureDetail.closest('[role="alert"]')
+    expect(failureCard).toHaveTextContent('Not sent')
+    expect(failureCard).toHaveTextContent('Processing')
+    const failedPreview = within(failureCard).getByRole('link', {
+      name: 'Open failed-turn-photo.png in a new tab',
+    })
+    expect(failedPreview).toHaveAttribute('href', 'blob:app/failed-turn-photo.png')
+    expect(failedPreview).toHaveAttribute('target', '_blank')
+    expect(failedPreview.querySelector('img')).toHaveAttribute('src', 'blob:app/failed-turn-photo.png')
+
+    const firstAttempt = api.submitClaimMessage.mock.calls[0][0]
+    await user.click(screen.getByRole('button', { name: 'Retry message' }))
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(2))
+    const safeRetry = api.submitClaimMessage.mock.calls[1][0]
+    expect(safeRetry.idempotencyKey).toBe(firstAttempt.idempotencyKey)
+    expect(safeRetry.clientMessageId).toBe(firstAttempt.clientMessageId)
+
+    await user.click(screen.getByRole('button', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: /^gpt-5\.5/ }))
+    await user.click(screen.getByRole('button', { name: 'Retry message' }))
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(3))
+    const changedModelAttempt = api.submitClaimMessage.mock.calls[2][0]
+    expect(changedModelAttempt.modelProfileId).toBe('nowcoding-gpt55')
+    expect(changedModelAttempt.idempotencyKey).not.toBe(firstAttempt.idempotencyKey)
+    expect(changedModelAttempt.clientMessageId).not.toBe(firstAttempt.clientMessageId)
   })
 
   it('does not resurface Evidence already sent with an earlier message in the composer tray', async () => {
@@ -3465,7 +4466,11 @@ describe('claimant intake projection', () => {
       }],
     })
     api.submitClaimMessage.mockResolvedValue({
-      claimant_message: { ...claimantMessage, message_id: 'msg_follow_up', content: { type: 'text', text: 'One more detail.' } },
+      claimant_message: {
+        ...claimantMessage,
+        message_id: 'msg_follow_up',
+        content: { type: 'text', text: 'One more detail.' },
+      },
       agent_message: agentMessage,
       form_changes: [],
       contents_item_changes: [],
@@ -3474,14 +4479,15 @@ describe('claimant intake projection', () => {
       decision: { customer_next_step: initialClaim.customer_next_step },
     })
 
-    render(<App />)
+    const { container } = render(<App />)
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     await screen.findByPlaceholderText('Write the details you know...')
     // Evidence sent on an earlier message is historical: it must never sit
     // in the composer tray as if it were staged to ride the next message.
-    expect(screen.queryByText('already-sent.jpg')).not.toBeInTheDocument()
+    expect((await screen.findByText('already-sent.jpg')).closest('.user-bubble')).not.toBeNull()
+    expect(container.querySelector('.composer-attachments')).not.toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('Write the details you know...'), 'One more detail.')
     await user.click(screen.getByRole('button', { name: 'Send' }))

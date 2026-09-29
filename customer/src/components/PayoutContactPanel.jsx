@@ -45,11 +45,20 @@ export default function PayoutContactPanel({
     () => new Set(activeDestinations.map((item) => item.payment_destination_id)),
     [activeDestinations],
   )
+  const autoFillPaymentDetails = Boolean(
+    account?.claim_auto_fill_preferences?.payment_details,
+  )
+  const suggestedDestinationId = autoFillPaymentDetails
+    ? activeDestinations.find((destination) => destination.is_common)?.payment_destination_id
+      || (activeDestinations.length === 1 ? activeDestinations[0].payment_destination_id : '')
+    : ''
   const effectiveDestinationId = activeDestinationIds.has(selectedDestinationId)
     ? selectedDestinationId
     : activeDestinationIds.has(claim?.payment_destination_id)
       ? claim.payment_destination_id
-      : ''
+      : activeDestinationIds.has(suggestedDestinationId)
+        ? suggestedDestinationId
+        : ''
   const effectiveContactPreference = contactPreference || existingContact
   const showDestinationForm = addingDestination || (!loading && activeDestinations.length === 0)
 
@@ -186,6 +195,14 @@ export default function PayoutContactPanel({
         {!loading && activeDestinations.length > 0 && (
           <fieldset className="payout-destination-list">
             <legend>Select a saved payout account</legend>
+            {suggestedDestinationId
+              && effectiveDestinationId === suggestedDestinationId
+              && !claim?.payment_destination_id
+              && (
+                <p className="payout-contact-status" role="status">
+                  Your saved payout account was preselected. Review it before continuing.
+                </p>
+              )}
             {activeDestinations.map((destination) => (
               <label className="payout-option" key={destination.payment_destination_id}>
                 <input
