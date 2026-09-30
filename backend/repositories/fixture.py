@@ -291,7 +291,11 @@ class FixtureRepository(PersistenceRepository):
                 (
                     operation
                     for operation in self._retention_operations.values()
-                    if operation.status is not RetentionOperationStatus.COMPLETED
+                    if operation.status
+                    not in {
+                        RetentionOperationStatus.COMPLETED,
+                        RetentionOperationStatus.HELD,
+                    }
                 ),
                 key=lambda operation: (
                     operation.updated_at,
@@ -1634,6 +1638,58 @@ class FixtureRepository(PersistenceRepository):
 
             validate_retention_hold_transition(current, hold)
             self._retention_holds[hold.hold_id] = deepcopy(hold)
+
+            operation = next(
+                (
+                    item
+                    for item in self._retention_operations.values()
+                    if item.claim_id == hold.claim_id
+                ),
+                None,
+            )
+            if operation is None or operation.status is not RetentionOperationStatus.HELD:
+                return
+
+            if any(
+                item.claim_id == hold.claim_id and item.active
+                for item in self._retention_holds.values()
+            ):
+                return
+
+            statuses = retention_target_statuses(
+                operation.targets,
+                operation.step_evidence,
+            )
+            if operation.targets and all(
+                status is RetentionStepStatus.SATISFIED for status in statuses.values()
+            ):
+                next_status = RetentionOperationStatus.COMPLETED
+                completed_at = hold.released_at
+            elif any(
+                status in {
+                    RetentionStepStatus.FAILED,
+                    RetentionStepStatus.UNKNOWN,
+                }
+                for status in statuses.values()
+            ):
+                next_status = RetentionOperationStatus.RECONCILIATION_REQUIRED
+                completed_at = None
+            else:
+                next_status = RetentionOperationStatus.RESERVED
+                completed_at = None
+
+            payload = operation.model_dump(mode='python')
+            payload.update(
+                {
+                    'revision': operation.revision + 1,
+                    'status': next_status,
+                    'updated_at': max(operation.updated_at, hold.released_at),
+                    'completed_at': completed_at,
+                }
+            )
+            resumed = RetentionOperation.model_validate(payload)
+            validate_retention_operation_transition(operation, resumed)
+            self._retention_operations[operation.operation_id] = deepcopy(resumed)
 
     def list_retention_holds(
         self,
