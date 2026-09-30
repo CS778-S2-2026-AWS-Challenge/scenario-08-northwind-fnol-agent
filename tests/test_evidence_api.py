@@ -4,6 +4,8 @@ from hashlib import sha256
 from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import (
     EvidenceUploadNotFound,
@@ -28,8 +30,6 @@ from backend.domain.runtime import (
     TurnResultRecord,
 )
 from backend.repositories.fixture import FixtureRepository
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from tests.media_support import synthetic_image
 
 
