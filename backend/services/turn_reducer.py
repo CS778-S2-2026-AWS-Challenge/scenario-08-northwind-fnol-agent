@@ -936,6 +936,7 @@ def reduce_turn(
             claimant_message.message_id,
             timestamp,
             during_handoff=bool(open_handoffs or handoff),
+            requirements_ready=applied_evaluation.requirements.ready,
         )
     )
     if accounted_next_step != effective_next_step:
