@@ -4540,22 +4540,30 @@ cannot read or select account Assets. The Workbench snapshot route remains staff
 
 | Method and route | Contract |
 | --- | --- |
-| `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset. Requires `Idempotency-Key`; returns `201`. |
+| `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset with an optional claimant-authored `note`. Requires `Idempotency-Key`; returns `201`. |
 | `GET /api/v1/account/assets` | Cursor-page active owned assets; `include_inactive=true` includes soft-deactivated records. |
 | `GET /api/v1/account/assets/{asset_id}` | Read one owned claimant-safe asset projection. |
-| `PATCH /api/v1/account/assets/{asset_id}` | Update approved asset details with numeric `If-Match`; increments asset revision. Fields may be omitted but explicit `null` and details for another Asset type return `422 VALIDATION_ERROR` without changing the Asset. |
+| `PATCH /api/v1/account/assets/{asset_id}` | Update approved asset fields with numeric `If-Match`; increments asset revision. Omitted fields remain unchanged. Explicit `null` clears only `note`; it remains invalid for `display_name` and `details`. Details for another Asset type return `422 VALIDATION_ERROR` without changing the Asset. |
 | `DELETE /api/v1/account/assets/{asset_id}` | Soft-deactivate with numeric `If-Match`; returns `204`. |
 | `POST /api/v1/claims/{claim_id}/asset-selections` | Select one active owned asset with `Idempotency-Key` and Claim `If-Match`; atomically writes proposed facts, an optional proposed ContentsItem, immutable snapshot, Branch Evaluation, Claim revision, and retry result. |
 | `GET /api/v1/claims/{claim_id}/asset-snapshots` | Cursor-page claimant-safe immutable snapshots for an owned Claim. |
 | `GET /api/v1/workbench/claims/{claim_id}/asset-snapshots` | Cursor-page the same approved snapshot fields for authorised staff. |
 
 Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset_type`,
-`display_name`, matching typed `details`, `revision`, `active`, and timestamps. The account-safe
-projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
-claimant-supplied policy text. A durable Policy association requires the future account-owned
+`display_name`, matching typed `details`, nullable `note`, `revision`, `active`, and timestamps.
+The account-safe projection omits `customer_id` and all physical storage/provider metadata. A
+non-null note is trimmed at its outer boundaries, must contain at least one non-whitespace
+character, and is limited to 1,000 characters after trimming; internal whitespace and line breaks
+are preserved. Asset creation may omit the note or set it to `null`. On PATCH, an omitted note is
+unchanged, a valid string replaces it, and explicit `null` clears it. Empty, whitespace-only, and
+over-limit strings return `422 VALIDATION_ERROR`. Note writes use the parent Asset revision;
+stale `If-Match` returns `409 REVISION_CONFLICT` without an Asset or success-audit mutation.
+Assets do not accept claimant-supplied policy text. A durable Policy association requires the future account-owned
 `pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
 routes. Reusable contents details are limited to description, category, brand, and model. Serial
-number and value are not part of the Asset or Claim asset snapshot contract.
+number and value are not part of the Asset or Claim asset snapshot contract. Asset notes are
+account-only and never enter Claim State, Claim Evidence, Dynamic Form, Agent/model/RAG context,
+Workbench/Admin projections, or Claim asset snapshots.
 
 Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, optional
 `proposed_contents_item`, and the immutable snapshot. The optional item copies only approved
@@ -4576,6 +4584,7 @@ INVALID_STATE_TRANSITION`; no Claim, snapshot, Branch Evaluation, idempotency, o
 performed. Asset create, update, and soft-deactivate atomically persist one Asset-scoped audit
 fact. Selection atomically persists one Claim-scoped audit fact with the resulting revision. Audit
 facts retain only bounded identities and source references, not copied Asset details.
+They also never contain Asset note text.
 
 ## Persistence and Provider Boundary
 
