@@ -4960,8 +4960,16 @@ class FixtureRepository(PersistenceRepository):
         runtime_records: RuntimeTurnRecords | None = None,
         *,
         checkpointed: bool = False,
+        review_signals: Sequence[ReviewSignalRecord] | None = None,
     ) -> None:
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        incoming_signals: dict[str, ReviewSignalRecord] = {}
+        for signal in review_signals or ():
+            if signal.claim_id != claim.claim_id:
+                raise KeyError(claim.claim_id)
+            if signal.signal_id in incoming_signals or signal.signal_id in self._review_signals:
+                raise IdempotencyConflict(signal.signal_id)
+            incoming_signals[signal.signal_id] = signal
         stored_session = self._sessions.get(session.session_id)
         existing_claimant_message = self._messages.get(claimant_message.message_id)
         existing_agent_message = self._messages.get(agent_message.message_id)
@@ -5133,6 +5141,7 @@ class FixtureRepository(PersistenceRepository):
             for item in (claimant_message, agent_message)
         )
         changed_record_kinds = ['message', 'message']
+        changed_record_kinds.extend('review_signal' for _ in incoming_signals)
         if handoff is not None:
             changed_record_kinds.append('handoff')
         if evidence is not None:
@@ -5168,6 +5177,8 @@ class FixtureRepository(PersistenceRepository):
             self._store_message(claimant_message)
         self._store_message(agent_message)
         self._decisions[decision.decision_id] = deepcopy(decision)
+        for signal in incoming_signals.values():
+            self._review_signals[signal.signal_id] = deepcopy(signal)
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if evidence is not None:

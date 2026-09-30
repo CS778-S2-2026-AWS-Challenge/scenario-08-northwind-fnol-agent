@@ -763,6 +763,7 @@ class GatewayAgent:
         repair_attempted: bool = False,
         repair_outcome: RepairOutcome | None = None,
         field_contract_violations: list[dict[str, str]] | None = None,
+        authorized_policy_sources: list[dict[str, object]] | None = None,
     ) -> AgentProposal:
         if response.structured_output is None:
             logger.warning(
@@ -877,6 +878,7 @@ class GatewayAgent:
                 open_handoffs=getattr(context, 'open_handoffs', ()),
                 message_text=context.message_text,
                 evidence=context.evidence,
+                authorized_policy_sources=authorized_policy_sources or (),
                 service_eligibility_resolver=context.service_eligibility_resolver,
                 authorised_service_ids={
                     consent.service_identity
@@ -1152,6 +1154,20 @@ class GatewayAgent:
     def _propose_v7_turn(self, context: AgentTurnContext) -> AgentProposal:
         context = prepare_model_family_context(context)
         context = detach_unreadable_evidence(context)
+        # Capture only guidance actually fetched through the server-authorized
+        # context loader in this turn, never model-supplied tool/source strings.
+        judgment_sources: list[dict[str, object]] = []
+        knowledge_loader = context.knowledge_context_loader
+        if knowledge_loader is not None:
+
+            def load_judgment_guidance(max_tokens: int) -> dict[str, object]:
+                result = knowledge_loader(max_tokens)
+                chunks = result.get('chunks')
+                if result.get('status') == 'evidence_found' and isinstance(chunks, list):
+                    judgment_sources.extend(dict(item) for item in chunks if isinstance(item, dict))
+                return result
+
+            context = replace(context, knowledge_context_loader=load_judgment_guidance)
         try:
             plan = plan_model_turn(context)
         except ContextBudgetExceeded:
@@ -1227,6 +1243,7 @@ class GatewayAgent:
                     context,
                     outcome.response,
                     [_runtime_invocation_trace(1, outcome.response, outcome.latency_ms)],
+                    authorized_policy_sources=judgment_sources,
                     tool_call_id=None,
                     tool_arguments={},
                     tool_output={
@@ -1414,6 +1431,7 @@ class GatewayAgent:
                     context,
                     response,
                     invocations,
+                    authorized_policy_sources=judgment_sources,
                     tool_call_id=tool_call_id,
                     tool_arguments=tool_arguments,
                     tool_output=tool_output,
@@ -1491,6 +1509,7 @@ class GatewayAgent:
                         context,
                         response,
                         invocations,
+                        authorized_policy_sources=judgment_sources,
                         tool_call_id=tool_call_id,
                         tool_arguments=tool_arguments,
                         tool_output=tool_output,
@@ -1681,6 +1700,7 @@ class GatewayAgent:
                         context,
                         response,
                         invocations,
+                        authorized_policy_sources=judgment_sources,
                         tool_call_id=None,
                         tool_arguments={},
                         tool_output={},
@@ -2155,6 +2175,7 @@ class KnowledgeGroundedAgent:
                     'section_path': chunk.section_path,
                     'source_uri': chunk.source_uri,
                     'version': chunk.version,
+                    'checksum': chunk.checksum,
                     'text': chunk.text[:max_chars_per_chunk],
                 }
                 for chunk in chunks

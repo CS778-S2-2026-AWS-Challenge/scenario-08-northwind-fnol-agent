@@ -89,6 +89,25 @@ class V8ServiceSuggestion(ContractModel):
     rationale: str = Field(min_length=1, max_length=150)
 
 
+class V8PolicyJudgmentProposal(ContractModel):
+    """Advisory policy application proposal for staff adjudication."""
+
+    kind: str = Field(min_length=1, max_length=100, pattern=r'^[a-z][a-z0-9_]*$')
+    assessment: str = Field(min_length=1, max_length=500)
+    rationale: str = Field(min_length=1, max_length=500)
+    source_refs: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        min_length=1, max_length=10
+    )
+
+    @model_validator(mode='after')
+    def require_nonblank_content(self) -> 'V8PolicyJudgmentProposal':
+        if not self.assessment.strip() or not self.rationale.strip():
+            raise ValueError('Policy judgment assessment and rationale must not be blank.')
+        if any(not ref.strip() or ref != ref.strip() for ref in self.source_refs):
+            raise ValueError('Policy judgment source references must be canonical nonblank IDs.')
+        return self
+
+
 class V8DocumentRequest(ContractModel):
     """The model asks for a document this kind of report should carry."""
 
@@ -132,6 +151,9 @@ class V8TurnProposal(ContractModel):
     # Any action may leave this None: the model decides whether this turn asks.
     next_question: V8NextQuestion | None = None
     service_suggestions: list[V8ServiceSuggestion] = Field(default_factory=list, max_length=3)
+    policy_judgment_proposals: list[V8PolicyJudgmentProposal] = Field(
+        default_factory=list, max_length=3
+    )
     document_requests: list[V8DocumentRequest] = Field(default_factory=list, max_length=2)
     evidence_interpretations: list[V8EvidenceInterpretation] = Field(
         default_factory=list, max_length=4

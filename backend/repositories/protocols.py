@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from threading import Event
@@ -1207,6 +1207,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         runtime_records: RuntimeTurnRecords | None = None,
         *,
         checkpointed: bool = False,
+        review_signals: Sequence[ReviewSignalRecord] | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn and optional Runtime trace."""
         raise NotImplementedError

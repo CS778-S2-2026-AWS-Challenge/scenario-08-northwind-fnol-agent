@@ -530,6 +530,9 @@ class WorkbenchFieldItem(ContractModel):
 
 
 class WorkbenchSignalDetail(WorkbenchRiskSignal):
+    judgment_point_kind: str | None = Field(default=None, max_length=100)
+    proposed_assessment: str | None = Field(default=None, max_length=500)
+    proposal_rationale: str | None = Field(default=None, max_length=500)
     reason_codes: list[str] = Field(default_factory=list)
     decisions: list[dict[str, Any]] = Field(default_factory=list)
     source_evidence: list[dict[str, Any]] = Field(default_factory=list)

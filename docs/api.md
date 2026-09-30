@@ -1295,6 +1295,69 @@ entering this normative HTTP contract.
 
 Signal status is `proposed`, `review_required`, `confirmed`, `dismissed`, `overridden`, or `resolved`. A signal records evidence for professional review; it MUST NOT state that the claimant committed fraud.
 
+#### Advisory policy judgment proposals
+
+The v8 turn envelope accepts optional `policy_judgment_proposals` (default empty, maximum three).
+Each proposal contains `kind` (maximum 100 characters), `assessment` and `rationale` (maximum 500
+characters each), and `source_refs` (one to ten authorized knowledge chunk IDs). These are advisory
+inputs, not Claim facts or coverage, liability, fraud, excess, or settlement decisions.
+
+The backend validates proposals against the final accepted turn facts before committing the turn.
+`claim.product_family` and the minimum facts below must be confirmed, resolved, and contain known
+values. `contents.items` refers to a confirmed, resolved typed item with a description and category,
+not a scalar Dynamic Form field. Unknown, disputed, proposed, empty, and unavailable facts do not
+satisfy these prerequisites. The requirements are structural evidence gates; they do not determine
+whether a clause applies or whether the model's assessment is correct.
+
+The executable taxonomy is `JUDGMENT_POINT_TAXONOMY` in `backend/services/policy_judgment.py`:
+
+| Kind | Family and policy clause | Minimum facts in addition to confirmed family |
+| --- | --- | --- |
+| `liability_split` | Motor: `MTR-COV-02` | `parties.other_parties=true`, `incident.description` |
+| `excess_multiplicity` | Motor: `MTR-EXC-01`; home: `HOM-EXC-01`; contents: `CON-EXC-01` | `incident.description` |
+| `driver_permission_status` | Motor: `MTR-EXC-02` | `driver.owner_permission`, `driver.licence_status` |
+| `alcohol_drug_applicability` | Motor: `MTR-EXC-03` | `incident.description` |
+| `unsafe_use_applicability` | Motor: `MTR-EXC-04` | `vehicle.use`, `incident.description` |
+| `gradual_damage_discoverability` | Home: `HOM-BEN-03` | `incident.discovered_at`, `incident.description` |
+| `natural_hazard_allocation` | Home: `HOM-NHZ-01` | `incident.location`, `incident.description` |
+| `occupancy_change_applicability` | Home: `HOM-EXC-04` | `property.occupancy`, `incident.description` |
+| `theft_circumstance` | Contents: `CON-COV-02` | `theft.entry_context`, `incident.description` |
+| `unsecured_property_dispute` | Contents: `CON-EXC-04` | `contents.items`, `incident.description` |
+| `multi_event_dispute` | Motor: `MTR-EXC-01`; home: `HOM-EXC-01`; contents: `CON-EXC-01` | `incident.description` |
+| `item_classification_dispute` | Contents: `CON-AUTH-01` | `contents.items` |
+
+Every cited chunk must have been returned by the server-authorized knowledge context loader during
+this turn, contain nonempty text, and identify a configured clause in its section path. A model
+cannot authorize a source by naming an arbitrary chunk, policy number, or retrieval ID. No retrieval
+or unavailable retrieval means no eligible judgment proposal. Duplicate kinds in one turn are
+rejected. Active or newly created handoffs and safety interrupts suppress proposals; a turn without
+authorized mutation authority cannot create a signal. Optional rejected judgments do not discard
+otherwise valid facts or the ordinary turn.
+
+A valid proposal creates a staff-only `POLICY_JUDGMENT_PROPOSAL` `ReviewSignalRecord`, saved atomically
+with the Claim revision, messages, Runtime audit records, and idempotency result. Signal identity is
+stable for Claim, triggering message, and judgment kind; retrying the accepted message returns the
+existing result. Signal source references link the triggering message, accepted Claim revision,
+and cited chunks. The Runtime proposal retains submitted judgments, rejection reasons, and accepted
+signal references for internal audit. The existing `proposed_signals` compatibility input remains
+untrusted and is not an alternate write route.
+
+`GET /api/v1/workbench/claims/{claim_id}/signals` returns nullable `judgment_point_kind`,
+`proposed_assessment`, and `proposal_rationale` alongside existing signal data. `source_evidence`
+includes the persisted cited policy snapshots (document/chunk ID, title, section, source URI,
+version, checksum, and the bounded retrieved text). The authorized primary staff owner uses the
+existing `signal.record_decision` action and signal decision route for `confirmed`, `dismissed`,
+`overridden`, or `resolved`. No new decision workflow or claimant-visible signal is introduced.
+Staff realtime invalidation includes `signals`; claimant events exclude that resource.
+
+Agent integration consumes the existing v8 envelope and authorized `context.resolve` guidance.
+It emits only advisory proposals with the returned chunk IDs. Prompt selection of judgment kinds,
+claimant wording, and policy-judgment reply-consistency behavior remain the Agent owner's work.
+The backend does not automatically generate an assessment or rewrite the claimant reply. Adding a
+kind requires one taxonomy entry and corresponding contract/test evidence, without changing the
+generic validator, generator, or proposal schema. Neither acceptance of a proposal nor staff signal
+confirmation constitutes a final Claim or coverage decision.
+
 ### Handoff
 
 ```json

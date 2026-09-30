@@ -22,6 +22,16 @@ def test_docs_only_change_skips_backend_pytest() -> None:
     assert selection.tests == ()
 
 
+def test_policy_judgment_change_selects_validation_persistence_and_api_consumers() -> None:
+    selection = select_tests(['backend/services/policy_judgment.py'])
+    assert selection.mode == 'scoped'
+    assert set(selection.tests) == {
+        'tests/test_policy_judgment.py',
+        'tests/test_policy_judgment_persistence.py',
+        'tests/test_policy_judgment_turn.py',
+    }
+
+
 def test_narrow_claim_api_change_selects_direct_consumers() -> None:
     selection = select_tests(['backend/api/claims.py'])
 

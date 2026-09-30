@@ -77,6 +77,14 @@ JOURNEY_CRITICAL_PATHS = frozenset(
 )
 BACKEND_CONSUMER_RULES = (
     (
+        ('backend/services/policy_judgment.py',),
+        (
+            'tests/test_policy_judgment.py',
+            'tests/test_policy_judgment_persistence.py',
+            'tests/test_policy_judgment_turn.py',
+        ),
+    ),
+    (
         (
             'backend/api/account_data.py',
             'backend/domain/account_data.py',

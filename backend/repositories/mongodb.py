@@ -7,7 +7,7 @@ document details below the repository boundary.
 """
 
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from threading import Event
@@ -319,6 +319,7 @@ IMMUTABLE_CHILD_RECORD_KINDS = frozenset(
         'message',
         'conversation_summary',
         'agent_decision',
+        'review_signal',
         'branch_evaluation',
         'runtime_trace',
         'turn_plan',
@@ -8653,6 +8654,7 @@ class MongoDBRepository:
         runtime_records: RuntimeTurnRecords | None = None,
         *,
         checkpointed: bool = False,
+        review_signals: Sequence[ReviewSignalRecord] | None = None,
     ) -> None:
         records_match = (
             claim.revision == expected_revision + 1
@@ -8698,6 +8700,13 @@ class MongoDBRepository:
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        incoming_signals: dict[str, ReviewSignalRecord] = {}
+        for signal in review_signals or ():
+            if signal.claim_id != claim.claim_id:
+                raise KeyError(claim.claim_id)
+            if signal.signal_id in incoming_signals:
+                raise IdempotencyConflict(signal.signal_id)
+            incoming_signals[signal.signal_id] = signal
         if runtime_records is not None:
             try:
                 validate_runtime_turn_links(
@@ -8727,6 +8736,7 @@ class MongoDBRepository:
                 runtime_records,
                 checkpointed,
                 mongo_session,
+                tuple(incoming_signals.values()),
             )
         )
 
@@ -9210,7 +9220,16 @@ class MongoDBRepository:
         runtime_records: RuntimeTurnRecords | None,
         checkpointed: bool,
         mongo_session: Any,
+        review_signals: Sequence[ReviewSignalRecord],
     ) -> None:
+        for signal in review_signals:
+            if (
+                self._get(
+                    'review_signal', signal.signal_id, ReviewSignalRecord, session=mongo_session
+                )
+                is not None
+            ):
+                raise IdempotencyConflict(signal.signal_id)
         if handoff is not None:
             from backend.repositories.handoff_guard import validate_runtime_handoff_update
 
@@ -9240,6 +9259,7 @@ class MongoDBRepository:
             ('message', agent_message.message_id, agent_message),
             ('agent_decision', decision.decision_id, decision),
         ]
+        records.extend(('review_signal', signal.signal_id, signal) for signal in review_signals)
         if handoff is not None:
             records.append(('handoff', handoff.handoff_id, handoff))
         if evidence is not None:
