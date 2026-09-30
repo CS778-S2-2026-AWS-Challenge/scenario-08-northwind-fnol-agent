@@ -51,6 +51,8 @@ from backend.domain.realtime import (
     RealtimePublication,
 )
 from backend.domain.retention import (
+    ObjectDeletionOutcome,
+    RetentionDeleteAuthorization,
     RetentionHoldRecord,
     RetentionOperation,
     RetentionRecordTombstone,
@@ -730,6 +732,28 @@ class PersistenceRepository(ClaimRepository, Protocol):
         now: datetime,
     ) -> RetentionOperation:
         """Persist bounded failure/unknown evidence without repeating destruction."""
+        raise NotImplementedError
+
+    def authorize_retention_object_target(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        now: datetime,
+    ) -> tuple[RetentionOperation, RetentionDeleteAuthorization]:
+        """Atomically order one object-delete authorization against retention holds."""
+        raise NotImplementedError
+
+    def record_retention_object_result(
+        self,
+        operation_id: str,
+        authorization_id: str,
+        *,
+        outcome: ObjectDeletionOutcome,
+        now: datetime,
+    ) -> RetentionOperation:
+        """Settle one previously authorized object-delete attempt durably."""
         raise NotImplementedError
 
     def apply_retention_record_target(

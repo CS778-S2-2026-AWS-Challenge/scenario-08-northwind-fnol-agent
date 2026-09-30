@@ -159,75 +159,61 @@ def execute_retention_object_cleanup(
     *,
     now: datetime,
 ) -> RetentionOperation:
-    """Execute only unfinished Evidence object targets for one operation.
+    """Execute unfinished object targets through a durable authorization fence.
 
-    A failed or unknown delete is persisted before returning.  Exact retries
-    reload the same operation and skip every target whose latest evidence is
-    already satisfied.
+    Authorization and hold creation contend on the RetentionOperation revision.
+    A hold that commits first blocks authorization. If authorization commits
+    first, that one in-flight provider call may settle, but a later hold leaves
+    the operation HELD and prevents every subsequent destructive target.
     """
 
     if now.utcoffset() is None:
         raise ValueError('Retention execution time must be timezone-aware.')
 
     operation = repository.get_retention_operation(operation_id)
-
     if operation is None:
         raise KeyError(operation_id)
-
     if operation.status is RetentionOperationStatus.COMPLETED:
         return operation
 
-    hold_ids = _active_hold_ids(
-        repository,
-        operation.claim_id,
-    )
-
-    if hold_ids:
-        held = _held_candidate(
-            operation,
-            hold_ids,
-            now=now,
-        )
-
+    hold_ids = _active_hold_ids(repository, operation.claim_id)
+    if hold_ids and operation.active_delete_authorization_id is None:
+        held = _held_candidate(operation, hold_ids, now=now)
         if held != operation:
-            repository.save_retention_operation(
-                held,
-                operation.revision,
-            )
-
+            repository.save_retention_operation(held, operation.revision)
         return held
 
-    statuses = retention_target_statuses(
-        operation.targets,
-        operation.step_evidence,
-    )
+    statuses = retention_target_statuses(operation.targets, operation.step_evidence)
 
-    for target in sorted(
-        operation.targets,
-        key=lambda item: item.target_id,
-    ):
+    for target in sorted(operation.targets, key=lambda item: item.target_id):
         if target.kind is not RetentionTargetKind.OBJECT_BYTES:
             continue
-
         if statuses[target.target_id] is RetentionStepStatus.SATISFIED:
             continue
-
         if target.storage_key is None:
             raise ValueError('Object retention target lost its storage key.')
 
-        # A hold can be applied after an earlier target was satisfied. Re-read
-        # authority immediately before every new destructive side effect.
-        hold_ids = _active_hold_ids(repository, operation.claim_id)
-        if hold_ids:
-            held = _held_candidate(operation, hold_ids, now=now)
-            if held != operation:
-                repository.save_retention_operation(held, operation.revision)
-            return held
-
-        attempt = _next_attempt(
-            operation,
-            target.target_id,
-        )
+        try:
+            operation, authorization = repository.authorize_retention_object_target(
+                operation.operation_id,
+                target.target_id,
+                operation.revision,
+                now=now,
+            )
+        except RetentionTargetFreezeRejected:
+            refreshed = repository.get_retention_operation(operation.operation_id)
+            if refreshed is None:
+                raise
+            return refreshed
+        except Exception:
+            refreshed = repository.get_retention_operation(operation.operation_id)
+            if (
+                refreshed is not None
+                and refreshed.status is RetentionOperationStatus.HELD
+                and refreshed.active_delete_authorization_id is None
+            ):
+                return refreshed
+            raise
 
         try:
             outcome = storage.delete_upload(
@@ -238,58 +224,18 @@ def execute_retention_object_cleanup(
         except EvidenceStorageUnavailable:
             outcome = ObjectDeletionOutcome.FAILED
 
-        status = {
-            ObjectDeletionOutcome.DELETED: RetentionStepStatus.SATISFIED,
-            ObjectDeletionOutcome.ALREADY_ABSENT: RetentionStepStatus.SATISFIED,
-            ObjectDeletionOutcome.FAILED: RetentionStepStatus.FAILED,
-            ObjectDeletionOutcome.UNKNOWN: RetentionStepStatus.UNKNOWN,
-        }[outcome]
-
-        diagnostic_code = (
-            None
-            if status is RetentionStepStatus.SATISFIED
-            else (
-                'OBJECT_DELETE_FAILED'
-                if status is RetentionStepStatus.FAILED
-                else 'OBJECT_DELETE_UNKNOWN'
-            )
-        )
-
-        evidence = RetentionStepEvidence(
-            evidence_id=_step_evidence_id(
-                operation.operation_id,
-                target.target_id,
-                attempt,
-            ),
-            target_id=target.target_id,
-            attempt=attempt,
-            status=status,
-            object_outcome=outcome,
-            diagnostic_code=diagnostic_code,
-            source_refs=list(target.source_refs),
-            recorded_at=now,
-        )
-
-        candidate = _candidate_after_step(
-            operation,
-            evidence,
+        operation = repository.record_retention_object_result(
+            operation.operation_id,
+            authorization.authorization_id,
+            outcome=outcome,
             now=now,
         )
+        statuses = retention_target_statuses(operation.targets, operation.step_evidence)
 
-        repository.save_retention_operation(
-            candidate,
-            operation.revision,
-        )
-
-        operation = candidate
-        statuses = retention_target_statuses(
-            operation.targets,
-            operation.step_evidence,
-        )
-
-        # Preserve the first uncertain/failed point durably and reconcile from
-        # that exact operation on the next execution.
-        if status in {
+        latest_status = statuses[target.target_id]
+        if operation.status is RetentionOperationStatus.HELD:
+            return operation
+        if latest_status in {
             RetentionStepStatus.FAILED,
             RetentionStepStatus.UNKNOWN,
         }:

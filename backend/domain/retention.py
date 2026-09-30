@@ -32,6 +32,9 @@ from backend.domain.models import (
     RetentionCleanupTarget as RetentionCleanupTarget,
 )
 from backend.domain.models import (
+    RetentionDeleteAuthorization as RetentionDeleteAuthorization,
+)
+from backend.domain.models import (
     RetentionHoldReason as RetentionHoldReason,
 )
 from backend.domain.models import (
@@ -255,6 +258,30 @@ def validate_retention_operation_transition(
 
     if not set(current.hold_refs).issubset(candidate.hold_refs):
         raise ValueError('Retention hold references are append-only.')
+
+    current_authorizations = current.delete_authorizations
+    if (
+        len(candidate.delete_authorizations) < len(current_authorizations)
+        or candidate.delete_authorizations[: len(current_authorizations)] != current_authorizations
+    ):
+        raise ValueError('Retention delete authorizations are append-only.')
+
+    current_active = current.active_delete_authorization_id
+    candidate_active = candidate.active_delete_authorization_id
+    if current_active is None and candidate_active is not None:
+        newly_authorized = candidate.delete_authorizations[len(current_authorizations) :]
+        if len(newly_authorized) != 1 or newly_authorized[0].authorization_id != candidate_active:
+            raise ValueError('Active delete authorization must be the newly appended fence.')
+        if candidate.step_evidence != current.step_evidence:
+            raise ValueError('Delete authorization cannot also settle a retention step.')
+    elif current_active is not None and candidate_active not in {current_active, None}:
+        raise ValueError('An active delete authorization cannot be replaced.')
+    elif current_active is not None and candidate_active is None:
+        if not any(
+            evidence.authorization_id == current_active
+            for evidence in candidate.step_evidence[len(current.step_evidence) :]
+        ):
+            raise ValueError('Clearing delete authorization requires its durable result evidence.')
 
 
 def validate_retention_hold_transition(
@@ -754,6 +781,16 @@ def retention_step_evidence_id(
     material = f'{operation_id}|{target_id}|{attempt}'
 
     return 'rse_' + sha256(material.encode()).hexdigest()[:32]
+
+
+def retention_delete_authorization_id(
+    operation_id: str,
+    target_id: str,
+    attempt: int,
+) -> str:
+    material = f'{operation_id}|{target_id}|{attempt}|delete-authorization'
+
+    return 'rda_' + sha256(material.encode()).hexdigest()[:32]
 
 
 def retention_candidate_after_step(

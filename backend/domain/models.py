@@ -3126,6 +3126,21 @@ class RetentionCleanupTarget(ContractModel):
         return self
 
 
+class RetentionDeleteAuthorization(ContractModel):
+    """Durable authorization fence for one irreversible object-delete attempt."""
+
+    authorization_id: str = Field(min_length=1, max_length=200)
+    target_id: str = Field(min_length=1, max_length=200)
+    attempt: int = Field(ge=1)
+    authorized_at: datetime
+
+    @model_validator(mode='after')
+    def validate_authorization(self) -> 'RetentionDeleteAuthorization':
+        if self.authorized_at.utcoffset() is None:
+            raise ValueError('Retention delete authorization time must be timezone-aware.')
+        return self
+
+
 class RetentionStepEvidence(ContractModel):
     """Immutable evidence for one execution attempt against one target."""
 
@@ -3134,6 +3149,7 @@ class RetentionStepEvidence(ContractModel):
     attempt: int = Field(ge=1)
     status: RetentionStepStatus
     object_outcome: ObjectDeletionOutcome | None = None
+    authorization_id: str | None = Field(default=None, min_length=1, max_length=200)
     diagnostic_code: str | None = Field(
         default=None,
         min_length=1,
@@ -3204,6 +3220,15 @@ class RetentionOperation(ContractModel):
         default_factory=list,
         max_length=500,
     )
+    delete_authorizations: list[RetentionDeleteAuthorization] = Field(
+        default_factory=list,
+        max_length=2000,
+    )
+    active_delete_authorization_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+    )
     step_evidence: list[RetentionStepEvidence] = Field(
         default_factory=list,
         max_length=2000,
@@ -3264,6 +3289,29 @@ class RetentionOperation(ContractModel):
             raise ValueError('Retention cleanup target identities must be unique.')
 
         target_id_set = set(target_ids)
+        target_by_id = {target.target_id: target for target in self.targets}
+        authorization_ids: set[str] = set()
+        authorization_keys: set[tuple[str, int]] = set()
+
+        for authorization in self.delete_authorizations:
+            if authorization.authorization_id in authorization_ids:
+                raise ValueError('Retention delete authorization identities must be unique.')
+            if authorization.target_id not in target_id_set:
+                raise ValueError('Retention delete authorization references an unknown target.')
+            if target_by_id[authorization.target_id].kind is not RetentionTargetKind.OBJECT_BYTES:
+                raise ValueError('Only object-byte targets may carry delete authorization.')
+            key = (authorization.target_id, authorization.attempt)
+            if key in authorization_keys:
+                raise ValueError('A retention object-delete attempt may have only one authorization.')
+            authorization_ids.add(authorization.authorization_id)
+            authorization_keys.add(key)
+
+        if (
+            self.active_delete_authorization_id is not None
+            and self.active_delete_authorization_id not in authorization_ids
+        ):
+            raise ValueError('Active retention delete authorization must reference durable evidence.')
+
         evidence_keys: set[tuple[str, int]] = set()
         evidence_ids: set[str] = set()
 
@@ -3275,6 +3323,25 @@ class RetentionOperation(ContractModel):
                 raise ValueError('Retention step evidence identities must be unique.')
 
             evidence_ids.add(evidence.evidence_id)
+
+            if evidence.authorization_id is not None:
+                authorization = next(
+                    (
+                        item
+                        for item in self.delete_authorizations
+                        if item.authorization_id == evidence.authorization_id
+                    ),
+                    None,
+                )
+                if authorization is None:
+                    raise ValueError('Retention step references an unknown delete authorization.')
+                if (
+                    authorization.target_id != evidence.target_id
+                    or authorization.attempt != evidence.attempt
+                ):
+                    raise ValueError(
+                        'Retention step and delete authorization coordinates must agree.'
+                    )
 
             key = (evidence.target_id, evidence.attempt)
 

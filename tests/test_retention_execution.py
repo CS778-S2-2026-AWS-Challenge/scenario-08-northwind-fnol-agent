@@ -267,6 +267,14 @@ def test_hold_applied_mid_cleanup_stops_next_target_and_resume_uses_same_operati
     assert len(held.step_evidence) == 1
     assert held.step_evidence[0].target_id == 'target-1'
     assert held.step_evidence[0].status is RetentionStepStatus.SATISFIED
+    assert held.step_evidence[0].authorization_id is not None
+    assert len(held.delete_authorizations) == 1
+    assert (
+        held.delete_authorizations[0].authorization_id
+        == held.step_evidence[0].authorization_id
+    )
+    assert held.active_delete_authorization_id is None
+    assert 'hold-mid-cleanup' in held.hold_refs
 
     hold = repository.list_retention_holds(operation.claim_id)[0]
     repository.save_retention_hold(

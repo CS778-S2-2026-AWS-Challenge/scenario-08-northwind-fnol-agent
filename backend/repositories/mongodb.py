@@ -118,10 +118,12 @@ from backend.domain.realtime import (
 from backend.domain.retention import (
     RETENTION_STORAGE_TARGETS,
     RETENTION_TARGET_STORAGE_TYPE,
+    ObjectDeletionOutcome,
     ResourceAccessClosed,
     RetentionClassification,
     RetentionCleanupTarget,
     RetentionDatabaseStepError,
+    RetentionDeleteAuthorization,
     RetentionEligibilityReason,
     RetentionEligibilityRejected,
     RetentionHoldRecord,
@@ -136,6 +138,7 @@ from backend.domain.retention import (
     build_retention_cleanup_target,
     retention_access_closed,
     retention_candidate_after_step,
+    retention_delete_authorization_id,
     retention_next_attempt,
     retention_record_identity,
     retention_step_evidence_id,
@@ -1627,6 +1630,262 @@ class MongoDBRepository:
 
         return self._atomic(record)
 
+    def authorize_retention_object_target(
+        self,
+        operation_id: str,
+        target_id: str,
+        expected_revision: int,
+        *,
+        now: datetime,
+    ) -> tuple[RetentionOperation, RetentionDeleteAuthorization]:
+        def authorize(mongo_session: Any) -> tuple[RetentionOperation, RetentionDeleteAuthorization]:
+            operation = self._get(
+                'retention_operation',
+                operation_id,
+                RetentionOperation,
+                session=mongo_session,
+            )
+            if operation is None:
+                raise KeyError(operation_id)
+
+            if operation.active_delete_authorization_id is not None:
+                authorization = next(
+                    item
+                    for item in operation.delete_authorizations
+                    if item.authorization_id == operation.active_delete_authorization_id
+                )
+                if authorization.target_id != target_id:
+                    raise IdempotencyConflict(operation.active_delete_authorization_id)
+                return operation, authorization
+
+            if operation.revision != expected_revision:
+                raise RevisionConflict(operation.revision)
+            if operation.status is RetentionOperationStatus.COMPLETED:
+                raise ValueError('Completed retention cannot authorize deletion.')
+
+            active_hold = self._collection.find_one(
+                {
+                    'record_type': 'retention_hold',
+                    'claim_id': operation.claim_id,
+                    'released_at': None,
+                },
+                projection={'_id': 1},
+                session=mongo_session,
+            )
+            if active_hold is not None:
+                raise RetentionTargetFreezeRejected(
+                    RetentionTargetFreezeReason.ACTIVE_HOLD,
+                    operation.claim_id,
+                )
+
+            statuses = retention_target_statuses(operation.targets, operation.step_evidence)
+            target = next(
+                (item for item in operation.targets if item.target_id == target_id),
+                None,
+            )
+            if target is None:
+                raise KeyError(target_id)
+            if target.kind is not RetentionTargetKind.OBJECT_BYTES:
+                raise ValueError('Only object-byte targets may be authorized for provider deletion.')
+            if statuses[target_id] is RetentionStepStatus.SATISFIED:
+                raise ValueError('Satisfied retention targets cannot be re-authorized.')
+
+            attempt = retention_next_attempt(operation, target_id)
+            authorization = RetentionDeleteAuthorization(
+                authorization_id=retention_delete_authorization_id(
+                    operation.operation_id,
+                    target_id,
+                    attempt,
+                ),
+                target_id=target_id,
+                attempt=attempt,
+                authorized_at=now,
+            )
+            payload = operation.model_dump(mode='python')
+            payload.update(
+                {
+                    'revision': operation.revision + 1,
+                    'delete_authorizations': [*operation.delete_authorizations, authorization],
+                    'active_delete_authorization_id': authorization.authorization_id,
+                    'updated_at': now,
+                    'completed_at': None,
+                }
+            )
+            candidate = RetentionOperation.model_validate(payload)
+            validate_retention_operation_transition(operation, candidate)
+            document = candidate.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id('retention_operation', candidate.operation_id),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': candidate.claim_id,
+                }
+            )
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'retention_operation',
+                    'revision': expected_revision,
+                },
+                document,
+                session=mongo_session,
+            )
+            if result.modified_count != 1:
+                latest = self._get(
+                    'retention_operation',
+                    operation_id,
+                    RetentionOperation,
+                    session=mongo_session,
+                )
+                if latest is None:
+                    raise KeyError(operation_id)
+                raise RevisionConflict(latest.revision)
+            return candidate, authorization
+
+        return self._atomic(authorize)
+
+    def record_retention_object_result(
+        self,
+        operation_id: str,
+        authorization_id: str,
+        *,
+        outcome: ObjectDeletionOutcome,
+        now: datetime,
+    ) -> RetentionOperation:
+        def settle(mongo_session: Any) -> RetentionOperation:
+            operation = self._get(
+                'retention_operation',
+                operation_id,
+                RetentionOperation,
+                session=mongo_session,
+            )
+            if operation is None:
+                raise KeyError(operation_id)
+
+            existing = next(
+                (
+                    evidence
+                    for evidence in operation.step_evidence
+                    if evidence.authorization_id == authorization_id
+                ),
+                None,
+            )
+            if existing is not None:
+                return operation
+
+            authorization = next(
+                (
+                    item
+                    for item in operation.delete_authorizations
+                    if item.authorization_id == authorization_id
+                ),
+                None,
+            )
+            if authorization is None:
+                raise KeyError(authorization_id)
+            if operation.active_delete_authorization_id != authorization_id:
+                raise IdempotencyConflict(authorization_id)
+
+            target = next(
+                item for item in operation.targets if item.target_id == authorization.target_id
+            )
+            status = {
+                ObjectDeletionOutcome.DELETED: RetentionStepStatus.SATISFIED,
+                ObjectDeletionOutcome.ALREADY_ABSENT: RetentionStepStatus.SATISFIED,
+                ObjectDeletionOutcome.FAILED: RetentionStepStatus.FAILED,
+                ObjectDeletionOutcome.UNKNOWN: RetentionStepStatus.UNKNOWN,
+            }[outcome]
+            diagnostic_code = (
+                None
+                if status is RetentionStepStatus.SATISFIED
+                else (
+                    'OBJECT_DELETE_FAILED'
+                    if status is RetentionStepStatus.FAILED
+                    else 'OBJECT_DELETE_UNKNOWN'
+                )
+            )
+            evidence = RetentionStepEvidence(
+                evidence_id=retention_step_evidence_id(
+                    operation.operation_id,
+                    target.target_id,
+                    authorization.attempt,
+                ),
+                target_id=target.target_id,
+                attempt=authorization.attempt,
+                status=status,
+                object_outcome=outcome,
+                authorization_id=authorization.authorization_id,
+                diagnostic_code=diagnostic_code,
+                source_refs=list(target.source_refs),
+                recorded_at=now,
+            )
+            candidate = retention_candidate_after_step(operation, evidence, now=now)
+            active_hold_documents = list(
+                self._collection.find(
+                    {
+                        'record_type': 'retention_hold',
+                        'claim_id': operation.claim_id,
+                        'released_at': None,
+                    },
+                    projection={'hold_id': 1},
+                    session=mongo_session,
+                )
+            )
+            active_hold_ids = sorted(
+                document['hold_id']
+                for document in active_hold_documents
+                if isinstance(document.get('hold_id'), str)
+            )
+            payload = candidate.model_dump(mode='python')
+            payload['active_delete_authorization_id'] = None
+            if active_hold_ids:
+                payload.update(
+                    {
+                        'status': RetentionOperationStatus.HELD,
+                        'hold_refs': sorted(set(candidate.hold_refs).union(active_hold_ids)),
+                        'completed_at': None,
+                    }
+                )
+            candidate = RetentionOperation.model_validate(payload)
+            validate_retention_operation_transition(operation, candidate)
+            document = candidate.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id('retention_operation', candidate.operation_id),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': candidate.claim_id,
+                }
+            )
+            result = self._collection.replace_one(
+                {
+                    '_id': document['_id'],
+                    'record_type': 'retention_operation',
+                    'revision': operation.revision,
+                },
+                document,
+                session=mongo_session,
+            )
+            if result.modified_count != 1:
+                latest = self._get(
+                    'retention_operation',
+                    operation_id,
+                    RetentionOperation,
+                    session=mongo_session,
+                )
+                if latest is None:
+                    raise KeyError(operation_id)
+                if any(
+                    evidence.authorization_id == authorization_id
+                    for evidence in latest.step_evidence
+                ):
+                    return latest
+                raise RevisionConflict(latest.revision)
+            return candidate
+
+        return self._atomic(settle)
+
     def apply_retention_record_target(
         self,
         operation_id: str,
@@ -2195,8 +2454,59 @@ class MongoDBRepository:
                 if hold.released_at is not None:
                     raise ValueError('A retention hold must be persisted before release.')
 
-                # Insert-only: a concurrent creator of the same hold identity
-                # either replays exactly or conflicts; it never overwrites.
+                operation_document = self._collection.find_one(
+                    {
+                        'record_type': 'retention_operation',
+                        'claim_id': hold.claim_id,
+                    },
+                    session=mongo_session,
+                )
+                operation = self._model_from_document(
+                    operation_document,
+                    RetentionOperation,
+                )
+                if operation is not None and operation.status is not RetentionOperationStatus.COMPLETED:
+                    payload = operation.model_dump(mode='python')
+                    payload.update(
+                        {
+                            'revision': operation.revision + 1,
+                            'status': RetentionOperationStatus.HELD,
+                            'hold_refs': sorted(set(operation.hold_refs).union({hold.hold_id})),
+                            'updated_at': max(operation.updated_at, hold.applied_at),
+                            'completed_at': None,
+                        }
+                    )
+                    held = RetentionOperation.model_validate(payload)
+                    validate_retention_operation_transition(operation, held)
+                    held_document = held.model_dump(mode='json')
+                    held_document.update(
+                        {
+                            '_id': self._record_id('retention_operation', held.operation_id),
+                            'record_type': 'retention_operation',
+                            'customer_id': None,
+                            'claim_id': held.claim_id,
+                        }
+                    )
+                    result = self._collection.replace_one(
+                        {
+                            '_id': held_document['_id'],
+                            'record_type': 'retention_operation',
+                            'revision': operation.revision,
+                        },
+                        held_document,
+                        session=mongo_session,
+                    )
+                    if result.modified_count != 1:
+                        latest = self._get(
+                            'retention_operation',
+                            operation.operation_id,
+                            RetentionOperation,
+                            session=mongo_session,
+                        )
+                        if latest is None:
+                            raise KeyError(operation.operation_id)
+                        raise RevisionConflict(latest.revision)
+
                 try:
                     self._collection.insert_one(
                         {
