@@ -291,11 +291,11 @@ class FixtureRepository(PersistenceRepository):
                 (
                     operation
                     for operation in self._retention_operations.values()
-                    if operation.status
-                    not in {
-                        RetentionOperationStatus.COMPLETED,
-                        RetentionOperationStatus.HELD,
-                    }
+                    if operation.status is not RetentionOperationStatus.COMPLETED
+                    and (
+                        operation.status is not RetentionOperationStatus.HELD
+                        or operation.active_delete_authorization_id is not None
+                    )
                 ),
                 key=lambda operation: (
                     operation.updated_at,
