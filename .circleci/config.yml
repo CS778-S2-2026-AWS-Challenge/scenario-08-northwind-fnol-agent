@@ -381,6 +381,166 @@ jobs:
             git commit -m "fix: apply backend recovery formatting"
             git push origin HEAD:feature/issue-1076-unified-recovery
 
+  debug-local-mypy-worker:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy backend/recovery_worker_main.py
+          command: python -m mypy --follow-imports=skip backend/recovery_worker_main.py
+
+  debug-local-mypy-fixture:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy backend/repositories/fixture.py
+          command: python -m mypy --follow-imports=skip backend/repositories/fixture.py
+
+  debug-local-mypy-mongodb:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy backend/repositories/mongodb.py
+          command: python -m mypy --follow-imports=skip backend/repositories/mongodb.py
+
+  debug-local-mypy-protocols:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy backend/repositories/protocols.py
+          command: python -m mypy --follow-imports=skip backend/repositories/protocols.py
+
+  debug-local-mypy-recovery-service:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy backend/services/recovery_worker.py
+          command: python -m mypy --follow-imports=skip backend/services/recovery_worker.py
+
+  debug-local-mypy-retention-service:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy backend/services/retention.py
+          command: python -m mypy --follow-imports=skip backend/services/retention.py
+
+  debug-local-mypy-incomplete-test:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy tests/test_incomplete_claim_recovery.py
+          command: python -m mypy --follow-imports=skip tests/test_incomplete_claim_recovery.py
+
+  debug-local-mypy-retention-test:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy tests/test_retention_execution.py
+          command: python -m mypy --follow-imports=skip tests/test_retention_execution.py
+
+  debug-local-mypy-deployment-test:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy tests/test_runtime_deployment_profiles.py
+          command: python -m mypy --follow-imports=skip tests/test_runtime_deployment_profiles.py
+
+  debug-local-mypy-selector-test:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Isolate Mypy tests/test_backend_test_selection.py
+          command: python -m mypy --follow-imports=skip tests/test_backend_test_selection.py
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -719,6 +879,16 @@ workflows:
       - debug-mypy-services
       - debug-mypy-tests
       - debug-autofix-format
+      - debug-local-mypy-worker
+      - debug-local-mypy-fixture
+      - debug-local-mypy-mongodb
+      - debug-local-mypy-protocols
+      - debug-local-mypy-recovery-service
+      - debug-local-mypy-retention-service
+      - debug-local-mypy-incomplete-test
+      - debug-local-mypy-retention-test
+      - debug-local-mypy-deployment-test
+      - debug-local-mypy-selector-test
       - github-automation-quality
       - pr-policy
       - docs-quality
