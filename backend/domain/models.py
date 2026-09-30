@@ -2234,8 +2234,6 @@ class CompleteEvidenceProcessingRequest(ContractModel):
 
     @model_validator(mode='after')
     def validate_outcome(self) -> 'CompleteEvidenceProcessingRequest':
-        if self.outcome == 'ready' and not self.facts:
-            raise ValueError('A ready processing result must contain at least one fact.')
         if self.outcome != 'ready' and self.facts:
             raise ValueError('Failed or retry processing results must not contain facts.')
         return self

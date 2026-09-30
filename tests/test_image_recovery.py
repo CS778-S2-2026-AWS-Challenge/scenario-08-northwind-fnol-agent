@@ -1,6 +1,6 @@
 """Repeatable worker lifecycle and retry regressions; no external providers."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
 from typing import cast
 from unittest.mock import Mock
@@ -19,7 +19,8 @@ from backend.domain.models import (
     EvidenceStatus,
 )
 from backend.repositories.protocols import PersistenceRepository
-from backend.services.image_recovery import ImageRecoveryWorker
+from backend.services.image_recovery import EvidenceProcessingWorker, ImageRecoveryWorker
+from backend.services.support import now_utc
 
 
 def _record(evidence_id: str = 'evd_1', **updates: object) -> EvidenceRecord:
@@ -36,6 +37,16 @@ def _record(evidence_id: str = 'evd_1', **updates: object) -> EvidenceRecord:
         updated_at=datetime(2026, 9, 29, tzinfo=UTC),
     )
     return record.model_copy(update=updates)
+
+
+def _pdf_record(evidence_id: str = 'evd_pdf', **updates: object) -> EvidenceRecord:
+    return _record(evidence_id).model_copy(
+        update={
+            'kind': 'police_report',
+            'media_type': 'application/pdf',
+            **updates,
+        }
+    )
 
 
 def _repository() -> Mock:
@@ -202,3 +213,113 @@ def test_stop_waits_for_inflight_repair_and_prevents_next_record(
 def test_fixture_profile_does_not_start_background_recovery() -> None:
     app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
     assert app.state.image_recovery_worker is None
+
+
+def test_pdf_requires_processor_and_running_lease_must_expire_before_dispatch() -> None:
+    repository = _repository()
+    processor = Mock()
+    repository.list_evidence_recovery_page.return_value = [_pdf_record()]
+
+    EvidenceProcessingWorker(
+        cast(PersistenceRepository, repository), MockEvidenceStorage()
+    ).run_once()
+    processor.process.assert_not_called()
+
+    repository.reset_mock()
+    repository.get_claim_internal.return_value = Mock(revision=7)
+    repository.list_evidence_recovery_page.return_value = [
+        _pdf_record(
+            provenance={
+                'processing_state': 'running',
+                'processing_lease_expires_at': (now_utc() + timedelta(minutes=1)).isoformat(),
+            }
+        )
+    ]
+    EvidenceProcessingWorker(
+        cast(PersistenceRepository, repository), MockEvidenceStorage(), processor
+    ).run_once()
+    processor.process.assert_not_called()
+
+    for lease in (None, 'not-a-timestamp'):
+        repository.list_evidence_recovery_page.return_value = [
+            _pdf_record(
+                provenance={
+                    'processing_state': 'running',
+                    'processing_lease_expires_at': lease,
+                }
+            )
+        ]
+        EvidenceProcessingWorker(
+            cast(PersistenceRepository, repository), MockEvidenceStorage(), processor
+        ).run_once()
+    processor.process.assert_not_called()
+
+    repository.list_evidence_recovery_page.return_value = [
+        _pdf_record(
+            provenance={
+                'processing_state': 'running',
+                'processing_lease_expires_at': (now_utc() - timedelta(seconds=1)).isoformat(),
+            }
+        )
+    ]
+    EvidenceProcessingWorker(
+        cast(PersistenceRepository, repository), MockEvidenceStorage(), processor
+    ).run_once()
+    processor.process.assert_called_once()
+
+
+def test_poison_pdf_does_not_starve_later_pdf_record() -> None:
+    repository = _repository()
+    repository.list_evidence_recovery_page.return_value = [
+        _pdf_record('evd_poison'),
+        _pdf_record('evd_valid'),
+    ]
+    processor = Mock(
+        **{
+            'process.side_effect': [
+                ApiError(
+                    status_code=409,
+                    code='REVISION_CONFLICT',
+                    message='synthetic conflict',
+                    retryable=True,
+                ),
+                None,
+            ]
+        }
+    )
+
+    EvidenceProcessingWorker(
+        cast(PersistenceRepository, repository), MockEvidenceStorage(), processor
+    ).run_once()
+
+    assert [call.args[0].evidence_id for call in processor.process.call_args_list] == [
+        'evd_poison',
+        'evd_valid',
+    ]
+
+
+def test_wake_interrupts_full_sweep_wait() -> None:
+    repository = _repository()
+    first_sweep = Event()
+    second_sweep = Event()
+
+    def page(**kwargs: object) -> list[EvidenceRecord]:
+        if repository.list_evidence_recovery_page.call_count == 1:
+            first_sweep.set()
+        else:
+            second_sweep.set()
+        return []
+
+    repository.list_evidence_recovery_page.side_effect = page
+    worker = EvidenceProcessingWorker(
+        cast(PersistenceRepository, repository),
+        MockEvidenceStorage(),
+        sweep_interval_seconds=60,
+    )
+    worker.start()
+    try:
+        assert first_sweep.wait(2)
+        worker.wake()
+        assert second_sweep.wait(2)
+    finally:
+        worker.stop()
