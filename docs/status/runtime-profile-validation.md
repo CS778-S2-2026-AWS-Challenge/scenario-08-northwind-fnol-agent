@@ -52,15 +52,23 @@ deployed.
 | ECR | `unconfigured` | The ECR console opened and exposed private-repository navigation | No repository or image push was performed; repository creation and push permissions remain to be tested only when an approved image test is ready |
 | CloudWatch | `unconfigured` | The Sydney CloudWatch console opened | No log group, metric, alarm, or dashboard was created; observability permissions and cost impact remain unverified |
 | Secrets Manager | `unconfigured` | The Sydney Secrets Manager console opened and exposed `Store a new secret` | No secret was created and no secret value was entered; runtime secret injection remains unverified |
-| Bedrock | `unconfigured` | The Sydney Bedrock console opened | No model invocation or Knowledge Base operation was attempted; model access, quotas, and IAM permissions remain unverified |
+| Bedrock model inference | `validated` | The Sydney Playground successfully completed bounded Amazon Nova Pro 1.0 on-demand invocations using synthetic, non-sensitive prompts. Observed completed calls included 65 input/1,687 output tokens, 148 input/5,120 output tokens, 15,709 input/5,120 output tokens, and 26,035 input/5,120 output tokens | This proves interactive model invocation for the school permission set, not application-runtime credentials, Bedrock Knowledge Bases, citations, or production readiness |
+| Bedrock Knowledge Bases | `unconfigured` | No Knowledge Base, vector store, data source, ingestion job, or retrieval request was created | Knowledge Base provisioning, S3 access, retrieval, citations, and failure semantics remain separate validation work |
 | AWS credits | `unavailable` | The Billing and Cost Management Credits page reported no active or remaining credits at the time of checking | The account must not be treated as having a guaranteed course credit. Budgets are alerts, not credit balances; confirm the teaching team's billing arrangement before persistent deployment |
 | Repository AWS runtime | `local_only` | The current repository still requires the AWS profile to fail closed when its complete capability bundle is absent | Console access does not change the local runtime contract. The app remains on the existing local MongoDB/MinIO and model-gateway path until an approved AWS adapter and deployment evidence exist |
 
 ### Cost and cleanup boundary
 
 No EC2 instance, ECS cluster, ECR repository, DynamoDB table, CloudWatch
-resource, secret, Bedrock invocation, or uploaded S3 object was created during
-this check. The only new resource was the empty S3 permission-test bucket
+resource, secret, Knowledge Base, or uploaded S3 object was created during
+this check. Bounded Bedrock Nova Pro on-demand inference was invoked with
+synthetic text only. The completed Playground calls prove that the school
+account can consume a metered AWS service. Based on the visible token counts
+and the applicable on-demand model rates, the test was intentionally bounded
+to an estimated approximately `$0.20-$0.35`; the authoritative amount was not
+yet visible because AWS billing data is delayed.
+
+The only new persistent resource was the empty S3 permission-test bucket
 named `nw-fnol-permission-check-20261001`; it contains zero objects. Its
 deletion is a separate account mutation and should be performed after the
 current user confirms that the evidence has been recorded.
@@ -81,13 +89,16 @@ proof of application connectivity.
 The next bounded checks are:
 
 1. confirm the temporary S3 bucket cleanup decision;
-2. test an empty DynamoDB on-demand write/read using the approved migration
-   harness, then remove the test item/table only through an explicit cleanup
-   step;
-3. test ECR repository creation and a small image push only if the team has
+2. test ECR repository creation and a small image push only if the team has
    approved the image and its storage lifecycle;
-4. verify the exact ECS/Fargate, execution-role, Secrets Manager, CloudWatch,
-   and Bedrock permissions without entering real secrets or customer data.
+3. verify the exact ECS/Fargate, execution-role, Secrets Manager, and
+   CloudWatch permissions without entering real secrets or customer data;
+4. validate Bedrock Knowledge Bases ingestion, retrieval, citations, and
+   failure semantics separately from the now-verified model invocation.
+
+DynamoDB write/read was explicitly excluded from this validation pass. Its
+existing-table visibility remains recorded above, but no write capability or
+application adapter claim is made.
 
 These checks remain separate from the repository's local runtime-profile
 validation and must be recorded with the same evidence classifications.
