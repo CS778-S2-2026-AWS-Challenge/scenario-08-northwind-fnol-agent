@@ -5397,7 +5397,7 @@
             "type": "integer"
           },
           "ordinary_input_hard_limit": {
-            "default": 7500,
+            "default": 12000,
             "minimum": 100.0,
             "title": "Ordinary Input Hard Limit",
             "type": "integer"
@@ -5426,7 +5426,7 @@
             "type": "integer"
           },
           "tool_path_input_hard_limit": {
-            "default": 6000,
+            "default": 12000,
             "minimum": 100.0,
             "title": "Tool Path Input Hard Limit",
             "type": "integer"
