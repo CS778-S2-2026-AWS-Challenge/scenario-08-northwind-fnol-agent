@@ -160,9 +160,9 @@ COMMON_REQUIRED = frozenset(
 # Documents each kind of report normally carries, named by existing
 # EvidenceRecord.kind values already read by tag_projection / demo_materials.
 FAMILY_DOCUMENTS = {
-    'motor': frozenset({'incident_image', 'repair_quote'}),
-    'home': frozenset({'incident_image', 'repair_quote'}),
-    'contents': frozenset({'incident_image', 'proof_of_ownership'}),
+    'motor': frozenset({'incident_photo', 'repair_quote'}),
+    'home': frozenset({'incident_photo', 'repair_quote'}),
+    'contents': frozenset({'incident_photo', 'proof_of_ownership'}),
 }
 FAMILY_REQUIRED = {
     'motor': frozenset({'vehicle.damage_description', 'vehicle.drivable'}),

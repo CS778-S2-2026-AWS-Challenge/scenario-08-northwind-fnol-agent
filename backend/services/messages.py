@@ -23,6 +23,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
+from backend.domain.evidence import canonical_evidence_kind
 from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -1670,7 +1671,7 @@ def _document_projection(
     received: dict[str, list[str]] = {}
     for item in repository.list_evidence(claim.claim_id, claim.customer_id):
         if item.status is EvidenceStatus.RECEIVED:
-            received.setdefault(item.kind, []).append(item.evidence_id)
+            received.setdefault(canonical_evidence_kind(item.kind), []).append(item.evidence_id)
     return tuple(
         {
             'kind': kind,
