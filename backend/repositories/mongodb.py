@@ -681,7 +681,12 @@ class MongoDBRepository:
             self._collection.find(
                 {
                     'record_type': 'retention_operation',
-                    'status': {'$ne': RetentionOperationStatus.COMPLETED.value},
+                    'status': {
+                        '$nin': [
+                            RetentionOperationStatus.COMPLETED.value,
+                            RetentionOperationStatus.HELD.value,
+                        ]
+                    },
                 }
             )
             .sort([('updated_at', 1), ('_id', 1)])
@@ -2580,6 +2585,101 @@ class MongoDBRepository:
                     return
 
                 raise IdempotencyConflict(hold.hold_id)
+
+            operation_document = self._collection.find_one(
+                {
+                    'record_type': 'retention_operation',
+                    'claim_id': hold.claim_id,
+                    'status': RetentionOperationStatus.HELD.value,
+                },
+                session=mongo_session,
+            )
+            operation = self._model_from_document(
+                operation_document,
+                RetentionOperation,
+            )
+            if operation is None:
+                return
+
+            if (
+                self._collection.find_one(
+                    {
+                        'record_type': 'retention_hold',
+                        'claim_id': hold.claim_id,
+                        'released_at': None,
+                    },
+                    projection={'_id': 1},
+                    session=mongo_session,
+                )
+                is not None
+            ):
+                return
+
+            statuses = retention_target_statuses(
+                operation.targets,
+                operation.step_evidence,
+            )
+            if operation.targets and all(
+                status is RetentionStepStatus.SATISFIED for status in statuses.values()
+            ):
+                next_status = RetentionOperationStatus.COMPLETED
+                completed_at = hold.released_at
+            elif any(
+                status in {
+                    RetentionStepStatus.FAILED,
+                    RetentionStepStatus.UNKNOWN,
+                }
+                for status in statuses.values()
+            ):
+                next_status = RetentionOperationStatus.RECONCILIATION_REQUIRED
+                completed_at = None
+            else:
+                next_status = RetentionOperationStatus.RESERVED
+                completed_at = None
+
+            payload = operation.model_dump(mode='python')
+            payload.update(
+                {
+                    'revision': operation.revision + 1,
+                    'status': next_status,
+                    'updated_at': max(operation.updated_at, hold.released_at),
+                    'completed_at': completed_at,
+                }
+            )
+            resumed = RetentionOperation.model_validate(payload)
+            validate_retention_operation_transition(operation, resumed)
+            resumed_document = resumed.model_dump(mode='json')
+            resumed_document.update(
+                {
+                    '_id': self._record_id(
+                        'retention_operation',
+                        resumed.operation_id,
+                    ),
+                    'record_type': 'retention_operation',
+                    'customer_id': None,
+                    'claim_id': resumed.claim_id,
+                }
+            )
+            operation_result = self._collection.replace_one(
+                {
+                    '_id': resumed_document['_id'],
+                    'record_type': 'retention_operation',
+                    'revision': operation.revision,
+                },
+                resumed_document,
+                session=mongo_session,
+            )
+            if operation_result.modified_count != 1:
+                latest = self._get(
+                    'retention_operation',
+                    operation.operation_id,
+                    RetentionOperation,
+                    session=mongo_session,
+                )
+                if latest != resumed:
+                    raise RevisionConflict(
+                        latest.revision if latest is not None else operation.revision
+                    )
 
         self._atomic(persist)
 
