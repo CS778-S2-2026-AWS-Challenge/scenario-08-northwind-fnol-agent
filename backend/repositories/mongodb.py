@@ -14,6 +14,9 @@ from threading import Event
 from typing import Any, NoReturn, TypeVar, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from pymongo import MongoClient, ReturnDocument
+from pymongo.collection import Collection
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from backend.domain.account_data import (
     IdentityDocumentRecord,
@@ -211,10 +214,6 @@ from backend.repositories.protocols import (
     validate_staff_agent_execution_source,
     validate_validation_seed_session,
 )
-from pymongo import MongoClient, ReturnDocument
-from pymongo.collection import Collection
-from pymongo.errors import DuplicateKeyError, PyMongoError
-
 ModelT = TypeVar('ModelT', bound=BaseModel)
 ResultT = TypeVar('ResultT')
 _DATETIME_ADAPTER = TypeAdapter(datetime)
