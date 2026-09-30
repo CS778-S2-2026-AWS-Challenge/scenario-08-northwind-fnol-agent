@@ -10,7 +10,11 @@ from backend.domain.agent_context_runtime import RequestProfile, TurnTask
 # The earlier v7 Home intake baseline was 3955, before the vocabulary expansion.
 # The claimant schema includes the registered branch field vocabulary. Keep a
 # bounded ceiling while allowing the complete commercial FNOL contract.
-V7_INPUT_HARD_LIMIT = 5500
+V7_INPUT_HARD_LIMIT = 8000
+# Interactive latency is dominated by output tokens (about 120 tokens/s measured
+# on openrouter-gpt4o); input prefill is a small share. Input ceilings therefore
+# leave headroom for long conversations while output limits stay tight.
+V8_INPUT_HARD_LIMIT = 12_000
 
 _PROFILES = {
     'claimant.turn.v1': RequestProfile(
@@ -19,7 +23,7 @@ _PROFILES = {
         schema_id='claimant.turn.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=7500,
+        input_hard_limit=V8_INPUT_HARD_LIMIT,
         # Dense envelope with every list at its cap estimates 6361 tokens
         # (tests/test_request_profile_budgets.py); operating cap, not a proof.
         output_limit=6500,
@@ -48,7 +52,7 @@ _PROFILES = {
         schema_id='claimant.turn.v1',
         max_model_invocations=1,
         max_model_selected_tools=0,
-        input_hard_limit=7500,
+        input_hard_limit=V8_INPUT_HARD_LIMIT,
         output_limit=7500,
         requires_media_types=['image/*', 'application/pdf'],
     ),
@@ -59,7 +63,7 @@ _PROFILES = {
         tool_names=['context.resolve'],
         max_model_invocations=2,
         max_model_selected_tools=1,
-        input_hard_limit=7500,
+        input_hard_limit=V8_INPUT_HARD_LIMIT,
         output_limit=6500,
         requires_tool_continuation=True,
     ),
