@@ -1564,3 +1564,24 @@ authorization therefore share one persistence ordering boundary: hold-before-aut
 the target; authorization-before-hold allows only that already-authorized side effect to settle,
 records its authorization identity with the result, leaves the operation held, and prevents later
 object or database targets until the hold is released.
+
+### Recovery and retention identity prefixes
+
+Replay-stable identities are minted only through `backend/domain/ids.py`
+(`stable_digest`, `stable_operation_id`, `stable_record_id`). Their material is authoritative
+coordinates, never retry wall-clock time, so a restarted worker or replayed request resolves the
+same record. The digest length is part of the v1 contract and must not change for persisted records.
+
+| Prefix | Record or field | Digest | Material |
+| --- | --- | --- | --- |
+| `fuo_` | `FollowUpOperation.operation_id` | 24 | Follow-up ID, policy coordinate, sequence |
+| `ret_` | `RetentionOperation.operation_id` | 24 | Claim, terminal source reference, retention policy ID and `v1` label |
+| `rtg_` | `RetentionCleanupTarget.target_id` | 32 | Operation, record type and ID, target kind, classification |
+| `rts_` | Retention tombstone ID | 32 | The `rtg_` digest of the tombstoned target (`retention_tombstone_id`) |
+| `rse_` | `RetentionStepEvidence.evidence_id` | 32 | Operation, target, attempt |
+| `rda_` | `RetentionDeleteAuthorization.authorization_id` | 32 | Operation, target, attempt, delete-authorization marker |
+| `external_link_`, `idempotency_` | Retention cleanup `record_id` for composite source records | 32 | Record prefix and the source record's natural key |
+| `msg_recovery_` | Claimant-visible in-app recovery Message | 24 | FollowUpOperation ID |
+| `wki_recovery_` | Recovery Runtime WorkItem | 24 | Claim, operation or event coordinate, rule ID, subject |
+| `aud_recovery_`, `aud_p17_backfill_`, `aud_ret_` | Recovery, backfill and retention Audit events | 24 / 24 / 32 | Event suffix and Claim; Follow-up and outcome; operation step |
+| `aud_resume_`, `aud_abandon_` | Resume and staff-abandonment Audit events | 20 | Actor, route, idempotency key |

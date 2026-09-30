@@ -67,6 +67,24 @@ Claim/Evidence write-back record.
   from persisted/projectable task statuses and never appears in an
   `ExternalTaskRecord` projection.
 
+## Recovery responsibility
+
+The published Recovery Policy Registry
+([unified recovery design](design/agent-runtime/recovery-policy-registry.md)) decides the
+staff responsibility for a failed operation; the ExternalTask stays the authority for delivery
+certainty and the result.
+
+- `unknown_outcome` and `terminal_failure` each materialise one open recovery WorkItem owned by
+  staff. Its identity is derived from the Claim, the operation identity, the policy rule, and the
+  task, so a repeated failure event cannot open a second obligation for the same operation.
+- `unknown_outcome` blocks `external.retry` until reconciliation. The policy must authorise
+  reconciling the existing operation identity; otherwise the path fails closed.
+- Successful reconciliation settles that same WorkItem to `completed`. It never creates a
+  completed sibling beside an open item, and it fails closed when the original item is missing.
+  Replaying reconciliation leaves the settled item unchanged.
+- While any ExternalTask outcome for a Claim is unknown, retention eligibility and cleanup are
+  refused (see `docs/persistence-schema.md`).
+
 ## State and transition requirements
 
 Each lifecycle definition separates `state_invariants`, which must already be
