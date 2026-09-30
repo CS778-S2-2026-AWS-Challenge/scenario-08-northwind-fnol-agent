@@ -47,9 +47,11 @@ version `v1`. Retention domain exports refer to the same model definitions.
 | Retention eligible / hold / unknown cleanup result | Reserve / block destruction / reconcile same operation | retention domain and service; retention_eligibility / execution tests |
 | Old Session or retry after closure | Concealed absence / deny | Existing repository access guard; retention_access_closure tests |
 
-The transaction-local in-app path atomically writes the obligation, operation,
-Claim revision, idempotency and Audit evidence. CAS plus identity replay is the
-event deduplication and command-commit equivalent accepted for this boundary.
+The transaction-local due-contact path atomically writes the updated FollowUp
+obligation, the same logical FollowUpOperation, one claimant-visible Message, and
+Audit evidence. It does not bump Claim revision or create a claimant idempotency
+record merely to count contact. Repository CAS/identity replay on those records is
+the event-deduplication and commit boundary accepted for this in-process path.
 ExternalTask retains its operation/reconciliation contract. There is no generic
 RecoveryInstance, Inbox/Outbox framework, additional worker platform, or persisted
 UI state machine.
@@ -73,8 +75,10 @@ coordinates across restarts.
 Legacy backfill derives the deadline from persisted source interruption only. It
 preserves created time, historical due time and source references, and never
 fabricates operations. Missing or contradictory source records remain readable
-but blocked/nonexecutable. Both paginated discovery implementations exclude
-blocked records, use opaque cursors and named due/deadline indexes.
+but blocked/nonexecutable. Due discovery excludes blocked/exhausted obligations
+because they cannot contact again; deadline discovery includes those open blocked
+obligations so recovery expiry can still terminate them. Both paths are paginated
+with opaque cursors and named due/deadline indexes.
 
 ## Retention ordering and failure boundaries
 
