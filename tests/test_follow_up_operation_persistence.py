@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import mongomock
 import pytest
+
 from backend.domain.models import (
     Channel,
     ClaimState,
