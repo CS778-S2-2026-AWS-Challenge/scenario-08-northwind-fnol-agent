@@ -10,7 +10,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 from threading import Event
-from types import FrameType
 
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.core.config import Settings
@@ -87,7 +86,7 @@ def run_worker(
 
 
 def _install_signal_handlers(stop_event: Event) -> None:
-    def request_shutdown(signum: int, _frame: FrameType | None) -> None:
+    def request_shutdown(signum: int, _frame: object | None) -> None:
         LOGGER.info(
             'Received signal %s; recovery worker will stop after the current cycle.',
             signum,
