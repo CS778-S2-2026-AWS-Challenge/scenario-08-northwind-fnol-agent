@@ -461,8 +461,6 @@ def test_hold_applied_mid_cleanup_stops_next_target_and_resume_uses_same_operati
     ]
 
 
-
-
 @pytest.mark.parametrize(
     'kind',
     ['fixture', 'mongodb'],
@@ -500,6 +498,7 @@ def test_held_retention_does_not_occupy_discovery_and_release_requeues_same_oper
     assert [
         item.operation_id for item in repository.list_pending_retention_operations(limit=10)
     ] == [operation.operation_id]
+
 
 def test_mock_evidence_storage_delete_is_idempotent() -> None:
     storage = MockEvidenceStorage()

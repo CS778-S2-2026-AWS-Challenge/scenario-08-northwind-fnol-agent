@@ -583,8 +583,6 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     assert retention.status is RetentionOperationStatus.COMPLETED
 
 
-
-
 def test_recovery_cycle_isolates_one_failed_expiry_candidate(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -656,6 +654,7 @@ def test_recovery_cycle_isolates_one_failed_expiry_candidate(
 
     assert result.failed_candidates == 1
     assert processed == [candidates[1].follow_up_id]
+
 
 def test_p17_full_journey_pause_resume_stops_future_recovery(
     client: TestClient,
