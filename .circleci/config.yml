@@ -541,6 +541,108 @@ jobs:
           name: Isolate Mypy tests/test_backend_test_selection.py
           command: python -m mypy --follow-imports=skip tests/test_backend_test_selection.py
 
+  probe-mypy-fixture-auth:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe fixture authorization lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy --follow-imports=skip backend/repositories/fixture.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/fixture.py" && $2 >= 900 && $2 <= 1150 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-fixture-hold:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe fixture hold lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy --follow-imports=skip backend/repositories/fixture.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/fixture.py" && $2 >= 1550 && $2 <= 1720 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-mongo-auth:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe mongo authorization lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy --follow-imports=skip backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 1600 && $2 <= 1900 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-mongo-hold:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe mongo hold lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy --follow-imports=skip backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2400 && $2 <= 2720 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-incomplete-new:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe incomplete recovery new lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy --follow-imports=skip tests/test_incomplete_claim_recovery.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 400 && $2 <= 670 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-retention-new:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe retention execution new lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy --follow-imports=skip tests/test_retention_execution.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_retention_execution.py" && $2 >= 190 && $2 <= 530 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -889,6 +991,12 @@ workflows:
       - debug-local-mypy-retention-test
       - debug-local-mypy-deployment-test
       - debug-local-mypy-selector-test
+      - probe-mypy-fixture-auth
+      - probe-mypy-fixture-hold
+      - probe-mypy-mongo-auth
+      - probe-mypy-mongo-hold
+      - probe-mypy-incomplete-new
+      - probe-mypy-retention-new
       - github-automation-quality
       - pr-policy
       - docs-quality
