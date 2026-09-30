@@ -3053,6 +3053,49 @@
         "title": "ClaimTerminalDisposition",
         "type": "object"
       },
+      "ClaimTriage": {
+        "additionalProperties": false,
+        "description": "Staff-only triage of a created Claim; never part of a claimant projection.",
+        "properties": {
+          "amount_threshold": {
+            "minimum": 0.0,
+            "title": "Amount Threshold",
+            "type": "number"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Reasons",
+            "type": "array"
+          },
+          "rules_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Rules Version",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "source": {
+            "$ref": "#/components/schemas/TriageSource"
+          },
+          "system_severity": {
+            "$ref": "#/components/schemas/Severity"
+          }
+        },
+        "required": [
+          "severity",
+          "source",
+          "system_severity",
+          "rules_version",
+          "amount_threshold"
+        ],
+        "title": "ClaimTriage",
+        "type": "object"
+      },
       "ClaimantClaim": {
         "additionalProperties": false,
         "properties": {
@@ -14918,6 +14961,14 @@
         "title": "TransitionRequest",
         "type": "object"
       },
+      "TriageSource": {
+        "enum": [
+          "system",
+          "staff"
+        ],
+        "title": "TriageSource",
+        "type": "string"
+      },
       "UpdateAssetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15832,6 +15883,16 @@
               }
             ]
           },
+          "triage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimTriage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -16028,6 +16089,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimTerminalDisposition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "triage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimTriage"
               },
               {
                 "type": "null"

@@ -30,6 +30,7 @@ from backend.domain.models import (
     MessageVisibility,
     ResolveHandoffRequest,
     SessionStatus,
+    Severity,
     SignalDecisionRecord,
     SignalDecisionRequest,
     SignalDecisionResponse,
@@ -900,6 +901,9 @@ def _apply_state_changes(claim: WorkingClaim, payload: UpdateStaffActionRequest)
         'claim_state.coverage': Coverage,
         'claim_state.customer_support': CustomerSupport,
         'claim_state.fraud_signal': FraudSignal,
+        # A staff triage decision locks the Workbench triage; `unassessed`
+        # hands the Claim back to the triage rules.
+        'claim_state.severity': Severity,
         'claim_state.workflow_state': WorkflowState,
         'claim_state.next_action': AgentAction,
     }
