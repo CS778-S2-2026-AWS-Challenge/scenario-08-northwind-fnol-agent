@@ -234,6 +234,22 @@ BACKEND_CONSUMER_RULES = (
         ),
     ),
     (
+        (
+            'backend/repositories/fixture.py',
+            'backend/repositories/mongodb.py',
+            'backend/repositories/protocols.py',
+        ),
+        (
+            'tests/test_account_data_api.py',
+            'tests/test_admin_access_audit.py',
+            'tests/test_api_boundaries.py',
+            'tests/test_audit_repository.py',
+            'tests/test_staff_agent_tools.py',
+            'tests/test_staff_workbench_authorization.py',
+            'tests/test_validation_seed.py',
+        ),
+    ),
+    (
         ('backend/repositories/',),
         (
             'tests/test_asset_repository.py',
