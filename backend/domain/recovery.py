@@ -25,12 +25,14 @@ from backend.domain.recovery_policy_registry import (
     RecoveryRetryMode,
     RecoveryRule,
     RecoverySnapshot,
-    RecoveryTransition as LifecycleRecoveryTransition,
     RecoveryTrigger,
     RecoveryWorkItemKind,
     UnknownRecoveryTransition,
     classify_recovery,
     recovery_policy,
+)
+from backend.domain.recovery_policy_registry import (
+    RecoveryTransition as LifecycleRecoveryTransition,
 )
 
 
