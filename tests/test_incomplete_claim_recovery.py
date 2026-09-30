@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import MockEvidenceStorage
+from backend.core.runtime_profiles import DataRuntimeBundle
 from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import (
     Channel,
@@ -450,10 +451,13 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
 
     follow_up = repository.list_follow_ups(claim_id, 'cus_demo')[0]
     storage = MockEvidenceStorage()
-    bundle = SimpleNamespace(
-        repository=repository,
-        evidence_storage=storage,
-        close=lambda: None,
+    bundle = cast(
+        DataRuntimeBundle,
+        SimpleNamespace(
+            repository=repository,
+            evidence_storage=storage,
+            close=lambda: None,
+        ),
     )
     monkeypatch.setattr(
         recovery_worker_cli,
