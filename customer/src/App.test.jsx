@@ -299,6 +299,51 @@ function readyDynamicForm() {
   }
 }
 
+function agreementAcceptedReadback(agreement) {
+  return {
+    ...initialClaim,
+    revision: 4,
+    submission_agreement: agreement,
+    dynamic_form: readyDynamicForm(),
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.create_claim',
+      actionType: 'claim_creation',
+      available: true,
+      revision: 4,
+    }),
+  }
+}
+
+function createdClaimReadback(agreement) {
+  return {
+    ...agreementAcceptedReadback(agreement),
+    revision: 5,
+    external_claim: {
+      claim_number: 'NWF-2026-RECOVERED',
+      creation_status: 'created',
+      route: 'Claims intake review',
+      next_step: 'A claims specialist will review the submitted details.',
+      expected_by: '2026-09-16T01:00:00Z',
+    },
+    external_service_action: null,
+    customer_next_step: {
+      status: 'claim_created',
+      summary: 'Claims intake review',
+      required_items: [],
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.continue_conversation',
+      available: false,
+      revision: 5,
+    }),
+  }
+}
+
 function configureAgreementSubmissionFailureJourney() {
   const paymentDestination = {
     payment_destination_id: 'pyd_1234567890abcdef1234',
@@ -3287,6 +3332,9 @@ describe('claimant intake projection', () => {
       }
 
       await openAgreementForFailureTest(user, agreement)
+      if (phase === 'creation') {
+        api.getClaim.mockResolvedValue(agreementAcceptedReadback(agreement))
+      }
       await user.click(screen.getByRole('button', { name: 'Submit claim' }))
 
       const errorHeading = await screen.findByRole('heading', {
@@ -3329,6 +3377,98 @@ describe('claimant intake projection', () => {
     },
   )
 
+
+  it('recovers an accepted agreement after the acceptance response is lost', async () => {
+    const user = userEvent.setup()
+    const { agreement } = configureAgreementSubmissionFailureJourney()
+    const networkError = Object.assign(
+      new api.ApiRequestError(
+        'We could not reach the claim service. Check your connection and try again.',
+      ),
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+    api.acceptClaimAgreement.mockRejectedValue(networkError)
+
+    await openAgreementForFailureTest(user, agreement)
+    api.getClaim.mockResolvedValue(agreementAcceptedReadback(agreement))
+    const readsBeforeSubmit = api.getClaim.mock.calls.length
+
+    await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(readsBeforeSubmit + 1))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Agreement confirmed. Claim submission can be retried without recording a second acceptance.',
+    )
+    expect(screen.getByRole('button', { name: 'Retry claim submission' })).toBeEnabled()
+    expect(screen.queryByRole('heading', { name: 'Submission interrupted' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Submission result is unclear' })).not.toBeInTheDocument()
+    expect(api.createExternalClaim).not.toHaveBeenCalled()
+  })
+
+  it('recovers a created Claim after the creation response is lost', async () => {
+    const user = userEvent.setup()
+    const { agreement } = configureAgreementSubmissionFailureJourney()
+    const networkError = Object.assign(
+      new api.ApiRequestError(
+        'We could not reach the claim service. Check your connection and try again.',
+      ),
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+    api.createExternalClaim.mockRejectedValue(networkError)
+
+    await openAgreementForFailureTest(user, agreement)
+    api.getClaim.mockResolvedValue(createdClaimReadback(agreement))
+    const readsBeforeSubmit = api.getClaim.mock.calls.length
+
+    await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(readsBeforeSubmit + 1))
+    const successHeading = await screen.findByRole('heading', { name: 'Claim submitted' })
+    const successPanel = successHeading.closest('section')
+    expect(successPanel).not.toBeNull()
+    expect(within(successPanel).getByText('NWF-2026-RECOVERED')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Submission interrupted' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry claim submission' })).not.toBeInTheDocument()
+  })
+
+  it('keeps an explicit unknown state and request identity when authoritative readback fails', async () => {
+    const user = userEvent.setup()
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    const { agreement } = configureAgreementSubmissionFailureJourney()
+    const networkError = Object.assign(
+      new api.ApiRequestError(
+        'We could not reach the claim service. Check your connection and try again.',
+      ),
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+    api.acceptClaimAgreement.mockRejectedValue(networkError)
+
+    await openAgreementForFailureTest(user, agreement)
+    api.getClaim.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('The current Claim could not be loaded.'),
+      { code: 'NETWORK_ERROR', retryable: true },
+    ))
+
+    await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+    const errorHeading = await screen.findByRole('heading', {
+      name: 'Submission result is unclear',
+    })
+    const agreementAlert = errorHeading.closest('[role="alert"]')
+    expect(agreementAlert).not.toBeNull()
+    expect(agreementAlert).toHaveTextContent(
+      'the current Claim status could not confirm the result',
+    )
+    const firstRequest = api.acceptClaimAgreement.mock.calls[0][0]
+
+    const retry = screen.getByRole('button', { name: 'Submit claim' })
+    expect(retry).toBeEnabled()
+    await user.click(retry)
+    await waitFor(() => expect(api.acceptClaimAgreement).toHaveBeenCalledTimes(2))
+    expect(api.acceptClaimAgreement.mock.calls[1][0].idempotencyKey)
+      .toBe(firstRequest.idempotencyKey)
+  })
 
   it.each([
     [409, 'REVISION_CONFLICT', 'Submission was not accepted', 'Review the latest claim information and try again.'],

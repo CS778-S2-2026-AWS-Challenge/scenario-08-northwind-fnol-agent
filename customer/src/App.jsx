@@ -540,6 +540,11 @@ function protectedAccountPageForPath(pathname) {
   return null
 }
 
+function isDefinitiveAgreementSubmissionRefusal(requestError) {
+  return requestError instanceof ApiRequestError
+    && (requestError.status === 409 || requestError.status === 422)
+}
+
 function agreementSubmissionFailure(requestError, stage) {
   const action = stage === 'acceptance'
     ? 'recording your agreement'
@@ -553,10 +558,7 @@ function agreementSubmissionFailure(requestError, stage) {
     }
   }
 
-  if (
-    requestError instanceof ApiRequestError
-    && (requestError.status === 409 || requestError.status === 422)
-  ) {
+  if (isDefinitiveAgreementSubmissionRefusal(requestError)) {
     const reason = requestError.message || 'Northwind refused this request.'
     return {
       kind: 'refused',
@@ -569,6 +571,17 @@ function agreementSubmissionFailure(requestError, stage) {
     kind: 'unknown',
     title: 'Submission result is unclear',
     message: `Northwind returned a result that does not confirm whether ${action} completed. Do not assume your Claim was created. Try again; the same submission identity will be reused so Northwind can reconcile the attempt without creating a duplicate.`,
+  }
+}
+
+function agreementSubmissionReconciliationFailure(stage) {
+  const action = stage === 'acceptance'
+    ? 'recording your agreement'
+    : 'submitting your Claim'
+  return {
+    kind: 'unknown',
+    title: 'Submission result is unclear',
+    message: `Northwind did not confirm whether ${action} completed, and the current Claim status could not confirm the result. Do not assume your Claim was created. Try again; the same submission identity will be reused so Northwind can reconcile the attempt without creating a duplicate.`,
   }
 }
 
@@ -2812,9 +2825,10 @@ function App() {
     setStatus('creating-claim')
 
     let submissionStage = canAccept ? 'acceptance' : 'creation'
+    let submissionRevision = claim.revision
 
     try {
-      let revision = claim.revision
+      let revision = submissionRevision
 
       if (canAccept) {
         const agreement = claim.submission_agreement
@@ -2842,6 +2856,7 @@ function App() {
         })
 
         revision = accepted.revision
+        submissionRevision = accepted.revision
 
         setClaim((current) => ({
           ...current,
@@ -2879,9 +2894,49 @@ function App() {
       setAgreementSubmissionError(null)
       setStatus('idle')
     } catch (requestError) {
+      let visibleFailure = agreementSubmissionFailure(requestError, submissionStage)
+
+      if (!isDefinitiveAgreementSubmissionRefusal(requestError)) {
+        try {
+          const currentClaim = await getClaim(claim.claim_id)
+          const snapshotApplied = applyClaimSnapshot(currentClaim, {
+            minimumRevision: submissionRevision,
+          })
+
+          if (!snapshotApplied) {
+            visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+          } else if (currentClaim.external_claim?.creation_status === 'created') {
+            pendingClaimCreation.current = null
+            pendingAgreementAcceptance.current = null
+            setAgreementSubmissionError(null)
+            setError('')
+            setStatus('idle')
+            return
+          } else if (
+            submissionStage === 'acceptance'
+            && currentClaim.primary_action?.action_code === 'claimant.create_claim'
+          ) {
+            pendingAgreementAcceptance.current = null
+            setAgreementSubmissionError(null)
+            setError('')
+            setStatus('idle')
+            return
+          } else {
+            const expectedPendingAction = submissionStage === 'acceptance'
+              ? 'claimant.review_agreement'
+              : 'claimant.create_claim'
+            if (currentClaim.primary_action?.action_code !== expectedPendingAction) {
+              visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+            }
+          }
+        } catch {
+          visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+        }
+      }
+
       setAgreementSubmissionError({
         claimId: claim.claim_id,
-        ...agreementSubmissionFailure(requestError, submissionStage),
+        ...visibleFailure,
       })
       showError(requestError)
     }
