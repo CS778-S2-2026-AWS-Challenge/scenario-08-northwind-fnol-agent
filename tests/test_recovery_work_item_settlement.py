@@ -111,9 +111,7 @@ def test_external_reconciliation_settles_same_logical_work_item(
         update={
             'status': 'completed',
             'blocks_action': None,
-            'source_refs': list(
-                dict.fromkeys([*opened.source_refs, *completion.source_refs])
-            ),
+            'source_refs': list(dict.fromkeys([*opened.source_refs, *completion.source_refs])),
             'updated_at': NOW + timedelta(minutes=1),
             'completed_at': NOW + timedelta(minutes=1),
         }

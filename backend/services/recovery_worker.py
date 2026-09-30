@@ -109,8 +109,7 @@ def run_recovery_cycle(
         limit=limit,
     )
     contacted = sum(
-        process_due_follow_up(repository, candidate, now) is not None
-        for candidate in due
+        process_due_follow_up(repository, candidate, now) is not None for candidate in due
     )
 
     return RecoveryCycleResult(
