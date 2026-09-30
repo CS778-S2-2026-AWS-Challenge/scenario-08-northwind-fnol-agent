@@ -2549,6 +2549,9 @@ class MongoDBRepository:
                 hold,
             )
 
+            released_at = hold.released_at
+            assert released_at is not None
+
             document = hold.model_dump(mode='json')
             document.update(
                 {
@@ -2623,7 +2626,7 @@ class MongoDBRepository:
                 status is RetentionStepStatus.SATISFIED for status in statuses.values()
             ):
                 next_status = RetentionOperationStatus.COMPLETED
-                completed_at = hold.released_at
+                completed_at = released_at
             elif any(
                 status in {
                     RetentionStepStatus.FAILED,
@@ -2642,7 +2645,7 @@ class MongoDBRepository:
                 {
                     'revision': operation.revision + 1,
                     'status': next_status,
-                    'updated_at': max(operation.updated_at, hold.released_at),
+                    'updated_at': max(operation.updated_at, released_at),
                     'completed_at': completed_at,
                 }
             )
