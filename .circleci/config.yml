@@ -81,37 +81,117 @@ jobs:
               echo "AuditEvent contract unaffected; check skipped."
             fi
 
-  backend-format-diagnostic:
+  backend-lint-b-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare backend diagnostics
+          name: Prepare backend lint diagnostic
           command: |
             git fetch origin main
             python -m pip install -r backend/requirements-dev.txt
       - run:
-          name: Ruff format diagnostic
+          name: Ruff B diagnostic
           command: |
-            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check --select B
 
-  backend-lint-diagnostic:
+  backend-lint-e-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare backend diagnostics
+          name: Prepare backend lint diagnostic
           command: |
             git fetch origin main
             python -m pip install -r backend/requirements-dev.txt
       - run:
-          name: Ruff lint diagnostic
+          name: Ruff E diagnostic
           command: |
-            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check --select E
+
+  backend-lint-f-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend lint diagnostic
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff F diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check --select F
+
+  backend-lint-i-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend lint diagnostic
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff I diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check --select I
+
+  backend-lint-ruf-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend lint diagnostic
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff RUF diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check --select RUF
+
+  backend-lint-sim-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend lint diagnostic
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff SIM diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check --select SIM
+
+  backend-lint-up-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend lint diagnostic
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff UP diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check --select UP
 
   backend-mypy-diagnostic:
     docker:
@@ -120,7 +200,7 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Prepare backend diagnostics
+          name: Prepare backend mypy diagnostic
           command: |
             git fetch origin main
             python -m pip install -r backend/requirements-dev.txt
@@ -447,8 +527,13 @@ workflows:
   quality:
     jobs:
       - backend-quality
-      - backend-format-diagnostic
-      - backend-lint-diagnostic
+      - backend-lint-b-diagnostic
+      - backend-lint-e-diagnostic
+      - backend-lint-f-diagnostic
+      - backend-lint-i-diagnostic
+      - backend-lint-ruf-diagnostic
+      - backend-lint-sim-diagnostic
+      - backend-lint-up-diagnostic
       - backend-mypy-diagnostic
       - github-automation-quality
       - pr-policy
