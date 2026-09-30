@@ -3,8 +3,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from backend.domain.tag_registry import StaffTag
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+from backend.domain.tag_registry import StaffTag
 
 
 class ContractModel(BaseModel):
