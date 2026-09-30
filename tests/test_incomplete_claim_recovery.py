@@ -38,6 +38,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services import recovery_worker
 from backend.services.follow_up_recovery import (
     process_due_follow_up,
     process_expiring_follow_up,
@@ -47,7 +48,6 @@ from backend.services.retention import (
     freeze_retention_cleanup_targets,
     reserve_retention_from_terminal,
 )
-from backend.services import recovery_worker
 
 
 def _create_claim(
