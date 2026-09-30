@@ -3396,9 +3396,9 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Submit claim' }))
 
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(readsBeforeSubmit + 1))
-    expect(await screen.findByRole('status')).toHaveTextContent(
+    expect(await screen.findByText(
       'Agreement confirmed. Claim submission can be retried without recording a second acceptance.',
-    )
+    )).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: 'Retry claim submission' })).toBeEnabled()
     expect(screen.queryByRole('heading', { name: 'Submission interrupted' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Submission result is unclear' })).not.toBeInTheDocument()
