@@ -5511,6 +5511,33 @@ class FixtureRepository(PersistenceRepository):
             ),
         )
 
+    def list_evidence_recovery_page(
+        self, after_evidence_id: str | None = None, limit: int = 10
+    ) -> list[EvidenceRecord]:
+        """Discover a bounded internal page using the persistence port contract.
+
+        Args:
+            after_evidence_id: Exclusive Evidence identity cursor.
+            limit: Page size clamped to 1 through 50.
+        Returns:
+            Detached Evidence records in strictly increasing identity order.
+        Raises:
+            ValueError: If stored Evidence has an inconsistent identity.
+        """
+        with self._claim_mutation_lock:
+            identifiers = sorted(
+                identifier
+                for identifier in self._evidence
+                if after_evidence_id is None or identifier > after_evidence_id
+            )[: max(1, min(limit, 50))]
+            records = [deepcopy(self._evidence[identifier]) for identifier in identifiers]
+            if any(
+                record.evidence_id != identifier
+                for record, identifier in zip(records, identifiers, strict=True)
+            ):
+                raise ValueError('Stored Evidence identity does not match its recovery cursor.')
+            return records
+
     def get_motor_other_driver(
         self, claim_id: str, customer_id: str
     ) -> MotorOtherDriverRecord | None:

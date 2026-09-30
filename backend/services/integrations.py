@@ -1545,6 +1545,22 @@ def reconcile_assessor_routing(
             'reconciliation of this existing operation.'
         )
 
+    if reserved_unsettled:
+        recovery_work_item = build_recovery_work_item(
+            recovery_transition,
+            claim_id=claim.claim_id,
+            subject_ref=f'external-task:{task.task_id}',
+            now=external_request.dispatch_reserved_at or task.updated_at,
+        )
+        if recovery_work_item is None:
+            raise RuntimeError(
+                'Interrupted external dispatch did not materialise its reconciliation WorkItem.'
+            )
+        repository.save_runtime_work_item(
+            recovery_work_item,
+            claim.customer_id,
+        )
+
     if claim.revision != expected_revision:
         raise ApiError(
             status_code=409,

@@ -1295,6 +1295,21 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Return Evidence owned by a customer across all of their Claims."""
         raise NotImplementedError
 
+    def list_evidence_recovery_page(
+        self, after_evidence_id: str | None = None, limit: int = 10
+    ) -> list[EvidenceRecord]:
+        """Discover a bounded internal page; the service decides repair eligibility.
+
+        Args:
+            after_evidence_id: Exclusive cursor from the previous page's last record.
+            limit: Page size, clamped to 1 through 50.
+        Returns:
+            All Evidence states in ascending evidence_id order, without ownership filtering.
+        Raises:
+            ValueError: If persisted Evidence cannot satisfy the domain contract.
+        """
+        raise NotImplementedError
+
     def get_motor_other_driver(
         self, claim_id: str, customer_id: str
     ) -> MotorOtherDriverRecord | None:

@@ -701,10 +701,9 @@ def test_reconciliation_settles_the_existing_identity_without_another_route() ->
         )
         if item.subject_ref == f'external-task:{task_after.task_id}'
     ]
-    assert [item.status for item in recovery_items] == [
-        'open',
-        'completed',
-    ]
+    assert [item.status for item in recovery_items] == ['completed']
+    assert recovery_items[0].blocks_action is None
+    assert recovery_items[0].completed_at is not None
 
     claim_after = repository.get_claim_internal(claim_id)
     assert claim_after is not None

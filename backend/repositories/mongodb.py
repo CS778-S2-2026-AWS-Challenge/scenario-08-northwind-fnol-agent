@@ -7015,6 +7015,34 @@ class MongoDBRepository:
             )
         ]
 
+    def list_evidence_recovery_page(
+        self, after_evidence_id: str | None = None, limit: int = 10
+    ) -> list[EvidenceRecord]:
+        """Read one bounded Evidence identity range using the existing primary index.
+
+        Args:
+            after_evidence_id: Exclusive Evidence identity cursor.
+            limit: Page size clamped to 1 through 50.
+        Returns:
+            All Evidence states in strictly increasing identity order.
+        Raises:
+            ValueError: If persisted Evidence violates the domain or cursor contract.
+        """
+        lower = self._record_id('evidence', after_evidence_id or '')
+        documents = (
+            self._collection.find({'_id': {'$gt': lower, '$lt': 'evidence;'}})
+            .hint('_id_')
+            .sort('_id', 1)
+            .limit(max(1, min(limit, 50)))
+        )
+        records: list[EvidenceRecord] = []
+        for document in documents:
+            record = self._model_from_document(document, EvidenceRecord)
+            if record is None or self._record_id('evidence', record.evidence_id) != document['_id']:
+                raise ValueError('Stored Evidence identity does not match its recovery cursor.')
+            records.append(record)
+        return records
+
     def get_motor_other_driver(
         self, claim_id: str, customer_id: str
     ) -> MotorOtherDriverRecord | None:
