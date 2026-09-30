@@ -2621,6 +2621,8 @@ class MongoDBRepository:
                 operation.targets,
                 operation.step_evidence,
             )
+            next_status: RetentionOperationStatus
+            completed_at: datetime | None
             if operation.targets and all(
                 status is RetentionStepStatus.SATISFIED for status in statuses.values()
             ):
