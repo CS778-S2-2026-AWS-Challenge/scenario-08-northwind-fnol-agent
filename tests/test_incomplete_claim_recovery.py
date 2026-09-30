@@ -530,6 +530,23 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     assert retention.revision > 1
     assert retention.status is RetentionOperationStatus.COMPLETED
 
+    # The same Claim ends the journey: the old Session and a delayed resume are
+    # denied with concealed absence, and no replacement Claim is created.
+    claims_before_denial = repository.claim_count
+    for path in (
+        f'/api/v1/claims/{claim_id}',
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}',
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+    ):
+        assert client.get(path, headers=auth_headers).status_code == 404, path
+    delayed_resume = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={**auth_headers, 'Idempotency-Key': 'p17-worker-entrypoint-late-resume'},
+        json={'intent': 'resume'},
+    )
+    assert delayed_resume.status_code == 404
+    assert repository.claim_count == claims_before_denial
+
 
 def test_recovery_cycle_isolates_one_failed_expiry_candidate(
     client: TestClient,

@@ -647,6 +647,15 @@ def test_reconciliation_settles_the_existing_identity_without_another_route() ->
         request_before = repository.list_external_task_requests_internal(claim_id)[0]
         claim_before = repository.get_claim_internal(claim_id)
         assert claim_before is not None
+        # The unknown outcome opened one staff recovery obligation that blocks a resend.
+        open_items = [
+            item
+            for item in repository.list_runtime_work_items(claim_id, 'cus_demo')
+            if item.subject_ref == f'external-task:{task_before.task_id}'
+        ]
+        assert [(item.status, item.blocks_action) for item in open_items] == [
+            ('open', 'external.retry')
+        ]
 
         settled = _reconcile(
             client,
@@ -701,6 +710,8 @@ def test_reconciliation_settles_the_existing_identity_without_another_route() ->
         )
         if item.subject_ref == f'external-task:{task_after.task_id}'
     ]
+    # The same obligation was settled in place; replay added no open task or sibling.
+    assert [item.work_item_id for item in recovery_items] == [open_items[0].work_item_id]
     assert [item.status for item in recovery_items] == ['completed']
     assert recovery_items[0].blocks_action is None
     assert recovery_items[0].completed_at is not None
@@ -802,6 +813,15 @@ def test_inconclusive_reconciliation_preserves_unknown_and_resend_refusal() -> N
     )
     assert _operation_statuses(repository, claim_id) == [
         AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    ]
+    # An inconclusive check leaves the staff recovery obligation open and blocking.
+    recovery_items = [
+        item
+        for item in repository.list_runtime_work_items(claim_id, 'cus_demo')
+        if item.subject_ref == f'external-task:{task.task_id}'
+    ]
+    assert [(item.status, item.blocks_action) for item in recovery_items] == [
+        ('open', 'external.retry')
     ]
 
 
