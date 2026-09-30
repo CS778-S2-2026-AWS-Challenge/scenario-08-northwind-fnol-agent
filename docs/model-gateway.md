@@ -260,7 +260,7 @@ The published claimant profiles use this adapter contract:
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
-| `openrouter-gpt4o-mini` | `openai/gpt-4o` through OpenRouter | deployment default | structured output, tools, and image input |
+| `openrouter-gpt4o-mini` | `openai/gpt-4o` through OpenRouter | deployment default | structured output, tools, image input, and PDF document input |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 | `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
 
@@ -290,6 +290,29 @@ media estimate is approximately 91.7 seconds. These are practical calibration es
 not upper latency guarantees. They provide no evidence for increasing the 130-second
 bootstrap timeout or the existing 180-second published-release ceiling. Neither timeout
 was changed by the probe.
+
+On 2026-09-30, a live synthetic PDF probe sent the checked-in simulated contents receipt to the
+OpenRouter `openai/gpt-4o` profile as a private Base64 `application/pdf` file block. The same request
+used the profile's strict JSON Schema response mode. It returned the correct document type and
+confirmed the document's explicit simulated-material marker in 169 input and 15 output tokens. The
+probe did not select a parser plugin, so it verifies OpenRouter's documented default PDF-processing
+path for this exact profile and payload, not native GPT-4o file handling or a fixed parser engine.
+Provider availability, parser selection, price, and latency remain deployment observations. This
+transport result does not prove automatic Evidence processing, which remains a separate lifecycle
+boundary.
+
+After the existing development secret injection, repeat the bounded probe with synthetic material:
+
+```powershell
+$env:AGENT_RUNTIME_PROFILE = 'model_gateway'
+$env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
+$env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+py -3.12 -m scripts.verify_model_gateway_live `
+  --pdf backend/demo_data/materials/contents/contents-purchase-receipt.pdf
+```
+
+The command prints only bounded status, profile, usage, and capability metadata. It does not print
+the provider credential, PDF bytes, extracted document content, or the complete model response.
 
 The local Qwen deployment uses the OpenAI-compatible transport with `json_object` structured
 output. Its llama.cpp endpoint cannot compile the larger claimant JSON Schema grammar used by
@@ -403,9 +426,9 @@ The `google-gemini35-flash-lite` profile was verified on 2026-09-17 with live im
 `inlineData` requests, a structured-output request, and a live forced `context.resolve` call followed
 by structured continuation. This verifies transport compatibility for synthetic FNOL data. Provider
 availability and latency remain deployment observations rather than a permanent guarantee. The
-current OpenRouter GPT-4o-mini binding supports image input but not document input;
-the local Qwen profile remains text-only until a
-vision-capable deployment is qualified.
+OpenRouter GPT-4o binding supports authorised Base64 PDF file blocks through OpenRouter's verified
+PDF-processing path. The local Qwen profile remains text-only until a vision-capable deployment is
+qualified.
 
 The executable claimant Prompt Pack is `northwind-fnol-claimant-v8`, authored under
 `backend/prompts/v8/` and embedded immutably in the published `agent_instruction` configuration.

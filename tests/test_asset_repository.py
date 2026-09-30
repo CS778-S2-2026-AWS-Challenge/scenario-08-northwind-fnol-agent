@@ -6,11 +6,13 @@ import pytest
 from pydantic import ValidationError
 
 from backend.core.auth import Principal
+from backend.core.errors import ApiError
 from backend.domain.assets import (
     AssetRecord,
     AssetType,
     ClaimAssetSnapshot,
     ContentsAssetDetails,
+    CreateAssetRequest,
     SelectClaimAssetRequest,
     VehicleAssetDetails,
     project_asset,
@@ -49,8 +51,9 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     RevisionConflict,
 )
-from backend.services.assets import select_claim_asset
+from backend.services.assets import create_asset, select_claim_asset
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.support import request_fingerprint
 
 
 def _asset() -> AssetRecord:
@@ -101,6 +104,7 @@ def test_mongodb_reads_legacy_contents_asset_and_snapshot_without_exposing_seria
         source_refs=[f'asset:{asset.asset_id}:revision:{asset.revision}'],
     )
     asset_document = asset.model_dump(mode='json')
+    asset_document.pop('note')
     asset_document.update({'_id': f'asset:{asset.asset_id}', 'record_type': 'asset'})
     asset_document['details']['serial_number'] = 'LEGACY-SENSITIVE-SERIAL'
     snapshot_document = snapshot.model_dump(mode='json')
@@ -234,6 +238,136 @@ def test_fixture_asset_repository_enforces_owner_and_compare_and_set() -> None:
             audit_event=_asset_audit(stale, 'aud_fixture_stale'),
         )
     assert conflict.value.current_revision == 2
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+def test_asset_note_persistence_and_clear_have_fixture_mongodb_parity(adapter: str) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(mongomock.MongoClient(), f'asset_note_{adapter}')
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+
+    note = 'Synthetic private asset note.'
+    asset = _asset().model_copy(update={'note': note})
+    repository.create_asset(
+        asset,
+        IdempotencyRecord(
+            actor_id=asset.customer_id,
+            route='/api/v1/account/assets',
+            key=f'note-create-{adapter}',
+            request_fingerprint=f'note-create-fingerprint-{adapter}',
+            claim_id=asset.asset_id,
+            session_id='',
+        ),
+        _asset_audit(asset, f'aud_note_create_{adapter}', idempotency_key=f'note-create-{adapter}'),
+    )
+    assert repository.get_asset(asset.asset_id, asset.customer_id) == asset
+
+    cleared = asset.model_copy(update={'note': None, 'revision': 2})
+    repository.update_asset(
+        cleared,
+        expected_revision=1,
+        audit_event=_asset_audit(cleared, f'aud_note_clear_{adapter}'),
+    )
+
+    assert repository.get_asset(asset.asset_id, asset.customer_id) == cleared
+    events = repository.list_audit_events_internal(
+        AuditSubject(subject_type=AuditSubjectType.ASSET, subject_id=asset.asset_id)
+    )
+    assert len(events) == 2
+    assert note not in ''.join(event.model_dump_json() for event in events)
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])
+@pytest.mark.parametrize('replay_path', ['existing', 'concurrent'])
+def test_asset_create_replays_legacy_idempotency_without_mutation(
+    adapter: str,
+    replay_path: str,
+) -> None:
+    repository: FixtureRepository | MongoDBRepository
+    if adapter == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo = MongoDBRepository(
+            mongomock.MongoClient(), f'asset_legacy_replay_{adapter}_{replay_path}'
+        )
+        mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo
+
+    asset = _asset()
+    payload = CreateAssetRequest(
+        asset_type=asset.asset_type,
+        display_name=asset.display_name,
+        details=asset.details,
+    )
+    key = f'legacy-create-{adapter}'
+    legacy_response = project_asset(asset).model_dump(mode='json', exclude={'note'})
+    legacy_idempotency = IdempotencyRecord(
+        actor_id=asset.customer_id,
+        route='/api/v1/account/assets',
+        key=key,
+        request_fingerprint=request_fingerprint(payload.model_dump(mode='json', exclude={'note'})),
+        claim_id=asset.asset_id,
+        session_id='',
+        response_payload=legacy_response,
+    )
+    subject = AuditSubject(subject_type=AuditSubjectType.ASSET, subject_id=asset.asset_id)
+    repository.create_asset(
+        asset,
+        legacy_idempotency,
+        _asset_audit(asset, f'aud_legacy_create_{adapter}', idempotency_key=key),
+    )
+    principal = Principal(
+        subject=asset.customer_id,
+        actor_type='claimant',
+        auth_source='test:claimant',
+    )
+    if replay_path == 'concurrent':
+        original_find = repository.find_idempotency
+        find_calls = 0
+
+        def find_after_initial_lookup(
+            actor_id: str,
+            route: str,
+            key: str,
+        ) -> IdempotencyRecord | None:
+            nonlocal find_calls
+            find_calls += 1
+            if find_calls == 1:
+                return None
+            return original_find(actor_id, route, key)
+
+        repository.find_idempotency = find_after_initial_lookup  # type: ignore[method-assign]
+
+    replay = create_asset(repository, repository, principal, payload, key)
+
+    assert replay == project_asset(asset)
+    assert replay.note is None
+    assert repository.list_assets(asset.customer_id) == ([asset], False)
+    assert repository.find_idempotency(asset.customer_id, legacy_idempotency.route, key) == (
+        legacy_idempotency
+    )
+    assert repository.list_audit_events_internal(subject) == [
+        _asset_audit(asset, f'aud_legacy_create_{adapter}', idempotency_key=key)
+    ]
+
+    changed_payload = CreateAssetRequest.model_validate(
+        {**payload.model_dump(mode='json'), 'note': 'A different request.'}
+    )
+    with pytest.raises(ApiError) as conflict:
+        create_asset(repository, repository, principal, changed_payload, key)
+
+    assert conflict.value.code == 'IDEMPOTENCY_CONFLICT'
+    assert repository.list_assets(asset.customer_id) == ([asset], False)
+    assert repository.find_idempotency(asset.customer_id, legacy_idempotency.route, key) == (
+        legacy_idempotency
+    )
+    assert repository.list_audit_events_internal(subject) == [
+        _asset_audit(asset, f'aud_legacy_create_{adapter}', idempotency_key=key)
+    ]
 
 
 @pytest.mark.parametrize('adapter', ['fixture', 'mongodb'])

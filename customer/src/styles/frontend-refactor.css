@@ -1024,8 +1024,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .history-actions { display: grid; gap: var(--space-1); padding-bottom: var(--space-3); border-bottom: var(--border-component); border-bottom-color: var(--color-accent-strong); }
 .history-actions button { min-height: var(--size-control-touch); padding: 0 var(--space-3); border: 1px solid transparent; border-radius: var(--radius-md); color: var(--color-text-secondary); background: transparent; text-align: left; font: inherit; font-size: var(--font-size-caption); font-weight: var(--font-weight-medium); cursor: pointer; }
 .history-actions button:hover { border-color: var(--color-accent-light); background: var(--color-accent-soft); color: var(--color-text-primary); }
-.history-action-button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.history-action-count { display: inline-grid; min-width: var(--space-6); min-height: var(--space-6); place-items: center; padding-inline: var(--space-1); border-radius: var(--radius-round); color: var(--color-text-primary); background: var(--color-warning-soft); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
+.history-actions button.is-active { border-color: var(--claimant-workspace-divider-color); color: var(--color-text-primary); background: var(--claimant-history-row-selected-surface); }
 .conversation-heading {
   position: static;
   z-index: auto;
@@ -1052,6 +1051,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   text-transform: none;
   letter-spacing: normal;
 }
+.conversation-heading.is-empty { min-height: var(--space-6); }
 .conversation-heading h1 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: var(--font-size-section); line-height: var(--line-height-heading); }
 .claim-progress-disclosure {
   position: relative;
@@ -1284,7 +1284,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.conversation-start-intro h2 {
+.conversation-start-intro h1 {
   margin: 0 0 var(--space-2);
   color: var(--color-text-primary);
   font-size: var(--font-size-page);

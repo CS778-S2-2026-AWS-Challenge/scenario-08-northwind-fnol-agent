@@ -15,6 +15,10 @@ from backend.domain.models import (
 )
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+AssetNote = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=1000),
+]
 
 
 class AssetType(str, Enum):
@@ -55,12 +59,17 @@ def _omitted_asset_details() -> AssetDetails:
     return cast(AssetDetails, PydanticUndefined)
 
 
+def _omitted_asset_note() -> AssetNote | None:
+    return cast(AssetNote | None, PydanticUndefined)
+
+
 class AssetRecord(ContractModel):
     asset_id: str = Field(pattern=r'^ase_[a-f0-9]{20}$')
     customer_id: str = Field(min_length=1, max_length=200)
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
+    note: AssetNote | None = None
     revision: int = Field(default=1, ge=1)
     active: bool = True
     created_at: datetime
@@ -85,6 +94,7 @@ class AssetProjection(ContractModel):
     asset_type: AssetType
     display_name: str
     details: AssetDetails
+    note: str | None
     revision: int
     active: bool
     created_at: datetime
@@ -95,6 +105,7 @@ class CreateAssetRequest(ContractModel):
     asset_type: AssetType
     display_name: ShortText
     details: AssetDetails
+    note: AssetNote | None = None
 
     @model_validator(mode='after')
     def validate_request(self) -> 'CreateAssetRequest':
@@ -112,9 +123,10 @@ class CreateAssetRequest(ContractModel):
 
 
 class UpdateAssetRequest(ContractModel):
-    # A default factory keeps each PATCH field optional without making explicit null valid.
+    # Default factories preserve omitted-vs-explicit input semantics for PATCH fields.
     display_name: ShortText = Field(default_factory=_omitted_short_text)
     details: AssetDetails = Field(default_factory=_omitted_asset_details)
+    note: AssetNote | None = Field(default_factory=_omitted_asset_note)
 
     @model_validator(mode='after')
     def require_change(self) -> 'UpdateAssetRequest':

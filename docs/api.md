@@ -1037,7 +1037,7 @@ Initial common field codes:
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
 | `vehicle.use` | enum | `private`, `commuting`, `business`, `rideshare_delivery`, `other`, or `unknown` |
 | `vehicle.towing_required` | enum | `required`, `not_required`, `already_towed`, or `unknown` |
-| `vehicle.towing_location` | object/string | Current or intended towing location |
+| `vehicle.towing_location` | object/string | Claimant-supplied current or intended tow location; the backend does not infer which interpretation applies |
 | `driver.identity_ref` | string | Actual-driver identity reference when available |
 | `driver.name` | string | Actual-driver name when no identity reference is available |
 | `driver.phone` | string | Actual-driver phone |
@@ -1045,7 +1045,7 @@ Initial common field codes:
 | `driver.relationship_to_policyholder` | enum | Actual-driver relationship to the policyholder |
 | `driver.owner_permission` | enum | Permission fact: `confirmed`, `not_confirmed`, `unknown`, or `not_applicable` |
 | `driver.licence_number` | protected string | Protected licence value; never sent to model/RAG |
-| `driver.licence_status` | enum | `valid`, `expired`, `suspended`, `learner`, `restricted`, or `unknown` |
+| `driver.licence_status` | enum | One reported licensing state: `valid`, `expired`, `suspended`, `learner`, `restricted`, or `unknown`; the current contract does not expose a separate licence-class field |
 | `other_party.insurer_name` | string | Other-party insurer on the existing Motor other-driver record |
 | `other_party.policy_number` | protected string | Other-party policy number; protected and masked in projections |
 | `other_party.claim_reference` | string | Other-party insurer claim reference |
@@ -1294,6 +1294,69 @@ entering this normative HTTP contract.
 ```
 
 Signal status is `proposed`, `review_required`, `confirmed`, `dismissed`, `overridden`, or `resolved`. A signal records evidence for professional review; it MUST NOT state that the claimant committed fraud.
+
+#### Advisory policy judgment proposals
+
+The v8 turn envelope accepts optional `policy_judgment_proposals` (default empty, maximum three).
+Each proposal contains `kind` (maximum 100 characters), `assessment` and `rationale` (maximum 500
+characters each), and `source_refs` (one to ten authorized knowledge chunk IDs). These are advisory
+inputs, not Claim facts or coverage, liability, fraud, excess, or settlement decisions.
+
+The backend validates proposals against the final accepted turn facts before committing the turn.
+`claim.product_family` and the minimum facts below must be confirmed, resolved, and contain known
+values. `contents.items` refers to a confirmed, resolved typed item with a description and category,
+not a scalar Dynamic Form field. Unknown, disputed, proposed, empty, and unavailable facts do not
+satisfy these prerequisites. The requirements are structural evidence gates; they do not determine
+whether a clause applies or whether the model's assessment is correct.
+
+The executable taxonomy is `JUDGMENT_POINT_TAXONOMY` in `backend/services/policy_judgment.py`:
+
+| Kind | Family and policy clause | Minimum facts in addition to confirmed family |
+| --- | --- | --- |
+| `liability_split` | Motor: `MTR-COV-02` | `parties.other_parties=true`, `incident.description` |
+| `excess_multiplicity` | Motor: `MTR-EXC-01`; home: `HOM-EXC-01`; contents: `CON-EXC-01` | `incident.description` |
+| `driver_permission_status` | Motor: `MTR-EXC-02` | `driver.owner_permission`, `driver.licence_status` |
+| `alcohol_drug_applicability` | Motor: `MTR-EXC-03` | `incident.description` |
+| `unsafe_use_applicability` | Motor: `MTR-EXC-04` | `vehicle.use`, `incident.description` |
+| `gradual_damage_discoverability` | Home: `HOM-BEN-03` | `incident.discovered_at`, `incident.description` |
+| `natural_hazard_allocation` | Home: `HOM-NHZ-01` | `incident.location`, `incident.description` |
+| `occupancy_change_applicability` | Home: `HOM-EXC-04` | `property.occupancy`, `incident.description` |
+| `theft_circumstance` | Contents: `CON-COV-02` | `theft.entry_context`, `incident.description` |
+| `unsecured_property_dispute` | Contents: `CON-EXC-04` | `contents.items`, `incident.description` |
+| `multi_event_dispute` | Motor: `MTR-EXC-01`; home: `HOM-EXC-01`; contents: `CON-EXC-01` | `incident.description` |
+| `item_classification_dispute` | Contents: `CON-AUTH-01` | `contents.items` |
+
+Every cited chunk must have been returned by the server-authorized knowledge context loader during
+this turn, contain nonempty text, and identify a configured clause in its section path. A model
+cannot authorize a source by naming an arbitrary chunk, policy number, or retrieval ID. No retrieval
+or unavailable retrieval means no eligible judgment proposal. Duplicate kinds in one turn are
+rejected. Active or newly created handoffs and safety interrupts suppress proposals; a turn without
+authorized mutation authority cannot create a signal. Optional rejected judgments do not discard
+otherwise valid facts or the ordinary turn.
+
+A valid proposal creates a staff-only `POLICY_JUDGMENT_PROPOSAL` `ReviewSignalRecord`, saved atomically
+with the Claim revision, messages, Runtime audit records, and idempotency result. Signal identity is
+stable for Claim, triggering message, and judgment kind; retrying the accepted message returns the
+existing result. Signal source references link the triggering message, accepted Claim revision,
+and cited chunks. The Runtime proposal retains submitted judgments, rejection reasons, and accepted
+signal references for internal audit. The existing `proposed_signals` compatibility input remains
+untrusted and is not an alternate write route.
+
+`GET /api/v1/workbench/claims/{claim_id}/signals` returns nullable `judgment_point_kind`,
+`proposed_assessment`, and `proposal_rationale` alongside existing signal data. `source_evidence`
+includes the persisted cited policy snapshots (document/chunk ID, title, section, source URI,
+version, checksum, and the bounded retrieved text). The authorized primary staff owner uses the
+existing `signal.record_decision` action and signal decision route for `confirmed`, `dismissed`,
+`overridden`, or `resolved`. No new decision workflow or claimant-visible signal is introduced.
+Staff realtime invalidation includes `signals`; claimant events exclude that resource.
+
+Agent integration consumes the existing v8 envelope and authorized `context.resolve` guidance.
+It emits only advisory proposals with the returned chunk IDs. Prompt selection of judgment kinds,
+claimant wording, and policy-judgment reply-consistency behavior remain the Agent owner's work.
+The backend does not automatically generate an assessment or rewrite the claimant reply. Adding a
+kind requires one taxonomy entry and corresponding contract/test evidence, without changing the
+generic validator, generator, or proposal schema. Neither acceptance of a proposal nor staff signal
+confirmation constitutes a final Claim or coverage decision.
 
 ### Handoff
 
@@ -4477,22 +4540,30 @@ cannot read or select account Assets. The Workbench snapshot route remains staff
 
 | Method and route | Contract |
 | --- | --- |
-| `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset. Requires `Idempotency-Key`; returns `201`. |
+| `POST /api/v1/account/assets` | Create a typed vehicle, property, or contents asset with an optional claimant-authored `note`. Requires `Idempotency-Key`; returns `201`. |
 | `GET /api/v1/account/assets` | Cursor-page active owned assets; `include_inactive=true` includes soft-deactivated records. |
 | `GET /api/v1/account/assets/{asset_id}` | Read one owned claimant-safe asset projection. |
-| `PATCH /api/v1/account/assets/{asset_id}` | Update approved asset details with numeric `If-Match`; increments asset revision. Fields may be omitted but explicit `null` and details for another Asset type return `422 VALIDATION_ERROR` without changing the Asset. |
+| `PATCH /api/v1/account/assets/{asset_id}` | Update approved asset fields with numeric `If-Match`; increments asset revision. Omitted fields remain unchanged. Explicit `null` clears only `note`; it remains invalid for `display_name` and `details`. Details for another Asset type return `422 VALIDATION_ERROR` without changing the Asset. |
 | `DELETE /api/v1/account/assets/{asset_id}` | Soft-deactivate with numeric `If-Match`; returns `204`. |
 | `POST /api/v1/claims/{claim_id}/asset-selections` | Select one active owned asset with `Idempotency-Key` and Claim `If-Match`; atomically writes proposed facts, an optional proposed ContentsItem, immutable snapshot, Branch Evaluation, Claim revision, and retry result. |
 | `GET /api/v1/claims/{claim_id}/asset-snapshots` | Cursor-page claimant-safe immutable snapshots for an owned Claim. |
 | `GET /api/v1/workbench/claims/{claim_id}/asset-snapshots` | Cursor-page the same approved snapshot fields for authorised staff. |
 
 Asset identifiers use `ase_`; snapshots use `cas_`. Asset records contain `asset_type`,
-`display_name`, matching typed `details`, `revision`, `active`, and timestamps. The account-safe
-projection omits `customer_id` and all physical storage/provider metadata. Assets do not accept
-claimant-supplied policy text. A durable Policy association requires the future account-owned
+`display_name`, matching typed `details`, nullable `note`, `revision`, `active`, and timestamps.
+The account-safe projection omits `customer_id` and all physical storage/provider metadata. A
+non-null note is trimmed at its outer boundaries, must contain at least one non-whitespace
+character, and is limited to 1,000 characters after trimming; internal whitespace and line breaks
+are preserved. Asset creation may omit the note or set it to `null`. On PATCH, an omitted note is
+unchanged, a valid string replaces it, and explicit `null` clears it. Empty, whitespace-only, and
+over-limit strings return `422 VALIDATION_ERROR`. Note writes use the parent Asset revision;
+stale `If-Match` returns `409 REVISION_CONFLICT` without an Asset or success-audit mutation.
+Assets do not accept claimant-supplied policy text. A durable Policy association requires the future account-owned
 `pol_` Policy Summary contract and ownership/status validation; it is not implemented by these
 routes. Reusable contents details are limited to description, category, brand, and model. Serial
-number and value are not part of the Asset or Claim asset snapshot contract.
+number and value are not part of the Asset or Claim asset snapshot contract. Asset notes are
+account-only and never enter Claim State, Claim Evidence, Dynamic Form, Agent/model/RAG context,
+Workbench/Admin projections, or Claim asset snapshots.
 
 Selection returns `claim_id`, resulting `revision`, the exact `proposed_fields`, optional
 `proposed_contents_item`, and the immutable snapshot. The optional item copies only approved
@@ -4513,6 +4584,7 @@ INVALID_STATE_TRANSITION`; no Claim, snapshot, Branch Evaluation, idempotency, o
 performed. Asset create, update, and soft-deactivate atomically persist one Asset-scoped audit
 fact. Selection atomically persists one Claim-scoped audit fact with the resulting revision. Audit
 facts retain only bounded identities and source references, not copied Asset details.
+They also never contain Asset note text.
 
 ## Persistence and Provider Boundary
 

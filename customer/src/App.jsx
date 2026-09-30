@@ -39,7 +39,8 @@ import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
 import AttachmentPreview from './components/AttachmentPreview.jsx'
 import { modelAttachmentCompatibility } from './attachmentModelCompatibility.js'
-import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
+import ExternalServiceAction from './components/ExternalServiceAction.jsx'
+import ExternalServicesPage from './components/ExternalServicesPage.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
@@ -54,6 +55,7 @@ import {
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
 import UserProfile from './components/UserProfile.jsx'
+import PrivacyPage from './privacy/PrivacyPage.jsx'
 import './styles/profile-shell.css'
 import './styles/profile-records.css'
 import './styles/profile-assets.css'
@@ -63,7 +65,6 @@ import { profilePathForSection, profileSectionFromPath } from './profileRoutes.j
 import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
 import useClaimAutoFillEditor from './profile/useClaimAutoFillEditor.js'
-import { documentAttentionCount } from './claimDocumentProjection.js'
 import { WORKBENCH_URL } from './runtimeConfig.js'
 import {
   forgetAnonymousConversation,
@@ -252,13 +253,13 @@ function ClaimStartIcon({ name, className = '' }) {
 
 function ConversationStart({ onChoosePrompt }) {
   return (
-    <section className="conversation-start" aria-labelledby="conversation-start-title">
+    <section className="conversation-start" aria-labelledby="conversation-title">
       <div className="conversation-start-intro">
         <span className="conversation-start-shield" aria-hidden="true">
           <ClaimStartIcon name="shield" />
         </span>
         <div>
-          <h2 id="conversation-start-title">Let&apos;s get your claim started</h2>
+          <h1 id="conversation-title">Let&apos;s get your claim started</h1>
           <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
         </div>
       </div>
@@ -743,10 +744,6 @@ function App() {
   const homepageConversationReports = claim ? conversationReports : (savedReports || [])
   const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
     || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
-  const documentOutstandingCount = evidenceLoadStatus === 'ready'
-    ? documentAttentionCount(evidenceItems)
-    : null
-
   function currentClaimantIdentityKey() {
     const authenticated = hasClaimantAccessToken()
     let identityKey = `account:${accountRef.current?.customer_id || ''}`
@@ -3340,6 +3337,26 @@ function App() {
     setPage('home')
   }
 
+  function navigateBackFromWorkspaceUtility() {
+    if (workspaceView === 'claim-evidence') {
+      setWorkspaceView('claim-features')
+      return
+    }
+    if (workspaceView === 'claim-features') {
+      openClaimHistory()
+      return
+    }
+    leaveWorkspaceUtility()
+  }
+
+  function handleWorkspaceHeaderBack() {
+    if (workspaceView !== 'chat') {
+      navigateBackFromWorkspaceUtility()
+      return
+    }
+    returnToLanding()
+  }
+
   function openProfileFromWorkspace(section = null) {
     if (!account) {
       setPage('login')
@@ -3635,12 +3652,37 @@ function App() {
   const isUrgentSupport = handoff?.support_need === 'urgent'
   const isProfilePage = page === 'account'
   const isStandaloneClaimHistory = !isWorkspaceActive && page === 'claim-history'
-  const profileDisplayName = account?.profile?.display_name || 'Log in to save your chat'
+  const profileDisplayName = account?.profile?.display_name || 'Log in'
   const profileEmail = account?.profile?.email || 'Profile and preferences'
   const profileNamePreview = middleEllipsisLayoutParts(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)
   const profileButtonLabel = account
     ? `Open Profile for ${profileDisplayName} (${profileEmail})`
     : 'Open Profile and preferences'
+
+  function openClaimWorkspacePage(destination) {
+    if (destination === 'overview') {
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      return
+    }
+    if (destination === 'documents') {
+      openCurrentClaimDocuments()
+      return
+    }
+    if (destination === 'history') {
+      openClaimHistory()
+      return
+    }
+    if (destination === 'privacy') {
+      setWorkspaceView('privacy')
+      setMobileView('chat')
+      return
+    }
+    setWorkspaceView('external-services')
+    setMobileView('chat')
+  }
+
+  const showsClaimDetails = workspaceView === 'chat' || workspaceView === 'external-services'
 
   return (
     <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'workspace-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''} ${isStandaloneClaimHistory ? 'is-claim-history-page' : ''}`}>
@@ -3654,8 +3696,8 @@ function App() {
             <button
               className="header-back-to-start"
               type="button"
-              aria-label="Back to start"
-              onClick={returnToLanding}
+              aria-label={workspaceView === 'chat' ? 'Back to start' : 'Back to previous page'}
+              onClick={handleWorkspaceHeaderBack}
               disabled={isBusy}
             >
               <span aria-hidden="true">←</span>
@@ -3971,7 +4013,7 @@ function App() {
           </section>
         </main>
       ) : (
-        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'}`}>
+        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''}`}>
           <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
             {[
               ['history', 'History'],
@@ -3992,23 +4034,25 @@ function App() {
               >
                 {status === 'pausing-session' ? 'Saving...' : 'New chat'}
               </button>
-              <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
-              <button type="button" onClick={openClaimHistory}>Claim history</button>
-              <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
               <button
-                className="history-action-button"
+                className={workspaceView === 'privacy' ? 'is-active' : undefined}
                 type="button"
-                aria-label={documentOutstandingCount > 0
-                  ? `What to provide, ${documentOutstandingCount} outstanding`
-                  : 'What to provide'}
-                onClick={openCurrentClaimDocuments}
+                aria-current={workspaceView === 'privacy' ? 'page' : undefined}
+                onClick={() => {
+                  setWorkspaceView('privacy')
+                  setMobileView('chat')
+                }}
               >
-                <span>What to provide</span>
-                {documentOutstandingCount > 0 && (
-                  <span className="history-action-count" aria-hidden="true">
-                    {documentOutstandingCount}
-                  </span>
-                )}
+                Privacy &amp; your data
+              </button>
+              <button type="button" onClick={openClaimHistory}>Claim history</button>
+              <button
+                className={workspaceView === 'external-services' ? 'is-active' : undefined}
+                type="button"
+                aria-current={workspaceView === 'external-services' ? 'page' : undefined}
+                onClick={() => openClaimWorkspacePage('external-services')}
+              >
+                External services
               </button>
             </div>
             <div className="intake-history-label">Conversation history</div>
@@ -4062,53 +4106,41 @@ function App() {
           </aside>
           <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
-              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''}`}
+              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''} ${workspaceView === 'privacy' ? 'is-privacy-page' : ''}`}
               hidden={workspaceView === 'chat'}
             >
-              <button
-                className="back-link"
-                type="button"
-                onClick={workspaceView === 'claim-evidence'
-                  ? () => setWorkspaceView('claim-features')
-                  : workspaceView === 'claim-features'
-                    ? openClaimHistory
-                    : leaveWorkspaceUtility}
-              >
-                <span className="back-link-arrow" aria-hidden="true">←</span>
-                {workspaceView === 'claim-evidence'
-                  ? 'Back to Claim features'
-                  : workspaceView === 'claim-features'
-                    ? 'Back to Claim history'
-                    : 'Back to conversation'}
-              </button>
-              <h1>
-                {workspaceView === 'privacy'
-                  ? 'Privacy policy'
-                  : workspaceView === 'history'
-                    ? 'Claim history'
-                    : workspaceView === 'claim-features'
-                      ? 'Claim features'
-                      : workspaceView === 'external-services'
-                        ? 'External services'
+              {workspaceView === 'privacy' ? (
+                <PrivacyPage
+                  claimType={claim?.incident_type || null}
+                  hasCurrentClaim={Boolean(claim?.claim_id)}
+                  onViewClaim={claim ? () => openClaimFeatures(claim) : null}
+                />
+              ) : (
+                workspaceView === 'external-services' ? null : (
+                  <>
+                    <h1>
+                      {workspaceView === 'history'
+                      ? 'Claim history'
+                      : workspaceView === 'claim-features'
+                        ? 'Claim features'
                         : workspaceView === 'agreement'
                             ? 'Agreement & confirmation'
                             : 'Evidence history'}
-              </h1>
-              <p>
-                {workspaceView === 'privacy'
-                  ? 'We only use the information needed to handle your Claim and show you what has been recorded.'
-                  : workspaceView === 'history'
-                    ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
-                    : workspaceView === 'claim-features'
-                      ? 'Review this Claim\'s current status and available information.'
-                      : workspaceView === 'external-services'
-                        ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
+                    </h1>
+                    <p>
+                      {workspaceView === 'history'
+                      ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
+                      : workspaceView === 'claim-features'
+                        ? 'Review this Claim\'s current status and available information.'
                         : workspaceView === 'agreement'
                             ? 'Your payout destination and preferred contact method are saved. Agreement review and final Claim confirmation happen in Step 4.'
                             : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
-              </p>
+                    </p>
+                  </>
+                )
+              )}
               {workspaceView === 'history' && (
                 account ? (
                   <ClaimHistory
@@ -4166,9 +4198,12 @@ function App() {
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
               )}
               {workspaceView === 'external-services' && (
-                claim?.external_service_action
-                  ? <ExternalServiceOverview action={claim.external_service_action} />
-                  : <p className="empty-details">No external service is currently recorded for this claim.</p>
+                <ExternalServicesPage
+                  action={claim?.external_service_action || null}
+                  claim={claim}
+                  onBackToOverview={() => openClaimWorkspacePage('overview')}
+                  onWhatToProvide={() => openClaimWorkspacePage('documents')}
+                />
               )}
               {workspaceView === 'files' && (
                 account ? (
@@ -4185,18 +4220,20 @@ function App() {
                 )
               )}
             </div>
-            <div className="conversation-heading">
-              <div className="conversation-heading-main">
-                <div className="claim-heading-identity">
-                  {claim ? <span>Claim:</span> : null}
-                  <h1 id="conversation-title">{claim?.claim_id || 'New conversation'}</h1>
+            <div className={`conversation-heading ${claim ? '' : 'is-empty'}`}>
+              {claim && (
+                <div className="conversation-heading-main">
+                  <div className="claim-heading-identity">
+                    <span>Claim:</span>
+                    <h1 id="conversation-title">{claim.claim_id}</h1>
+                  </div>
                 </div>
-              </div>
-              <div className="claim-status">{claim
-                ? claim.external_claim?.creation_status === 'created'
+              )}
+              {claim && (
+                <div className="claim-status">{claim.external_claim?.creation_status === 'created'
                   ? 'Claim created'
-                  : handoff ? 'Staff assistance active' : 'In progress'
-                : 'Ready to start'}</div>
+                  : handoff ? 'Staff assistance active' : 'In progress'}</div>
+              )}
             </div>
 
             {claim && (
@@ -4492,10 +4529,10 @@ function App() {
             />
           </section>
 
-          {!detailsOpen && workspaceView === 'chat' && (
+          {!detailsOpen && showsClaimDetails && (
             <button className="details-reopen" type="button" onClick={() => setDetailsOpen(true)} aria-label="Show claim details" title="Show claim details">‹</button>
           )}
-          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && workspaceView === 'chat' ? 'is-open' : 'is-collapsed'} ${workspaceView !== 'chat' ? 'is-hidden' : ''}`} aria-labelledby="claim-details-title">
+          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && showsClaimDetails ? 'is-open' : 'is-collapsed'}`} aria-labelledby="claim-details-title">
             <div className="claim-panel-heading">
               <div>
                 <p className="eyebrow">Your claim</p>
@@ -4573,7 +4610,7 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
-              {detailsTab === 'documents' && workspaceView === 'chat' && (
+              {detailsTab === 'documents' && showsClaimDetails && (
                 <ClaimDocuments
                   items={evidenceItems}
                   loadStatus={evidenceLoadStatus}

@@ -371,8 +371,9 @@ the append-only audit collection through a bounded, filterable projection.
     active owned record into the existing `policy.policy_number` Claim field without treating it
     as a coverage decision or exposing/inventing provider data.
 46. Create/read zero or one `MotorOtherDriverRecord` per authorised Motor Claim, containing only
-    supplied name, phone, email, and other-vehicle registration. Keep it outside model/RAG context
-    and reject a second record without advancing Claim revision.
+    supplied name, phone, email, other-vehicle registration, insurer name, policy number, and
+    claim reference. Keep it outside model/RAG context, protect the policy number at the
+    protected-value boundary, and reject a second record without advancing Claim revision.
 47. Append/list immutable same-Claim ContentsItem-to-Evidence associations and reject links when
     either side belongs to another Claim or customer.
 48. Create/revise/list emergency-repair mitigation records and their Evidence/WorkItem links in
@@ -433,8 +434,11 @@ the append-only audit collection through a bounded, filterable projection.
 ## Asset Record Mapping
 
 - `asset:{asset_id}` stores the current `AssetRecord`; `asset_id` uses `ase_` and is globally
-  opaque. Reusable contents details are limited to description, category, brand, and model;
-  serial number and value are not stored in the Asset or copied into its Claim snapshot. Logical
+  opaque. The record may store one nullable, 1,000-character claimant-authored `note`. The note
+  uses the parent Asset revision and whole-record compare-and-set update; omitted PATCH input
+  preserves it and explicit `null` clears it. Reusable contents details are limited to description,
+  category, brand, and model; serial number and value are not stored in the Asset or copied into
+  its Claim snapshot. Note text is likewise never copied into a Claim snapshot. Logical
   lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
 - `claim_asset_snapshot:{snapshot_id}` stores immutable `ClaimAssetSnapshot`; `snapshot_id`
   uses `cas_`. Logical lookup/index: `(record_type, claim_id, captured_at, _id)` with
@@ -453,7 +457,11 @@ the append-only audit collection through a bounded, filterable projection.
 - Fixture and MongoDB adapters implement the same port. MongoDB selection uses one transaction;
   Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
   the current asset.
-- Existing records require no bulk backfill. The MongoDB adapter recognises only the legacy
+- Asset note create, replace, and clear operations reuse the existing atomic Asset mutation and
+  value-free audit boundary. Audit events retain the Asset identity and resulting revision, never
+  raw note text.
+- Existing records require no bulk backfill; a missing `note` decodes as `null`. The MongoDB
+  adapter recognises only the legacy
   `serial_number` member inside pre-upgrade contents Asset and Claim asset snapshot details,
   removes it from the validated in-memory representation, and never exposes it through claimant
   or staff projections. The stored source document, including an immutable snapshot, is not
@@ -849,6 +857,22 @@ Evidence record or protected object.
   decision.
 - Staff decisions are separate immutable records and retain the source references that
   motivated the review.
+- Validated v8 policy judgments reuse `ReviewSignalRecord` with optional
+  `judgment_point_kind`, `proposed_assessment`, `proposal_rationale`, and `policy_sources`.
+  `policy_sources` retains only cited authorized policy chunks with document/chunk identity,
+  section, version, checksum, source URI, title, and bounded retrieved text. Older signals
+  deserialize with null metadata and an empty source list.
+- Policy judgment signals are immutable children of `save_agent_turn`, committed together
+  with the Claim CAS, session, messages, decision, Runtime bundle, and idempotency result in
+  both Fixture and MongoDB. Cross-Claim records, duplicate signal identities, or conflicts
+  reject the turn. MongoDB writes use the existing transaction; there is no post-commit
+  independent signal write or alternate collection.
+- Judgment signal identity uses the `sig_` prefix and a deterministic hash of Claim ID,
+  triggering message ID, and kind. Ordinary request replay reuses the committed result.
+  The internal Runtime proposal stores bounded submitted judgments, rejection reasons,
+  and accepted signal references. Staff decisions remain separate immutable records.
+  Staff `signals` invalidation is emitted only when the turn saves a signal; claimant
+  projections and realtime resource lists do not expose it.
 - An Agent decision identifies whether its proposal came from `controlled_agent` or
   `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
   profile, executable prompt identifier, provider-reported model identifier, and provider request
@@ -872,7 +896,10 @@ Evidence record or protected object.
   that identifier.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
-  validation, and any non-empty model signal proposal rejects the complete turn before write.
+  validation, and any non-empty compatibility `proposed_signals` value rejects the complete
+  turn before write. The separate v8 `policy_judgment_proposals` contract is advisory input
+  validated against accepted facts, authorized retrieved clauses, handoff state, and turn
+  authority before it can generate a staff-only review record; it grants no decision authority.
 - A structured form field retains an immutable assertion list plus one
   `current_assertion_id`. Assertions preserve reported wording, normalized value, source
   references, relation, status, temporal precision, optional reason code, and creation time.

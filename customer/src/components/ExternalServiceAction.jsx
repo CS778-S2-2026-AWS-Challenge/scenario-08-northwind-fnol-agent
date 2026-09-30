@@ -19,6 +19,15 @@ const RECONCILIATION_WORDING =
   'The assessment request may already have reached the assessor, but we did not get a confirmation. Your claim is saved and unchanged. Northwind is checking with the assessor before anything is sent again, so please do not resend it.'
 
 function claimantStatusCopy(action) {
+  if (action.effective_label || action.status_detail) {
+    return {
+      label: action.effective_label || 'External service update',
+      detail: action.status_detail
+        || (typeof action.next_action === 'string' ? action.next_action : null)
+        || 'Northwind has recorded an external-service update for this claim.',
+      attention: Boolean(action.attention_required),
+    }
+  }
   if (action.status === 'consent_required') {
     return {
       label: 'Permission needed',
@@ -118,37 +127,51 @@ export function ExternalServiceOverview({ action }) {
   const state = claimantStatusCopy(action)
   const routing = action.routing
   const limitations = routing?.limitations || []
+  const expectedContact = action.expected_contact_at || routing?.expected_by
+  const providerNextStep = action.provider_next_step || routing?.next_step || state.detail
 
   return (
     <section className="external-service external-service-overview" aria-labelledby="external-service-overview-title">
-      <p className="transfer-label">External service</p>
-      <h2 id="external-service-overview-title">{action.service_name}</h2>
-      <p>{action.purpose}</p>
-      <div className={`service-result ${state.attention ? 'is-error' : 'is-success'}`} role="status">
-        <strong>{state.label}</strong>
-        <p>{state.detail}</p>
+      <div className="external-services-overview-heading">
+        <span className="external-services-overview-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-9" /></svg>
+        </span>
+        <div>
+          <p className="external-services-state-label">External service</p>
+          <h2 id="external-service-overview-title">{action.service_name}</h2>
+          <p>{action.purpose}</p>
+          {action.status_detail && <p className="external-services-status-detail">{state.detail}</p>}
+        </div>
+        <span className="external-services-status-badge" role="status">{state.label}</span>
+      </div>
+      {limitations.length > 0 && (
+        <div className={`service-result ${state.attention ? 'is-error' : 'is-success'}`}>
         {limitations.map((limitation) => (
           <p className="service-limitation" key={limitation}>{limitation}</p>
         ))}
-      </div>
+        </div>
+      )}
       <dl className="service-details">
-        <div><dt>Service</dt><dd>{action.service_name}</dd></div>
-        <div><dt>Provider</dt><dd>{action.provider}</dd></div>
+        <div><dt>Provider name</dt><dd>{action.provider}</dd></div>
+        <div><dt>Service type</dt><dd>{action.service_name}</dd></div>
+        <div><dt>Why this service is needed</dt><dd>{action.purpose}</dd></div>
         <div><dt>Permission</dt><dd>{consentLabel(action.consent_status)}</dd></div>
+        <div><dt>What the provider will do next</dt><dd>{providerNextStep}</dd></div>
+        {expectedContact && (
+          <div>
+            <dt>Expected contact</dt>
+            <dd><time dateTime={expectedContact}>{new Date(expectedContact).toLocaleString()}</time></dd>
+          </div>
+        )}
+        {routing?.assessor_reference && <div><dt>Assessor reference</dt><dd>{routing.assessor_reference}</dd></div>}
+        {routing?.queue_reference && <div><dt>Queue reference</dt><dd>{routing.queue_reference}</dd></div>}
       </dl>
       <details className="service-disclosure" open>
-        <summary>What Northwind may share</summary>
+        <summary>What information may be shared</summary>
         <ul className="shared-data-list">
           {action.shared_data_summary.map((item) => <li key={item}>{item}</li>)}
         </ul>
       </details>
-      {routing && (
-        <dl className="service-details">
-          {routing.assessor_reference && <div><dt>Assessor reference</dt><dd>{routing.assessor_reference}</dd></div>}
-          {routing.queue_reference && <div><dt>Queue reference</dt><dd>{routing.queue_reference}</dd></div>}
-          {routing.expected_by && <div><dt>Expected by</dt><dd>{new Date(routing.expected_by).toLocaleString()}</dd></div>}
-        </dl>
-      )}
     </section>
   )
 }

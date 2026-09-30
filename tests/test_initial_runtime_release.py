@@ -32,6 +32,7 @@ def _binding(
     prompt_version: str = 'northwind-fnol-claimant-v7',
 ) -> ModelRuntimeBinding:
     is_qwen = profile_id == 'qwen-local'
+    is_openrouter = profile_id == 'openrouter-gpt4o-mini'
     is_bedrock = profile_id == 'bedrock-nova2-lite'
     is_google = profile_id == 'google-gemini35-flash-lite'
     return ModelRuntimeBinding(
@@ -78,7 +79,7 @@ def _binding(
         structured_output=True,
         tools=not is_bedrock,
         image_input=is_bedrock or is_google,
-        document_input=is_google,
+        document_input=is_openrouter or is_google,
         structured_output_method='json_object' if is_qwen else 'json_schema',
     )
 
@@ -177,6 +178,12 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     )
     assert bedrock.values['evaluation_status'] == 'unavailable'
     assert bedrock.values['image_input'] is True
+    openrouter = next(
+        record
+        for record in configurations.list_configurations('model')
+        if record.values['profile_id'] == 'openrouter-gpt4o-mini'
+    )
+    assert openrouter.values['document_input'] is True
     qwen = next(
         record
         for record in configurations.list_configurations('model')
@@ -713,6 +720,10 @@ def test_capabilities_expose_the_repository_published_model_catalogue(
         'qwen-local',
     ]
     assert response.json()['default_model_profile_id'] == 'openrouter-gpt4o-mini'
+    openrouter = next(
+        item for item in response.json()['models'] if item['id'] == 'openrouter-gpt4o-mini'
+    )
+    assert openrouter['document_input'] is True
     bedrock = next(item for item in response.json()['models'] if item['id'] == 'bedrock-nova2-lite')
     assert bedrock['availability'] == 'unavailable'
     assert bedrock['image_input'] is True
