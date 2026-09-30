@@ -103,6 +103,8 @@ const metadata = {
     { value: 'abandoned', label: 'Abandoned', group: 'terminal' },
     { value: 'closed', label: 'Closed', group: 'terminal' },
     { value: 'urgent', label: 'Urgent', group: 'operational' },
+    { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
+    { value: 'created_routed', label: 'Created / routed', group: 'operational' },
   ],
   workflow_states: [{ value: 'collecting', label: 'Collecting' }],
   priorities: [{ value: 'routine', label: 'Routine' }],
@@ -188,6 +190,9 @@ function renderPage(initialEntry) {
         <Route path="/workbench/conversations" element={page} />
         <Route path="/workbench/conversations/:conversationSessionId" element={page} />
         <Route path="/workbench/agent/sessions/:agentSessionId" element={page} />
+        <Route path="/workbench/drafts" element={page} />
+        <Route path="/workbench/drafts/:claimId" element={page} />
+        <Route path="/workbench/drafts/:claimId/:section" element={page} />
         <Route path="/workbench/claims/:claimId" element={page} />
         <Route path="/workbench/claims/:claimId/:section" element={page} />
       </Routes>
@@ -257,7 +262,7 @@ describe('WorkbenchPage queue routing', () => {
     await waitFor(() => {
       const location = screen.getByTestId('location').textContent
       expect(location).toContain('/workbench/claims/clm_route_1/conversation?')
-      expect(location).toContain('view=waiting_user')
+      expect(location).not.toContain('view=')
       expect(location).toContain('search=NW-900')
       expect(location).toContain('session=ses_saved')
     })
@@ -273,8 +278,41 @@ describe('WorkbenchPage queue routing', () => {
     renderPage('/workbench')
 
     expect(await screen.findByText('NW-900')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Submitted claims' })).toBeVisible()
+    expect(api.claims).toHaveBeenCalledWith(
+      'staff-token',
+      expect.objectContaining({ view: 'created_routed' }),
+    )
+    expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/workbench')
     expect(api.claim).not.toHaveBeenCalled()
+  })
+
+  it('scopes the Draft claims route, search, and filters to the incomplete-claims projection', async () => {
+    const user = userEvent.setup()
+    renderPage('/workbench/drafts?search=NW-900&priority=routine')
+
+    expect(await screen.findByRole('heading', { name: 'Draft claims' })).toBeVisible()
+    expect(screen.getByText('Customer drafts · Not yet submitted')).toBeVisible()
+    expect(screen.getByText('Customers are still completing these claims. They have not entered the formal work queue.')).toBeVisible()
+    expect(api.claims).toHaveBeenCalledWith(
+      'staff-token',
+      expect.objectContaining({
+        view: 'incomplete_claims',
+        search: 'NW-900',
+        priority: 'routine',
+      }),
+    )
+    expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
+
+    await user.click(await screen.findByText('NW-900'))
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workbench/drafts/clm_route_1?priority=routine&search=NW-900',
+    ))
+    expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1')
+    expect(api.acceptHandoff).not.toHaveBeenCalled()
+    expect(api.reopenClaim).not.toHaveBeenCalled()
   })
 
   it('does not override an explicit Claim route with a different persisted active tab', async () => {
@@ -296,26 +334,21 @@ describe('WorkbenchPage queue routing', () => {
     expect(screen.getByTestId('location')).not.toHaveTextContent('clm_old')
   })
 
-  it('preserves an unpublished URL view and does not issue a guessed queue request', async () => {
-    const user = userEvent.setup()
+  it('normalizes a legacy URL view to the submitted queue without dropping supported filters', async () => {
     renderPage('/workbench?view=retired_queue&assignee_id=unassigned&next_action=ASK')
 
-    expect(await screen.findByText('This queue view is no longer available')).toBeInTheDocument()
-    expect(api.claims).not.toHaveBeenCalled()
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/workbench?view=retired_queue&assignee_id=unassigned&next_action=ASK',
-    )
-
-    await user.click(screen.getByRole('button', { name: 'Open all active work' }))
-
-    await waitFor(() => expect(api.claims).toHaveBeenCalledOnce())
+    expect(await screen.findByText('NW-900')).toBeInTheDocument()
     expect(api.claims).toHaveBeenCalledWith(
       'staff-token',
-      expect.objectContaining({ assignee_id: 'unassigned', next_action: 'ASK' }),
+      expect.objectContaining({
+        view: 'created_routed',
+        assignee_id: 'unassigned',
+        next_action: 'ASK',
+      }),
     )
-    expect(screen.getByTestId('location')).toHaveTextContent(
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
       '/workbench?assignee_id=unassigned&next_action=ASK',
-    )
+    ))
   })
 
   it('preserves the published queue and every non-view filter on Claim navigation', async () => {
@@ -330,7 +363,7 @@ describe('WorkbenchPage queue routing', () => {
       expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_1?')
     })
     const location = screen.getByTestId('location').textContent
-    expect(location).toContain('view=waiting_user')
+    expect(location).not.toContain('view=')
     expect(location).toContain('workflow_state=collecting')
     expect(location).toContain('priority=routine')
     expect(location).toContain('assignee_id=unassigned')
@@ -345,7 +378,7 @@ describe('WorkbenchPage queue routing', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent(
-        '/workbench/claims/clm_route_1?view=waiting_user&assignee_id=unassigned',
+        '/workbench/claims/clm_route_1?assignee_id=unassigned',
       )
     })
   })
@@ -395,11 +428,11 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.claim).toHaveBeenCalledTimes(2)
     expect(await screen.findByText(/reopened at revision 8.*moved to Processing/i)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
-      '/workbench/claims/clm_route_1?view=processing',
+      '/workbench/claims/clm_route_1',
     ))
     expect(api.claims).toHaveBeenLastCalledWith(
       'staff-token',
-      expect.objectContaining({ view: 'processing' }),
+      expect.objectContaining({ view: 'created_routed' }),
     )
   })
 
@@ -707,7 +740,8 @@ describe('WorkbenchPage queue routing', () => {
       { requestId: 'req_filtered_1' },
     ))
 
-    await user.selectOptions(screen.getByLabelText('Current work'), 'processing')
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    await user.selectOptions(screen.getByLabelText('Claim priority'), 'routine')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('req_filtered_1')
     expect(screen.queryByText('NW-900')).not.toBeInTheDocument()

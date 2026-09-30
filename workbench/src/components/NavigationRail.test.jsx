@@ -1,0 +1,49 @@
+import { render, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
+import NavigationRail from './NavigationRail.jsx'
+
+vi.mock('./AccountMenu.jsx', () => ({
+  default: () => <div data-testid="account-menu" />,
+}))
+
+function renderNavigation(pathname) {
+  render(
+    <MemoryRouter initialEntries={[pathname]}>
+      <NavigationRail
+        profile={{ staff_id: 'stf_demo', display_name: 'Demo Staff' }}
+        draftCount={3}
+        onLogout={vi.fn()}
+        onAgent={vi.fn()}
+      />
+    </MemoryRouter>,
+  )
+}
+
+describe('NavigationRail', () => {
+  it('renders Draft claims as a peer navigation item with a subdued count and selected state', () => {
+    renderNavigation('/workbench/drafts/clm_1')
+
+    const navigation = screen.getByRole('navigation', { name: 'Workbench navigation' })
+    const links = within(navigation).getAllByRole('link')
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/workbench',
+      '/workbench/drafts',
+      '/workbench/conversations',
+    ])
+
+    const drafts = within(navigation).getByRole('link', { name: '3 Draft claims' })
+    expect(drafts).toHaveClass('active')
+    expect(drafts).toHaveAttribute('aria-current', 'page')
+    expect(within(drafts).getByText('3')).toHaveClass('navigation-rail__count')
+    expect(within(navigation).getByRole('link', { name: 'Workbench' })).not.toHaveClass('active')
+  })
+
+  it('keeps Workbench selected for a submitted Claim detail route', () => {
+    renderNavigation('/workbench/claims/clm_1')
+
+    const workbench = screen.getByRole('link', { name: 'Workbench' })
+    expect(workbench).toHaveClass('active')
+    expect(workbench).toHaveAttribute('aria-current', 'page')
+  })
+})

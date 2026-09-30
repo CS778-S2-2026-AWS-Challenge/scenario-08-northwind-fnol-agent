@@ -16,7 +16,12 @@ vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/StaffAgent.jsx', () => ({ default: () => null }))
 const metadata = {
-  views: [{ value: 'all', label: 'All active work', group: 'overview' }, { value: 'processing', label: 'Processing', group: 'active' }],
+  views: [
+    { value: 'all', label: 'All active work', group: 'overview' },
+    { value: 'processing', label: 'Processing', group: 'active' },
+    { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
+    { value: 'created_routed', label: 'Created / routed', group: 'operational' },
+  ],
   workflow_states: [{ value: 'professional_review', label: 'Professional review' }, { value: 'ready_for_next', label: 'Ready for next' }],
   priorities: [{ value: 'standard', label: 'Standard' }],
   tags: [],
