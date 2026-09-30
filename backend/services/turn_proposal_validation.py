@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -108,6 +108,10 @@ class ValidatedTurn:
     evidence_interpretations: tuple[V8EvidenceInterpretation, ...] = ()
     # Service identities the model proposed but Runtime refused this turn.
     rejected_services: tuple[str, ...] = ()
+    # Structural proposals only; the reducer validates them against the final
+    # accepted facts and handoff/authority state before atomic persistence.
+    policy_judgment_proposals: tuple[V8PolicyJudgmentProposal, ...] = ()
+    policy_judgment_sources: tuple[Mapping[str, object], ...] = ()
 
 
 def claimant_report_supports_value(
@@ -434,6 +438,7 @@ def validate_turn_proposal(
     service_eligibility_resolver: Callable[[list[ProposedFormChange]], Collection[str]]
     | None = None,
     authorised_service_ids: Collection[str] = (),
+    authorized_policy_sources: Sequence[Mapping[str, object]] = (),
 ) -> ValidatedTurn:
     """Validate one model envelope without applying claim mutations.
 
@@ -446,6 +451,8 @@ def validate_turn_proposal(
         open_handoffs: Active handoffs; any entry suppresses every service suggestion.
         message_text: Latest claimant message used solely as fact provenance.
         evidence: Evidence authorised for this model request.
+        authorized_policy_sources: Clause citations actually loaded by the server in this
+            turn; retained for final fact and authority validation in the reducer.
         service_eligibility_resolver: Existing eligibility query using validated turn facts.
         authorised_service_ids: Services with a durable, claimant-granted consent
             record on this Claim. A field the model marks third_party_pending
@@ -705,4 +712,6 @@ def validate_turn_proposal(
         document_requests=tuple(document_requests),
         evidence_interpretations=tuple(interpretations),
         rejected_services=tuple(rejected_services),
+        policy_judgment_proposals=tuple(proposal.policy_judgment_proposals),
+        policy_judgment_sources=tuple(authorized_policy_sources),
     )

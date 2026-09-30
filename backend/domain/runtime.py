@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from backend.domain.agent_v8 import V8PolicyJudgmentProposal
 from backend.domain.external_service_registry import (
     ExternalLifecycleStatus,
     ExternalTaskResultVerification,
@@ -81,6 +82,11 @@ class AgentProposalRecord(ContractModel):
     contents_item_changes: list[ProposedContentsItem] = Field(default_factory=list, max_length=100)
     source_refs: list[str] = Field(default_factory=list, max_length=100)
     external_service_intents: list[dict[str, str]] = Field(default_factory=list, max_length=8)
+    policy_judgment_proposals: list[V8PolicyJudgmentProposal] = Field(
+        default_factory=list, max_length=3
+    )
+    policy_judgment_rejections: list[dict[str, str]] = Field(default_factory=list, max_length=3)
+    policy_judgment_signal_refs: list[str] = Field(default_factory=list, max_length=3)
     proposal_source: AgentProposalSource
     model_profile_id: str = Field(min_length=1, max_length=100)
     runtime_configuration: RuntimeConfigurationProvenance | None = None

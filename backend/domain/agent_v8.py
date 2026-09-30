@@ -92,24 +92,20 @@ class V8ServiceSuggestion(ContractModel):
 class V8PolicyJudgmentProposal(ContractModel):
     """Advisory policy application proposal for staff adjudication."""
 
-    kind: Literal[
-        'liability_split',
-        'excess_multiplicity',
-        'driver_permission_status',
-        'unsafe_use_applicability',
-        'gradual_damage_discoverability',
-        'natural_hazard_allocation',
-        'occupancy_change_applicability',
-        'theft_circumstance',
-        'unsecured_property_dispute',
-        'multi_event_dispute',
-        'item_classification_dispute',
-    ]
+    kind: str = Field(min_length=1, max_length=100, pattern=r'^[a-z][a-z0-9_]*$')
     assessment: str = Field(min_length=1, max_length=500)
     rationale: str = Field(min_length=1, max_length=500)
     source_refs: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
         min_length=1, max_length=10
     )
+
+    @model_validator(mode='after')
+    def require_nonblank_content(self) -> 'V8PolicyJudgmentProposal':
+        if not self.assessment.strip() or not self.rationale.strip():
+            raise ValueError('Policy judgment assessment and rationale must not be blank.')
+        if any(not ref.strip() or ref != ref.strip() for ref in self.source_refs):
+            raise ValueError('Policy judgment source references must be canonical nonblank IDs.')
+        return self
 
 
 class V8DocumentRequest(ContractModel):
