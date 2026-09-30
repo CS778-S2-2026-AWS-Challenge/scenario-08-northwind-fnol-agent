@@ -43,6 +43,22 @@ The three incomplete candidate containers exited with code 1 while importing the
 Their bounded errors named only missing or unverified capabilities. They did not listen on a port,
 construct fixture persistence as fallback, or access an unselected provider.
 
+## OpenRouter GPT-4o PDF transport validation
+
+On 2026-09-30, the document transport was checked in an isolated worktree based on
+`main@10cdc4f14ff29cc55e077a917f1d1e77a3539273`. The probe used the repository's synthetic contents
+purchase receipt, the configured OpenRouter endpoint, and `openai/gpt-4o`. It sent a private Base64
+PDF file block with a strict JSON Schema response request.
+The provider returned HTTP 200, identified the document type, and confirmed the explicit
+simulated-material marker. Usage was 169 input and 15 output tokens. The credential, PDF bytes,
+extracted text, storage references, and complete response were not printed or recorded.
+
+This is live provider transport and structured-output evidence for one synthetic PDF. It is not a
+claimant journey, a latency distribution, production-data approval, automatic Evidence processing,
+or proof of a fixed OpenRouter parser engine. The request omitted explicit parser configuration and
+therefore used OpenRouter's documented default PDF-processing selection. Issue #1129 separately owns
+automatic dispatch, durable processing state, idempotency, and recovery.
+
 ## Week 5 Day 4 cloud boundary revalidation
 
 Issue #432 revalidated this boundary on 3 September 2026 against `main@8d4d4e5`. The local
