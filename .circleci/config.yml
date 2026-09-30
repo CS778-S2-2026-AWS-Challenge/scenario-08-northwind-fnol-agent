@@ -360,6 +360,27 @@ jobs:
           name: Mypy tests
           command: python -m mypy tests/test_incomplete_claim_recovery.py tests/test_retention_execution.py tests/test_runtime_deployment_profiles.py tests/test_backend_test_selection.py
 
+  debug-autofix-format:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Apply exact Ruff formatting
+          command: |
+            python -m pip install ruff==0.11.2
+            python -m ruff format               backend/repositories/fixture.py               backend/repositories/mongodb.py               tests/test_retention_execution.py
+            if git diff --quiet --               backend/repositories/fixture.py               backend/repositories/mongodb.py               tests/test_retention_execution.py; then
+              echo "No formatting diff."
+              exit 0
+            fi
+            git config user.name "jxu316-arch"
+            git config user.email "jxu316@aucklanduni.ac.nz"
+            git add               backend/repositories/fixture.py               backend/repositories/mongodb.py               tests/test_retention_execution.py
+            git commit -m "fix: apply backend recovery formatting"
+            git push origin HEAD:feature/issue-1076-unified-recovery
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -697,6 +718,7 @@ workflows:
       - debug-mypy-repositories
       - debug-mypy-services
       - debug-mypy-tests
+      - debug-autofix-format
       - github-automation-quality
       - pr-policy
       - docs-quality
