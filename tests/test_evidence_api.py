@@ -30,6 +30,11 @@ from backend.domain.runtime import (
     TurnResultRecord,
 )
 from backend.repositories.fixture import FixtureRepository
+from tests.media_support import synthetic_image
+
+
+def synthetic_jpeg(size_bytes: int = 512) -> bytes:
+    return synthetic_image(size_bytes=size_bytes)
 
 
 def put_fixture_upload(
@@ -37,8 +42,13 @@ def put_fixture_upload(
     claim_id: str,
     evidence_id: str,
     size_bytes: int,
+    media_type: str = 'image/jpeg',
 ) -> str:
-    content = b'e' * size_bytes
+    content = (
+        b'%PDF-1.4\nsynthetic document'.ljust(size_bytes, b' ')
+        if media_type == 'application/pdf'
+        else synthetic_jpeg(size_bytes)
+    )
     storage = cast(MockEvidenceStorage, cast(FastAPI, client.app).state.evidence_storage)
     storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=content)
     return f'sha256:{sha256(content).hexdigest()}'
@@ -214,19 +224,19 @@ def test_claimant_can_read_evidence_history_across_owned_claims(
                 'kind': 'other_document',
                 'original_filename': 'history.jpg',
                 'media_type': 'image/jpeg',
-                'size_bytes': 7,
+                'size_bytes': 512,
             },
         )
         assert response.status_code == 201
         evidence_id = str(response.json()['evidence_id'])
         evidence_ids.append(evidence_id)
-        checksum = put_fixture_upload(client, claim_id, evidence_id, 7)
+        checksum = put_fixture_upload(client, claim_id, evidence_id, 512)
         complete = client.post(
             f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
             headers={**auth_headers, 'Idempotency-Key': f'{key}-complete', 'If-Match': '2'},
             json={'upload_checksum': checksum},
         )
-        assert complete.status_code == 202
+        assert complete.status_code == 200
 
     response = client.get('/api/v1/evidence?limit=1', headers=auth_headers)
     assert response.status_code == 200
@@ -875,7 +885,7 @@ def test_unresolved_evidence_remains_in_staff_pending_evidence_view(
         ('repair_quote', 'repair-quote.pdf', 'application/pdf', 284_120),
     ],
 )
-def test_upload_completion_exposes_processing_metadata_without_storage_details(
+def test_upload_completion_exposes_media_readiness_without_storage_details(
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
@@ -917,7 +927,7 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert stored_before is not None
     assert stored_before.file_status.value == 'awaiting_upload'
     assert 'url' not in stored_before.provenance
-    checksum = put_fixture_upload(client, claim_id, evidence_id, size_bytes)
+    checksum = put_fixture_upload(client, claim_id, evidence_id, size_bytes, media_type)
 
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
@@ -965,7 +975,8 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
         headers={'Authorization': 'Bearer synthetic-staff'},
     )
 
-    assert completed.status_code == 202
+    expected_file_status = 'ready' if media_type == 'image/jpeg' else 'processing'
+    assert completed.status_code == (200 if media_type == 'image/jpeg' else 202)
     body = completed.json()
     assert completion_replay.json() == body
     assert completion_conflict.status_code == 409
@@ -973,7 +984,7 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert second_completion.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     assert body['revision'] == 3
     assert body['evidence']['status'] == 'received'
-    assert body['evidence']['file_status'] == 'processing'
+    assert body['evidence']['file_status'] == expected_file_status
     assert body['evidence']['original_filename'] == filename
     assert body['evidence']['media_type'] == media_type
     assert body['evidence']['size_bytes'] == size_bytes
@@ -981,26 +992,28 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert listed.status_code == 200
     assert listed.json()['items'] == [body['evidence']]
     assert workbench.status_code == 200
-    workbench_item = next(
-        item for item in workbench.json()['items'] if item['claim_id'] == claim_id
-    )
-    pending = next(
-        value
-        for value in workbench_item['work_summary']['missing_information']
-        if value['kind'] == 'evidence'
-    )
-    assert pending['responsible_party'] == 'system'
+    if media_type == 'application/pdf':
+        workbench_item = next(
+            item for item in workbench.json()['items'] if item['claim_id'] == claim_id
+        )
+        pending = next(
+            value
+            for value in workbench_item['work_summary']['missing_information']
+            if value['kind'] == 'evidence'
+        )
+        assert pending['responsible_party'] == 'system'
     workbench_evidence = client.get(
         f'/api/v1/workbench/claims/{claim_id}/evidence',
         headers={'Authorization': 'Bearer synthetic-staff'},
     ).json()['items'][0]
     assert workbench_evidence['status'] == 'received'
-    assert workbench_evidence['file_status'] == 'processing'
-    assert workbench_evidence['wait_type'] == 'internal'
-    assert workbench_evidence['responsible_party'] == 'system'
-    assert workbench_evidence['context_summary'] == (
-        'Northwind is processing the completed evidence upload.'
-    )
+    assert workbench_evidence['file_status'] == expected_file_status
+    if media_type == 'application/pdf':
+        assert workbench_evidence['wait_type'] == 'internal'
+        assert workbench_evidence['responsible_party'] == 'system'
+        assert workbench_evidence['context_summary'] == (
+            'Northwind is processing the completed evidence upload.'
+        )
     public_payload = listed.text
     assert 'storage_key' not in public_payload
     assert 'upload_checksum' not in public_payload
@@ -1008,14 +1021,18 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert 'file_contents' not in public_payload
     stored_after = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
     assert stored_after is not None
-    assert stored_after.provenance['processing_state'] == 'queued'
+    assert stored_after.provenance['processing_state'] == (
+        'completed' if media_type == 'image/jpeg' else 'queued'
+    )
     assert stored_after.provenance['storage_key'].endswith(evidence_id)
     updated_claim = repository.get_claim(claim_id, 'cus_demo')
     assert updated_claim is not None
     assert updated_claim.form == {}
-    assert updated_claim.evidence_summary.received == 0
-    assert updated_claim.evidence_summary.pending == 1
-    assert updated_claim.claim_state.evidence.value == 'pending'
+    assert updated_claim.evidence_summary.received == (1 if media_type == 'image/jpeg' else 0)
+    assert updated_claim.evidence_summary.pending == (0 if media_type == 'image/jpeg' else 1)
+    assert updated_claim.claim_state.evidence.value == (
+        'received' if media_type == 'image/jpeg' else 'pending'
+    )
     assert listed.json()['revision'] == updated_claim.revision
 
 
@@ -1028,8 +1045,10 @@ def test_processing_failure_is_claim_attention_and_retry_is_idempotent(
     claim = created['claim']
     assert isinstance(claim, dict)
     claim_id = str(claim['claim_id'])
-    evidence_id = upload_evidence(client, auth_headers, claim_id, 'failed-processing-upload', 1)
-    checksum = f'sha256:{sha256(b"e" * 512).hexdigest()}'
+    evidence_id = upload_evidence(
+        client, auth_headers, claim_id, 'failed-processing-upload', 1, media_type='application/pdf'
+    )
+    checksum = put_fixture_upload(client, claim_id, evidence_id, 512, 'application/pdf')
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
         headers={**auth_headers, 'Idempotency-Key': 'failed-processing-complete', 'If-Match': '2'},
@@ -1138,7 +1157,7 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     )
     assert requested.status_code == 201
     evidence_id = requested.json()['evidence_id']
-    checksum = put_fixture_upload(client, claim_id, evidence_id, 512)
+    checksum = put_fixture_upload(client, claim_id, evidence_id, 512, media_type)
 
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
@@ -1149,7 +1168,7 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
         },
         json={'upload_checksum': checksum},
     )
-    assert completed.status_code == 202
+    assert completed.status_code == (200 if media_type == 'image/jpeg' else 202)
 
     processing_endpoint = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
     processing_headers = {
@@ -1245,12 +1264,19 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert stored is not None
     transitions = stored.provenance['transition_history']
     assert isinstance(transitions, list)
-    assert [(entry['from'], entry['to']) for entry in transitions] == [
+    expected_transitions = [
         ('awaiting_upload', 'processing'),
         ('processing', 'ready'),
-        ('processing', 'proposed'),
-        ('proposed', decision),
     ]
+    if media_type == 'image/jpeg':
+        expected_transitions.append(('ready', 'ready'))
+    expected_transitions.extend(
+        [
+            ('ready' if media_type == 'image/jpeg' else 'processing', 'proposed'),
+            ('proposed', decision),
+        ]
+    )
+    assert [(entry['from'], entry['to']) for entry in transitions] == expected_transitions
     fact_transition = transitions[-1]
     assert fact_transition['source'] == expected_source
     proposed_at = datetime.fromisoformat(str(fact_transition['proposed_at']))
@@ -1317,6 +1343,7 @@ def upload_evidence(
     claim_id: str,
     case: str,
     revision: int,
+    media_type: str = 'image/jpeg',
 ) -> str:
     requested = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
@@ -1327,14 +1354,16 @@ def upload_evidence(
         },
         json={
             'kind': 'incident_image',
-            'original_filename': f'{case}.jpg',
-            'media_type': 'image/jpeg',
+            'original_filename': f'{case}.pdf'
+            if media_type == 'application/pdf'
+            else f'{case}.jpg',
+            'media_type': media_type,
             'size_bytes': 512,
         },
     )
     assert requested.status_code == 201
     evidence_id = cast(str, requested.json()['evidence_id'])
-    put_fixture_upload(client, claim_id, evidence_id, 512)
+    put_fixture_upload(client, claim_id, evidence_id, 512, media_type)
     return evidence_id
 
 
@@ -1346,7 +1375,7 @@ def complete_upload(
     case: str,
     revision: int,
 ) -> None:
-    checksum = f'sha256:{sha256(b"e" * 512).hexdigest()}'
+    checksum = f'sha256:{sha256(synthetic_jpeg()).hexdigest()}'
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
         headers={
@@ -1356,7 +1385,7 @@ def complete_upload(
         },
         json={'upload_checksum': checksum},
     )
-    assert completed.status_code == 202
+    assert completed.status_code == 200
 
 
 def integration_headers(key: str, revision: int) -> dict[str, str]:
@@ -1365,6 +1394,100 @@ def integration_headers(key: str, revision: int) -> dict[str, str]:
         'Idempotency-Key': key,
         'If-Match': str(revision),
     }
+
+
+@pytest.mark.parametrize('decision', ['confirmed', 'rejected'])
+def test_evidence_participant_projection_requires_claimant_confirmation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    decision: str,
+) -> None:
+    created = create_claim(client, auth_headers, 'participant-evidence-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'participant', 1)
+    complete_upload(client, auth_headers, claim_id, evidence_id, 'participant', 2)
+    fields = {
+        'driver.name': 'Synthetic Driver',
+        'policyholder.name': 'Synthetic Policyholder',
+        'witness.name': 'Synthetic Witness',
+    }
+    processed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=integration_headers('participant-process', 3),
+        json={
+            'facts': [
+                {'field_code': code, 'value': value, 'confidence': 0.9}
+                for code, value in fields.items()
+            ]
+        },
+    )
+    assert processed.status_code == 200, processed.text
+    before = repository.get_claim_internal(claim_id)
+    assert before is not None
+    assert before.driver is None and before.policyholder is None and before.witnesses == []
+
+    route = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions'
+    headers = {**auth_headers, 'Idempotency-Key': 'participant-decision', 'If-Match': '4'}
+    payload = {'field_codes': list(fields), 'decision': decision}
+    decided = client.post(route, headers=headers, json=payload)
+    assert decided.status_code == 200, decided.text
+    replay = client.post(route, headers=headers, json=payload)
+    assert replay.json() == decided.json()
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None and stored.revision == 5
+    for code in fields:
+        assert stored.form[code].source_refs == [
+            evidence_id,
+            f'evidence:{evidence_id}:material:1',
+        ]
+    for role_route, role_headers in [
+        (f'/api/v1/claims/{claim_id}', auth_headers),
+        (f'/api/v1/workbench/claims/{claim_id}', staff_auth_headers),
+    ]:
+        response = client.get(role_route, headers=role_headers)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if decision == 'confirmed':
+            assert body['driver']['name'] == fields['driver.name']
+            assert body['policyholder']['name'] == fields['policyholder.name']
+            assert body['witnesses'][0]['name'] == fields['witness.name']
+            assert body['witnesses'][0]['witness_id'] == stored.witnesses[0].witness_id
+        else:
+            assert body['driver'] is None and body['policyholder'] is None
+            assert body['witnesses'] == []
+
+
+@pytest.mark.parametrize('code', ['driver.licence_number', 'other_party.policy_number'])
+def test_evidence_rejects_protected_participant_extraction_before_persistence(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    code: str,
+) -> None:
+    created = create_claim(client, auth_headers, 'protected-evidence-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'protected', 1)
+    complete_upload(client, auth_headers, claim_id, evidence_id, 'protected', 2)
+    before_claim = repository.get_claim_internal(claim_id)
+    before_evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    route = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
+    response = client.post(
+        route,
+        headers=integration_headers('protected-process', 3),
+        json={'facts': [{'field_code': code, 'value': 'SYNTHETIC-SECRET-123', 'confidence': 0.9}]},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()['error']['code'] == 'PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE'
+    assert 'SYNTHETIC-SECRET-123' not in response.text
+    assert repository.get_claim_internal(claim_id) == before_claim
+    assert repository.get_evidence(claim_id, evidence_id, 'cus_demo') == before_evidence
+    assert repository.find_idempotency('cus_demo', route, 'protected-process') is None
 
 
 def test_completion_transition_uses_storage_result_source(
@@ -1407,7 +1530,10 @@ def test_completion_transition_uses_storage_result_source(
     assert evidence is not None
     transitions = evidence.provenance['transition_history']
     assert isinstance(transitions, list)
-    assert transitions[-1]['actor_id'] == 'configured_test_evidence_storage'
+    assert transitions[-2]['actor_id'] == 'configured_test_evidence_storage'
+    assert transitions[-2]['to'] == 'processing'
+    assert transitions[-1]['actor_id'] == 'image_file_validator'
+    assert transitions[-1]['to'] == 'ready'
 
 
 def test_processing_rejects_unknown_targets_reused_keys_and_unregistered_facts(

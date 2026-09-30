@@ -18,6 +18,7 @@ import {
   listPaymentDestinations,
   loginClaimant,
   logoutClaimant,
+  pauseClaimSession,
   requestId,
   requestHumanSupport,
   promoteAnonymousClaim,
@@ -36,13 +37,17 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
-import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
+import AttachmentPreview from './components/AttachmentPreview.jsx'
+import { modelAttachmentCompatibility } from './attachmentModelCompatibility.js'
+import ExternalServiceAction from './components/ExternalServiceAction.jsx'
+import ExternalServicesPage from './components/ExternalServicesPage.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
 import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
 import AgreementConfirmationPanel from './components/AgreementConfirmationPanel.jsx'
 import PayoutContactPanel from './components/PayoutContactPanel.jsx'
+import ClaimAutoFillPanel from './components/ClaimAutoFillPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
   AgentTurnDisclosure,
@@ -50,6 +55,7 @@ import {
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
 import UserProfile from './components/UserProfile.jsx'
+import PrivacyPage from './privacy/PrivacyPage.jsx'
 import './styles/profile-shell.css'
 import './styles/profile-records.css'
 import './styles/profile-assets.css'
@@ -58,7 +64,8 @@ import './styles/claim-history.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
 import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
-import { documentAttentionCount } from './claimDocumentProjection.js'
+import useClaimAutoFillEditor from './profile/useClaimAutoFillEditor.js'
+import { WORKBENCH_URL } from './runtimeConfig.js'
 import {
   forgetAnonymousConversation,
   readAnonymousConversationHistory,
@@ -123,6 +130,12 @@ const INPUT_LABELS = {
   provide_incident_location: 'Incident location',
   describe_loss: 'Damage or loss',
 }
+
+const CLAIM_START_PROMPTS = [
+  { icon: 'car', text: 'I was in a car accident' },
+  { icon: 'home', text: 'My home or belongings were damaged' },
+  { icon: 'search', text: 'Something was lost or stolen' },
+]
 
 const FIELD_SOURCE_LABELS = {
   claimant: 'Provided by you',
@@ -190,6 +203,91 @@ function fieldValueText(field) {
   }
   if (typeof field.value === 'boolean') return field.value ? 'Yes' : 'No'
   return String(field.value ?? '')
+}
+
+function ClaimStartIcon({ name, className = '' }) {
+  const paths = {
+    arrow: <path d="m9 18 6-6-6-6" />,
+    car: (
+      <>
+        <path d="m5 17-1 2M19 17l1 2M3 13l2-6h14l2 6v5H3v-5Z" />
+        <path d="M5 13h14M7 16h.01M17 16h.01" />
+      </>
+    ),
+    home: (
+      <>
+        <path d="m3 11 9-8 9 8" />
+        <path d="M5 10v10h14V10M9 20v-6h6v6" />
+      </>
+    ),
+    lock: (
+      <>
+        <rect x="5" y="10" width="14" height="10" rx="2" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </>
+    ),
+    search: (
+      <>
+        <circle cx="10" cy="10" r="6" />
+        <path d="m15 15 5 5M8 8h4v4H8z" />
+      </>
+    ),
+    shield: (
+      <>
+        <path d="M12 3 5 6v5c0 4.4 2.8 8.4 7 10 4.2-1.6 7-5.6 7-10V6l-7-3Z" />
+        <path d="m9 12 2 2 4-4" />
+      </>
+    ),
+  }
+
+  return (
+    <svg
+      className={`claim-start-icon ${className}`.trim()}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      {paths[name]}
+    </svg>
+  )
+}
+
+function ConversationStart({ onChoosePrompt }) {
+  return (
+    <section className="conversation-start" aria-labelledby="conversation-title">
+      <div className="conversation-start-intro">
+        <span className="conversation-start-shield" aria-hidden="true">
+          <ClaimStartIcon name="shield" />
+        </span>
+        <div>
+          <h1 id="conversation-title">Let&apos;s get your claim started</h1>
+          <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
+        </div>
+      </div>
+      <div className="conversation-start-options" aria-labelledby="conversation-start-options-title">
+        <h3 id="conversation-start-options-title">Choose a starting point</h3>
+        <div className="conversation-start-prompt-list">
+          {CLAIM_START_PROMPTS.map((prompt) => (
+            <button
+              className="conversation-start-prompt"
+              type="button"
+              key={prompt.text}
+              onClick={() => onChoosePrompt(prompt.text)}
+            >
+              <span className="conversation-start-prompt-icon" aria-hidden="true">
+                <ClaimStartIcon name={prompt.icon} />
+              </span>
+              <span>{prompt.text}</span>
+              <ClaimStartIcon name="arrow" className="conversation-start-arrow" />
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="conversation-start-privacy">
+        <ClaimStartIcon name="lock" />
+        <span>Your information stays private and is only used to help prepare this claim.</span>
+      </p>
+    </section>
+  )
 }
 
 function messageText(message) {
@@ -297,6 +395,73 @@ function evidenceFileStatusLabel(fileStatus, status) {
   return status === 'received' ? 'Received' : status
 }
 
+function isSendableComposerAttachment(attachment) {
+  if (attachment.status === 'staged') {
+    return Boolean(attachment.stagedFile && attachment.uploadAttempt)
+  }
+  return (
+    (attachment.status === 'uploaded' || attachment.status === 'processing')
+    && Boolean(attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+  )
+}
+
+function attachmentSubmissionSignature(text, attachments, modelProfileId) {
+  return JSON.stringify({
+    text,
+    modelProfileId,
+    attachments: attachments.map((attachment) => (
+      attachment.evidenceId
+      || attachment.uploadAttempt?.evidenceId
+      || attachment.id
+      || attachment.name
+    )),
+  })
+}
+
+function localAttachmentFile(attachment) {
+  return attachment?.previewFile || attachment?.stagedFile || attachment?.retryFile || null
+}
+
+function ClaimantMessageAttachments({ message, evidenceItems, attachments, previewFiles }) {
+  const presentedAttachments = Array.isArray(attachments)
+    ? attachments.map((attachment) => ({
+      ...attachment,
+      previewFile: localAttachmentFile(attachment)
+        || previewFiles?.get(attachment.evidenceId || attachment.uploadAttempt?.evidenceId),
+    }))
+    : (message?.evidence_refs || []).map((evidenceId, index) => {
+      const evidence = evidenceItems.find((item) => item.evidence_id === evidenceId)
+      return {
+        id: evidenceId,
+        name: evidence?.original_filename || evidence?.kind || `Attached file ${index + 1}`,
+        previewFile: previewFiles?.get(evidenceId),
+        statusLabel: evidence
+          ? evidenceFileStatusLabel(evidence.file_status, evidence.status)
+          : 'Attached',
+      }
+    })
+
+  if (presentedAttachments.length === 0) return null
+
+  return (
+    <ul className="message-attachments" aria-label="Attached files">
+      {presentedAttachments.map((attachment, index) => (
+        <li className="message-attachment" key={attachment.id || attachment.name || index}>
+          <AttachmentPreview
+            attachment={attachment}
+            fallbackClassName="message-attachment-icon"
+            className="message-attachment-preview"
+          />
+          <span className="message-attachment-copy">
+            <strong>{attachment.name || `Attached file ${index + 1}`}</strong>
+            <small>{attachment.statusLabel || 'Attached'}</small>
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 async function fetchClaimHistory({ signal } = {}) {
   const claimsById = new Map()
   const seenCursors = new Set()
@@ -367,6 +532,14 @@ function claimProgress(dynamicForm) {
   }
 }
 
+function protectedAccountPageForPath(pathname) {
+  if (pathname === '/account/claims') return 'claim-history'
+  if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return 'claim-evidence'
+  if (/^\/account\/claims\/[^/]+$/.test(pathname)) return 'claim-features'
+  if (pathname === '/files') return 'files'
+  return null
+}
+
 function App() {
   const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialDraftWorkspaceActive = globalThis.location?.pathname === '/claims/new'
@@ -377,10 +550,8 @@ function App() {
     if (path === '/profile' || path === '/account' || initialProfileSection) {
       return hasClaimantAccessToken() ? 'account' : 'login'
     }
-    if (/^\/account\/claims\/[^/]+\/evidence$/.test(path)) return 'claim-evidence'
-    if (/^\/account\/claims\/[^/]+$/.test(path)) return 'claim-features'
-    if (path === '/account/claims') return 'claim-history'
-    if (path === '/files') return 'files'
+    const protectedPage = protectedAccountPageForPath(path)
+    if (protectedPage) return hasClaimantAccessToken() ? protectedPage : 'login'
     if (path === '/how-it-works') return 'how-it-works'
     return 'home'
   })()
@@ -405,6 +576,7 @@ function App() {
   const [dynamicForm, setDynamicForm] = useState(null)
   const [nextStep, setNextStep] = useState(null)
   const [status, setStatus] = useState('idle')
+  const [autoFillBusy, setAutoFillBusy] = useState(false)
   const [error, setError] = useState('')
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
@@ -430,6 +602,10 @@ function App() {
     account,
     setAccount,
     enabled: page === 'account',
+  })
+  const autoFillEditor = useClaimAutoFillEditor({
+    account,
+    onSave: profileController.saveAutoFillPreferences,
   })
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
@@ -466,11 +642,19 @@ function App() {
   const pendingAgreementAcceptance = useRef(null)
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
+  const pendingSessionPause = useRef(null)
+  const deferredSessionPauses = useRef(new Map())
+  const sessionPauseGeneration = useRef(0)
+  const pendingMessageReconciliation = useRef(null)
+  const messageReconciliationGeneration = useRef(0)
+  const workspaceGeneration = useRef(0)
+  const claimantIdentityGeneration = useRef(0)
   const latestRevision = useRef(0)
   const latestRevisionClaimId = useRef(null)
   const activeClaimRef = useRef(claim)
   const activeSessionIdRef = useRef(sessionId)
   const accountRef = useRef(account)
+  const workspaceViewRef = useRef(workspaceView)
   const realtimeCursor = useRef(null)
   const realtimeSeenEventIds = useRef(new Set())
   const messagesRequestGeneration = useRef(0)
@@ -480,6 +664,9 @@ function App() {
   const evidenceHasLocalMutation = useRef(false)
   const evidenceClaimId = useRef(null)
   const evidenceUploadControllers = useRef(new Map())
+  const evidencePreviewFiles = useRef(new Map())
+  const attachmentsRef = useRef(attachments)
+  const cancelledAttachmentIds = useRef(new Set())
   const dismissedComposerEvidenceIds = useRef(new Set())
   const detailsTabRefs = useRef({})
   const conversationPanelRef = useRef(null)
@@ -500,6 +687,8 @@ function App() {
   activeClaimRef.current = claim
   activeSessionIdRef.current = sessionId
   accountRef.current = account
+  workspaceViewRef.current = workspaceView
+  attachmentsRef.current = attachments
   messagesRef.current = messages
   const realtimePrincipal = account ? 'authenticated' : claim?.claim_id ? 'anonymous' : 'none'
   const realtimeSyncNotice = realtimeHealth === 'stale'
@@ -522,9 +711,110 @@ function App() {
   const homepageConversationReports = claim ? conversationReports : (savedReports || [])
   const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
     || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
-  const documentOutstandingCount = evidenceLoadStatus === 'ready'
-    ? documentAttentionCount(evidenceItems)
-    : null
+  function currentClaimantIdentityKey() {
+    const authenticated = hasClaimantAccessToken()
+    let identityKey = `account:${accountRef.current?.customer_id || ''}`
+    if (!authenticated) {
+      try {
+        identityKey = `anonymous:${globalThis.sessionStorage?.getItem('northwind.anonymousSession') || ''}`
+      } catch { identityKey = 'anonymous:' }
+    }
+    return [claimantIdentityGeneration.current, identityKey].join(':')
+  }
+
+  function currentPauseContextKey() {
+    return [
+      currentClaimantIdentityKey(),
+      globalThis.location?.pathname || '/',
+      workspaceViewRef.current,
+      activeClaimRef.current?.claim_id || '',
+      activeSessionIdRef.current || '',
+    ].join(':')
+  }
+
+  function sessionPauseRecoveryKey(identityKey, claimId) {
+    return `${identityKey}:${claimId}`
+  }
+
+  function isSessionPauseIdentityCurrent(operation) {
+    return operation?.identityKey === currentClaimantIdentityKey()
+  }
+
+  function rememberDeferredSessionPause(operation) {
+    if (!isSessionPauseIdentityCurrent(operation)) return false
+    const existing = deferredSessionPauses.current.get(operation.recoveryKey)
+    if (existing && existing !== operation && existing.generation > operation.generation) return false
+    deferredSessionPauses.current.set(operation.recoveryKey, operation)
+    return true
+  }
+
+  function forgetDeferredSessionPause(operation) {
+    if (deferredSessionPauses.current.get(operation?.recoveryKey) === operation) {
+      deferredSessionPauses.current.delete(operation.recoveryKey)
+    }
+  }
+
+  function isSessionPauseCurrent(operation) {
+    return operation
+      && pendingSessionPause.current === operation
+      && sessionPauseGeneration.current === operation.generation
+      && currentPauseContextKey() === operation.contextKey
+  }
+
+  function beginMessageReconciliation(currentClaim, currentSessionId) {
+    messageReconciliationGeneration.current += 1
+    const operation = {
+      generation: messageReconciliationGeneration.current,
+      workspaceGeneration: workspaceGeneration.current,
+      identityKey: currentClaimantIdentityKey(),
+      claimId: currentClaim?.claim_id || null,
+      sessionId: currentSessionId || null,
+      contextKey: currentPauseContextKey(),
+    }
+    pendingMessageReconciliation.current = operation
+    return operation
+  }
+
+  function isMessageReconciliationCurrent(operation) {
+    return operation
+      && pendingMessageReconciliation.current === operation
+      && messageReconciliationGeneration.current === operation.generation
+      && workspaceGeneration.current === operation.workspaceGeneration
+      && currentClaimantIdentityKey() === operation.identityKey
+      && activeClaimRef.current?.claim_id === operation.claimId
+      && activeSessionIdRef.current === operation.sessionId
+      && currentPauseContextKey() === operation.contextKey
+  }
+
+  function finishMessageReconciliation(operation) {
+    if (pendingMessageReconciliation.current === operation) {
+      pendingMessageReconciliation.current = null
+    }
+  }
+
+  function invalidateSessionPause({ identityChanged = false } = {}) {
+    const operation = pendingSessionPause.current
+    const hadPendingPause = Boolean(operation)
+    if (identityChanged) {
+      claimantIdentityGeneration.current += 1
+      deferredSessionPauses.current.clear()
+      messageReconciliationGeneration.current += 1
+      pendingMessageReconciliation.current = null
+      pendingSubmission.current = null
+    } else if (operation) {
+      rememberDeferredSessionPause(operation)
+    }
+    sessionPauseGeneration.current += 1
+    pendingSessionPause.current = null
+    if (hadPendingPause) setStatus((current) => current === 'pausing-session' ? 'idle' : current)
+  }
+
+  useEffect(() => {
+    workspaceGeneration.current += 1
+    const operation = pendingSessionPause.current
+    if (operation && !isSessionPauseCurrent(operation)) invalidateSessionPause()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.customer_id, claim?.claim_id, draftWorkspaceActive, page, sessionId, workspaceActive, workspaceView])
 
   function rememberClaimInHistory(createdClaim) {
     if (!hasClaimantAccessToken()) {
@@ -623,10 +913,8 @@ function App() {
     if (pathname === '/auth/login') return 'login'
     if (pathname === '/auth/register') return 'register'
     if (pathname === '/profile' || pathname === '/account' || profileSectionFromPath(pathname)) return account ? 'account' : 'login'
-    if (pathname === '/account/claims') return account ? 'claim-history' : 'login'
-    if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return account ? 'claim-evidence' : 'login'
-    if (/^\/account\/claims\/[^/]+$/.test(pathname)) return account ? 'claim-features' : 'login'
-    if (pathname === '/files') return account ? 'files' : 'login'
+    const protectedPage = protectedAccountPageForPath(pathname)
+    if (protectedPage) return account ? protectedPage : 'login'
     if (pathname === '/how-it-works') return 'how-it-works'
     if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
     return 'home'
@@ -691,7 +979,7 @@ function App() {
     }
   }, [draftWorkspaceActive, isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
 
-  const isBusy = [
+  const claimOperationBusy = [
     'starting',
     'sending',
     'confirming',
@@ -704,7 +992,9 @@ function App() {
     'requesting-assessor',
     'saving-payment-destination',
     'saving-payout-contact',
+    'pausing-session',
   ].includes(status)
+  const isBusy = claimOperationBusy || autoFillBusy
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
     [form],
@@ -747,6 +1037,10 @@ function App() {
     () => buildConversationTimeline(messages, resumeContext),
     [messages, resumeContext],
   )
+  const isNewConversationEmpty = !claim
+    && conversationTimeline.length === 0
+    && !pendingMessage
+    && !failedMessage
   const lastAgentMessageId = useMemo(() => (
     [...conversationTimeline]
       .reverse()
@@ -852,19 +1146,30 @@ function App() {
   useEffect(() => {
     const messageList = messageListRef.current
     if (!messageList || !isWorkspaceActive || workspaceView !== 'chat') return
+    if (isNewConversationEmpty) {
+      messageList.scrollTop = 0
+      followLatestMessages.current = true
+      forceLatestMessages.current = false
+      return
+    }
     if (!followLatestMessages.current && !forceLatestMessages.current) return
     messageList.scrollTop = messageList.scrollHeight
     followLatestMessages.current = true
     forceLatestMessages.current = false
   }, [
     assistanceState,
+    attachments,
     claim?.external_claim,
     conversationActionKind,
     conversationTimeline,
+    draft,
+    error,
     evidenceSyncNotice,
     failedMessage,
+    isNewConversationEmpty,
     isWorkspaceActive,
     pendingMessage,
+    selectedModel,
     status,
     workspaceView,
   ])
@@ -946,7 +1251,8 @@ function App() {
     transition.resolve()
   }
 
-  function replaceActiveClaimContext(currentClaim, currentSessionId) {
+  function replaceActiveClaimContext(currentClaim, currentSessionId, { preserveSessionPause = false } = {}) {
+    if (!preserveSessionPause) invalidateSessionPause()
     activeClaimRef.current = currentClaim
     activeSessionIdRef.current = currentSessionId
     latestRevisionClaimId.current = currentClaim?.claim_id || null
@@ -992,6 +1298,7 @@ function App() {
       id: current.id || evidence.evidence_id,
       evidenceId: evidence.evidence_id,
       name: evidence.original_filename || evidence.kind,
+      mediaType: evidence.media_type,
       status,
       statusLabel,
       ...(canCheckStatus
@@ -1412,6 +1719,7 @@ function App() {
 
   useEffect(() => {
     if (!claim?.claim_id) {
+      evidencePreviewFiles.current.clear()
       evidenceClaimId.current = null
       latestEvidenceRevision.current = 0
       latestEvidenceItems.current = []
@@ -1422,6 +1730,7 @@ function App() {
       return undefined
     }
     if (evidenceClaimId.current !== claim.claim_id) {
+      evidencePreviewFiles.current.clear()
       evidenceClaimId.current = claim.claim_id
       latestEvidenceRevision.current = 0
       latestEvidenceItems.current = []
@@ -1480,11 +1789,18 @@ function App() {
     evidenceUploadControllers.current.get(localId)?.abort()
     const uploadController = new AbortController()
     evidenceUploadControllers.current.set(localId, uploadController)
+    if (attempt.evidenceId) evidencePreviewFiles.current.set(attempt.evidenceId, file)
     setAttachments((current) => existingAttachment
       ? current.map((item) => item.id === localId
-        ? { ...item, status: 'uploading', statusLabel: 'Uploading…', retry: null }
+        ? { ...item, previewFile: file, status: 'uploading', statusLabel: 'Uploading…', retry: null }
         : item)
-      : [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
+      : [...current, {
+        id: localId,
+        name: file.name,
+        previewFile: file,
+        status: 'uploading',
+        statusLabel: 'Uploading…',
+      }])
     let uploadRevision = activeClaim.revision
     try {
       if (checkExistingEvidence) {
@@ -1506,7 +1822,14 @@ function App() {
             })
             : item))
           if (settleStatus) setStatus('idle')
-          return { revision: uploadRevision, succeeded: true }
+          return {
+            revision: uploadRevision,
+            succeeded: true,
+            evidenceId: observed.evidence_id,
+            fileStatus: observed.file_status,
+            statusLabel: evidenceFileStatusLabel(observed.file_status, observed.status),
+            readyForMessage: observed.file_status !== 'failed',
+          }
         }
       }
       const requested = await requestEvidenceUpload({
@@ -1518,9 +1841,11 @@ function App() {
         idempotencyKey: attempt.uploadKey,
         signal: uploadController.signal,
       })
+      uploadRevision = requested.revision
       evidenceHasLocalMutation.current = true
       latestEvidenceRevision.current = requested.revision
       attempt.evidenceId = requested.evidence_id
+      evidencePreviewFiles.current.set(requested.evidence_id, file)
       dismissedComposerEvidenceIds.current.delete(requested.evidence_id)
       setAttachments((current) => current.map((item) => item.id === localId
         ? { ...item, evidenceId: requested.evidence_id, stagedFile: null, uploadAttempt: attempt }
@@ -1552,10 +1877,17 @@ function App() {
         })
         : item))
       if (settleStatus) setStatus('idle')
-      return { revision: completed.revision, succeeded: true }
+      return {
+        revision: completed.revision,
+        succeeded: true,
+        evidenceId: completed.evidence.evidence_id,
+        fileStatus: completed.evidence.file_status,
+        statusLabel: evidenceFileStatusLabel(completed.evidence.file_status, completed.evidence.status),
+        readyForMessage: completed.evidence.file_status !== 'failed',
+      }
     } catch (requestError) {
       if (requestError?.name === 'AbortError') {
-        return { revision: uploadRevision, succeeded: false }
+        return { revision: uploadRevision, succeeded: false, aborted: true }
       }
       setAttachments((current) => current.map((item) => item.id === localId
         ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
@@ -1564,6 +1896,7 @@ function App() {
       return {
         revision: Math.max(uploadRevision, latestEvidenceRevision.current),
         succeeded: false,
+        evidenceId: attempt.evidenceId,
         message: requestError?.message || 'Northwind could not upload this file.',
       }
     } finally {
@@ -1601,6 +1934,7 @@ function App() {
       kind: requestedKind || (file.type.startsWith('image/') ? 'incident_photo' : 'other_document'),
       evidenceId: requestedEvidenceId,
     }
+    cancelledAttachmentIds.current.delete(attempt.localId)
 
     if (!isWorkspaceActive || !claim) {
       setAttachments((current) => [
@@ -1610,6 +1944,7 @@ function App() {
           name: file.name,
           status: 'staged',
           statusLabel: 'Ready to upload after your first message is sent',
+          previewFile: file,
           stagedFile: file,
           uploadAttempt: attempt,
         },
@@ -1624,14 +1959,23 @@ function App() {
   }
 
   function removeComposerAttachment(attachment) {
+    cancelledAttachmentIds.current.add(attachment.id)
+    attachmentsRef.current = attachmentsRef.current.filter((item) => item.id !== attachment.id)
     evidenceUploadControllers.current.get(attachment.id)?.abort()
     evidenceUploadControllers.current.delete(attachment.id)
     const evidenceId = attachment.evidenceId || attachment.uploadAttempt?.evidenceId
-    if (evidenceId) dismissedComposerEvidenceIds.current.add(evidenceId)
+    if (evidenceId) {
+      dismissedComposerEvidenceIds.current.add(evidenceId)
+      evidencePreviewFiles.current.delete(evidenceId)
+    }
     setAttachments((current) => current.filter((item) => item.id !== attachment.id))
   }
 
   function clearComposerAttachments() {
+    for (const attachment of attachmentsRef.current) {
+      cancelledAttachmentIds.current.add(attachment.id)
+    }
+    attachmentsRef.current = []
     for (const controller of evidenceUploadControllers.current.values()) controller.abort()
     evidenceUploadControllers.current.clear()
     dismissedComposerEvidenceIds.current.clear()
@@ -1639,6 +1983,19 @@ function App() {
   }
 
   function cancelComposerDraftAttachments() {
+    const draftAttachmentIds = new Set(attachmentsRef.current
+      .filter((item) => (
+        item.status === 'staged'
+        || item.status === 'uploading'
+        || (item.status === 'failed' && !item.evidenceId)
+      ))
+      .map((item) => item.id))
+    for (const attachmentId of draftAttachmentIds) {
+      cancelledAttachmentIds.current.add(attachmentId)
+    }
+    attachmentsRef.current = attachmentsRef.current.filter(
+      (item) => !draftAttachmentIds.has(item.id),
+    )
     for (const controller of evidenceUploadControllers.current.values()) controller.abort()
     evidenceUploadControllers.current.clear()
     setAttachments((current) => current.filter((item) => {
@@ -1666,27 +2023,190 @@ function App() {
     setStatus('error')
   }
 
+  async function reconcileDeferredSessionPause(
+    currentClaim,
+    currentSessionId,
+    reconciliationOperation,
+  ) {
+    if (!currentClaim?.claim_id || !currentSessionId) {
+      return null
+    }
+    const reconciliationIsCurrent = () => (
+      isMessageReconciliationCurrent(reconciliationOperation)
+    )
+    const recoveryKey = sessionPauseRecoveryKey(
+      currentClaimantIdentityKey(),
+      currentClaim.claim_id,
+    )
+    const operation = deferredSessionPauses.current.get(recoveryKey)
+    if (!operation) return { claim: currentClaim, sessionId: currentSessionId }
+
+    await operation.settled
+    if (!reconciliationIsCurrent() || !isSessionPauseIdentityCurrent(operation)) {
+      return null
+    }
+    if (deferredSessionPauses.current.get(recoveryKey) !== operation) {
+      return { claim: currentClaim, sessionId: currentSessionId }
+    }
+
+    const latestClaim = await getClaim(currentClaim.claim_id)
+    if (
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
+    ) {
+      return null
+    }
+    if (latestClaim.active_session_id === currentSessionId) {
+      forgetDeferredSessionPause(operation)
+      applyClaimSnapshot(latestClaim)
+      return { claim: latestClaim, sessionId: currentSessionId }
+    }
+
+    const resumedSession = await resumeClaimSession({ claimId: currentClaim.claim_id })
+    if (
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
+    ) return null
+    const authoritativeClaim = await getClaim(currentClaim.claim_id)
+    if (
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
+    ) return null
+    const conversation = await getClaimMessages(
+      currentClaim.claim_id,
+      resumedSession.session_id,
+    )
+    if (
+      !reconciliationIsCurrent()
+      || !isSessionPauseIdentityCurrent(operation)
+    ) {
+      return null
+    }
+
+    forgetDeferredSessionPause(operation)
+    replaceActiveClaimContext(authoritativeClaim, resumedSession.session_id)
+    if (resumedSession.model_profile_id) setSelectedModel(resumedSession.model_profile_id)
+    commitMessages(conversation.items)
+    setRecoveryFailure(null)
+    setForm(authoritativeClaim.form)
+    setContentsItems(authoritativeClaim.contents_items || [])
+    setDynamicForm(authoritativeClaim.dynamic_form || null)
+    setNextStep(authoritativeClaim.customer_next_step)
+    setHandoff(authoritativeClaim.handoff || null)
+    setResumeContext({
+      ...resumedSession.resume,
+      resumed_at: resumedSession.started_at,
+      resumed_after_message_id: orderMessages(conversation.items).at(-1)?.message_id || null,
+      has_resume_boundary: true,
+    })
+    rememberClaimInHistory(authoritativeClaim)
+    return { claim: authoritativeClaim, sessionId: resumedSession.session_id }
+  }
+
   async function sendMessage(event, recoveryMessage = null) {
     event.preventDefault()
     const text = recoveryMessage ? messageText(recoveryMessage) : draft.trim()
-    if ((!text && !recoveryMessage?.evidence_refs?.length) || isBusy) return
-    const stagedAttachments = recoveryMessage ? [] : attachments.filter((attachment) => (
-      attachment.status === 'staged'
-      && attachment.stagedFile
-      && attachment.uploadAttempt
-    ))
-    // Already-uploaded attachments (attached mid-conversation, before this
-    // Send) carry an evidenceId but were never linked to a message: the model
-    // only sees an attachment when its evidence_id rides on the same turn.
-    const readyAttachmentEvidenceIds = recoveryMessage ? [] : attachments
-      .filter((attachment) => (
-        attachment.evidenceId
-        && attachment.status !== 'staged'
-        && attachment.status !== 'failed'
-        && attachment.status !== 'uploading'
-      ))
-      .map((attachment) => attachment.evidenceId)
+    const recoveryEvidenceRefs = recoveryMessage?.evidence_refs || []
+    const recoveryAttachments = recoveryMessage
+      ? recoveryEvidenceRefs.map((evidenceId, index) => {
+        const evidence = evidenceItems.find((item) => item.evidence_id === evidenceId)
+        return {
+          id: evidenceId,
+          evidenceId,
+          name: evidence?.original_filename || evidence?.kind || `Attached file ${index + 1}`,
+          mediaType: evidence?.media_type,
+          previewFile: evidencePreviewFiles.current.get(evidenceId),
+          status: evidence?.file_status === 'processing' ? 'processing' : 'uploaded',
+          statusLabel: evidence
+            ? evidenceFileStatusLabel(evidence.file_status, evidence.status)
+            : 'Attached',
+        }
+      })
+      : []
+    const selectedAttachments = recoveryMessage
+      ? recoveryAttachments
+      : attachments.filter(isSendableComposerAttachment)
+    const hasUploadingAttachment = !recoveryMessage
+      && attachments.some((attachment) => attachment.status === 'uploading')
+    if (
+      (!text && selectedAttachments.length === 0)
+      || hasUploadingAttachment
+      || isBusy
+      || isMessageReconciliationCurrent(pendingMessageReconciliation.current)
+    ) return
+    const selectedModelOption = runtimeCapabilities.models.find((model) => model.id === selectedModel)
+    const modelCompatibility = modelAttachmentCompatibility(selectedAttachments, selectedModelOption)
+    if (!modelCompatibility.compatible) {
+      setError(modelCompatibility.message)
+      setStatus('error')
+      return
+    }
+    const stagedAttachments = recoveryMessage
+      ? []
+      : selectedAttachments.filter((attachment) => attachment.status === 'staged')
+    const submissionSignature = recoveryMessage
+      ? JSON.stringify({
+        clientMessageId: recoveryMessage.client_message_id,
+        text,
+        modelProfileId: selectedModel,
+        attachments: recoveryEvidenceRefs,
+      })
+      : attachmentSubmissionSignature(text, selectedAttachments, selectedModel)
     const isAssistanceReply = assistanceState?.key === 'response_needed'
+    let presentedAttachments = selectedAttachments
+
+    if (recoveryMessage) {
+      pendingSubmission.current = {
+        signature: submissionSignature,
+        text,
+        claimKey: requestId('claim'),
+        turnKey: requestId('turn'),
+        clientMessageId: recoveryMessage.client_message_id,
+        evidenceRefs: recoveryEvidenceRefs,
+      }
+    }
+    if (!recoveryMessage && pendingSubmission.current?.signature !== submissionSignature) {
+      pendingSubmission.current = {
+        signature: submissionSignature,
+        text,
+        claimKey: requestId('claim'),
+        turnKey: requestId('turn'),
+        clientMessageId: requestId('message'),
+      }
+    }
+    const operation = pendingSubmission.current
+    let activeClaim = hasStarted ? claim : null
+    let activeSessionId = hasStarted ? sessionId : null
+
+    if (activeClaim && activeSessionId) {
+      const reconciliationOperation = beginMessageReconciliation(activeClaim, activeSessionId)
+      let reconciled
+      try {
+        reconciled = await reconcileDeferredSessionPause(
+          activeClaim,
+          activeSessionId,
+          reconciliationOperation,
+        )
+      } catch (requestError) {
+        const mayMutateCurrentWorkspace = isMessageReconciliationCurrent(
+          reconciliationOperation,
+        )
+        finishMessageReconciliation(reconciliationOperation)
+        if (mayMutateCurrentWorkspace) {
+          showError(requestError)
+        } else if (pendingSubmission.current === operation) {
+          pendingSubmission.current = null
+        }
+        return
+      }
+      finishMessageReconciliation(reconciliationOperation)
+      if (!reconciled) {
+        if (pendingSubmission.current === operation) pendingSubmission.current = null
+        return
+      }
+      activeClaim = reconciled.claim
+      activeSessionId = reconciled.sessionId
+    }
 
     forceLatestMessages.current = true
     setError('')
@@ -1694,37 +2214,24 @@ function App() {
     setRecoveryFailure(null)
     if (isAssistanceReply) {
       setAssistanceReplyReview({
-        claimId: claim.claim_id,
+        claimId: activeClaim.claim_id,
         handoffId: handoff.handoff_id,
         messageId: null,
       })
     }
-    setStatus(hasStarted ? 'sending' : 'starting')
-    let messageWasSubmitted = hasStarted
+    setStatus(activeClaim ? 'sending' : 'starting')
+    let messageWasSubmitted = Boolean(activeClaim)
     try {
-      if (recoveryMessage) {
-        pendingSubmission.current = {
-          text,
-          claimKey: requestId('claim'),
-          turnKey: requestId('turn'),
-          clientMessageId: recoveryMessage.client_message_id,
-          evidenceRefs: recoveryMessage.evidence_refs || [],
-        }
-      }
-      if (pendingSubmission.current?.text !== text) {
-        pendingSubmission.current = {
-          text,
-          claimKey: requestId('claim'),
-          turnKey: requestId('turn'),
-          clientMessageId: requestId('message'),
-        }
-      }
-      const operation = pendingSubmission.current
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
-      setPendingMessage({ text, turnId: operation.clientMessageId, retrying: Boolean(recoveryMessage) })
-      let activeClaim = hasStarted ? claim : null
-      let activeSessionId = hasStarted ? sessionId : null
+      setPendingMessage({
+        text,
+        attachments: selectedAttachments.map((attachment) => attachment.status === 'staged'
+          ? { ...attachment, status: 'uploading', statusLabel: 'Preparing upload…' }
+          : attachment),
+        turnId: operation.clientMessageId,
+        retrying: Boolean(recoveryMessage),
+      })
       if (!activeClaim) {
         const created = await createClaim({
           idempotencyKey: operation.claimKey,
@@ -1735,6 +2242,11 @@ function App() {
         activeSessionId = created.session.session_id
         rememberClaimInHistory(created.claim)
         replaceActiveClaimContext(created.claim, activeSessionId)
+        evidenceClaimId.current = created.claim.claim_id
+        latestEvidenceRevision.current = Number(created.claim.revision || 0)
+        latestEvidenceItems.current = []
+        evidenceHasLocalMutation.current = false
+        dismissedComposerEvidenceIds.current.clear()
         if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
@@ -1748,54 +2260,90 @@ function App() {
         setWorkspaceView('chat')
         setMobileView('chat')
         setWorkspaceActive(true)
-        messageWasSubmitted = true
       }
 
-      // Staged attachments (selected before the claim existed) upload now,
-      // before the turn: the model can only read evidence attached to this
-      // same message, not a follow-up one nobody sends.
-      let uploadedStagedEvidenceIds = []
-      if (stagedAttachments.length) {
-        let attachmentClaim = activeClaim
-        for (const attachment of stagedAttachments) {
-          const upload = await uploadAttachment(
-            attachment.stagedFile,
-            attachment.uploadAttempt,
-            attachmentClaim,
-            { existingAttachment: true, settleStatus: false },
-          )
-          attachmentClaim = { ...attachmentClaim, revision: upload.revision }
-          if (upload.succeeded && attachment.uploadAttempt?.evidenceId) {
-            uploadedStagedEvidenceIds.push(attachment.uploadAttempt.evidenceId)
+      let turnClaim = activeClaim
+      const uploadedAttachments = new Map()
+      const attachmentIsStillSelected = (attachment) => (
+        !cancelledAttachmentIds.current.has(attachment.id)
+        && attachmentsRef.current.some((current) => current.id === attachment.id)
+      )
+      for (const attachment of stagedAttachments) {
+        if (!attachmentIsStillSelected(attachment)) continue
+        const upload = await uploadAttachment(
+          attachment.stagedFile,
+          attachment.uploadAttempt,
+          turnClaim,
+          { existingAttachment: true, settleStatus: false },
+        )
+        turnClaim = { ...turnClaim, revision: upload.revision }
+        if (upload.aborted && !attachmentIsStillSelected(attachment)) continue
+        if (!upload.succeeded || !upload.evidenceId || upload.readyForMessage === false) {
+          if (isAssistanceReply) setAssistanceReplyReview(null)
+          activeTurnProgressRef.current = null
+          setActiveTurnProgress(null)
+          setPendingMessage(null)
+          if (upload.aborted) {
+            pendingSubmission.current = null
+            setStatus('idle')
+          } else if (upload.readyForMessage === false) {
+            setError('The file could not be processed. Remove it or check its status before sending.')
+            setStatus('error')
           }
+          return
         }
-        activeClaim = attachmentClaim
+        if (!attachmentIsStillSelected(attachment)) continue
+        uploadedAttachments.set(attachment.id, {
+          ...attachment,
+          evidenceId: upload.evidenceId,
+          status: upload.fileStatus === 'processing' ? 'processing' : 'uploaded',
+          statusLabel: upload.statusLabel || 'Uploaded',
+        })
       }
-      const turnEvidenceRefs = [
-        ...(operation.evidenceRefs || []),
-        ...readyAttachmentEvidenceIds,
-        ...uploadedStagedEvidenceIds,
-      ]
+      presentedAttachments = recoveryMessage
+        ? selectedAttachments
+        : selectedAttachments
+            .filter(attachmentIsStillSelected)
+            .map((attachment) => uploadedAttachments.get(attachment.id) || attachment)
+      const evidenceRefs = recoveryMessage
+        ? [...new Set(operation.evidenceRefs || [])]
+        : [...new Set(presentedAttachments
+            .map((attachment) => attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+            .filter(Boolean))]
+      if (!text && evidenceRefs.length === 0) {
+        if (isAssistanceReply) setAssistanceReplyReview(null)
+        activeTurnProgressRef.current = null
+        setActiveTurnProgress(null)
+        setPendingMessage(null)
+        pendingSubmission.current = null
+        setStatus('idle')
+        return
+      }
+      const currentSignature = recoveryMessage
+        ? operation.signature
+        : attachmentSubmissionSignature(text, presentedAttachments, selectedModel)
+      if (!recoveryMessage && operation.signature !== currentSignature) {
+        operation.turnKey = requestId('turn')
+        operation.clientMessageId = requestId('message')
+      }
+      operation.signature = currentSignature
+      setPendingMessage({
+        text,
+        attachments: presentedAttachments,
+        turnId: operation.clientMessageId,
+      })
 
+      messageWasSubmitted = true
       const turn = await submitClaimMessage({
         claimId: activeClaim.claim_id,
         sessionId: activeSessionId,
-        revision: activeClaim.revision,
+        revision: turnClaim.revision,
         text,
+        evidenceRefs,
         modelProfileId: selectedModel,
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
-        evidenceRefs: turnEvidenceRefs,
       })
-      for (const evidenceId of turnEvidenceRefs) dismissedComposerEvidenceIds.current.add(evidenceId)
-      // Attachments that rode this message are done being staged in the
-      // composer: drop them from the preview tray now that they are part of
-      // the sent message, rather than leaving them stuck there unremovable.
-      if (turnEvidenceRefs.length) {
-        setAttachments((current) => current.filter(
-          (item) => !item.evidenceId || !turnEvidenceRefs.includes(item.evidenceId),
-        ))
-      }
       const currentRevision = currentTurnRevision(turn)
       const historicalTurn = turn.current_claim && currentRevision > turn.claim_revision
       // Historical actions are evidence, not permission to act on today's offer.
@@ -1863,8 +2411,15 @@ function App() {
           }
         }
       }
-      // Staged attachments already uploaded above, before the turn, so their
-      // evidence_id could ride on this same message.
+      if (!recoveryMessage) {
+        const sentAttachmentIds = new Set(selectedAttachments.map((attachment) => attachment.id))
+        const sentEvidenceRefs = new Set(evidenceRefs)
+        for (const evidenceId of sentEvidenceRefs) dismissedComposerEvidenceIds.current.add(evidenceId)
+        setAttachments((current) => current.filter((attachment) => (
+          !sentAttachmentIds.has(attachment.id)
+          && !sentEvidenceRefs.has(attachment.evidenceId || attachment.uploadAttempt?.evidenceId)
+        )))
+      }
       setStatus('idle')
     } catch (requestError) {
       if (isAssistanceReply) setAssistanceReplyReview(null)
@@ -1874,17 +2429,30 @@ function App() {
       if (messageWasSubmitted) {
         const serverConfirmedFailure = requestError instanceof ApiRequestError
           && Number.isInteger(requestError.status)
+        const attachmentGuidance = presentedAttachments.length > 1
+          ? 'Your file uploads are preserved and remain attached. '
+          : presentedAttachments.length === 1
+            ? 'Your file upload is preserved and remains attached. '
+            : ''
         const retryGuidance = requestError instanceof ApiRequestError && requestError.retryable
-          ? 'Try again in a moment.'
-          : 'Review the message and try again.'
+          ? 'Try the message again in a moment.'
+          : requestError instanceof ApiRequestError && requestError.code === 'DEPENDENCY_FAILED'
+            ? 'Retry the message, or select another available model and retry.'
+            : 'Review the message and try again.'
         const failureMessage = serverConfirmedFailure
-          ? `${requestError.message} ${retryGuidance}`
-          : 'We could not confirm delivery because the connection ended before the service responded. Retry safely; the same request will not create a duplicate.'
+          ? `${requestError.message} ${attachmentGuidance}${retryGuidance}`
+          : `We could not confirm delivery because the connection ended before the service responded. ${attachmentGuidance}Retry safely; the same request will not create a duplicate.`
         if (recoveryMessage) {
           pendingSubmission.current = null
           setRecoveryFailure({ messageId: recoveryMessage.message_id, message: failureMessage })
         } else {
-          setFailedMessage({ text, sender: 'You', message: failureMessage })
+          setFailedMessage({
+            text,
+            attachments: presentedAttachments,
+            sender: 'You',
+            deliveryState: serverConfirmedFailure ? 'Not sent' : 'Delivery not confirmed',
+            message: failureMessage,
+          })
         }
         setError('')
         if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
@@ -1897,8 +2465,13 @@ function App() {
     }
   }
 
-  function startNewChat({ stayInWorkspace = false } = {}) {
-    if (isBusy) return
+  function resetForNewChat(stayInWorkspace, pauseOperation = null) {
+    if (pauseOperation && !isSessionPauseCurrent(pauseOperation)) return
+    if (pauseOperation) {
+      deferredSessionPauses.current.delete(pauseOperation.recoveryKey)
+      pendingSessionPause.current = null
+      sessionPauseGeneration.current += 1
+    } else invalidateSessionPause()
     clearComposerAttachments()
     pendingSubmission.current = null
     pendingConfirmation.current = null
@@ -1909,7 +2482,8 @@ function App() {
     latestEvidenceItems.current = []
     evidenceHasLocalMutation.current = false
     evidenceClaimId.current = null
-    replaceActiveClaimContext(null, null)
+    evidencePreviewFiles.current.clear()
+    replaceActiveClaimContext(null, null, { preserveSessionPause: true })
     commitMessages([])
     setForm({})
     setContentsItems([])
@@ -1948,6 +2522,133 @@ function App() {
     const nextPath = stayInWorkspace ? '/claims/new' : '/'
     if (globalThis.location?.pathname !== nextPath) {
       globalThis.history?.pushState({ northwindRoute: 'home' }, '', nextPath)
+    }
+  }
+
+  async function startNewChat({ stayInWorkspace = false } = {}) {
+    if (isBusy || pendingSessionPause.current?.inFlight) return
+
+    const currentClaim = activeClaimRef.current
+    const currentSessionId = activeSessionIdRef.current
+    const canResume = nextStep?.can_resume ?? currentClaim?.customer_next_step?.can_resume
+    const activeSessionMatches = currentClaim?.active_session_id === undefined
+      || currentClaim.active_session_id === currentSessionId
+    const sessionNeedsPause = Boolean(
+      currentClaim
+      && currentSessionId
+      && activeSessionMatches
+      && canResume !== false
+      && currentClaim.workflow_state !== 'created'
+      && currentClaim.external_claim?.creation_status !== 'created',
+    )
+    if (!sessionNeedsPause) {
+      resetForNewChat(stayInWorkspace)
+      return
+    }
+
+    const fingerprint = `${currentClaim.claim_id}:${currentSessionId}:${currentClaim.revision}`
+    const contextKey = currentPauseContextKey()
+    const identityKey = currentClaimantIdentityKey()
+    let pauseRequest = pendingSessionPause.current
+    if (
+      !pauseRequest
+      || pauseRequest.fingerprint !== fingerprint
+      || pauseRequest.contextKey !== contextKey
+      || pauseRequest.stayInWorkspace !== stayInWorkspace
+    ) {
+      sessionPauseGeneration.current += 1
+      let settle
+      pauseRequest = {
+        fingerprint,
+        idempotencyKey: requestId('pause-session'),
+        generation: sessionPauseGeneration.current,
+        contextKey,
+        identityKey,
+        recoveryKey: sessionPauseRecoveryKey(identityKey, currentClaim.claim_id),
+        stayInWorkspace,
+        inFlight: false,
+        settled: new Promise((resolve) => { settle = resolve }),
+        settle,
+      }
+    }
+    pauseRequest.inFlight = true
+    pendingSessionPause.current = pauseRequest
+    setError('')
+    setStatus('pausing-session')
+
+    try {
+      const paused = await pauseClaimSession({
+        claimId: currentClaim.claim_id,
+        sessionId: currentSessionId,
+        revision: currentClaim.revision,
+        idempotencyKey: pauseRequest.idempotencyKey,
+      })
+      if (!isSessionPauseCurrent(pauseRequest)) {
+        rememberDeferredSessionPause(pauseRequest)
+        return
+      }
+      forgetDeferredSessionPause(pauseRequest)
+      rememberClaimInHistory(paused.claim)
+      resetForNewChat(stayInWorkspace, pauseRequest)
+    } catch (requestError) {
+      const mayMutateCurrentNavigation = isSessionPauseCurrent(pauseRequest)
+      if (!mayMutateCurrentNavigation && !isSessionPauseIdentityCurrent(pauseRequest)) return
+      pauseRequest.inFlight = false
+
+      if (!(requestError instanceof ApiRequestError) || !Number.isInteger(requestError.status)) {
+        let latestClaim = null
+        try {
+          latestClaim = await getClaim(currentClaim.claim_id)
+        } catch {
+          // Retain the current projection and original idempotency key. A retry safely
+          // replays a pause that may already have reached the service.
+        }
+        if (!isSessionPauseIdentityCurrent(pauseRequest)) return
+        if (!mayMutateCurrentNavigation) {
+          if (latestClaim?.active_session_id === currentSessionId) {
+            forgetDeferredSessionPause(pauseRequest)
+          } else {
+            rememberDeferredSessionPause(pauseRequest)
+          }
+          return
+        }
+        if (!isSessionPauseCurrent(pauseRequest)) return
+        if (latestClaim) {
+          const pauseWasSaved = latestClaim.active_session_id === null
+            && Boolean(latestClaim.incomplete_context)
+          if (pauseWasSaved) {
+            rememberClaimInHistory(latestClaim)
+            resetForNewChat(stayInWorkspace, pauseRequest)
+            return
+          }
+          applyClaimSnapshot(latestClaim)
+        }
+        setError('We could not confirm that your progress was saved because the claim service did not respond. Your current conversation is still open. Check your connection and select New chat again; the same save request will not create a duplicate.')
+        setStatus('error')
+        return
+      }
+
+      if (!mayMutateCurrentNavigation) {
+        forgetDeferredSessionPause(pauseRequest)
+        return
+      }
+      if (requestError.code === 'REVISION_CONFLICT') {
+        let latestClaim = null
+        try {
+          latestClaim = await getClaim(currentClaim.claim_id)
+        } catch {
+          // Keep the last visible projection when the refresh is also unavailable.
+        }
+        if (!isSessionPauseCurrent(pauseRequest)) return
+        if (latestClaim) applyClaimSnapshot(latestClaim)
+        setError('We could not save your place because this report changed in another session. Your current conversation is still open. Review the latest details and select New chat again.')
+      } else {
+        setError(`${requestError.message || 'We could not save your place before starting a new conversation.'} Your current conversation is still open. Review the report and select New chat again.`)
+      }
+      setStatus('error')
+    } finally {
+      pauseRequest.inFlight = false
+      pauseRequest.settle?.()
     }
   }
 
@@ -2418,6 +3119,7 @@ function App() {
 
   async function signIn(event) {
     event.preventDefault()
+    invalidateSessionPause({ identityChanged: true })
     const formData = new FormData(event.currentTarget)
     setAuthStatus('loading'); setAuthError('')
     try {
@@ -2448,6 +3150,7 @@ function App() {
 
   async function signUp(event) {
     event.preventDefault()
+    invalidateSessionPause({ identityChanged: true })
     const formData = new FormData(event.currentTarget)
     const password = String(formData.get('password') || '')
     const confirmPassword = String(formData.get('confirm_password') || '')
@@ -2484,8 +3187,10 @@ function App() {
   }
 
   async function signOut() {
+    invalidateSessionPause({ identityChanged: true })
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
+    autoFillEditor.reset()
     setAccount(null)
     setClaimHistory(readAnonymousConversationHistory())
     setClaimHistoryError('')
@@ -2499,6 +3204,14 @@ function App() {
     setNextStep(null)
     setHandoff(null)
     clearComposerAttachments()
+    setDraft('')
+    setError('')
+    setFailedMessage(null)
+    setRecoveryFailure(null)
+    setPendingMessage(null)
+    activeTurnProgressRef.current = null
+    setActiveTurnProgress(null)
+    setStatus('idle')
     setEvidenceItems([])
     setResumeContext(null)
     setExpandedConversationPanels({})
@@ -2516,6 +3229,7 @@ function App() {
   }
 
   function openClaimHistory() {
+    invalidateSessionPause()
     setSelectedHistoryClaimId(null)
     if (isWorkspaceActive) {
       setWorkspaceView('history')
@@ -2579,6 +3293,26 @@ function App() {
     setWorkspaceView('chat')
     setSelectedHistoryClaimId(null)
     setPage('home')
+  }
+
+  function navigateBackFromWorkspaceUtility() {
+    if (workspaceView === 'claim-evidence') {
+      setWorkspaceView('claim-features')
+      return
+    }
+    if (workspaceView === 'claim-features') {
+      openClaimHistory()
+      return
+    }
+    leaveWorkspaceUtility()
+  }
+
+  function handleWorkspaceHeaderBack() {
+    if (workspaceView !== 'chat') {
+      navigateBackFromWorkspaceUtility()
+      return
+    }
+    returnToLanding()
   }
 
   function openProfileFromWorkspace(section = null) {
@@ -2876,12 +3610,37 @@ function App() {
   const isUrgentSupport = handoff?.support_need === 'urgent'
   const isProfilePage = page === 'account'
   const isStandaloneClaimHistory = !isWorkspaceActive && page === 'claim-history'
-  const profileDisplayName = account?.profile?.display_name || 'Log in to save your chat'
+  const profileDisplayName = account?.profile?.display_name || 'Log in'
   const profileEmail = account?.profile?.email || 'Profile and preferences'
   const profileNamePreview = middleEllipsisLayoutParts(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)
   const profileButtonLabel = account
     ? `Open Profile for ${profileDisplayName} (${profileEmail})`
     : 'Open Profile and preferences'
+
+  function openClaimWorkspacePage(destination) {
+    if (destination === 'overview') {
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      return
+    }
+    if (destination === 'documents') {
+      openCurrentClaimDocuments()
+      return
+    }
+    if (destination === 'history') {
+      openClaimHistory()
+      return
+    }
+    if (destination === 'privacy') {
+      setWorkspaceView('privacy')
+      setMobileView('chat')
+      return
+    }
+    setWorkspaceView('external-services')
+    setMobileView('chat')
+  }
+
+  const showsClaimDetails = workspaceView === 'chat' || workspaceView === 'external-services'
 
   return (
     <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'workspace-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''} ${isStandaloneClaimHistory ? 'is-claim-history-page' : ''}`}>
@@ -2895,8 +3654,8 @@ function App() {
             <button
               className="header-back-to-start"
               type="button"
-              aria-label="Back to start"
-              onClick={returnToLanding}
+              aria-label={workspaceView === 'chat' ? 'Back to start' : 'Back to previous page'}
+              onClick={handleWorkspaceHeaderBack}
               disabled={isBusy}
             >
               <span aria-hidden="true">←</span>
@@ -3092,8 +3851,15 @@ function App() {
             <UserProfile
               account={account}
               activeSection={profileSection}
+              autoFillChoices={autoFillEditor.choices}
+              autoFillDirty={autoFillEditor.dirty}
+              autoFillError={autoFillEditor.error}
+              autoFillNotice={autoFillEditor.notice}
+              autoFillSaving={autoFillEditor.saving}
               controller={profileController}
+              onChangeAutoFillChoice={autoFillEditor.changeChoice}
               onOpenClaims={openSavedClaims}
+              onSaveAutoFillChoices={autoFillEditor.saveChoices}
               onSelectSection={openProfileSection}
               onSignOut={signOut}
             />
@@ -3144,7 +3910,7 @@ function App() {
             </button>
             <div className="employee-access">
               <span>Northwind team member?</span>
-              <a href="http://127.0.0.1:8002/">Employee access</a>
+              <a href={WORKBENCH_URL}>Employee access</a>
             </div>
           </section>
         </main>
@@ -3183,10 +3949,16 @@ function App() {
                   onRemoveAttachment={removeComposerAttachment}
                 />
                 {failedMessage && (
-                  <article className="message message-claimant is-failed">
+                  <article className="message message-claimant is-failed" role="alert">
                     <p className="message-author">{failedMessage.sender}</p>
-                    <p>{failedMessage.text}</p>
-                    <p className="message-state">{failedMessage.message}</p>
+                    {failedMessage.text && <p>{failedMessage.text}</p>}
+                    <ClaimantMessageAttachments
+                      evidenceItems={evidenceItems}
+                      attachments={failedMessage.attachments}
+                      previewFiles={evidencePreviewFiles.current}
+                    />
+                    <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
+                    <p className="message-failure-detail">{failedMessage.message}</p>
                   </article>
                 )}
               </section>
@@ -3199,7 +3971,7 @@ function App() {
           </section>
         </main>
       ) : (
-        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'}`}>
+        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''}`}>
           <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
             {[
               ['history', 'History'],
@@ -3218,25 +3990,27 @@ function App() {
                 onClick={() => startNewChat({ stayInWorkspace: true })}
                 disabled={isBusy}
               >
-                New chat
+                {status === 'pausing-session' ? 'Saving...' : 'New chat'}
               </button>
-              <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
-              <button type="button" onClick={openClaimHistory}>Claim history</button>
-              <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
               <button
-                className="history-action-button"
+                className={workspaceView === 'privacy' ? 'is-active' : undefined}
                 type="button"
-                aria-label={documentOutstandingCount > 0
-                  ? `What to provide, ${documentOutstandingCount} outstanding`
-                  : 'What to provide'}
-                onClick={openCurrentClaimDocuments}
+                aria-current={workspaceView === 'privacy' ? 'page' : undefined}
+                onClick={() => {
+                  setWorkspaceView('privacy')
+                  setMobileView('chat')
+                }}
               >
-                <span>What to provide</span>
-                {documentOutstandingCount > 0 && (
-                  <span className="history-action-count" aria-hidden="true">
-                    {documentOutstandingCount}
-                  </span>
-                )}
+                Privacy &amp; your data
+              </button>
+              <button type="button" onClick={openClaimHistory}>Claim history</button>
+              <button
+                className={workspaceView === 'external-services' ? 'is-active' : undefined}
+                type="button"
+                aria-current={workspaceView === 'external-services' ? 'page' : undefined}
+                onClick={() => openClaimWorkspacePage('external-services')}
+              >
+                External services
               </button>
             </div>
             <div className="intake-history-label">Conversation history</div>
@@ -3290,53 +4064,41 @@ function App() {
           </aside>
           <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
-              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''}`}
+              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''} ${workspaceView === 'privacy' ? 'is-privacy-page' : ''}`}
               hidden={workspaceView === 'chat'}
             >
-              <button
-                className="back-link"
-                type="button"
-                onClick={workspaceView === 'claim-evidence'
-                  ? () => setWorkspaceView('claim-features')
-                  : workspaceView === 'claim-features'
-                    ? openClaimHistory
-                    : leaveWorkspaceUtility}
-              >
-                <span className="back-link-arrow" aria-hidden="true">←</span>
-                {workspaceView === 'claim-evidence'
-                  ? 'Back to Claim features'
-                  : workspaceView === 'claim-features'
-                    ? 'Back to Claim history'
-                    : 'Back to conversation'}
-              </button>
-              <h1>
-                {workspaceView === 'privacy'
-                  ? 'Privacy policy'
-                  : workspaceView === 'history'
-                    ? 'Claim history'
-                    : workspaceView === 'claim-features'
-                      ? 'Claim features'
-                      : workspaceView === 'external-services'
-                        ? 'External services'
+              {workspaceView === 'privacy' ? (
+                <PrivacyPage
+                  claimType={claim?.incident_type || null}
+                  hasCurrentClaim={Boolean(claim?.claim_id)}
+                  onViewClaim={claim ? () => openClaimFeatures(claim) : null}
+                />
+              ) : (
+                workspaceView === 'external-services' ? null : (
+                  <>
+                    <h1>
+                      {workspaceView === 'history'
+                      ? 'Claim history'
+                      : workspaceView === 'claim-features'
+                        ? 'Claim features'
                         : workspaceView === 'agreement'
                             ? 'Agreement & confirmation'
                             : 'Evidence history'}
-              </h1>
-              <p>
-                {workspaceView === 'privacy'
-                  ? 'We only use the information needed to handle your Claim and show you what has been recorded.'
-                  : workspaceView === 'history'
-                    ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
-                    : workspaceView === 'claim-features'
-                      ? 'Review this Claim\'s current status and available information.'
-                      : workspaceView === 'external-services'
-                        ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
+                    </h1>
+                    <p>
+                      {workspaceView === 'history'
+                      ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
+                      : workspaceView === 'claim-features'
+                        ? 'Review this Claim\'s current status and available information.'
                         : workspaceView === 'agreement'
                             ? 'Your payout destination and preferred contact method are saved. Agreement review and final Claim confirmation happen in Step 4.'
                             : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
-              </p>
+                    </p>
+                  </>
+                )
+              )}
               {workspaceView === 'history' && (
                 account ? (
                   <ClaimHistory
@@ -3386,9 +4148,12 @@ function App() {
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
               )}
               {workspaceView === 'external-services' && (
-                claim?.external_service_action
-                  ? <ExternalServiceOverview action={claim.external_service_action} />
-                  : <p className="empty-details">No external service is currently recorded for this claim.</p>
+                <ExternalServicesPage
+                  action={claim?.external_service_action || null}
+                  claim={claim}
+                  onBackToOverview={() => openClaimWorkspacePage('overview')}
+                  onWhatToProvide={() => openClaimWorkspacePage('documents')}
+                />
               )}
               {workspaceView === 'files' && (
                 account ? (
@@ -3405,18 +4170,20 @@ function App() {
                 )
               )}
             </div>
-            <div className="conversation-heading">
-              <div className="conversation-heading-main">
-                <div className="claim-heading-identity">
-                  {claim ? <span>Claim:</span> : null}
-                  <h1 id="conversation-title">{claim?.claim_id || 'New conversation'}</h1>
+            <div className={`conversation-heading ${claim ? '' : 'is-empty'}`}>
+              {claim && (
+                <div className="conversation-heading-main">
+                  <div className="claim-heading-identity">
+                    <span>Claim:</span>
+                    <h1 id="conversation-title">{claim.claim_id}</h1>
+                  </div>
                 </div>
-              </div>
-              <div className="claim-status">{claim
-                ? claim.external_claim?.creation_status === 'created'
+              )}
+              {claim && (
+                <div className="claim-status">{claim.external_claim?.creation_status === 'created'
                   ? 'Claim created'
-                  : handoff ? 'Staff assistance active' : 'In progress'
-                : 'Ready to start'}</div>
+                  : handoff ? 'Staff assistance active' : 'In progress'}</div>
+              )}
             </div>
 
             {claim && (
@@ -3433,6 +4200,7 @@ function App() {
               aria-live="polite"
               onScroll={handleMessageListScroll}
             >
+              {isNewConversationEmpty && <ConversationStart onChoosePrompt={setDraft} />}
               {conversationTimeline.map((item) => {
                 if (item.kind === 'conversation-event') {
                   return (
@@ -3453,11 +4221,19 @@ function App() {
                 }
                 const message = item.message
                 if (message.actor === 'claimant') {
+                  const claimantText = messageText(message)
                   return (
                     <article className="msg-user" key={item.key}>
                       <div className="chat-message-row">
                         <div className="user-message-body">
-                          <div className="chat-bubble user-bubble">{messageText(message)}</div>
+                          <div className="chat-bubble user-bubble">
+                            {claimantText && <p className="user-bubble-text">{claimantText}</p>}
+                            <ClaimantMessageAttachments
+                              message={message}
+                              evidenceItems={evidenceItems}
+                              previewFiles={evidencePreviewFiles.current}
+                            />
+                          </div>
                           {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                             <div className="message-recovery" role="status">
                               <p>{message.recovery.claimant_projection}</p>
@@ -3544,13 +4320,30 @@ function App() {
                   {renderConversationAction()}
                 </div>
               )}
+              {account && claim && (
+                <ClaimAutoFillPanel
+                  key={`${account.customer_id}:${claim.claim_id}`}
+                  account={account}
+                  claim={claim}
+                  busy={claimOperationBusy}
+                  onBusyChange={setAutoFillBusy}
+                  onClaimReadback={applyClaimSnapshot}
+                />
+              )}
               {pendingMessage && (
                 <>
                   {!pendingMessage.retrying && !messages.some((message) => message.actor === 'claimant' && message.client_message_id === pendingMessage.turnId) && <article className="msg-user is-pending" aria-label="Message sending">
                     <div className="message-timestamp">Sending…</div>
                     <div className="chat-message-row">
                       <div className="user-message-body">
-                        <div className="chat-bubble user-bubble">{pendingMessage.text}</div>
+                        <div className="chat-bubble user-bubble">
+                          {pendingMessage.text && <p className="user-bubble-text">{pendingMessage.text}</p>}
+                          <ClaimantMessageAttachments
+                            evidenceItems={evidenceItems}
+                            attachments={pendingMessage.attachments}
+                            previewFiles={evidencePreviewFiles.current}
+                          />
+                        </div>
                       </div>
                       <span className="message-avatar claimant-message-avatar" aria-hidden="true">
                         {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
@@ -3568,8 +4361,15 @@ function App() {
                   <div className="chat-message-row">
                     <div className="user-message-body">
                       <div className="chat-bubble user-bubble">
-                        <p>{failedMessage.text}</p>
-                        <p className="message-state">Delivery not confirmed</p>
+                        <p className="message-author">{failedMessage.sender}</p>
+                        {failedMessage.text && <p className="user-bubble-text">{failedMessage.text}</p>}
+                        <ClaimantMessageAttachments
+                          evidenceItems={evidenceItems}
+                          attachments={failedMessage.attachments}
+                          previewFiles={evidencePreviewFiles.current}
+                        />
+                        <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
+                        <p className="message-failure-detail">{failedMessage.message}</p>
                       </div>
                     </div>
                     <span className="message-avatar claimant-message-avatar" aria-hidden="true">
@@ -3654,7 +4454,9 @@ function App() {
                   : null}
               placeholder={assistanceState?.key === 'response_needed'
                 ? 'Reply to Northwind staff...'
-                : 'Write the details you know...'}
+                : isNewConversationEmpty
+                  ? 'Write what happened, or choose a prompt above…'
+                  : 'Write the details you know...'}
               buttonLabel={status === 'sending'
                 ? 'Sending...'
                 : failedMessage
@@ -3662,7 +4464,7 @@ function App() {
                   : assistanceState?.key === 'response_needed'
                     ? 'Send reply'
                     : 'Send'}
-              error={failedMessage?.message || error}
+              error={error}
               variant="workspace"
               claimType={claimType}
               setClaimType={setClaimType}
@@ -3677,10 +4479,10 @@ function App() {
             />
           </section>
 
-          {!detailsOpen && workspaceView === 'chat' && (
+          {!detailsOpen && showsClaimDetails && (
             <button className="details-reopen" type="button" onClick={() => setDetailsOpen(true)} aria-label="Show claim details" title="Show claim details">‹</button>
           )}
-          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && workspaceView === 'chat' ? 'is-open' : 'is-collapsed'} ${workspaceView !== 'chat' ? 'is-hidden' : ''}`} aria-labelledby="claim-details-title">
+          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && showsClaimDetails ? 'is-open' : 'is-collapsed'}`} aria-labelledby="claim-details-title">
             <div className="claim-panel-heading">
               <div>
                 <p className="eyebrow">Your claim</p>
@@ -3748,6 +4550,7 @@ function App() {
                 busy={isBusy}
                 status={status}
                 stepActive={conversationActionKind === 'review-details'}
+                conversationEmpty={isNewConversationEmpty}
               />
             </div>
             <div
@@ -3757,7 +4560,7 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
-              {detailsTab === 'documents' && workspaceView === 'chat' && (
+              {detailsTab === 'documents' && showsClaimDetails && (
                 <ClaimDocuments
                   items={evidenceItems}
                   loadStatus={evidenceLoadStatus}

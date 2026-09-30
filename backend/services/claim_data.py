@@ -10,9 +10,13 @@ from backend.domain.models import (
     ContentsItemEvidenceAssociationProjection,
     CreateContentsItemEvidenceAssociationRequest,
     CreateMotorOtherDriverRequest,
+    DriverProjection,
     MotorOtherDriverMutationResponse,
     MotorOtherDriverProjection,
     MotorOtherDriverRecord,
+    PolicyholderProjection,
+    WitnessProjection,
+    WorkingClaim,
 )
 from backend.repositories.pagination import InvalidRepositoryCursorError
 from backend.repositories.protocols import (
@@ -21,12 +25,35 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.protected_values import (
+    ProtectedValueAdapter,
+    ProtectedValueError,
+    masked_value,
+)
 from backend.services.support import (
     now_utc,
     parse_if_match,
     request_fingerprint,
     require_idempotency_key,
 )
+
+
+def project_claim_participants(
+    claim: WorkingClaim,
+) -> tuple[PolicyholderProjection | None, DriverProjection | None, list[WitnessProjection]]:
+    """Build role-safe Claim participant projections without exposing licence plaintext."""
+    policyholder = (
+        PolicyholderProjection.model_validate(claim.policyholder.model_dump())
+        if claim.policyholder is not None
+        else None
+    )
+    driver = (
+        DriverProjection.model_validate(claim.driver.model_dump(exclude={'licence_number'}))
+        if claim.driver is not None
+        else None
+    )
+    witnesses = [WitnessProjection.model_validate(item.model_dump()) for item in claim.witnesses]
+    return policyholder, driver, witnesses
 
 
 def _not_found(resource: str) -> ApiError:
@@ -82,9 +109,11 @@ def _terminal_claim_conflict() -> ApiError:
 
 
 def project_motor_other_driver(record: MotorOtherDriverRecord) -> MotorOtherDriverProjection:
-    return MotorOtherDriverProjection.model_validate(
-        record.model_dump(exclude={'customer_id', 'source_refs', 'created_at'})
+    values = record.model_dump(
+        exclude={'customer_id', 'source_refs', 'created_at', 'policy_number'}
     )
+    values['policy_number_masked'] = record.policy_number_masked
+    return MotorOtherDriverProjection.model_validate(values)
 
 
 def project_contents_item_evidence_association(
@@ -102,6 +131,7 @@ def create_motor_other_driver(
     payload: CreateMotorOtherDriverRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    protected_values: ProtectedValueAdapter | None = None,
 ) -> MotorOtherDriverMutationResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -134,11 +164,29 @@ def create_motor_other_driver(
         )
 
     timestamp = now_utc()
+    raw_policy_number = payload.policy_number
+    protected_policy_number = None
+    if raw_policy_number is not None:
+        try:
+            if protected_values is None:
+                raise ProtectedValueError('Protected data is not configured.')
+            protected_policy_number = protected_values.seal(raw_policy_number)
+        except ProtectedValueError as error:
+            raise ApiError(
+                status_code=503,
+                code='PROTECTED_DATA_UNAVAILABLE',
+                message='Protected Claim data is temporarily unavailable.',
+                retryable=True,
+            ) from error
     record = MotorOtherDriverRecord(
         participant_id=new_id('par'),
         claim_id=claim_id,
         customer_id=principal.subject,
-        **payload.model_dump(),
+        **payload.model_dump(exclude={'policy_number'}),
+        policy_number=protected_policy_number,
+        policy_number_masked=(
+            masked_value(raw_policy_number) if raw_policy_number is not None else None
+        ),
         source_refs=[f'claim:{claim_id}:revision:{expected_revision}'],
         created_at=timestamp,
         updated_at=timestamp,

@@ -190,6 +190,7 @@ REALTIME_MUTATION_RESOURCES: dict[RealtimeMutation, tuple[RealtimeResource, ...]
         RealtimeResource.EVIDENCE,
         RealtimeResource.HANDOFFS,
         RealtimeResource.WORK_ITEMS,
+        RealtimeResource.SIGNALS,
         RealtimeResource.QUEUE,
     ),
     RealtimeMutation.RUNTIME_TURN_COMMITTED: (
@@ -304,6 +305,7 @@ AUTHORITATIVE_RECORD_PROJECTION_IMPACTS: dict[str, tuple[RealtimeResource, ...]]
     ),
     'customer_update': (RealtimeResource.CUSTOMER_UPDATES,),
     'signal_decision': (RealtimeResource.SIGNALS,),
+    'review_signal': (RealtimeResource.SIGNALS,),
     'staff_agent_execution': (),
     'agent_decision': (),
     'runtime_trace': (),

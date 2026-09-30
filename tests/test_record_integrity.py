@@ -372,7 +372,11 @@ def test_valid_message_evidence_reply_and_projection_order_are_provider_neutral(
     )
     workbench_page = list_workbench_messages(
         repository,
-        Principal(subject='stf_integrity', actor_type='staff'),
+        Principal(
+            subject='stf_integrity',
+            actor_type='staff',
+            scopes=frozenset({'workbench:read'}),
+        ),
         claim.claim_id,
         session.session_id,
         limit=10,

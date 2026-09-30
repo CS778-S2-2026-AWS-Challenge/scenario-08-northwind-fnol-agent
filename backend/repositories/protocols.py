@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from threading import Event
@@ -32,10 +32,12 @@ from backend.domain.models import (
     CustomerUpdateRecord,
     EvidenceClaimLink,
     EvidenceRecord,
+    FollowUpOperation,
     FollowUpRecord,
     HandoffRecord,
     MessageRecord,
     MotorOtherDriverRecord,
+    RetentionOperation,
     RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
@@ -448,6 +450,72 @@ class ClaimRepository(Protocol):
         claim_id: str,
         customer_id: str,
     ) -> list[FollowUpRecord]:
+        raise NotImplementedError
+
+    def list_due_follow_ups(
+        self,
+        due_before: datetime,
+        *,
+        limit: int,
+        cursor: tuple[datetime, str] | None = None,
+    ) -> list[FollowUpRecord]:
+        """Return bounded executable Follow-ups ordered by due time and ID."""
+        raise NotImplementedError
+
+    def list_expiring_follow_ups(
+        self,
+        deadline_before: datetime,
+        *,
+        limit: int,
+        cursor: tuple[datetime, str] | None = None,
+    ) -> list[FollowUpRecord]:
+        """Return bounded open Follow-ups ordered by deadline and ID."""
+        raise NotImplementedError
+
+    def get_follow_up_operation(self, operation_id: str) -> FollowUpOperation | None:
+        raise NotImplementedError
+
+    def list_follow_up_operations(self, follow_up_id: str) -> list[FollowUpOperation]:
+        raise NotImplementedError
+
+    def next_follow_up_operation_sequence(self, follow_up_id: str) -> int:
+        """Propose the next history sequence; save arbitrates concurrent reservations."""
+        raise NotImplementedError
+
+    def save_follow_up_operation(self, operation: FollowUpOperation) -> None:
+        """Persist one immutable logical operation with duplicate identity protection."""
+        raise NotImplementedError
+
+    def get_retention_operation(self, operation_id: str) -> RetentionOperation | None:
+        raise NotImplementedError
+
+    def advance_follow_up_operation(
+        self, expected: FollowUpOperation, operation: FollowUpOperation
+    ) -> FollowUpOperation:
+        """Conditionally settle a reservation; exact final retries replay unchanged."""
+        raise NotImplementedError
+
+    def advance_retention_operation(
+        self, expected: RetentionOperation, operation: RetentionOperation
+    ) -> RetentionOperation:
+        """CAS execution progress; immutable identity and completed steps cannot change."""
+        raise NotImplementedError
+
+    def commit_follow_up_operation(
+        self,
+        expected: FollowUpOperation,
+        operation: FollowUpOperation,
+        expected_follow_up: FollowUpRecord,
+        follow_up: FollowUpRecord,
+        claim: WorkingClaim,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+    ) -> FollowUpOperation:
+        """Commit settlement, aggregate, Claim CAS, audit and replay in one boundary."""
+        raise NotImplementedError
+
+    def save_retention_operation(self, operation: RetentionOperation) -> None:
+        """Persist one restart-safe cross-store retention operation."""
         raise NotImplementedError
 
     def save_incomplete_checkpoint(
@@ -961,6 +1029,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         runtime_records: RuntimeTurnRecords | None = None,
         *,
         checkpointed: bool = False,
+        review_signals: Sequence[ReviewSignalRecord] | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn and optional Runtime trace."""
         raise NotImplementedError
@@ -1031,6 +1100,21 @@ class PersistenceRepository(ClaimRepository, Protocol):
 
     def list_evidence_for_customer(self, customer_id: str) -> list[EvidenceRecord]:
         """Return Evidence owned by a customer across all of their Claims."""
+        raise NotImplementedError
+
+    def list_evidence_recovery_page(
+        self, after_evidence_id: str | None = None, limit: int = 10
+    ) -> list[EvidenceRecord]:
+        """Discover a bounded internal page; the service decides repair eligibility.
+
+        Args:
+            after_evidence_id: Exclusive cursor from the previous page's last record.
+            limit: Page size, clamped to 1 through 50.
+        Returns:
+            All Evidence states in ascending evidence_id order, without ownership filtering.
+        Raises:
+            ValueError: If persisted Evidence cannot satisfy the domain contract.
+        """
         raise NotImplementedError
 
     def get_motor_other_driver(

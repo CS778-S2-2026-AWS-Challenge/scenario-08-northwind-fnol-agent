@@ -1562,7 +1562,7 @@ textarea:focus-visible {
 .entry-page .report-text { min-height: 80px; padding: 0; border: 0; border-radius: 0; background: transparent; font-size: 16px; }
 .entry-page .report-text:focus { border: 0; box-shadow: none; }
 .entry-page .report-actions { margin-top: 10px; }
-.entry-page .primary-button { min-height: 38px; min-width: 112px; font-size: 14px; }
+.entry-page .primary-button { min-height: var(--size-control-touch); min-width: 112px; font-size: 14px; }
 
 .entry-hint-row {
   display: flex;

@@ -51,7 +51,6 @@ authorisation.
 | `customer/` | React and Vite claimant experience |
 | `workbench/` | React and Vite Claims Workbench with independent staff authentication |
 | `admin/` | React and Vite Control Plane console backed by the authenticated Admin API |
-| `employee/` | Deprecated redirect shell and legacy migration inventory; supported Workbench is `workbench/` |
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
@@ -89,6 +88,9 @@ The development requirements include `jsonschema` (MIT) and its typing package
 schemas in contract tests; Pydantic validation of a response alone cannot detect an
 unsatisfiable provider schema. They are not production runtime dependencies.
 
+The backend uses Pillow (MIT-CMU) to decode bounded JPEG/PNG uploads before marking files
+ready. This checks file usability, not malware or the truth of image-derived Claim facts.
+
 ### Run the app
 
 Start the complete system — MongoDB, MinIO with the approved knowledge corpus ingested, the
@@ -99,19 +101,22 @@ frontends — with one command:
 .\scripts\start-dev.ps1
 ```
 
-Requires Docker Desktop running and PowerShell 7.3+ (`pwsh`). One-time setup: the model
-credentials live on a team secrets endpoint, and the bearer token that unlocks it is itself a
-credential, so it is never stored in this repository. Get it from a teammate out of band and set
-it once for your Windows user, then open a new terminal:
+Requires Docker Desktop running and PowerShell 7.3+ (`pwsh`); there is no fixture or
+controlled-agent fallback in this script. No manual setup: the model credentials live on a team
+secrets endpoint that authorises the request by checking whether your GitHub identity can read
+this private repository, so the same `gh auth login` you already needed to clone it is enough —
+run `gh auth login` once if you have not, and `start-dev.ps1` fetches your token itself via
+`gh auth token`. `NORTHWIND_SECRETS_TOKEN` remains available as a manual override if you set it
+(for example, to use a fixed token instead of the GitHub CLI), but it is never required and is
+never stored in this repository.
 
-```powershell
-[Environment]::SetEnvironmentVariable('NORTHWIND_SECRETS_TOKEN', '<token from a teammate>', 'User')
-```
+Fetching and parsing the bundle is a config-layer integration point
+(`backend/core/dev_secrets.py`, called through `scripts/fetch_secrets.py`), not launcher logic;
+`start-dev.ps1` calls it but does not own or duplicate it. The script:
 
-The script refuses to start without it and tells you so. The script:
-
-1. pulls model credentials from the team secrets endpoint using that token, and hands them to
-   the backend process only — the three Vite frontends never receive them, and neither does the
+1. resolves a bearer token (your `gh auth token` by default, or `NORTHWIND_SECRETS_TOKEN` if
+   set) and pulls model credentials from the team secrets endpoint with it, handing them to the
+   backend process only — the three Vite frontends never receive them, and neither does the
    token itself;
 2. brings up MongoDB and MinIO through `docker-compose.yml` and waits for each to report
    healthy, then runs the one-shot `mongo-init`/`minio-init` containers and checks their real
@@ -130,10 +135,23 @@ moving on: a backend that crashes on startup is reported as failed, not as runni
 `http://127.0.0.1:5175/admin/` for the Control Plane console.
 
 Options: `-BackendOnly` starts only MongoDB/MinIO/backend and skips all three frontends.
-`-SkipDocker` falls back to the fixture data profile (no MongoDB, no MinIO, no persisted
-Evidence, no real knowledge retrieval) when Docker is genuinely unavailable. `-BackendPort` /
-`-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process. `-ReadyTimeoutSeconds` extends
-the readiness wait on a slow machine.
+`-BackendPort` / `-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process.
+`-ReadyTimeoutSeconds` extends the readiness wait on a slow machine.
+
+One-time Workbench staff account bootstrap: to provision the initial claims-professional
+account, set these in the same shell **before** running `.\scripts\start-dev.ps1`:
+
+```powershell
+$env:NORTHWIND_STAFF_BOOTSTRAP_EMAIL='claims@example.test'
+$env:NORTHWIND_STAFF_BOOTSTRAP_PASSWORD='<a strong local password>'
+$env:NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME='Claims Professional'
+```
+
+The bootstrap values only create the account when the email is absent; this is a one-time step,
+not something to set for every run. Clear `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD` from the shell
+immediately afterward — the database stores a salted scrypt hash, not the plaintext password,
+and this variable is not covered by the launcher's credential-removal list the way model
+credentials are.
 
 The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
 ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
@@ -147,16 +165,19 @@ is decided by `config/model-runtime-bindings.json`; when that file is loaded the
 `MODEL_PROVIDER`, `MODEL_BASE_URL`, `MODEL_IDENTIFIER`, `MODEL_API_KEY_ENV` and the
 `MODEL_SUPPORTS_*` variables, so change the model there, not in the environment.
 
-The same steps, one at a time, if you prefer to run them by hand:
+The same steps, one at a time, if you prefer to run them by hand. This inlines what
+`scripts/fetch_secrets.py` does for a single shell; it does not partition backend-only
+credentials away from the frontends the way the script does, so only use this for a quick
+manual check, not as a standing alternative to `start-dev.ps1`:
 
 ```powershell
-# 1. Pull the credentials with your NORTHWIND_SECRETS_TOKEN (set up above). The bundle is
-#    KEY=VALUE lines. Doing it by hand puts them in this shell's environment, so run the
-#    backend from this same shell and start the frontends from a different one.
-$bundle = Invoke-RestMethod -Uri 'https://ysoseri.us/secret/northwind-dev' `
-    -Headers @{ Authorization = "Bearer $env:NORTHWIND_SECRETS_TOKEN" }
-foreach ($line in ($bundle -split "`n")) {
-    if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
+# 1. Pull the credentials through the same scripts/fetch_secrets.py the launcher calls; it
+#    resolves your `gh auth token` (or NORTHWIND_SECRETS_TOKEN if set) as the bearer token.
+#    Doing it by hand puts them in this shell's environment, so run the backend from this same
+#    shell and start the frontends from a different one.
+$credentials = py -3.12 scripts/fetch_secrets.py | ConvertFrom-Json
+foreach ($property in $credentials.secrets.PSObject.Properties) {
+    Set-Item -Path "env:$($property.Name)" -Value $property.Value
 }
 
 # 2. MongoDB and MinIO, then the real one-shot init containers.
@@ -245,6 +266,20 @@ FastAPI evidence flow against local MinIO, start the packaged service and config
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
 
+After starting the updated backend on a persistent data profile, previously queued JPEG/PNG
+uploads are checked automatically in small background batches. Valid images become ready;
+corrupt images become failed. Conflicts and unavailable storage are retried in later passes.
+Refresh the Evidence view after recovery; no re-upload or manual command is required for normal
+legacy queued uploads. This does not process PDF or mark image-derived facts confirmed.
+
+For an explicitly targeted diagnostic repair, open an operator shell with the same persistent
+runtime environment as the backend, then run `py -3.12 scripts/repair_processing_image.py
+--claim-id YOUR-CLAIM-ID --evidence-id YOUR-EVIDENCE-ID --revision CURRENT-REVISION
+--material-version CURRENT-MATERIAL-VERSION`. Inspect this dry-run's predicted file status before
+repeating with `--apply` to persist validation. Obtain both versions from current authoritative
+records; refresh them after a conflict rather than bypassing the guard. Run only for explicitly
+authorized records. Do not use this command for PDF, bulk repairs, or extraction of claim facts.
+
 `start-dev.ps1` above already runs the backend on this persistence path for interactive use. The
 following two smoke-test scripts verify it instead of running it: with the same MongoDB and MinIO
 from `docker-compose.yml` up, `py -3.12 scripts/run_local_mvp_smoke.py` checks MongoDB-backed
@@ -297,9 +332,8 @@ npm run dev --prefix workbench
 ```
 
 Configure the initial normal-mode staff account as documented in
-[workbench/README.md](workbench/README.md). The legacy files under `employee/` remain only until
-their still-valid capabilities have been migrated and verified; do not add new product behaviour
-to that client.
+[workbench/README.md](workbench/README.md). The React/Vite Workbench is the only supported
+employee-facing client.
 
 Start the Control Plane console separately when administrator access is required:
 

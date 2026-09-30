@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from hashlib import sha256
 
 from backend.adapters.evidence_storage import (
     EvidenceStorage,
@@ -70,7 +71,16 @@ from backend.services.agent_evidence_actions import (
     execute_confirmed_evidence_action,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claim_participants import (
+    reject_unprotected_participant_fields,
+    synchronize_participants,
+)
 from backend.services.evidence_visibility import claimant_visible_evidence
+from backend.services.image_readiness import (
+    IMAGE_MEDIA_TYPES,
+    IMAGE_VALIDATION_VERSION,
+    validate_image_content,
+)
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -1050,6 +1060,74 @@ def request_upload(
     return response
 
 
+def _validated_image(
+    storage: EvidenceStorage, evidence: EvidenceRecord, storage_key: str, checksum: str
+) -> bool:
+    try:
+        content = storage.read_upload(
+            claim_id=evidence.claim_id, evidence_id=evidence.evidence_id, storage_key=storage_key
+        )
+    except EvidenceStorageUnavailable as error:
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message='Evidence storage is temporarily unavailable. The claim is unchanged.',
+            retryable=True,
+        ) from error
+    if content is None:
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message='The completed evidence bytes are unavailable. Please retry.',
+            retryable=True,
+        )
+    if (
+        len(content) != evidence.size_bytes
+        or len(content) > storage.max_size_bytes
+        or f'sha256:{sha256(content).hexdigest()}' != checksum.lower()
+    ):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The completed object does not match this evidence upload.',
+        )
+    return validate_image_content(content, evidence.media_type or '')
+
+
+def _settle_image(evidence: EvidenceRecord, valid: bool) -> EvidenceRecord:
+    timestamp = now_utc()
+    file_status = EvidenceFileStatus.READY if valid else EvidenceFileStatus.FAILED
+    return evidence.model_copy(
+        update={
+            'file_status': file_status,
+            'wait_type': None if valid else EvidenceWaitType.CLAIMANT,
+            'responsible_party': None if valid else ResponsibleParty.CLAIMANT,
+            'context_summary': (
+                'The image is available for review.'
+                if valid
+                else 'The image could not be read. Please upload a valid JPEG or PNG.'
+            ),
+            'provenance': _with_transition(
+                {
+                    **evidence.provenance,
+                    'processing_state': 'completed' if valid else 'failed',
+                    'image_validation': IMAGE_VALIDATION_VERSION if valid else 'rejected-v1',
+                },
+                _transition_entry(
+                    field_code=None,
+                    from_state=evidence.file_status.value,
+                    to_state=file_status.value,
+                    source=evidence.source.value,
+                    at=timestamp.isoformat(),
+                    actor_type=ActorType.SYSTEM.value,
+                    actor_id='image_file_validator',
+                ),
+            ),
+            'updated_at': timestamp,
+        }
+    )
+
+
 def complete_upload(
     repository: PersistenceRepository,
     storage: EvidenceStorage,
@@ -1157,6 +1235,10 @@ def complete_upload(
             'updated_at': timestamp,
         }
     )
+    if evidence.media_type in IMAGE_MEDIA_TYPES:
+        completed = _settle_image(
+            completed, _validated_image(storage, evidence, stored.storage_key, stored.checksum)
+        )
     updated_claim = _updated_claim(claim, _records_with(repository, claim, completed))
     response = EvidenceCompleteResponse(
         evidence=_claimant_evidence(completed),
@@ -1179,6 +1261,97 @@ def complete_upload(
             response_payload=response.model_dump(mode='json'),
         ),
     )
+    return response
+
+
+def repair_processing_image(
+    repository: PersistenceRepository,
+    storage: EvidenceStorage,
+    claim_id: str,
+    evidence_id: str,
+    expected_revision: int,
+    material_version: int,
+    apply: bool = False,
+) -> EvidenceCompleteResponse:
+    """Preview or settle one explicitly identified legacy processing image.
+
+    Args:
+        repository: Operator-selected authoritative persistence profile.
+        storage: Matching object storage profile.
+        claim_id: Exact owning Claim identity; no discovery or scanning is performed.
+        evidence_id: Exact claimant-uploaded Evidence identity.
+        expected_revision: Revision observed by the operator before repair.
+        material_version: File generation observed by the operator before repair.
+        apply: Persist the result; false only validates and previews it.
+
+    Returns:
+        The claimant-safe preview or idempotently persisted completion result.
+
+    Raises:
+        ApiError: The target, revision, generation, object or storage is unavailable or invalid.
+    """
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        raise _claim_not_found()
+    route = f'operator/claims/{claim_id}/evidence/{evidence_id}/image-readiness'
+    key = f'{IMAGE_VALIDATION_VERSION}:{material_version}:{expected_revision}'
+    fingerprint = request_fingerprint(
+        {'material_version': material_version, 'expected_revision': expected_revision}
+    )
+    existing = repository.find_idempotency(claim.customer_id, route, key)
+    if existing is not None and existing.response_payload is not None:
+        return EvidenceCompleteResponse.model_validate(existing.response_payload)
+    _validate_revision(claim, expected_revision)
+    evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    if evidence is None:
+        raise _evidence_not_found()
+    if (
+        evidence.source is not EvidenceSource.CLAIMANT
+        or evidence.file_status is not EvidenceFileStatus.PROCESSING
+        or evidence.media_type not in IMAGE_MEDIA_TYPES
+        or evidence.material_version != material_version
+        or evidence.status is not EvidenceStatus.RECEIVED
+        or evidence.claimant_history_state is not EvidenceHistoryState.AVAILABLE
+        or evidence.provenance.get('processing_state') != 'queued'
+        or evidence.provenance.get('extraction_state')
+    ):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='Repair requires the specified current, unprocessed claimant image generation.',
+        )
+    storage_key = evidence.provenance.get('storage_key')
+    checksum = evidence.provenance.get('upload_checksum')
+    if not isinstance(storage_key, str) or not isinstance(checksum, str):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The processing image has no recorded final object identity.',
+        )
+    completed = _settle_image(evidence, _validated_image(storage, evidence, storage_key, checksum))
+    updated_claim = _updated_claim(claim, _records_with(repository, claim, completed))
+    response = EvidenceCompleteResponse(
+        evidence=_claimant_evidence(completed),
+        revision=updated_claim.revision if apply else claim.revision,
+        status_url=f'/api/v1/claims/{claim_id}/evidence',
+        customer_next_step=updated_claim.customer_next_step,
+    )
+    if apply:
+        _persist(
+            repository,
+            updated_claim,
+            expected_revision,
+            completed,
+            IdempotencyRecord(
+                actor_id=claim.customer_id,
+                route=route,
+                key=key,
+                request_fingerprint=fingerprint,
+                claim_id=claim_id,
+                session_id=claim.active_session_id or '',
+                response_payload=response.model_dump(mode='json'),
+            ),
+        )
     return response
 
 
@@ -1269,7 +1442,17 @@ def complete_evidence_processing(
         )
         return response
 
-    if evidence.file_status is not EvidenceFileStatus.PROCESSING:
+    validated_image_awaiting_extraction = (
+        evidence.file_status is EvidenceFileStatus.READY
+        and evidence.media_type in IMAGE_MEDIA_TYPES
+        and evidence.provenance.get('image_validation') == IMAGE_VALIDATION_VERSION
+        and not evidence.provenance.get('extraction_state')
+        and payload.outcome == 'ready'
+    )
+    if (
+        evidence.file_status is not EvidenceFileStatus.PROCESSING
+        and not validated_image_awaiting_extraction
+    ):
         raise ApiError(
             status_code=409,
             code='INVALID_STATE_TRANSITION',
@@ -1328,6 +1511,7 @@ def complete_evidence_processing(
         return response
 
     field_codes = [fact.field_code for fact in payload.facts]
+    reject_unprotected_participant_fields(field_codes)
     invalid_codes = [code for code in field_codes if code not in REGISTERED_FIELD_CODES]
     if len(set(field_codes)) != len(field_codes) or invalid_codes:
         details = [
@@ -1411,7 +1595,7 @@ def complete_evidence_processing(
         provenance,
         _transition_entry(
             field_code=None,
-            from_state=EvidenceFileStatus.PROCESSING.value,
+            from_state=evidence.file_status.value,
             to_state=EvidenceFileStatus.READY.value,
             source=evidence.source.value,
             at=timestamp.isoformat(),
@@ -1424,7 +1608,7 @@ def complete_evidence_processing(
             provenance,
             _transition_entry(
                 field_code=field_code,
-                from_state=EvidenceFileStatus.PROCESSING.value,
+                from_state=evidence.file_status.value,
                 to_state=FormStatus.PROPOSED.value,
                 source=form_source.value,
                 at=timestamp.isoformat(),
@@ -1442,6 +1626,7 @@ def complete_evidence_processing(
     updated_claim = _updated_claim(claim, _records_with(repository, claim, processed)).model_copy(
         update={'form': {**claim.form, **proposed_fields}}
     )
+    updated_claim = synchronize_participants(updated_claim, proposed_fields)
     response = EvidenceProcessingResponse(
         evidence_id=evidence_id,
         revision=updated_claim.revision,
@@ -1593,6 +1778,8 @@ def decide_evidence_facts(
     updated_claim = _updated_claim(claim, _records_with(repository, claim, decided)).model_copy(
         update={'form': {**claim.form, **updated_fields}}
     )
+    reject_unprotected_participant_fields(updated_fields)
+    updated_claim = synchronize_participants(updated_claim, updated_fields)
     response = EvidenceFactDecisionResponse(
         evidence_id=evidence_id,
         revision=updated_claim.revision,

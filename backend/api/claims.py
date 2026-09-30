@@ -92,6 +92,7 @@ from backend.services.external_services import (
 from backend.services.message_history import list_claim_messages
 from backend.services.messages import submit_message
 from backend.services.model_profiles import select_model_profile
+from backend.services.protected_values import ProtectedValueAdapter
 from backend.services.resume import start_session_with_recovery
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 
@@ -168,6 +169,10 @@ def action_dispatcher_for(request: Request) -> ClaimantRuntimeActionDispatcher:
         ClaimantRuntimeActionDispatcher,
         request.app.state.claimant_runtime_action_dispatcher,
     )
+
+
+def protected_values_for(request: Request) -> ProtectedValueAdapter:
+    return cast(ProtectedValueAdapter, request.app.state.protected_value_adapter)
 
 
 def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
@@ -289,6 +294,7 @@ def create_claim_motor_other_driver(
             payload,
             idempotency_key,
             if_match,
+            protected_values_for(request),
         ),
     )
 
@@ -840,6 +846,7 @@ def patch_form(
         payload,
         if_match,
         identity_repository_for(request),
+        protected_values_for(request),
     )
 
 

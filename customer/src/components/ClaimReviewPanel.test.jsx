@@ -116,4 +116,18 @@ describe('ClaimReviewPanel', () => {
     expect(screen.getByText('Electronics')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
   })
+
+  it('explains how the Summary tab will populate before a conversation starts', () => {
+    renderPanel({
+      form: {},
+      proposedFields: [],
+      dynamicForm: null,
+      stepActive: false,
+      conversationEmpty: true,
+    })
+
+    expect(screen.getByRole('heading', { name: 'Your summary will build as you chat' })).toBeVisible()
+    expect(screen.getByText('Key dates, people, damage and supporting items will appear here automatically.')).toBeVisible()
+    expect(screen.queryByText('Details from your conversation will appear here.')).not.toBeInTheDocument()
+  })
 })

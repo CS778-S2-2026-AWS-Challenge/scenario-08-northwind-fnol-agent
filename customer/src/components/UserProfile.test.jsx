@@ -152,6 +152,7 @@ describe('UserProfile', () => {
 
     await user.click(screen.getAllByRole('button', { name: 'Claim auto-fill' })[0])
     expect(screen.getByText(/must review and confirm it before it becomes claim information/i)).toBeInTheDocument()
+    expect(screen.getByText(/could not load these choices from your account/i)).toBeInTheDocument()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(screen.getAllByText('Not configured')).toHaveLength(5)
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()

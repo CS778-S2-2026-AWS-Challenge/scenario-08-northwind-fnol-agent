@@ -82,9 +82,17 @@ Normal-mode local runtimes use the separate SQLite staff identity adapter config
 `NORTHWIND_STAFF_IDENTITY_DB_PATH`. An initial account may be provisioned explicitly with
 `NORTHWIND_STAFF_BOOTSTRAP_EMAIL`, `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD`, and
 `NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME`; the plaintext password is never persisted. This is a
-real persistent local login path, but it is not an enterprise IdP, SSO, MFA, recovery, or complete
-staff-entitlement implementation. Production deployment still requires an approved identity
-provider adapter.
+real persistent local login path, but it is not an enterprise IdP, SSO, MFA, or recovery
+implementation. Production deployment still requires an approved identity provider adapter.
+
+The server derives coarse Workbench capabilities from the stored staff roles. A
+`claims_professional` receives `workbench:read` and `workbench:write`. An `operations`-only
+account receives neither capability and cannot read or mutate Workbench Claims. It can still read
+and revoke its own authenticated staff session and read its own staff profile, but it does not
+receive a claimable Workbench presence lease. A published access policy may further restrict
+role-derived capabilities but cannot grant a capability absent from the stored role. Workbench
+read and mutation routes enforce their respective capability before resource lookup; ownership,
+assignment, action-registry, revision, and idempotency checks remain additional requirements.
 
 Current scopes:
 
@@ -598,9 +606,19 @@ the preference is enabled and a supported active owner-scoped source exists. Per
 `review_and_confirm`; Policies and Assets use their existing `select_policy` and `select_asset`
 contracts; Payment and Identity use `confirm_separately`. Reading the manifest does not change the
 Claim, Dynamic Form, Branch Evaluation, idempotency, audit, realtime, Agent, or external services.
-The response contains no saved record IDs, raw values, masked values, or ciphertext. A preference
-is suggestion permission only: it is not claimant confirmation, coverage authority, payment
-authority, identity verification, or third-party disclosure consent.
+The response contains no saved record IDs, raw values, masked values, or ciphertext. In the
+claimant client, an enabled Policy or Asset preference permits orchestration through the existing
+revisioned selection route: when the corresponding Claim information is empty, one active record
+is selected automatically and written only as proposed Claim information, while multiple active
+records require a compact claimant choice. Existing claimant-supplied information is not
+overwritten. The client re-reads the authoritative Claim after selection and uses asset snapshots
+to avoid applying the same asset revision twice. An enabled Payment preference may preselect the
+sole active or designated common destination only when the payout step is reached; the claimant
+must still confirm that step. Identity information is offered only in a supported separate
+verification step.
+Full payment-account and identity-document numbers are never copied into the Claim. These
+preferences are not coverage authority, payment authority, identity verification, or third-party
+disclosure consent, and reading this manifest remains side-effect free.
 
 Create requests for the three account resources require `Idempotency-Key`. List routes use the
 standard opaque cursor and default to active records. Their stable descending keyset is
@@ -647,6 +665,8 @@ Only `POST /api/v1/staff/auth/sessions` is public. It accepts `email` and `passw
 a role, scope, Claim assignment, or staff identifier from the client. The other routes require the
 issued staff bearer token and reject claimant credentials. `GET /staff/me` returns the staff ID,
 display name, email, roles, and development-identity marker; the server derives Workbench scopes
+from the stored roles rather than trusting the returned profile in later requests. Staff identity
+authentication alone does not grant Workbench Claim access.
 from the authenticated staff boundary rather than trusting the returned profile in later requests.
 `POST /staff/feedback` accepts a single whitespace-normalized `message` of 1–2,000 characters.
 The server derives the submitter from the authenticated staff session, never from request data.
@@ -765,6 +785,9 @@ The canonical backend record has these fields. API projections omit fields the c
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
 | `contents_items` | object array | Yes | Optional source-aware `ContentsItem` records; empty unless the Claim is a contents path |
+| `policyholder` | object/null | No | Claim-scoped policyholder record for a non-policyholder reporter; never duplicates account Profile data |
+| `driver` | object/null | No | Claim-scoped actual-driver record for Motor; licence number is protected and excluded from model/RAG and claimant projections |
+| `witnesses` | object array | Yes | Repeatable Claim-scoped witness records; empty when no witness is known |
 | `motor_other_driver` | object/null | Yes | Optional bounded other-driver name/contact/vehicle projection on Claim detail only; never included in Claim lists or model/RAG context |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
 | `route` | string | No | Configured processing route, not a decision outcome |
@@ -869,11 +892,27 @@ A session MAY move from `active` to `paused` after claimant inactivity or when t
 
 `POST /api/v1/claims/{claim_id}/sessions/{session_id}/pause` is the explicit P17.1 interruption boundary. It requires the current Claim revision through `If-Match` plus an `Idempotency-Key`, atomically marks the current session `paused`, aligns that Session's recovery snapshot to the accepted Claim revision, clears the Claim's active-session pointer, stores bounded recovery context, and creates exactly one open Claim-scoped recovery Follow-up for the `resume_incomplete_claim` purpose. The accepted Claim revision is part of the idempotency fingerprint, so reusing the same key with a different `If-Match` value returns `409 IDEMPOTENCY_CONFLICT`. It does not create a second Claim State, send a follow-up, make an abandonment decision, or apply a retention transition.
 
-The recovery Follow-up persists purpose, source references, responsible party, channel, due time, status, attempt count, and a contact-permission condition. An authenticated claimant may receive a `pending` in-app recovery Follow-up; that record does not authorise email, SMS, or phone contact. An anonymous browser claimant has no durable authorised contact channel in P17.1, so the record is persisted as `blocked` with `contact_permission=not_authorised`, no channel, and no due time. P17.2 owns any later scheduling, delivery, attempt, or escalation policy.
+The recovery Follow-up persists purpose, source references, responsible party, channel, due time, absolute deadline, status, attempt count, policy binding, typed lifecycle reasons, and a contact-permission condition. An authenticated claimant may receive a `pending` in-app recovery Follow-up; that record does not authorise email, SMS, or phone contact. An anonymous browser claimant has no durable authorised contact channel, so the record is persisted as `blocked` with `contact_permission=not_authorised`, a typed blocked reason, no channel, and no due time. The claimant projection exposes the persisted deadline and the Workbench projection also exposes the authoritative attempt count. Later delivery or escalation policy must consume these records rather than infer state from free text.
 
 After that checkpoint, claimant Claim detail and Claim list projections may include `incomplete_context` containing the interruption time, last meaningful activity, bounded resume point, and the claimant-safe open Follow-up state. Pause is accepted only when the authoritative Claim is not `created` and `customer_next_step.can_resume=true`; terminal or explicitly non-resumable Claims return `409 INVALID_STATE_TRANSITION`. Claimant and Workbench projections use the same incomplete predicate: an eligible resumable non-terminal Claim, no authoritative active Session, a relevant paused recovery checkpoint, and an open recovery Follow-up. This applies to every resumable non-terminal workflow state, not only `collecting`. The persisted checkpoint also records the exact durable source reference for the latest qualifying claimant message or accepted claimant business action.
 
-When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
+When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. Resolution records `claimant_resumed`, clears the blocked reason and executable due time, and preserves the original policy/deadline and contact facts. This applies to authenticated and anonymous claimants in both persistence adapters. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
+
+A blocked Follow-up with `attempt_limit_reached` keeps its original contact-permission fact
+and deadline while removing executable scheduling. Attempt count includes only committed
+countable operations; cancelled operation history does not consume the attempt budget.
+Internal due/deadline persistence and cursors use fixed-precision UTC timestamps without
+changing the represented instant. Exhaustion is not equivalent to contact withdrawal
+or Claim abandonment. Legacy blocked records without a reason retain their previous
+not-authorised/no-channel interpretation. No new recovery or retention HTTP endpoint is added.
+
+Quarantined recovery obligations remain readable without an invented deadline. Incomplete
+internal policy coordinates are not exposed as verified policy bindings. If a valid checkpoint
+is unavailable, incomplete projections remain absent; otherwise they show blocked with no
+schedule or deadline. Resuming an obligation blocked by inconsistent source evidence or an
+invalid policy binding returns `409 INVALID_STATE_TRANSITION`, with
+`details[].reason=recovery_unavailable`, before Claim, Session, or idempotency mutation.
+Operator repair is required; resume does not clear an unresolved authority error.
 
 Only one active claimant session per claim is permitted.
 
@@ -979,6 +1018,9 @@ Initial common field codes:
 | `claimant.client_number` | string | Staff-only Northwind client reference supplied by identity |
 | `claimant.role` | enum | Policyholder, authorised representative, or other reporter |
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
+| `claimant.relationship_to_policyholder` | enum | Reporter relationship to the policyholder |
+| `policyholder.identity_ref` | string | Claim-scoped policyholder identity reference when the reporter is not the policyholder |
+| `policyholder.name` | string | Policyholder fallback name when no durable identity reference is available |
 | `claim.product_family` | enum | `motor`, `home`, or `contents`; source-aware family field projected through top-level `incident_type` for compatibility |
 | `incident.type` | enum | `collision`, `fire`, `water`, `theft`, `weather`, or `other`; never the product family |
 | `incident.occurred_at` | timestamp | When the incident occurred |
@@ -993,10 +1035,31 @@ Initial common field codes:
 | `vehicle.registration` | string | Motor-specific vehicle reference |
 | `vehicle.damage_description` | string | Motor-specific damage account |
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
+| `vehicle.use` | enum | `private`, `commuting`, `business`, `rideshare_delivery`, `other`, or `unknown` |
+| `vehicle.towing_required` | enum | `required`, `not_required`, `already_towed`, or `unknown` |
+| `vehicle.towing_location` | object/string | Claimant-supplied current or intended tow location; the backend does not infer which interpretation applies |
+| `driver.identity_ref` | string | Actual-driver identity reference when available |
+| `driver.name` | string | Actual-driver name when no identity reference is available |
+| `driver.phone` | string | Actual-driver phone |
+| `driver.email` | string | Actual-driver email |
+| `driver.relationship_to_policyholder` | enum | Actual-driver relationship to the policyholder |
+| `driver.owner_permission` | enum | Permission fact: `confirmed`, `not_confirmed`, `unknown`, or `not_applicable` |
+| `driver.licence_number` | protected string | Protected licence value; never sent to model/RAG |
+| `driver.licence_status` | enum | One reported licensing state: `valid`, `expired`, `suspended`, `learner`, `restricted`, or `unknown`; the current contract does not expose a separate licence-class field |
+| `other_party.insurer_name` | string | Other-party insurer on the existing Motor other-driver record |
+| `other_party.policy_number` | protected string | Other-party policy number; protected and masked in projections |
+| `other_party.claim_reference` | string | Other-party insurer claim reference |
+| `witness.present` | enum | `yes`, `no`, or `unknown` |
+| `witness.name` | string | Repeatable typed witness record name |
+| `witness.phone` | string | Repeatable typed witness record phone |
+| `witness.email` | string | Repeatable typed witness record email |
+| `police.status` | enum | `not_reported`, `reported`, `reference_pending`, `reference_available`, `not_required`, or `unknown` |
 | `property.address` | object | Home or contents risk location |
 | `property.affected_areas` | array | Home-specific affected areas |
 | `property.ongoing_risk` | enum | `none`, `active_leak`, `fire`, `collapse`, `exposure`, or `other`; current home safety condition |
 | `property.habitable` | boolean | Whether the home is currently safe to occupy; does not replace professional safety advice |
+| `property.occupancy_relationship` | enum | `owner`, `tenant`, `landlord`, `authorised_representative`, or `other` |
+| `property.occupancy` | enum | `occupied`, `vacant`, `partially_occupied`, or `unknown` |
 
 ### Contents items
 
@@ -1042,11 +1105,36 @@ damage, loss, theft, ownership, value, or coverage.
 | `POST /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Link one same-Claim Evidence record to a ContentsItem with a bounded purpose. Requires `Idempotency-Key` and Claim `If-Match`. |
 | `GET /api/v1/claims/{claim_id}/contents-items/{item_id}/evidence-associations` | Cursor-page the item's role-safe immutable associations. |
 
-The Motor record contains only supplied `name`, `phone`, `email`, and
-`vehicle_registration`; at least one value is required and each Motor Claim has zero or one
-record. Contact data appears only in authorised claimant and Workbench Claim detail projections.
-It is not embedded in WorkingClaim, model context, RAG context, unrelated lists, logs, or audit
-reasons. Missing other-driver data never blocks initial capture.
+The Motor record stores only supplied participant details: `name`, `phone`, `email`,
+`vehicle_registration`, `insurer_name`, `policy_number`, and `claim_reference`. At least one
+value is required and each Motor Claim has zero or one record. `policy_number` is encrypted at
+the protected-value boundary and exposed only as `policy_number_masked` in role-safe projections.
+Contact data appears only in authorised claimant and Workbench Claim detail projections. It is
+not embedded in model context, RAG context, unrelated lists, logs, or audit reasons. Missing
+other-driver data never blocks initial capture. The generic form route rejects
+`other_party.policy_number`; callers must use the protected Motor other-driver route so the
+plaintext value never enters the generic form store.
+
+If a policy number is supplied without working protection, the service returns retryable
+`503 PROTECTED_DATA_UNAVAILABLE` before changing the participant, Claim revision, or successful
+idempotency result. Insurer-only and claim-reference-only submissions do not require protection.
+
+Participant form facts synchronize the Claim-scoped `policyholder`, `driver`, and first witness
+record through one service boundary before the existing atomic Claim write. This applies to
+form PATCH, accepted Agent form changes, form confirmation, and Evidence fact decisions.
+Only confirmed facts populate typed participant values; proposed, disputed, and unavailable
+changes remain in the form with their status and source/assertion history. They do not appear
+as settled values in typed participant projections. Corrections retain participant identity.
+A confirmed `witness.present=no` clears witness records; a later `yes` alone does not restore
+old contacts. Additional witness records retain their identities when the first is corrected.
+
+The form PATCH route accepts `driver.licence_number` only with confirmed status and working
+protection. It stores ciphertext in the driver record and masks the form value and assertion
+history before persistence. Unavailable protection returns the same safe retryable `503`.
+Agent and Evidence extraction writes for licence numbers or other-party policy numbers return
+`422 PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE`; these paths cannot persist raw protected facts.
+The raw-value input limit remains 120 characters; durable ciphertext has a separate 1024-character
+limit to accommodate encryption overhead. These changes do not select Agent questions.
 
 Contents association purposes are `proof_of_purchase`, `item_condition`, `repair_assessment`, and
 `authority_document`. Both item and Evidence must belong to the same owned Claim. Cross-Claim or
@@ -1206,6 +1294,69 @@ entering this normative HTTP contract.
 ```
 
 Signal status is `proposed`, `review_required`, `confirmed`, `dismissed`, `overridden`, or `resolved`. A signal records evidence for professional review; it MUST NOT state that the claimant committed fraud.
+
+#### Advisory policy judgment proposals
+
+The v8 turn envelope accepts optional `policy_judgment_proposals` (default empty, maximum three).
+Each proposal contains `kind` (maximum 100 characters), `assessment` and `rationale` (maximum 500
+characters each), and `source_refs` (one to ten authorized knowledge chunk IDs). These are advisory
+inputs, not Claim facts or coverage, liability, fraud, excess, or settlement decisions.
+
+The backend validates proposals against the final accepted turn facts before committing the turn.
+`claim.product_family` and the minimum facts below must be confirmed, resolved, and contain known
+values. `contents.items` refers to a confirmed, resolved typed item with a description and category,
+not a scalar Dynamic Form field. Unknown, disputed, proposed, empty, and unavailable facts do not
+satisfy these prerequisites. The requirements are structural evidence gates; they do not determine
+whether a clause applies or whether the model's assessment is correct.
+
+The executable taxonomy is `JUDGMENT_POINT_TAXONOMY` in `backend/services/policy_judgment.py`:
+
+| Kind | Family and policy clause | Minimum facts in addition to confirmed family |
+| --- | --- | --- |
+| `liability_split` | Motor: `MTR-COV-02` | `parties.other_parties=true`, `incident.description` |
+| `excess_multiplicity` | Motor: `MTR-EXC-01`; home: `HOM-EXC-01`; contents: `CON-EXC-01` | `incident.description` |
+| `driver_permission_status` | Motor: `MTR-EXC-02` | `driver.owner_permission`, `driver.licence_status` |
+| `alcohol_drug_applicability` | Motor: `MTR-EXC-03` | `incident.description` |
+| `unsafe_use_applicability` | Motor: `MTR-EXC-04` | `vehicle.use`, `incident.description` |
+| `gradual_damage_discoverability` | Home: `HOM-BEN-03` | `incident.discovered_at`, `incident.description` |
+| `natural_hazard_allocation` | Home: `HOM-NHZ-01` | `incident.location`, `incident.description` |
+| `occupancy_change_applicability` | Home: `HOM-EXC-04` | `property.occupancy`, `incident.description` |
+| `theft_circumstance` | Contents: `CON-COV-02` | `theft.entry_context`, `incident.description` |
+| `unsecured_property_dispute` | Contents: `CON-EXC-04` | `contents.items`, `incident.description` |
+| `multi_event_dispute` | Motor: `MTR-EXC-01`; home: `HOM-EXC-01`; contents: `CON-EXC-01` | `incident.description` |
+| `item_classification_dispute` | Contents: `CON-AUTH-01` | `contents.items` |
+
+Every cited chunk must have been returned by the server-authorized knowledge context loader during
+this turn, contain nonempty text, and identify a configured clause in its section path. A model
+cannot authorize a source by naming an arbitrary chunk, policy number, or retrieval ID. No retrieval
+or unavailable retrieval means no eligible judgment proposal. Duplicate kinds in one turn are
+rejected. Active or newly created handoffs and safety interrupts suppress proposals; a turn without
+authorized mutation authority cannot create a signal. Optional rejected judgments do not discard
+otherwise valid facts or the ordinary turn.
+
+A valid proposal creates a staff-only `POLICY_JUDGMENT_PROPOSAL` `ReviewSignalRecord`, saved atomically
+with the Claim revision, messages, Runtime audit records, and idempotency result. Signal identity is
+stable for Claim, triggering message, and judgment kind; retrying the accepted message returns the
+existing result. Signal source references link the triggering message, accepted Claim revision,
+and cited chunks. The Runtime proposal retains submitted judgments, rejection reasons, and accepted
+signal references for internal audit. The existing `proposed_signals` compatibility input remains
+untrusted and is not an alternate write route.
+
+`GET /api/v1/workbench/claims/{claim_id}/signals` returns nullable `judgment_point_kind`,
+`proposed_assessment`, and `proposal_rationale` alongside existing signal data. `source_evidence`
+includes the persisted cited policy snapshots (document/chunk ID, title, section, source URI,
+version, checksum, and the bounded retrieved text). The authorized primary staff owner uses the
+existing `signal.record_decision` action and signal decision route for `confirmed`, `dismissed`,
+`overridden`, or `resolved`. No new decision workflow or claimant-visible signal is introduced.
+Staff realtime invalidation includes `signals`; claimant events exclude that resource.
+
+Agent integration consumes the existing v8 envelope and authorized `context.resolve` guidance.
+It emits only advisory proposals with the returned chunk IDs. Prompt selection of judgment kinds,
+claimant wording, and policy-judgment reply-consistency behavior remain the Agent owner's work.
+The backend does not automatically generate an assessment or rewrite the claimant reply. Adding a
+kind requires one taxonomy entry and corresponding contract/test evidence, without changing the
+generic validator, generator, or proposal schema. Neither acceptance of a proposal nor staff signal
+confirmation constitutes a final Claim or coverage decision.
 
 ### Handoff
 
@@ -2545,10 +2696,24 @@ is never the sole size control. Provider-backed profiles return an object-store 
 fixture-only content route before consuming its request body, without changing the upload-target
 contract.
 
-The Sprint 2 mock adapter returns `202` and records the public `file_status` as
-`processing` after an image or PDF upload is accepted. Filename, media type,
-size, and processing status can be read back from the evidence list. Storage
-keys, checksums, processing references, and file contents remain internal.
+JPEG/PNG completion validates the final object's actual size and checksum, declared format,
+and full image decoding, with a 25-million-pixel limit and no animated images. It returns `200`
+with `ready` for a decodable image or `failed` for invalid image content. Missing bytes or a
+storage outage returns retryable `503 DEPENDENCY_UNAVAILABLE` without a Claim mutation; an
+object size/checksum mismatch returns `409 INVALID_STATE_TRANSITION`. Readiness means the
+image is usable, not malware-scanned, fact-verified, or sufficient for every business requirement.
+Completion does not extract or confirm Claim fields. Both persistence profiles use this boundary.
+PDF remains `202 processing`; no automatic PDF processor is dispatched by this change.
+Filename, media type, size, and file status can be read from the evidence list. Storage keys,
+checksums, processing references, and file contents remain internal.
+
+On persistent data profiles, backend startup also runs bounded background recovery of legacy
+claimant JPEG/PNG records still marked `processing` with queued provenance. It validates each
+record's current final object and applies the same terminal result with Claim revision and
+material-generation checks. Storage outages and conflicts remain retryable on later passes.
+Clients observe recovery through the existing Evidence reads and realtime invalidations;
+GET requests do not perform repair. Old completion idempotency responses remain historical,
+so clients refresh the authoritative Evidence resource after recovery. PDF is excluded.
 
 Authorised staff can read completed fixture evidence through
 `GET /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content`. This applies the same
@@ -2626,6 +2791,12 @@ Returns staff and system updates visible to the claimant. Each update includes `
 
 ## Workbench API
 
+All Workbench projection routes require the server-derived `workbench:read` capability. Mutation,
+presence-update, Staff Agent write, and demo-control routes require `workbench:write`. A read-only
+effective principal receives no executable `allowed_actions`. Capability rejection uses the stable
+`403 ACCESS_DENIED` envelope before the server checks whether a referenced Claim, handoff, work
+item, signal, or external task exists.
+
 ### Endpoint Catalogue
 
 | Method | Path | Purpose |
@@ -2670,6 +2841,12 @@ Staff Agent sessions are private to the authenticated staff identity and remain 
 Workbench pages and browser refreshes. They are not Claim conversation sessions and are never
 exposed through claimant routes. `GET /api/v1/workbench/conversations` includes them with
 `kind: "staff_agent"` so the staff member can resume them from Claim conversations.
+
+Staff Agent session creation, model capabilities, session lists, and message history require the
+server-derived `workbench:read` capability. Message submission and confirmed draft execution require
+`workbench:write`. The same capability checks run at the application-service boundary before session
+or Claim lookup, so an authenticated operations-only identity receives `403 ACCESS_DENIED` without
+revealing whether a supplied session or Claim identifier exists.
 
 `POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
 `model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that
@@ -3922,6 +4099,11 @@ and provider reference remain explicitly synthetic.
 
 Records the typed result of image or document extraction after an accepted
 upload reaches `processing`.
+
+A JPEG/PNG already made `ready` by synchronous image validation may also accept its first
+`ready` extraction result while it has no extraction state. The internal validation marker
+must identify the current material generation. Other terminal images cannot be reprocessed
+through this exception; `failed` and `retry` outcomes retain their existing state guards.
 
 Request:
 

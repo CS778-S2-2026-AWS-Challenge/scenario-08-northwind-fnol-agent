@@ -10,9 +10,12 @@ from backend.core.auth import (
     require_claimant,
     require_claimant_session,
     require_integration_service,
-    require_staff,
+    require_staff_identity,
+    require_workbench_read,
+    require_workbench_write,
 )
 from backend.core.config import Settings
+from backend.domain.claim_creation import evidence_snapshot_fingerprint
 
 
 def _bearer(token: str) -> dict[str, str]:
@@ -31,6 +34,8 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         '/api/claims/message': require_claimant,
         '/api/v1/claims/{claim_id}/asset-selections': require_claimant_session,
         '/api/v1/claims/{claim_id}/asset-snapshots': require_claimant_session,
+        '/api/v1/claims/{claim_id}/auto-fill-suggestions': require_claimant_session,
+        '/api/v1/claims/{claim_id}/payout-contact-selections': require_claimant_session,
         '/api/v1/claims/{claim_id}/policy-selections': require_claimant_session,
         '/api/v1/claims/{claim_id}/payout-contact-selections': require_claimant_session,
         '/api/v1/claims/{claim_id}/auto-fill-suggestions': require_claimant_session,
@@ -44,6 +49,8 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
     claimant_session_routes = {
         '/api/v1/claims/{claim_id}/asset-selections',
         '/api/v1/claims/{claim_id}/asset-snapshots',
+        '/api/v1/claims/{claim_id}/auto-fill-suggestions',
+        '/api/v1/claims/{claim_id}/payout-contact-selections',
         '/api/v1/claims/{claim_id}/policy-selections',
     }
 
@@ -59,8 +66,18 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         expected: Callable[..., object] | None
         if route.path in expected_dependencies:
             expected = expected_dependencies[route.path]
-        elif route.path.startswith(('/api/v1/workbench/', '/api/v1/staff/')):
-            expected = require_staff
+        elif route.path.startswith('/api/v1/staff/'):
+            expected = require_staff_identity
+        elif route.path.startswith('/api/v1/workbench/agent/'):
+            expected = (
+                require_workbench_read
+                if route.methods == {'GET'} or route.path == '/api/v1/workbench/agent/sessions'
+                else require_workbench_write
+            )
+        elif route.path.startswith('/api/v1/workbench/'):
+            expected = (
+                require_workbench_read if route.methods == {'GET'} else require_workbench_write
+            )
         elif route.path in claimant_session_routes or route.path.startswith(
             ('/api/v1/auth/', '/api/v1/account')
         ):
@@ -125,6 +142,7 @@ def test_integration_routes_reject_other_registered_actor_credentials(client: Te
         'confirmed_form': {},
         'evidence_refs': [],
         'pending_evidence': [],
+        'evidence_snapshot_fingerprint': evidence_snapshot_fingerprint([]),
         'route': 'standard_motor_intake',
     }
     allowed = client.post(

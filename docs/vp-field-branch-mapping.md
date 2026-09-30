@@ -3,7 +3,7 @@
 ## Scope and authority
 
 This document is the executable mapping for Week 6 P2.1. It maps every field in the
-current backend Field/Branch Registry (version 6) to the three VP family branches.
+current backend Field/Branch Registry (version 7) to the three VP family branches.
 The registry and API/persistence contracts remain authoritative for names and types;
 this document records scenario applicability, projection boundaries, confirmation
 needs, and lifecycle use. It does not add fields, define policy coverage, or replace
@@ -31,6 +31,9 @@ the Dynamic Form evaluator.
 | `claimant.client_number` | all | `common` | text | identity/system | no | staff only | ownership and audit |
 | `claimant.role` | all | `common` | text | claimant | yes | claimant/staff | reporter context |
 | `claimant.contact_preference` | all | `common` | enum | claimant/profile | yes | claimant/staff | support and follow-up |
+| `claimant.relationship_to_policyholder` | all | `common` | enum | claimant | conditional | claimant/staff | reporter authority |
+| `policyholder.identity_ref` | all | `common` | text | account/policy | conditional | staff; claimant-safe name only | non-policyholder reporter |
+| `policyholder.name` | all | `common` | text | claimant/policy | conditional | claimant/staff | policyholder fallback |
 | `claim.product_family` | all | `family.*` | enum | claimant plus deterministic routing | yes | claimant/staff | family activation |
 | `incident.type` | all | `common` | enum | claimant; staff may correct | conditional | claimant/staff | safety and conditional branches |
 | `incident.occurred_at` | all | `common` | temporal | claimant/evidence | conditional | claimant/staff | chronology and next action without invented precision |
@@ -45,10 +48,31 @@ the Dynamic Form evaluator.
 | `vehicle.registration` | motor | `family.motor` | text | claimant/evidence | conditional | claimant/staff | vehicle identification and provider routing |
 | `vehicle.damage_description` | motor | `family.motor` | text | claimant/evidence | conditional | claimant/staff | damage triage and assessment preparation |
 | `vehicle.drivable` | motor | `family.motor` | boolean | claimant; evidence/staff may verify | conditional | claimant/staff | safety, towing, and next action |
+| `vehicle.use` | motor | `family.motor` | enum | claimant/policy | conditional | claimant/staff | use at incident |
+| `vehicle.towing_required` | motor | `family.motor` | enum | claimant/staff | conditional | claimant/staff | recovery routing |
+| `vehicle.towing_location` | motor | `family.motor` | location | claimant/staff | conditional | claimant/staff | recovery routing |
+| `driver.identity_ref` | motor | `family.motor` | text | claimant/account | conditional | staff; claimant-safe projection | actual driver identity |
+| `driver.name` | motor | `family.motor` | text | claimant | conditional | claimant/staff | actual driver |
+| `driver.phone` | motor | `family.motor` | text | claimant | conditional | claimant/staff | driver contact |
+| `driver.email` | motor | `family.motor` | text | claimant | conditional | claimant/staff | driver contact |
+| `driver.relationship_to_policyholder` | motor | `family.motor` | enum | claimant | conditional | claimant/staff | driver authority |
+| `driver.owner_permission` | motor | `family.motor` | enum | claimant | conditional | claimant/staff | permission fact only |
+| `driver.licence_number` | motor | `family.motor` | protected text | claimant | conditional | masked staff only | licence verification |
+| `driver.licence_status` | motor | `family.motor` | enum | claimant/staff | conditional | staff; claimant-safe status | bounded review routing |
+| `other_party.insurer_name` | motor | `family.motor` | text | claimant/evidence | conditional | claimant/staff | third-party routing |
+| `other_party.policy_number` | motor | `family.motor` | protected text | claimant/evidence | conditional | masked staff only | third-party routing |
+| `other_party.claim_reference` | motor | `family.motor` | text | claimant/evidence | conditional | claimant/staff | third-party routing |
+| `witness.present` | motor | `family.motor` | enum | claimant | conditional | claimant/staff | witness branch |
+| `witness.name` | motor | `family.motor` | text | claimant | conditional | claimant/staff | repeatable witness record |
+| `witness.phone` | motor | `family.motor` | text | claimant | conditional | claimant/staff | repeatable witness record |
+| `witness.email` | motor | `family.motor` | text | claimant | conditional | claimant/staff | repeatable witness record |
+| `police.status` | all | `common` + `authority.police` | enum | claimant/evidence/staff | conditional | claimant/staff | police workflow state |
 | `property.address` | home | `family.home` | location | claimant/bounded lookup | conditional | claimant/staff | property routing |
 | `property.affected_areas` | home | `family.home` | text list | claimant/evidence | conditional | claimant/staff | triage and evidence requests |
 | `property.ongoing_risk` | home | `family.home`; may trigger `mitigation.emergency` | enum | claimant; staff may verify | conditional | claimant/staff | urgent safety interruption |
 | `property.habitable` | home | `family.home`; may trigger `accommodation.temporary` | boolean | claimant/staff | conditional | claimant/staff | support and accommodation work |
+| `property.occupancy_relationship` | home | `family.home` | enum | claimant/policy | conditional | claimant/staff | authority and routing |
+| `property.occupancy` | home | `family.home` | enum | claimant | conditional | claimant/staff | safety and routing |
 | `contents.police_reference` | contents | `family.contents` + `authority.police` | text | claimant/evidence/staff | conditional | claimant/staff | authority evidence for stolen or damaged items |
 | `incident.discovered_at` | all | `common` | temporal | claimant/evidence | conditional | claimant/staff | discovery chronology |
 | `injury.persons_affected` | all | `injury.details` | text_list | claimant | source-dependent | claimant/staff | required now |
@@ -66,9 +90,9 @@ and updater provenance. Claimant projections use `ClaimantContentsItem` and expo
 claimant-safe fields; Workbench retains the authorised full record. Item-to-Evidence
 association remains a separate follow-up boundary and is not invented by this mapping.
 
-## Explicit gaps and ownership
+## Remaining non-goals and ownership
 
-The following catalogue candidates are intentionally not executable fields in version 6:
+The following catalogue candidates remain outside this executable catalogue:
 
 - additional motor facts such as vehicle make/model, driver, collision detail, witness,
   repairer, and towing records;
@@ -81,5 +105,4 @@ The following catalogue candidates are intentionally not executable fields in ve
 - scenario seed records, field examples/state values, and full projections, which are
   owned by #583 and #585 respectively.
 
-These are named so downstream work cannot silently treat design candidates as registered
-fields. They do not block the current executable mapping or justify duplicate field names.
+These remain non-goals and do not justify duplicate field names.

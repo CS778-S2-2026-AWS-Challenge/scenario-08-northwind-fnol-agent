@@ -22,6 +22,16 @@ def test_docs_only_change_skips_backend_pytest() -> None:
     assert selection.tests == ()
 
 
+def test_policy_judgment_change_selects_validation_persistence_and_api_consumers() -> None:
+    selection = select_tests(['backend/services/policy_judgment.py'])
+    assert selection.mode == 'scoped'
+    assert set(selection.tests) == {
+        'tests/test_policy_judgment.py',
+        'tests/test_policy_judgment_persistence.py',
+        'tests/test_policy_judgment_turn.py',
+    }
+
+
 def test_narrow_claim_api_change_selects_direct_consumers() -> None:
     selection = select_tests(['backend/api/claims.py'])
 
@@ -108,6 +118,25 @@ def test_unrelated_identity_change_does_not_select_admin_account_contract() -> N
 
     assert selection.mode == 'scoped'
     assert 'tests/test_admin_accounts.py' not in selection.tests
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        'backend/core/auth.py',
+        'backend/api/staff_identity.py',
+        'backend/api/staff_presence.py',
+        'backend/services/staff_identity.py',
+        'backend/services/staff_presence.py',
+    ],
+)
+def test_staff_authorization_changes_select_identity_and_workbench_contracts(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert 'tests/test_identity_runtime.py' in selection.tests
+    assert 'tests/test_staff_identity.py' in selection.tests
+    assert 'tests/test_staff_workbench_authorization.py' in selection.tests
 
 
 def test_unmapped_backend_change_never_returns_an_empty_selection() -> None:

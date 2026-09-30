@@ -392,7 +392,7 @@ def _upload(journey: Journey, material: PackMaterial) -> str | None:
         f'complete upload {material.path}',
         'POST',
         f'{claim}/evidence/{evidence_id}/complete',
-        202,
+        200 if material.media_type in {'image/jpeg', 'image/png'} else 202,
         'claimant',
         {'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )

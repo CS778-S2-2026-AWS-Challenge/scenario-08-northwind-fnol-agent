@@ -1,12 +1,15 @@
 # Start the complete local system against the shared model runtime: MongoDB, MinIO, ingested
 # knowledge, the backend on the local_mvp persistence profile, and all three frontends.
 #
-# This is the one supported way to run the current claimant journey locally:
-#   - model credentials are pulled from the team secrets endpoint on Cloudflare, so nobody
-#     keeps private keys in .env or a local vault;
+# This is the only supported way to run the claimant journey locally -- there is no fixture or
+# controlled-agent fallback path here. Every developer runs the same real dependencies:
+#   - model credentials are pulled from the team secrets endpoint on Cloudflare through
+#     backend/core/dev_secrets.py (called via scripts/fetch_secrets.py), a config-layer
+#     integration point this script calls but does not own, so nobody keeps private keys in
+#     .env or a local vault;
 #   - MongoDB and MinIO run through the repo's docker-compose.yml (the same default services
-#     used outside the --profile vp container build), so Evidence and claim state persist
-#     across restarts instead of living only in the fixture repository;
+#     used outside the --profile vp container build); Docker is a hard requirement, not an
+#     optional dependency with a degraded fallback;
 #   - the approved knowledge corpus is ingested into that MinIO so real local RAG retrieval
 #     works, not the fixture knowledge stub;
 #   - the backend runs the model_gateway runtime profile against the shared
@@ -18,12 +21,12 @@
 #     reports success. A hidden process that has already crashed does not print as if it were
 #     running: each step fails loudly with the process's exit code.
 #
-# The controlled runtime profile (a deterministic agent that never calls a model) is kept only
-# for CI and the test suite. Do not use it for development.
+# The controlled runtime profile (a deterministic agent that never calls a model) and the
+# fixture data profile exist only for CI and the automated test suite. Neither is reachable
+# through this script, on purpose: a developer following this file always gets the real system.
 #
 # Every step below is also listed as a manual command in README.md if you would rather run
-# them one at a time. Pass -SkipDocker to fall back to the fixture data profile (no MongoDB,
-# no MinIO, no persisted Evidence, no real knowledge retrieval) when Docker is unavailable.
+# them one at a time.
 
 param(
     [int]$BackendPort = 8000,
@@ -32,7 +35,6 @@ param(
     [int]$AdminPort = 5175,
     [switch]$BackendOnly,
     [switch]$KeepControlPlane,
-    [switch]$SkipDocker,
     [int]$ReadyTimeoutSeconds = 60
 )
 
@@ -116,30 +118,36 @@ function Invoke-TrackedStep {
     }
 }
 
-# Credential boundary. Start-Process -Environment is an overlay on the inherited environment,
-# not a clean slate: a child sees everything in this shell's $env: plus the overlay, and a
-# $null overlay value removes a variable. So nothing secret is ever written to this shell's
-# $env:. Backend-only configuration and credentials live in $backendEnv and are passed to the
-# backend alone; every other child gets $frontendEnv, an overlay that removes every backend-only
-# name, in case the developer's own environment already carries one (an earlier manual-steps
-# run in this same shell, for instance).
-#
-# A fixed name list, independent of which runtime path actually executes below (-SkipDocker
-# skips the MongoDB/MinIO names entirely) and independent of which names the current bundle
-# fetch happens to return, plus whatever the bundle returns beyond that fixed list, discovered
-# dynamically. Building the removal set only from $backendEnv.Keys, or only from the current
-# bundle's own key names, both make the same mistake: they only null-remove what this
-# particular run happened to set or fetch, so a name a -SkipDocker run never touches, or a
-# credential the developer's shell still carries from an earlier session but that dropped out
-# of this run's bundle, would reach the frontends. Pure and process-free (no network call, no
-# Start-Process) so it can be exercised directly by scripts/test-start-dev-credential-boundary.ps1.
-function Get-CredentialEnvironments {
-    param([string]$SecretsToken, [string]$BundleText)
-    if (-not $SecretsToken) {
-        throw ('NORTHWIND_SECRETS_TOKEN is not set. Ask a teammate for the dev secrets token and ' +
-            'set it once for your user: [Environment]::SetEnvironmentVariable(' +
-            '"NORTHWIND_SECRETS_TOKEN", "<token>", "User"), then open a new terminal.')
+function Split-CredentialEnvironments {
+    # Credential boundary. Start-Process -Environment is an overlay on the inherited
+    # environment, not a clean slate: a child sees everything in this shell's $env: plus the
+    # overlay, and a $null overlay value removes a variable. BackendEnv is passed to the
+    # backend alone; every other child gets FrontendEnv, an overlay that removes every
+    # backend-only name, in case the developer's own environment already carries one (an
+    # earlier manual-steps run in this same shell, for instance).
+    #
+    # FrontendEnv's removal set is the union of three sources, each covering a different gap
+    # the other two miss:
+    #   - a fixed list for the infrastructure settings this script itself sets below;
+    #   - the model-credential names Python derived from config/model-runtime-bindings.json,
+    #     so a bindings change is picked up automatically instead of drifting from a separate
+    #     literal list;
+    #   - every name the endpoint actually returned this run (ModelSecretNames). This third
+    #     source is required, not redundant with the second: an endpoint-returned credential
+    #     name that is not yet in the bindings file (a new provider being trialled, for
+    #     instance) would otherwise stay out of the removal set entirely and reach every
+    #     frontend, since -Environment only overlays the inherited environment rather than
+    #     replacing it.
+    #
+    # Pure and process-free (no network call, no Start-Process) so it can be exercised
+    # directly by scripts/test-start-dev-credential-boundary.ps1 against the exact case above.
+    param([PSCustomObject]$Credentials)
+    $backendEnv = @{}
+    foreach ($property in $Credentials.secrets.PSObject.Properties) {
+        $backendEnv[$property.Name] = $property.Value
     }
+    $modelSecretNames = @($Credentials.secrets.PSObject.Properties.Name)
+
     $backendOnlyNames = @(
         'NORTHWIND_SECRETS_TOKEN',
         'NORTHWIND_ENVIRONMENT', 'NORTHWIND_IDENTITY_MODE', 'NORTHWIND_CONTROL_PLANE_DB_PATH',
@@ -150,33 +158,15 @@ function Get-CredentialEnvironments {
         'NORTHWIND_OBJECT_STORAGE_REGION', 'NORTHWIND_OBJECT_STORAGE_BUCKET', 'NORTHWIND_KNOWLEDGE_BUCKET',
         'NORTHWIND_MONGODB_URI', 'NORTHWIND_MONGODB_DATABASE', 'NORTHWIND_MONGODB_COLLECTION'
     )
-    # Every credential_environment_variable name config/model-runtime-bindings.json currently
-    # configures, kept in sync manually with that file. Removed from every frontend regardless
-    # of whether this run's bundle fetch returned it: a name configured but not returned this
-    # time (a stale credential the developer's shell already carries from an earlier session,
-    # or one the endpoint temporarily omitted) must be treated the same as one that was.
-    $configuredModelCredentialNames = @(
-        'NORTHWIND_MODEL_API_KEY', 'AWS_BEARER_TOKEN_BEDROCK', 'GEMINI_API_KEY'
-    )
-    $backendEnv = @{}
     $frontendEnv = @{}
     foreach ($name in $backendOnlyNames) { $frontendEnv[$name] = $null }
-    foreach ($name in $configuredModelCredentialNames) { $frontendEnv[$name] = $null }
-    # The backend has no use for the bootstrap token itself, only for the model keys it
-    # already unlocked below; null it in case this developer's own environment already has
+    foreach ($name in $Credentials.configured_credential_names) { $frontendEnv[$name] = $null }
+    foreach ($name in $modelSecretNames) { $frontendEnv[$name] = $null }
+    # The backend has no use for the bootstrap token itself, only for the model keys it already
+    # unlocked above; null it defensively in case this developer's own environment already has
     # it set (-Environment overlays the inherited environment, it does not replace it).
     $backendEnv.NORTHWIND_SECRETS_TOKEN = $null
-    $modelSecretNames = @()
-    foreach ($line in ($BundleText -split "`n")) {
-        if ($line -match '^([A-Z][A-Z0-9_]*)=(.*)$') {
-            $backendEnv[$Matches[1]] = $Matches[2]
-            $modelSecretNames += $Matches[1]
-            $frontendEnv[$Matches[1]] = $null
-        }
-    }
-    if ($modelSecretNames.Count -eq 0) {
-        throw 'The secrets endpoint returned no KEY=VALUE lines; the token may be wrong or revoked.'
-    }
+
     return [PSCustomObject]@{
         BackendEnv       = $backendEnv
         FrontendEnv      = $frontendEnv
@@ -184,81 +174,75 @@ function Get-CredentialEnvironments {
     }
 }
 
-# 1. Pull model credentials from the team secrets endpoint. The bundle is KEY=VALUE lines.
-#    The bearer token that unlocks the bundle is itself a credential and is never stored in
-#    the repository: it comes from the NORTHWIND_SECRETS_TOKEN environment variable, which
-#    each developer sets once (see README). It is read into a local, used for one request,
-#    and removed from every child this script starts -- no child needs it.
-$secretsToken = $env:NORTHWIND_SECRETS_TOKEN
-$bundle = if ($secretsToken) {
-    Invoke-RestMethod -Uri 'https://ysoseri.us/secret/northwind-dev' `
-        -Headers @{ Authorization = "Bearer $secretsToken" }
-} else { $null }
-# Remove it from this script's own process environment the moment the request is done: every
-# later external command in this script -- docker compose, Invoke-Step children, anything not
-# started through Start-Tracked's -Environment overlay -- inherits $env: directly, with no
-# overlay to null it back out. Leaving it here would leak it to every one of those, not only
-# to the Start-Tracked children the overlays cover.
+# 1. Pull model credentials from the team secrets endpoint. The fetch and parse logic is a
+#    Python function (backend/core/dev_secrets.py), a config-layer integration point this
+#    script calls through scripts/fetch_secrets.py but does not own or duplicate. The bearer
+#    token that unlocks the bundle defaults to the developer's own `gh auth token` -- the
+#    endpoint verifies that token can read this private repo, so nothing needs to be requested
+#    from a teammate or configured locally. NORTHWIND_SECRETS_TOKEN remains a manual override
+#    if set (see README), and either way the token itself is never stored in the repository.
+$fetchOutput = & py -3.12 (Join-Path $repoRoot 'scripts/fetch_secrets.py') 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw ($fetchOutput | Out-String).Trim()
+}
+# Remove it from this script's own process environment immediately: every later external
+# command in this script -- docker compose, Invoke-Step children, anything not started through
+# Start-Tracked's -Environment overlay -- inherits $env: directly, with no overlay to null it
+# back out. Leaving it here would leak it to every one of those, not only to the Start-Tracked
+# children the overlays cover.
 Remove-Item -ErrorAction SilentlyContinue env:NORTHWIND_SECRETS_TOKEN
-$credentials = Get-CredentialEnvironments -SecretsToken $secretsToken -BundleText $bundle
+
+$credentials = Split-CredentialEnvironments -Credentials ($fetchOutput | ConvertFrom-Json)
 $backendEnv = $credentials.BackendEnv
 $frontendEnv = $credentials.FrontendEnv
 $modelSecretNames = $credentials.ModelSecretNames
-$secretsToken = $null
 
-if ($SkipDocker) {
-    # Fixture data profile: no MongoDB, no MinIO, no persisted Evidence, no real knowledge
-    # retrieval. Only use this when Docker genuinely is not available.
-    $backendEnv.DATA_RUNTIME_PROFILE = 'fixture'
-    $backendEnv.NORTHWIND_OBJECT_STORAGE_ADAPTER = 'fixture'
+# 2. MongoDB and MinIO through docker-compose.yml, waited to healthy -- not started and
+#    assumed. `--wait` blocks until each service's own healthcheck passes. Docker is required;
+#    there is no fixture-data fallback in this script.
+Invoke-Step 'docker compose up mongodb/minio' { docker compose up -d --wait mongodb minio }
+
+# mongo-init and minio-init are one-shot containers (restart: "no") that depend on the
+# services above already being healthy. Running them here in the foreground turns their
+# actual exit code into a real pass/fail signal instead of a guess.
+Invoke-Step 'mongo-init' { docker compose up --exit-code-from mongo-init mongo-init }
+Invoke-Step 'minio-init' { docker compose up --exit-code-from minio-init minio-init }
+
+# 3. Object-storage settings, shared by knowledge ingestion and the backend. These are the
+#    docker-compose.yml development defaults for the local MinIO, not team secrets, but they
+#    are still backend-only and never reach a frontend.
+$storageEnv = @{
+    NORTHWIND_OBJECT_STORAGE_ENDPOINT          = 'http://localhost:9000'
+    NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID     = 'minioadmin'
+    NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY = 'minioadmin'
+    NORTHWIND_OBJECT_STORAGE_REGION            = 'us-east-1'
+    NORTHWIND_KNOWLEDGE_BUCKET                 = 'northwind-knowledge'
 }
-else {
-    # 2. MongoDB and MinIO through docker-compose.yml, waited to healthy -- not started and
-    #    assumed. `--wait` blocks until each service's own healthcheck passes.
-    Invoke-Step 'docker compose up mongodb/minio' { docker compose up -d --wait mongodb minio }
+foreach ($name in $storageEnv.Keys) { $backendEnv[$name] = $storageEnv[$name] }
 
-    # mongo-init and minio-init are one-shot containers (restart: "no") that depend on the
-    # services above already being healthy. Running them here in the foreground turns their
-    # actual exit code into a real pass/fail signal instead of a guess.
-    Invoke-Step 'mongo-init' { docker compose up --exit-code-from mongo-init mongo-init }
-    Invoke-Step 'minio-init' { docker compose up --exit-code-from minio-init minio-init }
-
-    # 3. Object-storage settings, shared by knowledge ingestion and the backend. These are the
-    #    docker-compose.yml development defaults for the local MinIO, not team secrets, but they
-    #    are still backend-only and never reach a frontend.
-    $storageEnv = @{
-        NORTHWIND_OBJECT_STORAGE_ENDPOINT          = 'http://localhost:9000'
-        NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID     = 'minioadmin'
-        NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY = 'minioadmin'
-        NORTHWIND_OBJECT_STORAGE_REGION            = 'us-east-1'
-        NORTHWIND_KNOWLEDGE_BUCKET                 = 'northwind-knowledge'
-    }
-    foreach ($name in $storageEnv.Keys) { $backendEnv[$name] = $storageEnv[$name] }
-
-    # Ingest the approved knowledge corpus into that MinIO so retrieval is real, not the
-    # fixture stub. Run as tracked children with only the storage settings -- explicitly not
-    # the model credentials or the bootstrap token, which ingestion has no use for, and which
-    # -Environment would otherwise still let this process inherit from this shell's own $env:.
-    $ingestionEnv = $storageEnv.Clone()
-    $ingestionEnv.NORTHWIND_SECRETS_TOKEN = $null
-    foreach ($name in $modelSecretNames) { $ingestionEnv[$name] = $null }
-    Invoke-TrackedStep 'knowledge source upload' `
-        -ArgumentList @('-3.12', 'scripts/upload_knowledge_sources.py', 'config/knowledge-source-corpus') `
+# Ingest the approved knowledge corpus into that MinIO so retrieval is real, not the
+# fixture stub. Run as tracked children with only the storage settings -- explicitly not
+# the model credentials or the bootstrap token, which ingestion has no use for, and which
+# -Environment would otherwise still let this process inherit from this shell's own $env:.
+$ingestionEnv = $storageEnv.Clone()
+$ingestionEnv.NORTHWIND_SECRETS_TOKEN = $null
+foreach ($name in $modelSecretNames) { $ingestionEnv[$name] = $null }
+Invoke-TrackedStep 'knowledge source upload' `
+    -ArgumentList @('-3.12', 'scripts/upload_knowledge_sources.py', 'config/knowledge-source-corpus') `
+    -Environment $ingestionEnv
+foreach ($request in (Get-ChildItem 'config/knowledge-ingestion-requests/*.json')) {
+    Invoke-TrackedStep "knowledge ingestion ($($request.Name))" `
+        -ArgumentList @('-3.12', 'scripts/ingest_knowledge_source.py', $request.FullName) `
         -Environment $ingestionEnv
-    foreach ($request in (Get-ChildItem 'config/knowledge-ingestion-requests/*.json')) {
-        Invoke-TrackedStep "knowledge ingestion ($($request.Name))" `
-            -ArgumentList @('-3.12', 'scripts/ingest_knowledge_source.py', $request.FullName) `
-            -Environment $ingestionEnv
-    }
-
-    # 4. Point the backend at that MongoDB and MinIO through the local_mvp persistence profile.
-    $backendEnv.DATA_RUNTIME_PROFILE = 'local_mvp'
-    $backendEnv.NORTHWIND_OBJECT_STORAGE_ADAPTER = 's3_compatible'
-    $backendEnv.NORTHWIND_MONGODB_URI = 'mongodb://localhost:27017/?directConnection=true&replicaSet=rs0'
-    $backendEnv.NORTHWIND_MONGODB_DATABASE = 'northwind_fnol'
-    $backendEnv.NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
-    $backendEnv.NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 }
+
+# 4. Point the backend at that MongoDB and MinIO through the local_mvp persistence profile.
+$backendEnv.DATA_RUNTIME_PROFILE = 'local_mvp'
+$backendEnv.NORTHWIND_OBJECT_STORAGE_ADAPTER = 's3_compatible'
+$backendEnv.NORTHWIND_MONGODB_URI = 'mongodb://localhost:27017/?directConnection=true&replicaSet=rs0'
+$backendEnv.NORTHWIND_MONGODB_DATABASE = 'northwind_fnol'
+$backendEnv.NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
+$backendEnv.NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 
 # 5. Start from a fresh Control Plane so the checked-in model catalogue is what gets published.
 #    The backend only seeds the Release Set into an empty Control Plane; an existing database
@@ -326,11 +310,11 @@ try {
         return
     }
 
-    # 7. Start the three frontends and wait for each to actually serve its page. Vite proxies
-    #    read the target from these environment variables at startup. These three are the only
-    #    names a frontend legitimately needs; everything else in $frontendEnv is a removal.
+    # 7. Start the three frontends and wait for each to actually serve its page. Vite clients
+    #    read these public runtime targets at startup; every backend-only value remains removed.
     $backendOrigin = "http://127.0.0.1:$BackendPort"
     $frontendEnv.VITE_BACKEND_PORT = [string]$BackendPort
+    $frontendEnv.VITE_NORTHWIND_WORKBENCH_URL = "http://127.0.0.1:$WorkbenchPort/workbench/"
     $frontendEnv.WORKBENCH_API_TARGET = $backendOrigin
     $frontendEnv.ADMIN_API_TARGET = $backendOrigin
 

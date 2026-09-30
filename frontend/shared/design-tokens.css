@@ -32,6 +32,7 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 10px;
+  --radius-composer: 12px;
   --radius-round: 999px;
 
   --color-page: #F7F4EF;
@@ -85,6 +86,7 @@
   --border-danger: 1.5px solid var(--color-danger);
   --shadow-none: none;
   --shadow-subtle: 0 1px 3px rgba(26, 24, 20, .08);
+  --shadow-image-inset: inset 0 0 0 1px rgba(26, 24, 20, .1);
   --shadow-popover: 0 8px 24px rgba(26, 24, 20, .14);
   --shadow-modal: 0 16px 40px rgba(26, 24, 20, .18);
   --blur-subtle: blur(8px);
@@ -107,6 +109,9 @@
   --density-workbench-inline-gap: 8px;
   --density-workbench-nav-width: 216px;
   --density-workbench-queue-width: 340px;
+  --density-workbench-conversation-queue-width: 38%;
+  --density-workbench-conversation-queue-min-width: 300px;
+  --density-workbench-conversation-queue-tablet-width: 320px;
   --density-workbench-agent-width: 400px;
   --density-workbench-agent-height: 600px;
   --density-workbench-record-label-width: 160px;
@@ -117,6 +122,7 @@
   --size-control-touch: 44px;
   --size-header-compact: 52px;
   --duration-standard: 200ms;
+  --duration-spinner: 800ms;
   --size-select-menu-min: 248px;
   --size-select-menu-max: 320px;
   --size-model-trigger-max: 200px;
@@ -128,6 +134,9 @@
   --claimant-profile-label-width: 160px;
   --claimant-profile-address-min-height: 96px;
   --claimant-details-panel-width: 400px;
+
+  /* Claimant attachment cards stay compact while shrinking with narrow composers. */
+  --claimant-attachment-card-width: 400px;
 
   /* Claimant entry semantic contract. Component CSS consumes these roles
      without reconstructing translucent states or page geometry. */

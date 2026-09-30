@@ -50,7 +50,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
-from backend.domain.retrieval import PolicyRetrievalRecord
+from backend.domain.retrieval import PolicyRetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
     ActionEnvelopeRecord,
     AgentProposalRecord,
@@ -64,6 +64,7 @@ from backend.domain.runtime import (
 )
 from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.protocols import IdempotencyRecord
+from backend.services.claim_participants import synchronize_participants
 from backend.services.external_service_offers import (
     build_offer_metadata,
     detected_service_intents,
@@ -75,6 +76,7 @@ from backend.services.fact_resolution import (
     resolve_form_change,
 )
 from backend.services.handoffs import prepare_support_handoff, updated_claim_for_handoff
+from backend.services.policy_judgment import policy_judgment_signals
 from backend.services.professional_reviews import build_policy_review_handoff
 
 if TYPE_CHECKING:
@@ -95,6 +97,7 @@ class TurnRecords:
     evaluation_record: BranchEvaluationRecord
     runtime_records: RuntimeTurnRecords
     live_mutation_command: Any
+    review_signals: list[ReviewSignalRecord] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -810,6 +813,7 @@ def reduce_turn(
                 'updated_at': timestamp,
             }
         )
+    updated_claim = synchronize_participants(updated_claim, form_changes)
     # A handoff owns responsibility; later model next-action proposals cannot
     # release it or create a second owner.
     if open_handoffs and handoff is None:
@@ -952,6 +956,23 @@ def reduce_turn(
         runtime_policy=runtime_policy,
     )
     effective_next_step = updated_claim.customer_next_step
+    judgment_signals: list[ReviewSignalRecord] = []
+    judgment_rejections: list[dict[str, str]] = []
+    if validated is not None and validated.policy_judgment_proposals:
+        if authority.outcome is not AuthorityOutcome.AUTHORISED:
+            judgment_rejections = [
+                {'kind': item.kind, 'reason': 'turn_not_authorized'}
+                for item in validated.policy_judgment_proposals
+            ]
+        else:
+            judgment_signals, judgment_rejections = policy_judgment_signals(
+                updated_claim,
+                validated.policy_judgment_proposals,
+                authorized_knowledge=validated.policy_judgment_sources,
+                trigger_message_id=claimant_message.message_id,
+                created_at=timestamp,
+                handoff_active=bool(open_handoffs or handoff or safety_interrupt),
+            )
     resulting_revision = updated_claim.revision
     updated_session = session_after_questions.model_copy(
         update={
@@ -1090,6 +1111,9 @@ def reduce_turn(
         contents_item_changes=list(proposal.contents_item_changes),
         source_refs=sorted(_tool_source_refs(proposal.tool_results)),
         external_service_intents=external_service_intents,
+        policy_judgment_proposals=list(validated.policy_judgment_proposals) if validated else [],
+        policy_judgment_rejections=judgment_rejections,
+        policy_judgment_signal_refs=[item.signal_id for item in judgment_signals],
         proposal_source=proposal.proposal_source,
         model_profile_id=session.model_profile_id,
         runtime_configuration=(runtime_policy.provenance() if runtime_policy else None),
@@ -1350,8 +1374,9 @@ def reduce_turn(
             evaluation_record=evaluation_record,
             runtime_records=runtime_records,
             live_mutation_command=live_mutation_command,
+            review_signals=judgment_signals,
         ),
         session=updated_session,
         offers=[item for item in work_items if item.kind == 'external'],
-        rejected_parts=list(validated.rejected) if validated is not None else [],
+        rejected_parts=[*(validated.rejected if validated else []), *judgment_rejections],
     )

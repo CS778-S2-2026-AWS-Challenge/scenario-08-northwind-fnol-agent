@@ -5,6 +5,7 @@ const VoiceInputControl = forwardRef(function VoiceInputControl({
   available,
   draft,
   onDraft,
+  statusId = 'staff-voice-status',
   textareaRef,
 }, controllerRef) {
   const [voiceState, setVoiceState] = useState('idle')
@@ -150,9 +151,10 @@ const VoiceInputControl = forwardRef(function VoiceInputControl({
   return (
     <>
       <button
-        className={`staff-composer__voice${voiceState === 'listening' ? ' is-listening' : ''}`}
+        className={`staff-composer__voice compact-composer__tool${voiceState === 'listening' ? ' is-listening' : ''}`}
         type="button"
         disabled={!available || voiceState === 'stopping'}
+        aria-pressed={voiceState === 'listening'}
         aria-label={voiceState === 'listening' ? 'Stop voice input' : 'Use voice input'}
         title={voiceState === 'listening' ? 'Stop voice input' : 'Use voice input'}
         onClick={startVoiceInput}
@@ -166,7 +168,7 @@ const VoiceInputControl = forwardRef(function VoiceInputControl({
           className={`staff-composer__voice-status${['error', 'unsupported'].includes(voiceState) ? ' is-error' : ''}`}
         >
           <span
-            id="staff-voice-status"
+            id={statusId}
             role={['error', 'unsupported'].includes(voiceState) ? 'alert' : 'status'}
             aria-live={['error', 'unsupported'].includes(voiceState) ? 'assertive' : 'polite'}
             aria-atomic="true"

@@ -143,6 +143,8 @@ def test_message_replay_fails_closed_for_mislinked_handoff_result(
         'I was not hurt.',
         'I hurt the bumper.',
         'Everyone is safe and we are no longer in danger.',
+        'No one is injured and nobody is in immediate danger.',
+        'None of us are in immediate danger.',
         'A support person emailed me yesterday.',
         'I do not need to speak to a person.',
         'Another person saw the collision.',

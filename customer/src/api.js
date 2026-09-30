@@ -400,6 +400,62 @@ export function updateAccountPreferences(preferences, revision) {
   })
 }
 
+export function updateClaimAutoFillPreferences(preferences, revision) {
+  return apiRequest('/api/v1/account/claim-auto-fill-preferences', {
+    method: 'PATCH',
+    headers: revision == null ? undefined : { 'If-Match': String(revision) },
+    body: JSON.stringify(preferences),
+  })
+}
+
+export function getClaimAutoFillSuggestions(claimId, { signal } = {}) {
+  return apiRequest(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/auto-fill-suggestions`,
+    { signal },
+  )
+}
+
+export function selectClaimPolicy({
+  claimId,
+  revision,
+  policyId,
+  idempotencyKey = requestId('policy-selection'),
+}) {
+  return apiRequest(`/api/v1/claims/${encodeURIComponent(claimId)}/policy-selections`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ policy_id: policyId }),
+  })
+}
+
+export function selectClaimAsset({
+  claimId,
+  revision,
+  assetId,
+  idempotencyKey = requestId('asset-selection'),
+}) {
+  return apiRequest(`/api/v1/claims/${encodeURIComponent(claimId)}/asset-selections`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ asset_id: assetId }),
+  })
+}
+
+export function listClaimAssetSnapshots(claimId, { cursor, limit = 100, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/asset-snapshots?${params}`,
+    { signal },
+  )
+}
+
 export function listAccountPolicies({ cursor, limit = 25, signal } = {}) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
@@ -625,6 +681,21 @@ export function resumeClaimSession({
   })
 }
 
+export function pauseClaimSession({
+  claimId,
+  sessionId,
+  revision,
+  idempotencyKey = requestId('pause-session'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/pause`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+  })
+}
+
 export function startClaimSession({ claimId, intent = 'new', idempotencyKey = requestId('session'), modelProfileId = null }) {
   return apiRequest(`/api/v1/claims/${claimId}/sessions`, {
     method: 'POST',
@@ -725,11 +796,12 @@ export function submitClaimMessage({
   sessionId,
   revision,
   text,
+  evidenceRefs = [],
   modelProfileId = null,
   idempotencyKey = requestId('turn'),
   clientMessageId = requestId('message'),
-  evidenceRefs = [],
 }) {
+  const normalizedText = text?.trim() || ''
   return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: {
@@ -738,7 +810,7 @@ export function submitClaimMessage({
     },
     body: JSON.stringify({
       client_message_id: clientMessageId,
-      content: { type: 'text', text },
+      ...(normalizedText ? { content: { type: 'text', text: normalizedText } } : {}),
       evidence_refs: evidenceRefs,
       ...(modelProfileId ? { model_profile_id: modelProfileId } : {}),
     }),

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, TypeVar
 
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
@@ -150,6 +150,7 @@ from backend.domain.workbench_action_registry import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.claim_data import (
+    project_claim_participants,
     project_contents_item_evidence_association,
     project_motor_other_driver,
 )
@@ -225,14 +226,6 @@ _QUEUE_VIEW_GROUPS: dict[WorkbenchQueueView, WorkbenchQueueViewGroup] = {
 }
 
 
-def _staff_access_required() -> ApiError:
-    return ApiError(
-        status_code=403,
-        code='ACCESS_DENIED',
-        message='Staff workbench access is required.',
-    )
-
-
 def _claim_not_found() -> ApiError:
     return ApiError(
         status_code=404,
@@ -246,8 +239,7 @@ def _authorised_claim(
     principal: Principal,
     claim_id: str,
 ) -> WorkingClaim:
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _claim_not_found()
@@ -920,6 +912,7 @@ def _incomplete_context(
         follow_up_due_at=follow_up.due_at,
         follow_up_status=follow_up.status.value,
         follow_up_attempts=follow_up.attempt_count,
+        expires_at=follow_up.deadline_at,
     )
 
 
@@ -1105,6 +1098,8 @@ def _allowed_actions(
     external_results: Sequence[ExternalTaskResult],
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
+    if 'workbench:write' not in principal.scopes:
+        return []
     external_attention = _external_staff_attention(
         external_tasks,
         external_requests,
@@ -1539,6 +1534,7 @@ def require_workbench_action(
     Raises:
         ApiError: The revision is stale or the exact action is not executable.
     """
+    require_staff_capability(principal, 'workbench:write')
     if claim.revision != expected_revision:
         raise ApiError(
             status_code=409,
@@ -1660,8 +1656,7 @@ def get_workbench_claim_filter_metadata(
         ApiError: The caller is not an authenticated staff principal.
     """
 
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     return WorkbenchClaimFilterMetadata(
         views=[
             WorkbenchQueueFilterOption(
@@ -1762,6 +1757,7 @@ def _build_projection(
     *,
     include_detail: bool,
 ) -> WorkbenchClaimListItem | WorkbenchClaimDetail:
+    require_staff_capability(principal, 'workbench:read')
     evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
     pending_evidence = _pending_evidence(evidence)
     handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
@@ -1909,11 +1905,15 @@ def _build_projection(
         except (InvalidExternalLifecycleTransition, ValueError):
             external_section_limitation = _INCONSISTENT_EXTERNAL_LIFECYCLE
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
+    policyholder, driver, witnesses = project_claim_participants(claim)
     return WorkbenchClaimDetail(
         **base,
         active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
         contents_items=claim.contents_items,
+        policyholder=policyholder,
+        driver=driver,
+        witnesses=witnesses,
         contents_item_evidence_associations=[
             project_contents_item_evidence_association(item)
             for item in repository.list_contents_item_evidence_associations(
@@ -2003,8 +2003,7 @@ def list_workbench_claims(
     limit: int = 25,
     cursor: str | None = None,
 ) -> WorkbenchClaimListResponse:
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     for field_name, value in (
         ('updated_before', updated_before),
         ('updated_after', updated_after),
@@ -2179,8 +2178,7 @@ def list_workbench_conversations(
     limit: int,
     cursor: str | None,
 ) -> WorkbenchConversationsResponse:
-    if principal.actor_type != 'staff':
-        raise _staff_access_required()
+    require_staff_capability(principal, 'workbench:read')
     items: list[WorkbenchConversationSummary] = []
     for claim in repository.list_claims_internal():
         handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
@@ -2302,16 +2300,21 @@ def list_workbench_signals(
         source_refs = signal.get('source_refs')
         refs = [str(value) for value in source_refs] if isinstance(source_refs, list) else []
         reason_codes = signal.get('reason_codes')
+        policy_sources = signal.get('policy_sources')
         items.append(
             WorkbenchSignalDetail(
                 **projected.model_dump(),
+                judgment_point_kind=signal.get('judgment_point_kind'),
+                proposed_assessment=signal.get('proposed_assessment'),
+                proposal_rationale=signal.get('proposal_rationale'),
                 reason_codes=(
                     [str(value) for value in reason_codes] if isinstance(reason_codes, list) else []
                 ),
                 decisions=[item.model_dump(mode='json') for item in by_signal.get(signal_id, [])],
                 source_evidence=[
                     retrievals[ref].model_dump(mode='json') for ref in refs if ref in retrievals
-                ],
+                ]
+                + (policy_sources if isinstance(policy_sources, list) else []),
                 created_at=signal.get('created_at'),
             )
         )

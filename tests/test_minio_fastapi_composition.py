@@ -13,9 +13,10 @@ from backend.app import create_app
 from backend.core.config import ObjectStorageAdapter
 from backend.core.runtime_profiles import RuntimeProfileConfigurationError
 from backend.services.support import now_utc
+from tests.media_support import synthetic_image
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
-PAYLOAD = b'northwind-minio-fastapi-smoke'
+PAYLOAD = synthetic_image()
 
 
 class FastApiS3Client:
@@ -136,10 +137,10 @@ def test_environment_composes_minio_through_the_fastapi_evidence_flow(
         listed = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
         readiness = client.get('/health/ready')
 
-    assert completed.status_code == 202
-    assert s3_client.object_reads == 2
+    assert completed.status_code == 200
+    assert s3_client.object_reads == 3
     assert listed.status_code == 200
-    assert listed.json()['items'][0]['file_status'] == 'processing'
+    assert listed.json()['items'][0]['file_status'] == 'ready'
     assert readiness.status_code == 200
     assert readiness.json()['status'] == 'degraded'
     assert readiness.json()['checks']['evidence_storage'] == 'configured_service'

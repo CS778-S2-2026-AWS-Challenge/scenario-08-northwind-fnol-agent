@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
@@ -29,9 +29,12 @@ from backend.domain.models import (
     CreateClaimRequest,
     CreateClaimResponse,
     CustomerNextStep,
+    DriverRecord,
     FieldSelectionState,
     FollowUpContactPermission,
+    FollowUpReasonCode,
     FollowUpRecord,
+    FollowUpResolutionCode,
     FollowUpStatus,
     FormConfirmationRequest,
     FormConfirmationResponse,
@@ -57,6 +60,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.recovery import RecoveryAuthorityError
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import (
     ClaimRepository,
@@ -74,9 +78,11 @@ from backend.services.branching import (
     claimant_dynamic_form_projection,
 )
 from backend.services.claim_data import (
+    project_claim_participants,
     project_contents_item_evidence_association,
     project_motor_other_driver,
 )
+from backend.services.claim_participants import synchronize_participants
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_current_action_projection
@@ -89,6 +95,11 @@ from backend.services.handoffs import claimant_handoff
 from backend.services.incomplete_claims import (
     find_incomplete_recovery,
     recovery_checkpoint_allowed,
+)
+from backend.services.protected_values import (
+    ProtectedValueAdapter,
+    ProtectedValueError,
+    masked_value,
 )
 from backend.services.support import (
     decode_cursor,
@@ -261,6 +272,7 @@ def _claimant_incomplete_context(
         last_meaningful_activity_at=recovery.last_meaningful_activity_at,
         resume_point=recovery.resume_point,
         follow_up_due_at=follow_up.due_at,
+        expires_at=follow_up.deadline_at,
         follow_up_status=follow_up.status,
     )
 
@@ -335,6 +347,7 @@ def claimant_claim(
         agreement_accepted=agreement_acceptance_is_current(claim),
     )
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
+    policyholder, driver, witnesses = project_claim_participants(claim)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -342,6 +355,9 @@ def claimant_claim(
         workflow_state=claim.claim_state.workflow_state,
         form=_claimant_form(repository, claim),
         contents_items=_claimant_contents_items(repository, claim),
+        policyholder=policyholder,
+        driver=driver,
+        witnesses=witnesses,
         motor_other_driver=(
             project_motor_other_driver(motor_other_driver)
             if motor_other_driver is not None
@@ -566,6 +582,8 @@ def pause_session(
         claim_id=claim_id,
         source_session_id=session_id,
         purpose='resume_incomplete_claim',
+        policy_id='incomplete_claim_follow_up',
+        policy_version=1,
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[
             f'claim:{claim_id}:revision:{updated_claim.revision}',
@@ -580,8 +598,12 @@ def pause_session(
         attempt_count=0,
         channel=PreferredChannel.IN_APP if contact_authorised else None,
         outcome=None,
+        blocked_reason=(
+            FollowUpReasonCode.CONTACT_NOT_AUTHORISED if not contact_authorised else None
+        ),
         status=FollowUpStatus.PENDING if contact_authorised else FollowUpStatus.BLOCKED,
         due_at=timestamp if contact_authorised else None,
+        deadline_at=recovery.interrupted_at + timedelta(days=7),
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -590,6 +612,7 @@ def pause_session(
         last_meaningful_activity_at=recovery.last_meaningful_activity_at,
         resume_point=recovery.resume_point,
         follow_up_due_at=follow_up.due_at,
+        expires_at=follow_up.deadline_at,
         follow_up_status=follow_up.status,
     )
     claimant_after = claimant_claim(
@@ -910,6 +933,9 @@ def start_session(
                     update={
                         'status': FollowUpStatus.RESOLVED,
                         'outcome': 'claimant_resumed',
+                        'resolution_code': FollowUpResolutionCode.CLAIMANT_RESUMED,
+                        'blocked_reason': None,
+                        'due_at': None,
                         'updated_at': timestamp,
                     }
                 )
@@ -1014,6 +1040,13 @@ def start_session(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The session resume request conflicted with an existing retry or session.',
             ) from conflict
+        except RecoveryAuthorityError as error:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='Saved recovery information needs repair before this claim can resume.',
+                details=[ErrorDetail(field='incomplete_context', reason='recovery_unavailable')],
+            ) from error
         claim = updated_claim
 
     return _claimant_session(session, claim.customer_next_step)
@@ -1039,6 +1072,7 @@ def update_form(
     payload: FormPatchRequest,
     if_match: str | None,
     identity_repository: IdentityRepository | None = None,
+    protected_values: ProtectedValueAdapter | None = None,
 ) -> FormPatchResponse:
     expected_revision = parse_if_match(if_match)
     claim = repository.get_claim(claim_id, principal.subject)
@@ -1055,6 +1089,7 @@ def update_form(
 
     timestamp = now_utc()
     updated_fields: dict[str, StructuredFormField] = {}
+    protected_driver = claim.driver
     for update in payload.updates:
         if update.field_code not in REGISTERED_FIELD_CODES:
             raise ApiError(
@@ -1063,6 +1098,18 @@ def update_form(
                 message='The field code is not registered.',
                 details=[
                     ErrorDetail(field='field_code', reason=f'Unknown field: {update.field_code}.')
+                ],
+            )
+        if update.field_code == 'other_party.policy_number':
+            raise ApiError(
+                status_code=422,
+                code='PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE',
+                message='Other-party policy numbers must use the protected participant route.',
+                details=[
+                    ErrorDetail(
+                        field=update.field_code,
+                        reason='The generic form cannot store this protected value.',
+                    )
                 ],
             )
         try:
@@ -1079,10 +1126,57 @@ def update_form(
                 details=[ErrorDetail(field=update.field_code, reason=str(error))],
             ) from error
         existing = claim.form.get(update.field_code)
+        value_changed = existing is not None and existing.value != update.value
+        if update.field_code == 'driver.licence_number':
+            if update.status is not FormStatus.CONFIRMED:
+                raise ApiError(
+                    status_code=422,
+                    code='VALIDATION_ERROR',
+                    message='The protected licence path accepts only confirmed values.',
+                )
+            raw_licence = str(update.value)
+            if len(raw_licence) > 120:
+                raise ApiError(
+                    status_code=422,
+                    code='VALIDATION_ERROR',
+                    message='The protected licence value exceeds its length limit.',
+                )
+            try:
+                if protected_values is None:
+                    raise ProtectedValueError('Protection unavailable.')
+                if protected_driver is not None and protected_driver.licence_number is not None:
+                    value_changed = (
+                        protected_values.resolve(protected_driver.licence_number)
+                        != raw_licence.strip()
+                    )
+                ciphertext = protected_values.seal(raw_licence)
+            except ProtectedValueError as error:
+                raise ApiError(
+                    status_code=503,
+                    code='PROTECTED_DATA_UNAVAILABLE',
+                    message='Protected participant data is temporarily unavailable.',
+                    retryable=True,
+                ) from error
+            # Mask before fact resolution creates assertion history or audit refs.
+            update = update.model_copy(
+                update={
+                    'value': masked_value(raw_licence),
+                    'correction_reason': 'Protected licence corrected.'
+                    if update.correction_reason is not None
+                    else None,
+                }
+            )
+            protected_driver = DriverRecord.model_validate(
+                {
+                    **(protected_driver.model_dump() if protected_driver else {}),
+                    'licence_number': ciphertext,
+                    'licence_number_masked': update.value,
+                }
+            )
         if (
             existing is not None
             and existing.status.value == 'confirmed'
-            and existing.value != update.value
+            and value_changed
             and update.correction_reason is None
         ):
             raise ApiError(
@@ -1126,6 +1220,7 @@ def update_form(
         update={
             'form': {**claim.form, **updated_fields},
             'incident_type': incident_type,
+            'driver': protected_driver,
             'payment_destination_id': (
                 None
                 if 'claimant.contact_preference' in updated_fields
@@ -1133,6 +1228,7 @@ def update_form(
             ),
         }
     )
+    projected_claim = synchronize_participants(projected_claim, updated_fields)
     candidate_branch_evaluation = BranchRuleEvaluator().evaluate(
         projected_claim,
         current_action=claim.claim_state.next_action,
@@ -1366,6 +1462,7 @@ def confirm_form_fields(
             'updated_at': timestamp,
         }
     )
+    updated_claim = synchronize_participants(updated_claim, confirmed_fields)
     updated_claim = apply_progress(
         updated_claim,
         BranchRuleEvaluator().evaluate(
