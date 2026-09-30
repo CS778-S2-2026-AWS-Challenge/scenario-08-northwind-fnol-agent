@@ -434,8 +434,11 @@ the append-only audit collection through a bounded, filterable projection.
 ## Asset Record Mapping
 
 - `asset:{asset_id}` stores the current `AssetRecord`; `asset_id` uses `ase_` and is globally
-  opaque. Reusable contents details are limited to description, category, brand, and model;
-  serial number and value are not stored in the Asset or copied into its Claim snapshot. Logical
+  opaque. The record may store one nullable, 1,000-character claimant-authored `note`. The note
+  uses the parent Asset revision and whole-record compare-and-set update; omitted PATCH input
+  preserves it and explicit `null` clears it. Reusable contents details are limited to description,
+  category, brand, and model; serial number and value are not stored in the Asset or copied into
+  its Claim snapshot. Note text is likewise never copied into a Claim snapshot. Logical
   lookup/index: `(record_type, customer_id, active, updated_at, _id)`.
 - `claim_asset_snapshot:{snapshot_id}` stores immutable `ClaimAssetSnapshot`; `snapshot_id`
   uses `cas_`. Logical lookup/index: `(record_type, claim_id, captured_at, _id)` with
@@ -454,7 +457,11 @@ the append-only audit collection through a bounded, filterable projection.
 - Fixture and MongoDB adapters implement the same port. MongoDB selection uses one transaction;
   Fixture uses one Claim mutation lock. No adapter may reconstruct a historical snapshot from
   the current asset.
-- Existing records require no bulk backfill. The MongoDB adapter recognises only the legacy
+- Asset note create, replace, and clear operations reuse the existing atomic Asset mutation and
+  value-free audit boundary. Audit events retain the Asset identity and resulting revision, never
+  raw note text.
+- Existing records require no bulk backfill; a missing `note` decodes as `null`. The MongoDB
+  adapter recognises only the legacy
   `serial_number` member inside pre-upgrade contents Asset and Claim asset snapshot details,
   removes it from the validated in-memory representation, and never exposes it through claimant
   or staff projections. The stored source document, including an immutable snapshot, is not

@@ -179,8 +179,36 @@ class EvidenceResolver:
         return self.content
 
 
-def test_openai_compatible_maps_authorised_evidence_blocks_without_storage_metadata() -> None:
-    resolver = EvidenceResolver(b'png-bytes')
+@pytest.mark.parametrize(
+    ('media_type', 'required_capabilities', 'expected_block'),
+    [
+        (
+            'image/png',
+            ModelCapabilities(image_input=True),
+            {
+                'type': 'image_url',
+                'image_url': {'url': 'data:image/png;base64,c3ludGhldGljLWV2aWRlbmNl'},
+            },
+        ),
+        (
+            'application/pdf',
+            ModelCapabilities(document_input=True),
+            {
+                'type': 'file',
+                'file': {
+                    'file_data': ('data:application/pdf;base64,c3ludGhldGljLWV2aWRlbmNl'),
+                    'filename': 'evd_authorised',
+                },
+            },
+        ),
+    ],
+)
+def test_openai_compatible_maps_authorised_evidence_blocks_without_storage_metadata(
+    media_type: str,
+    required_capabilities: ModelCapabilities,
+    expected_block: dict[str, object],
+) -> None:
+    resolver = EvidenceResolver()
     observed: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -200,7 +228,8 @@ def test_openai_compatible_maps_authorised_evidence_blocks_without_storage_metad
 
     gateway = OpenAICompatibleModelGateway(
         gateway_config(
-            image_input=True,
+            image_input=required_capabilities.image_input,
+            document_input=required_capabilities.document_input,
             evidence_resolver=resolver,
         ),
         transport=httpx.MockTransport(handler),
@@ -212,11 +241,14 @@ def test_openai_compatible_maps_authorised_evidence_blocks_without_storage_metad
                     role=ModelRole.USER,
                     content_blocks=[
                         ModelTextContent(text='Inspect this.'),
-                        ModelEvidenceContent(evidence_id='evd_authorised', media_type='image/png'),
+                        ModelEvidenceContent(
+                            evidence_id='evd_authorised',
+                            media_type=media_type,
+                        ),
                     ],
                 )
             ],
-            required_capabilities=ModelCapabilities(image_input=True),
+            required_capabilities=required_capabilities,
         )
     )
 
@@ -224,9 +256,9 @@ def test_openai_compatible_maps_authorised_evidence_blocks_without_storage_metad
     message = cast(list[dict[str, object]], payload['messages'])[0]
     content = cast(list[dict[str, object]], message['content'])
     assert content[0] == {'type': 'text', 'text': 'Inspect this.'}
-    assert content[1]['type'] == 'image_url'
+    assert content[1] == expected_block
     assert 'storage_key' not in json.dumps(payload)
-    assert resolver.requests == [('evd_authorised', 'image/png')]
+    assert resolver.requests == [('evd_authorised', media_type)]
     assert response.text == 'ok'
 
 
@@ -2145,8 +2177,19 @@ def test_capability_failures_are_explicit_and_happen_before_transport(
             {'required_capabilities': ModelCapabilities(tools=True)},
             {'tools': False},
         ),
+        (
+            {'required_capabilities': ModelCapabilities(document_input=True)},
+            {'document_input': False},
+        ),
     ],
-    ids=['purpose', 'privacy', 'prompt', 'explicit-structured-output', 'explicit-tools'],
+    ids=[
+        'purpose',
+        'privacy',
+        'prompt',
+        'explicit-structured-output',
+        'explicit-tools',
+        'explicit-document-input',
+    ],
 )
 def test_request_profile_mismatches_fail_before_transport(
     request_update: dict[str, object],
