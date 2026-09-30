@@ -28,6 +28,70 @@ The validation branch was synchronized with `main@4c90e2a` before the latest che
 containers use one image built from the final reviewed branch head; the pull-request evidence names
 that exact head after the configured remote quality checks pass.
 
+## AWS account capability validation
+
+On 1 October 2026, the school-provided team account was checked through the
+AWS console in the Sydney region (`ap-southeast-2`). This validation was
+performed against the exact current `origin/main` head:
+`a4ea7b49c6c25bb1bd0e6e922a085974553f33a4`.
+
+The console session used the school SSO permission set. No credentials,
+account identifiers, policyholder data, or secret values were recorded here.
+The results below are account-capability evidence only; they do not promote
+the repository `aws` runtime profile or prove that the application is
+deployed.
+
+| Capability | Classification | Evidence observed | Boundary and next step |
+| --- | --- | --- | --- |
+| Sydney region access | `validated` | The S3, DynamoDB, EC2, ECS, ECR, CloudWatch, Secrets Manager, and Bedrock consoles opened in `ap-southeast-2` under the school permission set | Console access is not equivalent to an SDK or application-runtime credential; validate the exact API calls before wiring a runtime profile |
+| S3 bucket creation | `validated` | An empty general-purpose bucket was created successfully in Sydney using the console. No objects were uploaded | The empty test bucket is temporary and must be removed after the user confirms cleanup; this proves S3 create permission, not Evidence or Knowledge Base integration |
+| S3 existing state | `validated` | Two existing Sydney general-purpose buckets were visible, including the project static-check bucket | Ownership and intended use of existing buckets remain to be confirmed; do not reuse the accelerator access-log bucket for project data |
+| DynamoDB table visibility | `validated` | Table `nw-ec2-ddb-test-20260928` was visible and `Active`, with on-demand read/write capacity and zero stored bytes | This proves the account can expose an existing table; migration writes and the application adapter still require a bounded API test and contract reconciliation |
+| EC2 launch surface | `validated` | Sydney had no instances, while the EC2 console exposed `Launch instances` | No instance was launched. A launch would create a persistent cost risk and requires an explicit smallest-size, stop/teardown plan |
+| ECS cluster surface | `validated` | Sydney showed zero clusters and exposed `Create cluster` | No cluster or service was created. Fargate task execution, task roles, networking, and image pulls remain unverified |
+| ECR | `unconfigured` | The ECR console opened and exposed private-repository navigation | No repository or image push was performed; repository creation and push permissions remain to be tested only when an approved image test is ready |
+| CloudWatch | `unconfigured` | The Sydney CloudWatch console opened | No log group, metric, alarm, or dashboard was created; observability permissions and cost impact remain unverified |
+| Secrets Manager | `unconfigured` | The Sydney Secrets Manager console opened and exposed `Store a new secret` | No secret was created and no secret value was entered; runtime secret injection remains unverified |
+| Bedrock | `unconfigured` | The Sydney Bedrock console opened | No model invocation or Knowledge Base operation was attempted; model access, quotas, and IAM permissions remain unverified |
+| AWS credits | `unavailable` | The Billing and Cost Management Credits page reported no active or remaining credits at the time of checking | The account must not be treated as having a guaranteed course credit. Budgets are alerts, not credit balances; confirm the teaching team's billing arrangement before persistent deployment |
+| Repository AWS runtime | `local_only` | The current repository still requires the AWS profile to fail closed when its complete capability bundle is absent | Console access does not change the local runtime contract. The app remains on the existing local MongoDB/MinIO and model-gateway path until an approved AWS adapter and deployment evidence exist |
+
+### Cost and cleanup boundary
+
+No EC2 instance, ECS cluster, ECR repository, DynamoDB table, CloudWatch
+resource, secret, Bedrock invocation, or uploaded S3 object was created during
+this check. The only new resource was the empty S3 permission-test bucket
+named `nw-fnol-permission-check-20261001`; it contains zero objects. Its
+deletion is a separate account mutation and should be performed after the
+current user confirms that the evidence has been recorded.
+
+The existing billing view showed an already-existing `$200` budget with usage
+above that budget, while the Credits view showed no remaining credits. This
+must be treated as a cost warning, not as proof that the team has `$200` of
+available free usage.
+
+### Validation commands and evidence limits
+
+The account checks above were performed through the authenticated AWS console,
+not through the local CLI. The local environment still has no AWS CLI and no
+committed AWS credentials. Therefore no CLI/API command can be reported as
+successful for this account, and no browser observation is being presented as
+proof of application connectivity.
+
+The next bounded checks are:
+
+1. confirm the temporary S3 bucket cleanup decision;
+2. test an empty DynamoDB on-demand write/read using the approved migration
+   harness, then remove the test item/table only through an explicit cleanup
+   step;
+3. test ECR repository creation and a small image push only if the team has
+   approved the image and its storage lifecycle;
+4. verify the exact ECS/Fargate, execution-role, Secrets Manager, CloudWatch,
+   and Bedrock permissions without entering real secrets or customer data.
+
+These checks remain separate from the repository's local runtime-profile
+validation and must be recorded with the same evidence classifications.
+
 ## Results
 
 | Profile example | Classification | Actual result | Bounded limitation |
