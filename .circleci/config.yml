@@ -728,6 +728,142 @@ jobs:
             if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 536 && $2 <= 650 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
             exit 0
 
+  probe-mypy-mongo-2521-2540:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe backend/repositories/mongodb.py 2521-2540
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2521 && $2 <= 2540 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-mongo-2541-2560:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe backend/repositories/mongodb.py 2541-2560
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2541 && $2 <= 2560 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-mongo-2561-2580:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe backend/repositories/mongodb.py 2561-2580
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2561 && $2 <= 2580 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-mongo-2581-2600:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe backend/repositories/mongodb.py 2581-2600
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2581 && $2 <= 2600 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-incomplete-536-565:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe tests/test_incomplete_claim_recovery.py 536-565
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy tests/test_incomplete_claim_recovery.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 536 && $2 <= 565 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-incomplete-566-595:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe tests/test_incomplete_claim_recovery.py 566-595
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy tests/test_incomplete_claim_recovery.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 566 && $2 <= 595 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-incomplete-596-625:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe tests/test_incomplete_claim_recovery.py 596-625
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy tests/test_incomplete_claim_recovery.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 596 && $2 <= 625 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-incomplete-626-650:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe tests/test_incomplete_claim_recovery.py 626-650
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy tests/test_incomplete_claim_recovery.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 626 && $2 <= 650 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -1087,6 +1223,14 @@ workflows:
       - probe-mypy-mongo-hold-c
       - probe-mypy-incomplete-entry
       - probe-mypy-incomplete-isolation
+      - probe-mypy-mongo-2521-2540
+      - probe-mypy-mongo-2541-2560
+      - probe-mypy-mongo-2561-2580
+      - probe-mypy-mongo-2581-2600
+      - probe-mypy-incomplete-536-565
+      - probe-mypy-incomplete-566-595
+      - probe-mypy-incomplete-596-625
+      - probe-mypy-incomplete-626-650
       - github-automation-quality
       - pr-policy
       - docs-quality
