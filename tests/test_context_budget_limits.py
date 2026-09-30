@@ -73,7 +73,7 @@ def test_v8_api_budget_overflow_preserves_input_without_provider_or_controlled_f
     assert response.status_code == 200, response.text
     body = response.json()
     assert body['agent_message'] is None
-    assert body['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    assert body['recovery']['rule_id'] == 'claimant_turn.model_dependency_terminal'
     assert provider.gateway.requests == []
     assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
     saved = repository.list_messages(claim_id, session_id, 'cus_demo')

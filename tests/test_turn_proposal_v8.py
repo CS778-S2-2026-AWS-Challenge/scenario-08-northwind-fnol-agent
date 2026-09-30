@@ -329,6 +329,6 @@ def test_bad_core_remains_atomic_even_when_optional_question_is_malformed(
     )
     assert response.status_code == 200
     assert response.json()['agent_message'] is None
-    assert response.json()['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    assert response.json()['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     claim = repository.get_claim(claim_id, 'cus_demo')
     assert claim is not None and claim.form == {}

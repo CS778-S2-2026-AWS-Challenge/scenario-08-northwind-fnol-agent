@@ -83,7 +83,7 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
     body = response.json()
     assert len(provider.gateway.requests) == 2
     assert body['agent_message'] is None
-    assert body['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    assert body['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     # No spliced or stripped reply reached the claimant; the message is kept.
     assert len(repository.list_messages(journey.claim_id, journey.session_id, 'cus_demo')) == 1
 
