@@ -176,6 +176,7 @@
                     "type": "number"
                   },
                   "currency": {
+                    "description": "ISO 4217 code the claimant stated; NZD when they did not name a currency.",
                     "maxLength": 3,
                     "minLength": 3,
                     "pattern": "^[A-Z]{3}$",

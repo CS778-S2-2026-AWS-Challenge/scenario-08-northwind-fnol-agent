@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.domain.branch_registry import build_default_registry
+from backend.domain.currency import to_nzd
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -38,12 +39,8 @@ from backend.domain.models import (
     NeededFor,
     RequirementResolution,
     Severity,
-    StaffActionStatus,
-    StateChange,
     StructuredFormField,
     SupportNeed,
-    TriageSource,
-    UpdateStaffActionRequest,
     Urgency,
     WorkingClaim,
 )
@@ -56,7 +53,6 @@ from backend.domain.retrieval import (
 from backend.domain.triage import DEFAULT_AMOUNT_THRESHOLD, TRIAGE_RULES_VERSION, triage_claim
 from backend.repositories.fixture import FixtureRepository
 from backend.services import workbench
-from backend.services.staff_actions import _apply_state_changes
 from tests.issue_928_support import prepare_claim_submission
 
 NOW = datetime(2026, 9, 30, tzinfo=UTC)
@@ -176,8 +172,6 @@ def test_a_clear_single_party_claim_is_fast_track() -> None:
     triage = _triage(_claim())
 
     assert triage.severity is Severity.FAST_TRACK
-    assert triage.system_severity is Severity.FAST_TRACK
-    assert triage.source is TriageSource.SYSTEM
     assert triage.reasons == []
     assert triage.rules_version == TRIAGE_RULES_VERSION
     assert triage.amount_threshold == DEFAULT_AMOUNT_THRESHOLD == 5000.0
@@ -364,10 +358,10 @@ def test_a_found_policy_without_uncertainty_is_not_complex() -> None:
     assert _triage(claim).severity is Severity.FAST_TRACK
 
 
-def test_accepted_photo_and_ownership_kinds_satisfy_document_requirements() -> None:
+def test_document_kinds_follow_the_canonical_names_only() -> None:
     contents = triage_claim(
         _claim(),
-        evidence=[_evidence('item_photo'), _evidence('receipt')],
+        evidence=[_evidence('incident_image'), _evidence('receipt')],
         handoffs=[],
         policy_records=[_policy()],
         active_branches=['family.contents'],
@@ -376,37 +370,42 @@ def test_accepted_photo_and_ownership_kinds_satisfy_document_requirements() -> N
     )
     assert contents is not None
     assert 'document_outstanding' not in contents.reasons
+    assessor_only = _triage(
+        _claim(), evidence=[_evidence('incident_photo'), _evidence('assessment_report')]
+    )
+    assert assessor_only.reasons == ['document_outstanding']
+    item_photo_only = _triage(
+        _claim(), evidence=[_evidence('item_photo'), _evidence('repair_quote')]
+    )
+    assert item_photo_only.reasons == ['document_outstanding']
+
+
+def test_contents_amounts_are_converted_to_nzd() -> None:
+    def item(amount: float, currency: str) -> ContentsItem:
+        return ContentsItem(
+            item_id=f'itm_{currency}',
+            description='Laptop',
+            category='electronics',
+            loss_type=ContentsLossType.STOLEN,
+            ownership=ContentsOwnership.OWNED,
+            estimated_value=MoneyAmount(amount=amount, currency=currency),
+            source=FormSource.CLAIMANT,
+            status=FormStatus.CONFIRMED,
+            needed_for=NeededFor.CURRENT_ACTION,
+            updated_at=NOW,
+            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+        )
+
+    # USD 3,000 is about NZD 5,314 at the reference rate, above the NZD threshold.
+    usd = _triage(_claim({'loss.estimated_amount': 100}, contents_items=[item(3000, 'USD')]))
+    assert 'amount_over_threshold' in usd.reasons
+    assert to_nzd(MoneyAmount(amount=2000, currency='NZD')) == 2000
+    unknown = _triage(_claim({'loss.estimated_amount': 100}, contents_items=[item(100, 'XAU')]))
+    assert 'amount_unknown' in unknown.reasons
 
 
 def test_no_triage_before_the_claim_is_created() -> None:
     assert _triage(_claim(external_claim=None)) is None
-
-
-def test_a_staff_decision_locks_the_result_and_keeps_the_rule_outcome() -> None:
-    claim = _claim({'incident.injury_or_danger': True})
-    decided = _apply_state_changes(
-        claim,
-        UpdateStaffActionRequest(
-            status=StaffActionStatus.COMPLETED,
-            state_changes=[StateChange(path='claim_state.severity', to='standard')],
-        ),
-    )
-
-    triage = _triage(decided)
-
-    assert decided.claim_state.severity is Severity.STANDARD
-    assert triage.severity is Severity.STANDARD
-    assert triage.source is TriageSource.STAFF
-    assert triage.system_severity is Severity.COMPLEX
-    assert triage.reasons == ['injury_or_danger']
-    released = _apply_state_changes(
-        decided,
-        UpdateStaffActionRequest(
-            status=StaffActionStatus.COMPLETED,
-            state_changes=[StateChange(path='claim_state.severity', to='unassessed')],
-        ),
-    )
-    assert _triage(released).source is TriageSource.SYSTEM
 
 
 def test_workbench_triages_a_created_claim_and_claimants_never_see_it(
@@ -480,8 +479,7 @@ def test_workbench_triages_a_created_claim_and_claimants_never_see_it(
 
     detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
     triage = detail['triage']
-    assert triage['severity'] == triage['system_severity'] == 'standard'
-    assert triage['source'] == 'system'
+    assert triage['severity'] == 'standard'
     # Another car accepted fault; no amount, policy lookup or repair quote is on file yet.
     assert set(triage['reasons']) >= {
         'third_party_recovery',

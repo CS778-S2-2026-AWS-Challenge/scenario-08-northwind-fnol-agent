@@ -3078,18 +3078,10 @@
           },
           "severity": {
             "$ref": "#/components/schemas/Severity"
-          },
-          "source": {
-            "$ref": "#/components/schemas/TriageSource"
-          },
-          "system_severity": {
-            "$ref": "#/components/schemas/Severity"
           }
         },
         "required": [
           "severity",
-          "source",
-          "system_severity",
           "rules_version",
           "amount_threshold"
         ],
@@ -14960,14 +14952,6 @@
         ],
         "title": "TransitionRequest",
         "type": "object"
-      },
-      "TriageSource": {
-        "enum": [
-          "system",
-          "staff"
-        ],
-        "title": "TriageSource",
-        "type": "string"
       },
       "UpdateAssetRequest": {
         "additionalProperties": false,

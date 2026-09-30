@@ -51,11 +51,6 @@ class Severity(str, Enum):
     COMPLEX = 'complex'
 
 
-class TriageSource(str, Enum):
-    SYSTEM = 'system'
-    STAFF = 'staff'
-
-
 class Coverage(str, Enum):
     NOT_ASSESSED = 'not_assessed'
     CLEAR = 'clear'
@@ -464,8 +459,6 @@ class ClaimTriage(ContractModel):
     """Staff-only triage of a created Claim; never part of a claimant projection."""
 
     severity: Severity
-    source: TriageSource
-    system_severity: Severity
     reasons: list[str] = Field(default_factory=list, max_length=20)
     rules_version: str = Field(min_length=1, max_length=100)
     amount_threshold: float = Field(ge=0.0)

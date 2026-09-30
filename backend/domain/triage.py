@@ -15,6 +15,8 @@ from collections.abc import Iterable, Sequence
 from enum import Enum
 
 from backend.domain.branch_registry import BranchRegistrySnapshot
+from backend.domain.currency import to_nzd
+from backend.domain.evidence import canonical_evidence_kind
 from backend.domain.field_registry import parse_registered_number
 from backend.domain.models import (
     AssessorRoutingStatus,
@@ -31,7 +33,6 @@ from backend.domain.models import (
     RequirementResolution,
     Severity,
     SupportNeed,
-    TriageSource,
     Urgency,
     WorkingClaim,
 )
@@ -52,12 +53,10 @@ _UNRESOLVED_REQUIREMENT_STATES = (
     'proposed',
 )
 _SEVERITY_RANK = {Severity.FAST_TRACK: 0, Severity.STANDARD: 1, Severity.COMPLEX: 2}
-# Branch document requirements name one kind; claimant uploads and other sources
-# record the same material under neighbouring kinds (a chat photo is
-# `incident_photo`, a receipt is `receipt`). These kinds satisfy the requirement.
+# A receipt or invoice is itself proof of ownership (the tag projection already maps
+# both to `evidence.proof_of_ownership`). Every other required kind needs that kind:
+# an assessor's report is not the claimant's repair quote.
 _SATISFYING_KINDS: dict[str, frozenset[str]] = {
-    'incident_image': frozenset({'incident_image', 'incident_photo', 'photo', 'item_photo'}),
-    'repair_quote': frozenset({'repair_quote', 'assessment_report'}),
     'proof_of_ownership': frozenset({'proof_of_ownership', 'receipt', 'invoice'}),
 }
 
@@ -114,12 +113,7 @@ def triage_claim(
     registry: BranchRegistrySnapshot,
     amount_threshold: float = DEFAULT_AMOUNT_THRESHOLD,
 ) -> ClaimTriage | None:
-    """Return the staff-only triage of a created Claim, or None before creation.
-
-    A severity stored on the Claim other than `unassessed` can only come from a
-    staff decision (Runtime never writes it), so it is reported as the result
-    and locks it; the current rule outcome is still returned beside it.
-    """
+    """Return the staff-only triage of a created Claim, or None before creation."""
     if not claim_is_created(claim):
         return None
     reasons = _matched_reasons(
@@ -132,17 +126,12 @@ def triage_claim(
         registry=registry,
         amount_threshold=amount_threshold,
     )
-    system_severity = max(
-        (REASON_SEVERITY[reason] for reason in reasons),
-        key=_SEVERITY_RANK.__getitem__,
-        default=Severity.FAST_TRACK,
-    )
-    stored = claim.claim_state.severity
-    staff_decided = stored is not Severity.UNASSESSED
     return ClaimTriage(
-        severity=stored if staff_decided else system_severity,
-        source=TriageSource.STAFF if staff_decided else TriageSource.SYSTEM,
-        system_severity=system_severity,
+        severity=max(
+            (REASON_SEVERITY[reason] for reason in reasons),
+            key=_SEVERITY_RANK.__getitem__,
+            default=Severity.FAST_TRACK,
+        ),
         reasons=[reason.value for reason in reasons],
         rules_version=TRIAGE_RULES_VERSION,
         amount_threshold=amount_threshold,
@@ -265,8 +254,12 @@ def _outstanding_documents(
     for branch_id in active_branches:
         branch = registry.branch_by_id.get(branch_id)
         if branch is not None:
-            wanted.update(branch.document_requirements)
-    received = {item.kind for item in evidence if item.status is EvidenceStatus.RECEIVED}
+            wanted.update(canonical_evidence_kind(kind) for kind in branch.document_requirements)
+    received = {
+        canonical_evidence_kind(item.kind)
+        for item in evidence
+        if item.status is EvidenceStatus.RECEIVED
+    }
     return {
         kind for kind in wanted if not (_SATISFYING_KINDS.get(kind, frozenset({kind})) & received)
     }
@@ -291,10 +284,13 @@ def _highest_amount(claim: WorkingClaim) -> float | None:
     if stated is not None:
         amounts.append(stated)
     item_values = [
-        item.estimated_value.amount
+        to_nzd(item.estimated_value)
         for item in claim.contents_items
         if item.status is FormStatus.CONFIRMED and item.estimated_value is not None
     ]
+    if any(value is None for value in item_values):
+        # Part of the contents total cannot be expressed in NZD, so the total is unknown.
+        return None
     if item_values:
-        amounts.append(sum(item_values))
+        amounts.append(sum(value for value in item_values if value is not None))
     return max(amounts) if amounts else None
