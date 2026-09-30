@@ -489,7 +489,15 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     assert visible_messages.status_code == 200
     items = visible_messages.json()['items']
     assert len(items) == 1
-    assert items[0]['recovery']['rule_id'] == 'incomplete_claim_follow_up.v1'
+    assert items[0]['actor'] == 'agent'
+    assert items[0]['recovery'] is None
+    assert items[0]['content'] == {
+        'type': 'text',
+        'text': (
+            'Your claim is still saved. You can return to continue '
+            'where you left off when you are ready.'
+        ),
+    }
 
     for _ in range(2):
         current = repository.get_follow_up(
