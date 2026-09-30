@@ -495,8 +495,10 @@ Each Claim conversation has a persisted question budget. Runtime counts Agent qu
 registered facts requested, repeated questions, and detailed question history. Counts carry across
 replacement sessions for the same Claim. When the budget is exhausted, Runtime preserves the
 Claim, stops the additional Agent question, sets `post_session_follow_up_required`, and returns a
-claimant-safe next step owned by a claims professional. Prompt wording and model behaviour cannot
-reset or exceed this boundary.
+claimant-safe next step owned by a claims professional. Once every current requirement is
+satisfied, an extra question cannot leave information outstanding: Runtime still counts it, but
+keeps the requirement-driven next step and does not set `post_session_follow_up_required`. Prompt
+wording and model behaviour cannot reset or exceed this boundary.
 
 ## Publication and Rollback
 

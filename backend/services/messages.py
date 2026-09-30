@@ -1231,6 +1231,7 @@ def _apply_question_accounting(
     trigger_message_id: str,
     timestamp: datetime,
     during_handoff: bool = False,
+    requirements_ready: bool = False,
 ) -> tuple[SessionRecord, CustomerNextStep, str]:
     fields = _question_fields(proposal, next_step)
     structured_v8_question = (
@@ -1245,7 +1246,14 @@ def _apply_question_accounting(
     )
     if not asks_question:
         return session, next_step, response_text
-    if not during_handoff and session.question_turn_count >= session.question_budget:
+    # Once every current requirement is satisfied, an extra question cannot
+    # leave information outstanding, so the budget no longer replaces the
+    # requirement-driven next step. The question is still counted.
+    if (
+        not during_handoff
+        and not requirements_ready
+        and session.question_turn_count >= session.question_budget
+    ):
         paused_step = CustomerNextStep(
             status='question_budget_reached',
             summary='Your report is saved. Northwind may follow up on the remaining information.',
