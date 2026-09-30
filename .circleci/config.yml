@@ -36,17 +36,67 @@ jobs:
           name: Check backend formatting
           command: |
             if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
+            set -o pipefail
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check 2>&1 | tee /tmp/backend-format.log
       - run:
           name: Lint backend
           command: |
             if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
+            set -o pipefail
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check 2>&1 | tee /tmp/backend-lint.log
       - run:
           name: Type-check backend
           command: |
             if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
+            set -o pipefail
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy 2>&1 | tee /tmp/backend-mypy.log
+      - run:
+          name: Report backend static-check failure
+          when: on_fail
+          command: |
+            if [ -z "${CIRCLE_PULL_REQUEST:-}" ] || [ -z "${GITHUB_TOKEN:-}" ]; then
+              echo "PR URL or GitHub token unavailable; diagnostic comment skipped."
+              exit 0
+            fi
+            export NORTHWIND_DIAGNOSTIC_PR="${CIRCLE_PULL_REQUEST##*/}"
+            python - <<'PY'
+            import json
+            import os
+            import urllib.request
+            from pathlib import Path
+
+            sections = []
+            for label, path in (
+                ('ruff format', '/tmp/backend-format.log'),
+                ('ruff lint', '/tmp/backend-lint.log'),
+                ('mypy', '/tmp/backend-mypy.log'),
+            ):
+                file = Path(path)
+                if file.exists():
+                    text = file.read_text(errors='replace').strip()
+                    sections.append(f'### {label}\n```text\n{text[-12000:]}\n```')
+            body = (
+                'Temporary exact-head backend-quality diagnostic for PR #1096.\n\n'
+                + ('\n\n'.join(sections) if sections else 'No static-check log file was produced.')
+            )
+            owner = os.environ['CIRCLE_PROJECT_USERNAME']
+            repo = os.environ['CIRCLE_PROJECT_REPONAME']
+            pr = os.environ['NORTHWIND_DIAGNOSTIC_PR']
+            request = urllib.request.Request(
+                f'https://api.github.com/repos/{owner}/{repo}/issues/{pr}/comments',
+                data=json.dumps({'body': body}).encode(),
+                method='POST',
+                headers={
+                    'Authorization': f"Bearer {os.environ['GITHUB_TOKEN']}",
+                    'Accept': 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    'Content-Type': 'application/json',
+                },
+            )
+            with urllib.request.urlopen(request, timeout=20) as response:
+                print(f'Diagnostic comment status: {response.status}')
+            PY
+
       - run:
           name: Test backend
           command: |
