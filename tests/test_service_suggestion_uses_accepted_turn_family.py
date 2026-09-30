@@ -40,8 +40,10 @@ def _prompt_services(provider: V8JourneyProvider, turn: int = 0) -> list[dict[st
     request = provider.gateway.requests[turn]
     message = next(item for item in request.messages if item.role.value == 'user')
     assert message.content is not None
+    # The planner omits an empty section, as it does when the lifecycle lookup fails.
     return cast(
-        list[dict[str, Any]], json.loads(message.content)['claim.current']['eligible_services']
+        list[dict[str, Any]],
+        json.loads(message.content)['claim.current'].get('eligible_services', []),
     )
 
 

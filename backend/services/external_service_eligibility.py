@@ -4,7 +4,7 @@ from backend.domain.external_service_registry import (
     ExternalLifecycleStatus,
     ExternalServiceLifecycleProjection,
 )
-from backend.domain.models import ActorType, MessageRecord, WorkingClaim
+from backend.domain.models import ActorType, FormStatus, MessageRecord, WorkingClaim
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent_external_lifecycle import build_agent_external_lifecycle_context
 from backend.services.external_service_offers import detected_service_intents
@@ -39,6 +39,10 @@ def eligible_service_ids(
         item['service_identity']
         for item in detected_service_intents(current_text, [], product_family=family)
     }
+    if not _incident_described(claim):
+        # Services wait until the claimant has told and confirmed what happened,
+        # unless the claimant asks for one in their own words.
+        available &= renewed
     for consent in claim.external_service_consents:
         if consent.status.value == 'granted':
             # The claimant already said yes. The lifecycle projection normally
@@ -61,3 +65,8 @@ def eligible_service_ids(
         if elapsed_turns < 3 and consent.service_identity not in renewed:
             available.discard(consent.service_identity)
     return frozenset(available)
+
+
+def _incident_described(claim: WorkingClaim) -> bool:
+    description = claim.form.get('incident.description')
+    return description is not None and description.status is FormStatus.CONFIRMED
