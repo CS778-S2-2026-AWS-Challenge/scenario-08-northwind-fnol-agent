@@ -18,7 +18,14 @@ def eligible_service_ids(
     *,
     current_text: str = '',
     lifecycle: tuple[ExternalServiceLifecycleProjection, ...] | None = None,
+    explicit_requests: frozenset[str] | None = None,
 ) -> frozenset[str]:
+    """Return the services the Agent may offer this turn.
+
+    `explicit_requests` are services the claimant asked for in the current message, as
+    verified by the model-turn validator. When it is None (controlled runtime and
+    context planning), the bounded `detected_service_intents` patterns stand in.
+    """
     if family is None or any(
         item.status.value not in {'resolved', 'cancelled'}
         for item in repository.list_handoffs(claim.claim_id, claim.customer_id)
@@ -35,10 +42,14 @@ def eligible_service_ids(
         )
         if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
     }
-    renewed = {
-        item['service_identity']
-        for item in detected_service_intents(current_text, [], product_family=family)
-    }
+    renewed = (
+        set(explicit_requests)
+        if explicit_requests is not None
+        else {
+            item['service_identity']
+            for item in detected_service_intents(current_text, [], product_family=family)
+        }
+    )
     if not _incident_described(claim):
         # Services wait until the claimant has told and confirmed what happened,
         # unless the claimant asks for one in their own words.

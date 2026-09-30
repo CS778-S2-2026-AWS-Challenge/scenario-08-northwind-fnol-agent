@@ -32,6 +32,7 @@ def agent_turn_provider() -> V8JourneyProvider:
                 ],
                 question='incident.injury_or_danger',
                 services=['vehicle_damage_assessment_routing'],
+                requested={'vehicle_damage_assessment_routing': 'need an assessor'},
             ),
             envelope(
                 fields=[fact('incident.injury_or_danger', False, 'No one was hurt')],

@@ -6,7 +6,7 @@ published production v8 request ceilings apply; these are workflow/contract
 tests, not live provider latency evidence.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, cast
@@ -71,6 +71,7 @@ def envelope(
     fields: Sequence[dict[str, Any]] = (),
     question: str | None = None,
     services: Sequence[str] = (),
+    requested: Mapping[str, str] | None = None,
     items: Sequence[dict[str, Any]] = (),
     confirms: bool = False,
     action: str | None = None,
@@ -104,7 +105,11 @@ def envelope(
         if question
         else None,
         'service_suggestions': [
-            {'service_identity': service, 'rationale': 'This support fits the reported situation.'}
+            {
+                'service_identity': service,
+                'rationale': 'This support fits the reported situation.',
+                'claimant_request_quote': (requested or {}).get(service),
+            }
             for service in services
         ],
         'document_requests': list(documents),

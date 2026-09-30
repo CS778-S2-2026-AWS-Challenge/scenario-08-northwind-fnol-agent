@@ -167,3 +167,31 @@ def test_cooldown_starts_at_consent_decision_and_handoff_wins(
         old_turns + later_turns,
         current_text='Please get me a damage assessment.',
     )
+
+
+def test_verified_requests_replace_pattern_recognition_on_the_model_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        eligibility,
+        'build_agent_external_lifecycle_context',
+        _consent_required(ASSESSMENT, RECOVERY),
+    )
+    repository = SimpleNamespace(list_handoffs=lambda *_: [])
+    claim = _claim({})
+
+    # The request patterns match "tow", but the model path verified no request.
+    assert (
+        eligibility.eligible_service_ids(
+            repository,
+            claim,
+            'motor',
+            (),
+            current_text='I do not want a tow.',
+            explicit_requests=frozenset(),
+        )
+        == frozenset()
+    )
+    assert eligibility.eligible_service_ids(
+        repository, claim, 'motor', (), explicit_requests=frozenset({RECOVERY})
+    ) == {RECOVERY}

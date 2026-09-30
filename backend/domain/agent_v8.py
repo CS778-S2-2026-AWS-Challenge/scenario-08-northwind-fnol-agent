@@ -87,6 +87,9 @@ class V8NextQuestion(ContractModel):
 class V8ServiceSuggestion(ContractModel):
     service_identity: str = Field(min_length=1, max_length=100)
     rationale: str = Field(min_length=1, max_length=150)
+    # The claimant's own words asking for this service, verbatim from the current
+    # message; Runtime verifies the quote before it counts as an explicit request.
+    claimant_request_quote: str | None = Field(default=None, max_length=300)
 
 
 class V8PolicyJudgmentProposal(ContractModel):
