@@ -81,6 +81,54 @@ jobs:
               echo "AuditEvent contract unaffected; check skipped."
             fi
 
+  backend-format-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend diagnostics
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff format diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
+
+  backend-lint-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend diagnostics
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff lint diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
+
+  backend-mypy-diagnostic:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend diagnostics
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Mypy diagnostic
+          command: |
+            python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -399,6 +447,9 @@ workflows:
   quality:
     jobs:
       - backend-quality
+      - backend-format-diagnostic
+      - backend-lint-diagnostic
+      - backend-mypy-diagnostic
       - github-automation-quality
       - pr-policy
       - docs-quality
