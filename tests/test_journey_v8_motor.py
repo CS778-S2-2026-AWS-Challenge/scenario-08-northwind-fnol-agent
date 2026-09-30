@@ -56,12 +56,19 @@ def agent_turn_provider() -> V8JourneyProvider:
                 services=['vehicle_recovery_request'],
             ),
             envelope(
-                fields=[fact('parties.other_parties', True, 'another vehicle')],
+                fields=[
+                    fact('parties.other_parties', True, 'another vehicle'),
+                    fact(
+                        'incident.liability_position',
+                        'other_party_accepts',
+                        'the other driver admitted it was their fault',
+                    ),
+                ],
                 reply=(
                     'Here is what I will pass to the claims team: rear-ended on Queen St '
                     'yesterday around 3pm, bumper damaged and the car cannot be driven, your '
                     'passenger has a sore neck (minor, no ambulance), another vehicle was '
-                    'involved. Anything to change before I send it?'
+                    'involved and its driver accepted fault. Anything to change before I send it?'
                 ),
                 summary_fields=MOTOR_SUMMARY_FIELDS,
             ),
@@ -82,6 +89,7 @@ MOTOR_SUMMARY_FIELDS = [
     'vehicle.damage_description',
     'vehicle.drivable',
     'parties.other_parties',
+    'incident.liability_position',
     'loss.description',
 ]
 
@@ -143,7 +151,9 @@ def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
         action['service_identity'] == 'vehicle_recovery_request'
         for action in sixth['agent_message']['message_actions']
     )
-    seventh = journey.send('There was another vehicle involved.')
+    seventh = journey.send(
+        'There was another vehicle involved and the other driver admitted it was their fault.'
+    )
     assert seventh['dynamic_form']['requirements']['ready'] is True
     seventh_text = seventh['agent_message']['content']['text']
     assert seventh_text.startswith('Here is what I will pass to the claims team')

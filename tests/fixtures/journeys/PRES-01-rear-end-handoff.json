@@ -7,7 +7,7 @@
   },
   "turns": [
     {
-      "input": "Another car hit the rear of mine at Queen Street this morning and damaged the rear bumper. Nobody was injured and the scene is safe. The vehicle is safe to drive.",
+      "input": "Another car hit the rear of mine at Queen Street this morning and damaged the rear bumper. Nobody was injured and the scene is safe. The vehicle is safe to drive. The other driver admitted it was their fault.",
       "expected_action": "CONFIRM",
       "expected_form_fields": [
         "incident.description",
@@ -18,7 +18,8 @@
         "incident.occurred_at",
         "parties.other_parties",
         "vehicle.damage_description",
-        "vehicle.drivable"
+        "vehicle.drivable",
+        "incident.liability_position"
       ],
       "response_contains": ["check"],
       "next_step_status": "confirmation_required"

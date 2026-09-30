@@ -1,7 +1,32 @@
+import math
+import re
 from collections.abc import Sequence
 from typing import Protocol
 
 from backend.domain.models import FormSource, FormStatus, StructuredFormField
+
+_AMOUNT_TEXT = re.compile(r'(?:nz)?\$?\s*(\d+(?:\.\d{1,2})?)', re.IGNORECASE)
+
+
+def parse_registered_number(value: object) -> float | None:
+    """Read a registered `number` value: a finite, non-negative amount.
+
+    Numbers pass through; text such as "1850", "$1,850" or "NZ$1850.50" is read as
+    the same amount. Anything else, including booleans, is not a number.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        number = float(value)
+    elif isinstance(value, str):
+        match = _AMOUNT_TEXT.fullmatch(value.strip().replace(',', ''))
+        if match is None:
+            return None
+        number = float(match.group(1))
+    else:
+        return None
+    return number if math.isfinite(number) and number >= 0 else None
+
 
 AUTHORITY_SENSITIVE = frozenset(
     {'claim.product_family', 'incident.injury_or_danger', 'parties.other_parties', 'incident.type'}
@@ -67,6 +92,9 @@ REGISTERED_FIELD_CODES = frozenset(
         'incident.description',
         'incident.injury_or_danger',
         'incident.cause',
+        'incident.liability_position',
+        'loss.estimated_amount',
+        'claim.cover_disagreement',
         'loss.description',
         'parties.other_parties',
         'authorities.police_report_reference',
@@ -108,4 +136,4 @@ REGISTERED_FIELD_CODES = frozenset(
     }
 )
 
-FIELD_REGISTRY_VERSION = '7'
+FIELD_REGISTRY_VERSION = '8'
