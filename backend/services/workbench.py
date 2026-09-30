@@ -70,7 +70,7 @@ from backend.domain.tag_registry import (
     get_filterable_staff_tag_definition,
     list_filterable_staff_tag_definitions,
 )
-from backend.domain.triage import claim_is_created, triage_claim
+from backend.domain.triage import DEFAULT_AMOUNT_THRESHOLD, claim_is_created, triage_claim
 from backend.domain.workbench import (
     ActionAvailability,
     ClaimLifecycleState,
@@ -1754,6 +1754,15 @@ def _matches_search(item: WorkbenchClaimListItem, search: str | None) -> bool:
     return any(query in value.casefold() for value in values if value)
 
 
+_triage_amount_threshold = DEFAULT_AMOUNT_THRESHOLD
+
+
+def configure_triage(*, amount_threshold: float) -> None:
+    """Apply the process-wide triage setting; `create_app` calls this from `Settings`."""
+    global _triage_amount_threshold
+    _triage_amount_threshold = amount_threshold
+
+
 def _claim_triage(
     repository: PersistenceRepository,
     claim: WorkingClaim,
@@ -1779,6 +1788,7 @@ def _claim_triage(
         active_branches=evaluation.active_branches,
         requirements=evaluation.requirements,
         registry=registry,
+        amount_threshold=_triage_amount_threshold,
     )
 
 

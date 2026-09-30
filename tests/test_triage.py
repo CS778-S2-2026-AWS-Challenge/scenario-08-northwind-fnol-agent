@@ -9,6 +9,8 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app import create_app
+from backend.core.config import Settings
 from backend.domain.branch_registry import build_default_registry
 from backend.domain.models import (
     ActorReference,
@@ -52,6 +54,8 @@ from backend.domain.retrieval import (
     RetrievalUncertainty,
 )
 from backend.domain.triage import DEFAULT_AMOUNT_THRESHOLD, TRIAGE_RULES_VERSION, triage_claim
+from backend.repositories.fixture import FixtureRepository
+from backend.services import workbench
 from backend.services.staff_actions import _apply_state_changes
 from tests.issue_928_support import prepare_claim_submission
 
@@ -507,3 +511,19 @@ def test_workbench_triages_a_created_claim_and_claimants_never_see_it(
         assert '"severity"' not in payload
         assert 'third_party_recovery' not in payload
         assert 'fast_track' not in payload
+
+
+def test_the_amount_threshold_comes_from_settings() -> None:
+    with pytest.raises(ValueError, match='NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD'):
+        Settings(environment='test', triage_amount_threshold_nzd=0)
+    create_app(Settings(environment='test', triage_amount_threshold_nzd=1000), FixtureRepository())
+    try:
+        triage = workbench._claim_triage(FixtureRepository(), _claim(), [], [])
+        assert triage is not None
+        assert triage.amount_threshold == 1000
+        assert 'amount_over_threshold' in triage.reasons
+    finally:
+        create_app(Settings(environment='test'), FixtureRepository())
+    default = workbench._claim_triage(FixtureRepository(), _claim(), [], [])
+    assert default is not None
+    assert default.amount_threshold == DEFAULT_AMOUNT_THRESHOLD

@@ -137,6 +137,7 @@ from backend.services.staff_agent import (
     ProfileSelectingStaffAgent,
     StaffAgentTurnProvider,
 )
+from backend.services.workbench import configure_triage
 
 
 def create_app(
@@ -279,6 +280,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = resolved_settings
+    configure_triage(amount_threshold=resolved_settings.triage_amount_threshold_nzd)
     app.state.protected_value_adapter = protected_value_adapter or protected_value_adapter_for(
         resolved_settings.environment
     )

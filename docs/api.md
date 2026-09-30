@@ -3049,7 +3049,7 @@ the next read. Three questions apply in order and every matched reason is return
 | `fast_track` | No reason matched |
 
 Unknown, unavailable or unchecked inputs never yield `fast_track`. `amount_threshold` is the
-configured business threshold (default NZD 5,000); the highest of `loss.estimated_amount` and the
+configured business threshold (`NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD`, default NZD 5,000); the highest of `loss.estimated_amount` and the
 sum of confirmed contents item values is compared, and an amount equal to the threshold is not
 over it. `coverage_uncertain` comes from an uncertainty on the policy retrieval record for the
 Claim's policy number or `coverage = ambiguous`, never from `coverage = review_required` alone.
