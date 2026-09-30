@@ -196,6 +196,170 @@ jobs:
             tests/test_backend_test_selection.py
             scripts/select_backend_tests.py
 
+  debug-format-fixture:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check backend/repositories/fixture.py
+          command: python -m ruff format --check backend/repositories/fixture.py
+
+  debug-format-mongodb:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check backend/repositories/mongodb.py
+          command: python -m ruff format --check backend/repositories/mongodb.py
+
+  debug-format-protocols:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check backend/repositories/protocols.py
+          command: python -m ruff format --check backend/repositories/protocols.py
+
+  debug-format-incomplete:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check tests/test_incomplete_claim_recovery.py
+          command: python -m ruff format --check tests/test_incomplete_claim_recovery.py
+
+  debug-format-retention-tests:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check tests/test_retention_execution.py
+          command: python -m ruff format --check tests/test_retention_execution.py
+
+  debug-format-deployment-tests:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check tests/test_runtime_deployment_profiles.py
+          command: python -m ruff format --check tests/test_runtime_deployment_profiles.py
+
+  debug-format-selector-tests:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check tests/test_backend_test_selection.py
+          command: python -m ruff format --check tests/test_backend_test_selection.py
+
+  debug-format-selector:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check scripts/select_backend_tests.py
+          command: python -m ruff format --check scripts/select_backend_tests.py
+
+  debug-mypy-worker:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare Mypy
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Mypy worker
+          command: python -m mypy backend/recovery_worker_main.py
+
+  debug-mypy-repositories:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare Mypy
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Mypy repositories
+          command: python -m mypy backend/repositories/fixture.py backend/repositories/mongodb.py backend/repositories/protocols.py
+
+  debug-mypy-services:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare Mypy
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Mypy services
+          command: python -m mypy backend/services/recovery_worker.py backend/services/retention.py
+
+  debug-mypy-tests:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare Mypy
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Mypy tests
+          command: python -m mypy tests/test_incomplete_claim_recovery.py tests/test_retention_execution.py tests/test_runtime_deployment_profiles.py tests/test_backend_test_selection.py
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -521,6 +685,18 @@ workflows:
       - debug-format-repositories
       - debug-format-services
       - debug-format-tests
+      - debug-format-fixture
+      - debug-format-mongodb
+      - debug-format-protocols
+      - debug-format-incomplete
+      - debug-format-retention-tests
+      - debug-format-deployment-tests
+      - debug-format-selector-tests
+      - debug-format-selector
+      - debug-mypy-worker
+      - debug-mypy-repositories
+      - debug-mypy-services
+      - debug-mypy-tests
       - github-automation-quality
       - pr-policy
       - docs-quality
