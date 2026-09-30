@@ -1,5 +1,6 @@
 """Ownership-safe application behavior for reusable claimant assets."""
 
+from collections.abc import Collection
 from typing import cast
 
 from pydantic import ValidationError
@@ -112,6 +113,27 @@ def _idempotency_conflict() -> ApiError:
         code='IDEMPOTENCY_CONFLICT',
         message='The Idempotency-Key was already used with a different request.',
     )
+
+
+def _asset_create_fingerprints(payload: CreateAssetRequest) -> set[str]:
+    serialized = payload.model_dump(mode='json')
+    fingerprints = {request_fingerprint(serialized)}
+    if payload.note is None:
+        legacy_payload = dict(serialized)
+        legacy_payload.pop('note', None)
+        fingerprints.add(request_fingerprint(legacy_payload))
+    return fingerprints
+
+
+def _replay_asset_create(
+    record: IdempotencyRecord,
+    accepted_fingerprints: Collection[str],
+) -> AssetProjection:
+    if record.request_fingerprint not in accepted_fingerprints or record.response_payload is None:
+        raise _idempotency_conflict()
+    response_payload = dict(record.response_payload)
+    response_payload.setdefault('note', None)
+    return AssetProjection.model_validate(response_payload)
 
 
 def _validation_error(error: ValidationError) -> ApiError:
@@ -231,12 +253,11 @@ def create_asset(
     idempotency_key: str | None,
 ) -> AssetProjection:
     key = require_idempotency_key(idempotency_key)
+    accepted_fingerprints = _asset_create_fingerprints(payload)
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
     existing = idempotency_repository.find_idempotency(principal.subject, CREATE_ROUTE, key)
     if existing is not None:
-        if existing.request_fingerprint != fingerprint or existing.response_payload is None:
-            raise _idempotency_conflict()
-        return AssetProjection.model_validate(existing.response_payload)
+        return _replay_asset_create(existing, accepted_fingerprints)
 
     timestamp = now_utc()
     asset = AssetRecord(
@@ -271,13 +292,9 @@ def create_asset(
         )
     except IdempotencyConflict as error:
         replay = idempotency_repository.find_idempotency(principal.subject, CREATE_ROUTE, key)
-        if (
-            replay is None
-            or replay.request_fingerprint != fingerprint
-            or replay.response_payload is None
-        ):
+        if replay is None:
             raise _idempotency_conflict() from error
-        return AssetProjection.model_validate(replay.response_payload)
+        return _replay_asset_create(replay, accepted_fingerprints)
     return projection
 
 
