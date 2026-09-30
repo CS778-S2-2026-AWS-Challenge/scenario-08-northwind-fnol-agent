@@ -37,8 +37,6 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         '/api/v1/claims/{claim_id}/auto-fill-suggestions': require_claimant_session,
         '/api/v1/claims/{claim_id}/payout-contact-selections': require_claimant_session,
         '/api/v1/claims/{claim_id}/policy-selections': require_claimant_session,
-        '/api/v1/claims/{claim_id}/payout-contact-selections': require_claimant_session,
-        '/api/v1/claims/{claim_id}/auto-fill-suggestions': require_claimant_session,
     }
     health_paths = {'/health', '/health/live', '/health/ready'}
     public_routes = {
@@ -138,7 +136,6 @@ def test_integration_routes_reject_other_registered_actor_credentials(client: Te
         'working_claim_id': 'clm_missing',
         'claim_revision': 1,
         'authorised_decision_id': 'dec_missing',
-        'evidence_snapshot_fingerprint': 'a' * 64,
         'confirmed_form': {},
         'evidence_refs': [],
         'pending_evidence': [],

@@ -332,13 +332,13 @@ def test_asset_create_replays_legacy_idempotency_without_mutation(
         def find_after_initial_lookup(
             actor_id: str,
             route: str,
-            idempotency_key: str,
+            key: str,
         ) -> IdempotencyRecord | None:
             nonlocal find_calls
             find_calls += 1
             if find_calls == 1:
                 return None
-            return original_find(actor_id, route, idempotency_key)
+            return original_find(actor_id, route, key)
 
         repository.find_idempotency = find_after_initial_lookup  # type: ignore[method-assign]
 
