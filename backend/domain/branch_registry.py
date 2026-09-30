@@ -12,6 +12,7 @@ from backend.domain.agent_context_runtime import TurnFamilyResolution
 from backend.domain.field_registry import (
     FIELD_REGISTRY_VERSION,
     REGISTERED_FIELD_CODES,
+    parse_registered_number,
     trusted_origin_assertion,
 )
 from backend.domain.models import (
@@ -75,6 +76,9 @@ COMMON_FIELDS = frozenset(
         'incident.cause',
         'loss.description',
         'parties.other_parties',
+        'incident.liability_position',
+        'loss.estimated_amount',
+        'claim.cover_disagreement',
         'authorities.emergency_services_notified',
         'police.status',
     }
@@ -133,6 +137,7 @@ REQUIREMENT_PRIORITY = (
     'incident.location',
     'loss.description',
     'parties.other_parties',
+    'incident.liability_position',
     'vehicle.damage_description',
     'vehicle.drivable',
     'property.address',
@@ -155,9 +160,9 @@ COMMON_REQUIRED = frozenset(
 # Documents each kind of report normally carries, named by existing
 # EvidenceRecord.kind values already read by tag_projection / demo_materials.
 FAMILY_DOCUMENTS = {
-    'motor': frozenset({'incident_image', 'repair_quote'}),
-    'home': frozenset({'incident_image', 'repair_quote'}),
-    'contents': frozenset({'incident_image', 'proof_of_ownership'}),
+    'motor': frozenset({'incident_photo', 'repair_quote'}),
+    'home': frozenset({'incident_photo', 'repair_quote'}),
+    'contents': frozenset({'incident_photo', 'proof_of_ownership'}),
 }
 FAMILY_REQUIRED = {
     'motor': frozenset({'vehicle.damage_description', 'vehicle.drivable'}),
@@ -213,6 +218,12 @@ FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
     'incident.cause': ('text', frozenset()),
     'loss.description': ('text', frozenset()),
     'parties.other_parties': ('boolean', frozenset()),
+    'incident.liability_position': (
+        'enum',
+        frozenset({'other_party_accepts', 'claimant_accepts', 'shared', 'disputed', 'unknown'}),
+    ),
+    'loss.estimated_amount': ('number', frozenset()),
+    'claim.cover_disagreement': ('enum', frozenset({'none', 'excess', 'cover'})),
     'authorities.police_report_reference': ('text', frozenset()),
     'authorities.emergency_services_notified': ('boolean', frozenset()),
     'vehicle.registration': ('text', frozenset()),
@@ -1229,6 +1240,10 @@ class BranchRuleEvaluator:
                     for item in claim.contents_items
                 ):
                     required.add('loss.description')
+        if deadline == 'required_now' and self._confirmed_truthy(claim, 'parties.other_parties'):
+            # Liability decides how much handling a claim with another party needs,
+            # so it is asked only once another party is confirmed.
+            required.add('incident.liability_position')
         for branch_id in active_branches:
             branch = self.registry.branch_by_id.get(branch_id)
             if branch is None or branch.kind != 'fact':
@@ -1501,6 +1516,8 @@ def validate_registered_field_value(
         valid = (isinstance(value, str) and bool(value.strip())) or (
             isinstance(value, Mapping) and bool(value)
         )
+    elif definition.value_type == 'number':
+        valid = parse_registered_number(value) is not None
     elif definition.value_type == 'text_list':
         valid = (
             isinstance(value, list)

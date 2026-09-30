@@ -146,6 +146,9 @@ make their boundary explicit.
 | `loss.description` | Damaged, lost, or stolen subject | common/scalar/no | C,E/y/y/y | y/c/registered | Registry + form | C/S; privacy |
 | `incident.injury_or_danger` | Bounded injury/continuing danger signal | common/boolean/no | C/y/y/y | urgent/y/registered | Registry + interruption rules | C/S; safety |
 | `parties.other_parties` | Whether another person or organisation is involved | conditional/boolean/no | C/y/y/y | handoff/c/registered | Participant details remain a separate record | C/S; consent/privacy |
+| `incident.liability_position` | Whether fault is accepted, shared, disputed or unknown when another party is involved | conditional/enum/no | C/y/y/y | triage/y/registered | Registry v8; required once `parties.other_parties` is true | C/S |
+| `loss.estimated_amount` | Estimated loss in NZD from the claimant or a quote or assessment | common/number/no | C,E/y/y/y | triage/c/registered | Registry v8 | C/S |
+| `claim.cover_disagreement` | Whether the claimant disputes the excess or the cover | common/enum/no | C/y/y/y | triage/y/registered | Registry v8 | C/S |
 | `evidence.availability` | Available, missing, incomplete, pending | common/enum/no | C,E,W/y/y/y | next action/y/record | Covered by `EvidenceRecord`, `EvidenceStatus`, and `EvidenceSummary`; not a form field | C/S; privacy |
 | `declaration.factual_accuracy` | Claimant factual declaration | common/enum/no | C/y/y/y | authority/y/record | Covered by `ClaimAgreementAcceptance` and the agreement service/API; not a form field | C/S; authority |
 | `consent.sharing_scope` | Purpose and fields allowed to share | conditional/structured/no | C/y/y/y | external/y/record | Consent record exists | C/S; consent/privacy |

@@ -23,6 +23,7 @@ from backend.domain.agent_v8 import (
 )
 from backend.domain.branch_registry import build_default_registry
 from backend.domain.external_service_registry import SERVICE_REGISTRY
+from backend.domain.field_registry import parse_registered_number
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.domain.models import (
     BranchEvaluationResult,
@@ -161,6 +162,15 @@ def claimant_report_supports_value(
         return all(
             isinstance(item, str) and ' '.join(item.split()).casefold() in quote for item in value
         )
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        # An amount is supported when the quotation states the same figure,
+        # written with or without a currency sign, thousands separators or cents.
+        stated = {
+            parsed
+            for token in re.findall(r'\d[\d,]*(?:\.\d{1,2})?', quote)
+            if (parsed := parse_registered_number(token)) is not None
+        }
+        return float(value) in stated
     if not isinstance(value, bool):
         return False
     negative = bool(

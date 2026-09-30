@@ -3,7 +3,7 @@
 ## Scope and authority
 
 This document is the executable mapping for Week 6 P2.1. It maps every field in the
-current backend Field/Branch Registry (version 7) to the three VP family branches.
+current backend Field/Branch Registry (version 8) to the three VP family branches.
 The registry and API/persistence contracts remain authoritative for names and types;
 this document records scenario applicability, projection boundaries, confirmation
 needs, and lifecycle use. It does not add fields, define policy coverage, or replace
@@ -43,6 +43,9 @@ the Dynamic Form evaluator.
 | `incident.cause` | all | `common` | text | claimant/evidence | conditional | claimant/staff | triage; never coverage conclusion |
 | `loss.description` | all | `common` | text | claimant/evidence | conditional | claimant/staff | loss scope and summary |
 | `parties.other_parties` | all | `common` + `participant.another_party` | boolean | claimant | conditional | claimant/staff | consent, participant, and handoff work |
+| `incident.liability_position` | all | `common`; `required_now` once `parties.other_parties` is confirmed true | enum | claimant | yes | claimant/staff | intake triage (third-party recovery or unresolved liability); never a liability decision |
+| `loss.estimated_amount` | all | `common` | number (NZD) | claimant estimate or quote/assessment total | conditional | claimant/staff | intake triage amount threshold; never a settlement value |
+| `claim.cover_disagreement` | all | `common` | enum | claimant | yes | claimant/staff | intake triage (complex when the claimant disputes the excess or cover) |
 | `authorities.police_report_reference` | motor | `family.motor` + `authority.police` | text | claimant/evidence/staff | conditional | claimant/staff | authority evidence and waiting work |
 | `authorities.emergency_services_notified` | motor | `family.motor` + `authority.police` | boolean | claimant/staff | conditional | claimant/staff | safety and authority context |
 | `vehicle.registration` | motor | `family.motor` | text | claimant/evidence | conditional | claimant/staff | vehicle identification and provider routing |
