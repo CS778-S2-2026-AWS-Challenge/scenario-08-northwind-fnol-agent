@@ -187,6 +187,15 @@ it('shows honest loading, empty, and unavailable states', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('Your claim is still saved')
 })
 
+it('uses a lightweight empty state in the Next steps panel', () => {
+  renderDocuments([], { compact: true })
+
+  expect(screen.getByRole('heading', { name: 'Documents and evidence' })).toBeVisible()
+  expect(screen.getByText('No documents required yet.')).toBeVisible()
+  expect(screen.queryByText('0 of 0 provided')).not.toBeInTheDocument()
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+})
+
 it.each([
   ['failed processing needed now', { status: 'received', file_status: 'failed', needed_for: ['current_action'] }, 'required'],
   ['invalid material needed now', { status: 'invalid', file_status: 'ready', needed_for: ['current_action'] }, 'required'],

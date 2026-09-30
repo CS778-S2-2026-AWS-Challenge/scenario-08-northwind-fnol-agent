@@ -2703,17 +2703,30 @@ storage outage returns retryable `503 DEPENDENCY_UNAVAILABLE` without a Claim mu
 object size/checksum mismatch returns `409 INVALID_STATE_TRANSITION`. Readiness means the
 image is usable, not malware-scanned, fact-verified, or sufficient for every business requirement.
 Completion does not extract or confirm Claim fields. Both persistence profiles use this boundary.
-PDF remains `202 processing`; no automatic PDF processor is dispatched by this change.
-Filename, media type, size, and file status can be read from the evidence list. Storage keys,
-checksums, processing references, and file contents remain internal.
+PDF completion returns `202 processing` after the final object identity, byte length, checksum,
+current material generation, ownership and media type are durable. On a persistent
+`model_gateway` runtime, the shared Evidence worker dispatches the current protected object
+through the published `openrouter-gpt4o-mini` binding (`openai/gpt-4o`) with the
+`evidence_processing` purpose and `northwind-evidence-pdf-v1` prompt contract. The model receives
+only the current PDF and currently unoccupied, registered field contracts. A successful response
+enters the existing processing-completion boundary and creates source-linked `proposed` facts;
+it never confirms a field. A valid document with no eligible facts becomes `ready` with no
+proposals. Filename, media type, size, and file status can be read from the Evidence list. Storage
+keys, checksums, processing operation/lease details, provider request identifiers, credentials,
+raw model responses and unrestricted provenance remain internal.
 
-On persistent data profiles, backend startup also runs bounded background recovery of legacy
-claimant JPEG/PNG records still marked `processing` with queued provenance. It validates each
-record's current final object and applies the same terminal result with Claim revision and
-material-generation checks. Storage outages and conflicts remain retryable on later passes.
-Clients observe recovery through the existing Evidence reads and realtime invalidations;
-GET requests do not perform repair. Old completion idempotency responses remain historical,
-so clients refresh the authoritative Evidence resource after recovery. PDF is excluded.
+On persistent data profiles, backend startup runs one bounded Evidence worker. It continues to
+recover legacy claimant JPEG/PNG records and, when the governed GPT-4o processor is configured,
+selects queued PDFs or PDFs whose five-minute processing lease expired. One stable
+`epr_...` operation identity belongs to the current material generation; each reservation advances
+the Claim revision with compare-and-set before provider I/O. Timeout, rate limit, object-store
+outage and unavailable configuration return the same generation to `queued`. Invalid PDF bytes,
+malformed model output and terminal provider rejection settle it as `failed` without partial
+facts. Claim revision or generation conflicts cannot overwrite newer state and remain eligible
+for a later bounded recovery pass. Clients observe recovery through existing Evidence reads and
+realtime invalidations; GET requests do not repair or dispatch work. Old completion idempotency
+responses remain historical, so clients refresh the authoritative Evidence resource after
+recovery.
 
 Authorised staff can read completed fixture evidence through
 `GET /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content`. This applies the same

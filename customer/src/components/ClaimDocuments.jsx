@@ -293,7 +293,7 @@ function DocumentGroup({ emphasizedId, items, label, onUpload }) {
   )
 }
 
-export default function ClaimDocuments({ items, loadStatus, onUpload }) {
+export default function ClaimDocuments({ items, loadStatus, onUpload, compact = false }) {
   const sortedItems = [...items].sort((left, right) => {
     const requirementDifference = (documentRequirement(left) === 'required' ? 0 : 1)
       - (documentRequirement(right) === 'required' ? 0 : 1)
@@ -312,6 +312,21 @@ export default function ClaimDocuments({ items, loadStatus, onUpload }) {
   const progressText = loadStatus === 'loading' || loadStatus === 'idle'
     ? 'Checking progress…'
     : `${providedCount} of ${totalCount} provided`
+
+  if (compact && totalCount === 0) {
+    return (
+      <section className="claim-documents is-compact-empty" aria-labelledby="claim-documents-title" aria-busy={loadStatus === 'loading'}>
+        <h3 id="claim-documents-title">Documents and evidence</h3>
+        {loadStatus === 'loading' || loadStatus === 'idle' ? (
+          <p role="status">Checking what may help with this claim…</p>
+        ) : loadStatus === 'error' ? (
+          <p className="is-error" role="alert">Document guidance could not be loaded. Your claim is still saved.</p>
+        ) : (
+          <p>No documents required yet.</p>
+        )}
+      </section>
+    )
+  }
 
   return (
     <section className="claim-documents" aria-labelledby="claim-documents-title" aria-busy={loadStatus === 'loading'}>
@@ -332,7 +347,7 @@ export default function ClaimDocuments({ items, loadStatus, onUpload }) {
       ) : loadStatus === 'error' ? (
         <div className="document-panel-state is-error" role="alert">
           <strong>Document guidance could not be loaded.</strong>
-          <span>Your claim is still saved. Check your connection and return to What to provide to try again.</span>
+          <span>Your claim is still saved. Check your connection and return to Next steps to try again.</span>
         </div>
       ) : sortedItems.length === 0 ? (
         <div className="document-panel-state">

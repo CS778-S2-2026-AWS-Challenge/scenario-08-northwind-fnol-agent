@@ -77,6 +77,17 @@ JOURNEY_CRITICAL_PATHS = frozenset(
 )
 BACKEND_CONSUMER_RULES = (
     (
+        (
+            'backend/services/image_recovery.py',
+            'backend/services/pdf_processing.py',
+        ),
+        (
+            'tests/test_evidence_api.py',
+            'tests/test_image_recovery.py',
+            'tests/test_pdf_processing.py',
+        ),
+    ),
+    (
         ('backend/services/policy_judgment.py',),
         (
             'tests/test_policy_judgment.py',

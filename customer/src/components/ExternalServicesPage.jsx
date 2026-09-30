@@ -49,10 +49,16 @@ function EmptyServiceState() {
 
 export default function ExternalServicesPage({
   action,
+  messageActions = [],
   claim,
   onBackToOverview,
   onWhatToProvide,
 }) {
+  const projectedActions = [
+    ...(Array.isArray(messageActions) ? messageActions : []),
+    ...(action ? [action] : []),
+  ]
+
   return (
     <div className="external-services-page">
       <nav className="external-services-breadcrumb" aria-label="Breadcrumb">
@@ -69,7 +75,14 @@ export default function ExternalServicesPage({
         <p className="external-services-claim-number"><span>Claim</span> {claim?.claim_id}</p>
       </header>
 
-      {action ? <ExternalServiceOverview action={action} /> : <EmptyServiceState />}
+      {projectedActions.length > 0
+        ? projectedActions.map((projectedAction, index) => (
+            <ExternalServiceOverview
+              key={projectedAction.offer_id || `legacy:${projectedAction.service_identity || index}`}
+              action={projectedAction}
+            />
+          ))
+        : <EmptyServiceState />}
 
       <div className="external-services-assurances">
         <article>

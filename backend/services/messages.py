@@ -1238,6 +1238,7 @@ def _apply_question_accounting(
     trigger_message_id: str,
     timestamp: datetime,
     during_handoff: bool = False,
+    requirements_ready: bool = False,
 ) -> tuple[SessionRecord, CustomerNextStep, str]:
     fields = _question_fields(proposal, next_step)
     structured_v8_question = (
@@ -1252,7 +1253,14 @@ def _apply_question_accounting(
     )
     if not asks_question:
         return session, next_step, response_text
-    if not during_handoff and session.question_turn_count >= session.question_budget:
+    # Once every current requirement is satisfied, an extra question cannot
+    # leave information outstanding, so the budget no longer replaces the
+    # requirement-driven next step. The question is still counted.
+    if (
+        not during_handoff
+        and not requirements_ready
+        and session.question_turn_count >= session.question_budget
+    ):
         paused_step = CustomerNextStep(
             status='question_budget_reached',
             summary='Your report is saved. Northwind may follow up on the remaining information.',
@@ -2586,14 +2594,22 @@ def submit_message(
             )
             return ()
 
-    def resolve_turn_services(changes: list[ProposedFormChange]) -> frozenset[str]:
+    def resolve_turn_services(
+        changes: list[ProposedFormChange], explicit_requests: frozenset[str]
+    ) -> frozenset[str]:
         # Resolve the same assertions the reducer will apply. A source-backed
         # proposal can still be disputed against stored authority; it must not
         # unlock a service merely because the model supplied a valid quotation.
-        family_changes = [item for item in changes if item.field_code == 'claim.product_family']
+        # The incident description joins the family: a description the claimant
+        # confirms this turn opens offers this turn (#1134).
+        turn_changes = [
+            item
+            for item in changes
+            if item.field_code in {'claim.product_family', 'incident.description'}
+        ]
         resolved = _build_form_changes(
             claim.form,
-            family_changes,
+            turn_changes,
             claimant_message,
             timestamp,
             AuthorityOutcome.AUTHORISED,
@@ -2632,6 +2648,7 @@ def submit_message(
                     if item.message_id != claimant_message.message_id
                 ),
                 current_text=message_text,
+                explicit_requests=explicit_requests,
             )
         except ExternalLifecycleContextError:
             logger.warning(

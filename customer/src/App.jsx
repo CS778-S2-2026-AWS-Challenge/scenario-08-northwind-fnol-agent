@@ -44,7 +44,11 @@ import ExternalServicesPage from './components/ExternalServicesPage.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
-import ClaimReviewPanel from './components/ClaimReviewPanel.jsx'
+import ClaimReviewPanel, {
+  ClaimNextStepsPanel,
+  ClaimSummaryProgress,
+} from './components/ClaimReviewPanel.jsx'
+import { claimReviewRequirements } from './claimReviewProjection.js'
 import AgreementConfirmationPanel from './components/AgreementConfirmationPanel.jsx'
 import PayoutContactPanel from './components/PayoutContactPanel.jsx'
 import ClaimAutoFillPanel from './components/ClaimAutoFillPanel.jsx'
@@ -187,7 +191,11 @@ function fieldLabel(fieldCode) {
 function fieldStatusLabel(status) {
   if (status === 'confirmed') return 'Confirmed'
   if (status === 'pending_generation') return 'Pending'
-  return 'Check this'
+  if (status === 'proposed') return 'Needs review'
+  if (status === 'missing') return 'Missing'
+  if (status === 'disputed') return 'Conflict'
+  if (status === 'unavailable') return 'Unavailable'
+  return 'Recorded'
 }
 
 function fieldSourceLabel(source) {
@@ -202,6 +210,14 @@ function fieldValueText(field) {
     return 'Expected later'
   }
   if (typeof field.value === 'boolean') return field.value ? 'Yes' : 'No'
+  if (Array.isArray(field.value)) return field.value.join(', ')
+  if (field.value && typeof field.value === 'object') {
+    return field.value.claimant_wording
+      || field.value.formatted
+      || Object.values(field.value).filter((value) => (
+        typeof value === 'string' || typeof value === 'number'
+      )).join(', ')
+  }
   return String(field.value ?? '')
 }
 
@@ -1051,6 +1067,12 @@ function App() {
     () => conversationActionFromProjection(claim),
     [claim],
   )
+  const messageExternalServiceActions = useMemo(
+    () => messages.flatMap((message) => (
+      Array.isArray(message.message_actions) ? message.message_actions : []
+    )),
+    [messages],
+  )
   const conversationActionKind = conversationAction?.kind || null
   const accountCustomerId = account?.customer_id || null
   const accountRevision = account?.revision || null
@@ -1343,7 +1365,7 @@ function App() {
       // report the reference number is still awaited for, a repair quote
       // nobody has requested. They carry no real file, so they must never
       // enter the composer tray as if ready to ride the next message; the
-      // "What to provide" sidebar is where a claimant sees those.
+      // "Next steps" is where a claimant sees those.
       const hasRealContent = (item) => (item.file_status || item.status) !== 'not_available'
       if (current.some((item) => item.status === 'uploading')) {
         return current.map((item) => {
@@ -3641,6 +3663,12 @@ function App() {
   }
 
   const showsClaimDetails = workspaceView === 'chat' || workspaceView === 'external-services'
+  const reviewRequirements = claimReviewRequirements(dynamicForm)
+  const toProvideCount = new Set([
+    ...reviewRequirements.missingRequiredNow,
+    ...reviewRequirements.pendingLater,
+  ]).size
+  const claimDetailsExpanded = detailsOpen && showsClaimDetails
 
   return (
     <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'workspace-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''} ${isStandaloneClaimHistory ? 'is-claim-history-page' : ''}`}>
@@ -3971,7 +3999,7 @@ function App() {
           </section>
         </main>
       ) : (
-        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''}`}>
+        <main className={`intake-page ${claimDetailsExpanded ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''}`}>
           <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
             {[
               ['history', 'History'],
@@ -4150,6 +4178,7 @@ function App() {
               {workspaceView === 'external-services' && (
                 <ExternalServicesPage
                   action={claim?.external_service_action || null}
+                  messageActions={messageExternalServiceActions}
                   claim={claim}
                   onBackToOverview={() => openClaimWorkspacePage('overview')}
                   onWhatToProvide={() => openClaimWorkspacePage('documents')}
@@ -4480,47 +4509,72 @@ function App() {
           </section>
 
           {!detailsOpen && showsClaimDetails && (
-            <button className="details-reopen" type="button" onClick={() => setDetailsOpen(true)} aria-label="Show claim details" title="Show claim details">‹</button>
+            <button
+              className="details-reopen"
+              type="button"
+              onClick={() => setDetailsOpen(true)}
+              aria-label="Open claim details panel"
+              title="Open claim details panel"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3.5" y="4" width="17" height="16" rx="2" />
+                <path d="M15 4v16m-1-12-4 4 4 4" />
+              </svg>
+            </button>
           )}
-          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && showsClaimDetails ? 'is-open' : 'is-collapsed'}`} aria-labelledby="claim-details-title">
-            <div className="claim-panel-heading">
-              <div>
-                <p className="eyebrow">Your claim</p>
-                <h2 id="claim-details-title">Claim details</h2>
-              </div>
-              <div className="details-panel-actions">
-                <span className="revision-label">{claim ? `Revision ${claim.revision}` : 'Not started'}</span>
+          <aside
+            className={`claim-panel intake-details-panel mobile-view-${mobileView} ${claimDetailsExpanded ? 'is-open' : 'is-collapsed'}`}
+            aria-label="Claim details"
+            aria-hidden={!claimDetailsExpanded}
+            hidden={!showsClaimDetails}
+          >
+            <div className="claim-details-sticky-header">
+              <div className="claim-details-toolbar">
+                <h2>Claim details</h2>
                 <button
-                  className="details-toggle"
+                  className="claim-details-collapse"
                   type="button"
-                  aria-expanded={detailsOpen}
+                  aria-label="Collapse panel"
+                  title="Collapse panel"
+                  aria-expanded={claimDetailsExpanded}
                   aria-controls="claim-details-body"
-                  onClick={() => setDetailsOpen((open) => !open)}
+                  onClick={() => setDetailsOpen(false)}
                 >
-                  {detailsOpen ? 'Collapse' : 'Details'}
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3.5" y="4" width="17" height="16" rx="2" />
+                    <path d="M15 4v16m-5-12 4 4-4 4" />
+                  </svg>
                 </button>
               </div>
-            </div>
-            <div className="claim-details-tabs" role="tablist" aria-label="Claim details">
-              {[
-                ['summary', 'Summary'],
-                ['documents', 'What to provide'],
-              ].map(([tab, label]) => (
-                <button
-                  ref={(node) => { detailsTabRefs.current[tab] = node }}
-                  id={`claim-details-${tab}-tab`}
-                  key={tab}
-                  type="button"
-                  role="tab"
-                  aria-selected={detailsTab === tab}
-                  aria-controls={`claim-details-${tab}-panel`}
-                  tabIndex={detailsTab === tab ? 0 : -1}
-                  onClick={() => setDetailsTab(tab)}
-                  onKeyDown={(event) => handleDetailsTabKeyDown(event, tab)}
-                >
-                  {label}
-                </button>
-              ))}
+              <div className="claim-details-tabs" role="tablist" aria-label="Claim detail views">
+                {[
+                  ['summary', 'Overview'],
+                  ['documents', 'Next steps'],
+                ].map(([tab, label]) => (
+                  <button
+                    ref={(node) => { detailsTabRefs.current[tab] = node }}
+                    id={`claim-details-${tab}-tab`}
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={detailsTab === tab}
+                    aria-controls={`claim-details-${tab}-panel`}
+                    tabIndex={detailsTab === tab ? 0 : -1}
+                    onClick={() => setDetailsTab(tab)}
+                    onKeyDown={(event) => handleDetailsTabKeyDown(event, tab)}
+                  >
+                    <span>{label}</span>
+                    {tab === 'documents' && (
+                      <span className="claim-details-tab-count" aria-hidden="true">{toProvideCount}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <ClaimSummaryProgress
+                form={form}
+                contentsItems={contentsItems}
+                dynamicForm={dynamicForm}
+              />
             </div>
             <div id="claim-details-body" hidden={!detailsOpen}>
             <div
@@ -4530,28 +4584,31 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'summary'}
             >
-              <ClaimReviewPanel
-                form={form}
-                contentsItems={contentsItems}
-                dynamicForm={dynamicForm}
-                proposedFields={proposedFields}
-                proposedContentsItems={proposedContentsItems}
-                editingField={editingField}
-                editValue={editValue}
-                setEditValue={setEditValue}
-                beginEdit={beginEdit}
-                cancelEdit={() => setEditingField(null)}
-                saveFieldCorrection={saveFieldCorrection}
-                confirmProposedFields={confirmProposedFields}
-                fieldLabel={fieldLabel}
-                fieldStatusLabel={fieldStatusLabel}
-                fieldSourceLabel={fieldSourceLabel}
-                fieldValueText={fieldValueText}
-                busy={isBusy}
-                status={status}
-                stepActive={conversationActionKind === 'review-details'}
-                conversationEmpty={isNewConversationEmpty}
-              />
+              {detailsTab === 'summary' && (
+                <ClaimReviewPanel
+                  form={form}
+                  contentsItems={contentsItems}
+                  dynamicForm={dynamicForm}
+                  proposedFields={proposedFields}
+                  proposedContentsItems={proposedContentsItems}
+                  editingField={editingField}
+                  editValue={editValue}
+                  setEditValue={setEditValue}
+                  beginEdit={beginEdit}
+                  cancelEdit={() => setEditingField(null)}
+                  saveFieldCorrection={saveFieldCorrection}
+                  confirmProposedFields={confirmProposedFields}
+                  fieldLabel={fieldLabel}
+                  fieldStatusLabel={fieldStatusLabel}
+                  fieldSourceLabel={fieldSourceLabel}
+                  fieldValueText={fieldValueText}
+                  busy={isBusy}
+                  status={status}
+                  stepActive={conversationActionKind === 'review-details'}
+                  conversationEmpty={isNewConversationEmpty}
+                  onViewNextSteps={() => setDetailsTab('documents')}
+                />
+              )}
             </div>
             <div
               id="claim-details-documents-panel"
@@ -4560,6 +4617,21 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
+              {detailsTab === 'documents' && (
+                <ClaimNextStepsPanel
+                  form={form}
+                  dynamicForm={dynamicForm}
+                  fieldLabel={fieldLabel}
+                  editingField={editingField}
+                  editValue={editValue}
+                  setEditValue={setEditValue}
+                  beginEdit={beginEdit}
+                  cancelEdit={() => setEditingField(null)}
+                  saveFieldCorrection={saveFieldCorrection}
+                  busy={isBusy}
+                  status={status}
+                />
+              )}
               {detailsTab === 'documents' && showsClaimDetails && (
                 <ClaimDocuments
                   items={evidenceItems}
@@ -4570,23 +4642,30 @@ function App() {
                     item.kind,
                     item.evidence_id,
                   )}
+                  compact
                 />
               )}
-              {claim?.external_capabilities?.length > 0 && (
-                <button
-                  ref={externalCapabilitiesTriggerRef}
-                  className="external-capabilities-trigger"
-                  type="button"
-                  aria-haspopup="dialog"
-                  onClick={() => setExternalCapabilitiesOpen(true)}
-                >
-                  <strong>Use a third-party service</strong>
-                  <span>
-                    View {claim.external_capabilities.length}{' '}
-                    {claim.external_capabilities.length === 1 ? 'option' : 'options'}
-                    <span aria-hidden="true">›</span>
-                  </span>
-                </button>
+              {detailsTab === 'documents' && claim?.external_capabilities?.length > 0 && (
+                <details className="next-steps-more-options">
+                  <summary>
+                    <span>More options</span>
+                    <span>{claim.external_capabilities.length}</span>
+                  </summary>
+                  <button
+                    ref={externalCapabilitiesTriggerRef}
+                    className="external-capabilities-trigger"
+                    type="button"
+                    aria-haspopup="dialog"
+                    onClick={() => setExternalCapabilitiesOpen(true)}
+                  >
+                    <strong>Use a third-party service</strong>
+                    <span>
+                      View {claim.external_capabilities.length}{' '}
+                      {claim.external_capabilities.length === 1 ? 'option' : 'options'}
+                      <span aria-hidden="true">›</span>
+                    </span>
+                  </button>
+                </details>
               )}
             </div>
             </div>

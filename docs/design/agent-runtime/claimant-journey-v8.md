@@ -71,7 +71,13 @@ An open handoff continues to accept claimant messages and returns an Agent
 reply. It may record facts and ask a non-blocking question. It suppresses all
 new third-party suggestions until the handoff is resolved. Declined or withdrawn
 offers are suppressed for three claimant turns; an explicit renewed request can
-create a new offer identity. Consent, withdrawal, dispatch, result and handoff
+create a new offer identity. Until the claimant has confirmed the incident description
+(`incident.description`, including a description confirmed in the same turn), no service is
+eligible except one the claimant explicitly asks for in the current message, so offers follow the
+claimant's account instead of interrupting it. On the model path the explicit request is the
+model's `claimant_request_quote`, which Runtime accepts only when that quote appears verbatim in
+the current message; refusals and incidental mentions carry no quote. The controlled runtime,
+which has no model, recognises requests with the bounded `detected_service_intents` patterns. Consent, withdrawal, dispatch, result and handoff
 mutations recompute the claimant next step.
 
 Unknown family limits the frontend catalogue to cross-family manual assistance.
