@@ -47,7 +47,7 @@ from backend.domain.retention import (
     retention_target_statuses,
     retention_terminal_source_ref,
 )
-from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.protocols import PersistenceRepository, RevisionConflict
 
 
 def _active_hold_ids(
@@ -205,7 +205,7 @@ def execute_retention_object_cleanup(
             if refreshed is None:
                 raise
             return refreshed
-        except Exception:
+        except RevisionConflict:
             refreshed = repository.get_retention_operation(operation.operation_id)
             if (
                 refreshed is not None
