@@ -81,95 +81,83 @@ jobs:
               echo "AuditEvent contract unaffected; check skipped."
             fi
 
-  backend-i-core-domain-diagnostic:
+  backend-i-core-1-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare import diagnostic
-          command: |
-            python -m pip install -r backend/requirements-dev.txt
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
       - run:
-          name: Ruff I core-domain
-          command: |
-            python -m ruff check --select I backend/adapters/evidence_storage.py backend/api/workbench.py backend/core/errors.py backend/domain/audit.py backend/domain/external_services.py backend/domain/follow_up_execution.py backend/domain/follow_up_migration.py backend/domain/ids.py backend/domain/models.py backend/domain/recovery.py backend/domain/recovery_policy_registry.py backend/domain/retention.py backend/domain/workbench.py backend/domain/workbench_action_registry.py
+          name: Ruff I core-1
+          command: python -m ruff check --select I backend/adapters/evidence_storage.py backend/api/workbench.py backend/core/errors.py backend/domain/audit.py
 
-  backend-i-repo-service-a-diagnostic:
+  backend-i-core-2-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare import diagnostic
-          command: |
-            python -m pip install -r backend/requirements-dev.txt
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
       - run:
-          name: Ruff I repo-service-a
-          command: |
-            python -m ruff check --select I backend/repositories/fixture.py backend/repositories/mongodb.py backend/repositories/pagination.py backend/repositories/protocols.py backend/services/claims.py backend/services/follow_up_recovery.py backend/services/integrations.py backend/services/messages.py
+          name: Ruff I core-2
+          command: python -m ruff check --select I backend/domain/external_services.py backend/domain/follow_up_execution.py backend/domain/follow_up_migration.py backend/domain/ids.py
 
-  backend-i-service-b-scripts-diagnostic:
+  backend-i-core-3-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare import diagnostic
-          command: |
-            python -m pip install -r backend/requirements-dev.txt
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
       - run:
-          name: Ruff I service-b-scripts
-          command: |
-            python -m ruff check --select I backend/services/recovery_decisions.py backend/services/recovery_worker.py backend/services/retention.py backend/services/terminal_claims.py backend/services/turn_reducer.py backend/services/workbench.py scripts/backfill_follow_up_policy.py scripts/run_recovery_worker.py
+          name: Ruff I core-3
+          command: python -m ruff check --select I backend/domain/models.py backend/domain/recovery.py backend/domain/recovery_policy_registry.py
 
-  backend-i-tests-a-diagnostic:
+  backend-i-core-4-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare import diagnostic
-          command: |
-            python -m pip install -r backend/requirements-dev.txt
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
       - run:
-          name: Ruff I tests-a
-          command: |
-            python -m ruff check --select I tests/test_claimant_turn_checkpoint.py tests/test_evidence_api.py tests/test_external_task_acceptance_mapping.py tests/test_external_task_status.py tests/test_follow_up_discovery_persistence.py tests/test_follow_up_execution.py tests/test_follow_up_operation_persistence.py tests/test_follow_up_recovery_backfill.py tests/test_incomplete_claim_recovery.py
+          name: Ruff I core-4
+          command: python -m ruff check --select I backend/domain/retention.py backend/domain/workbench.py backend/domain/workbench_action_registry.py
 
-  backend-i-tests-b-diagnostic:
+  backend-i-repo-1-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare import diagnostic
-          command: |
-            python -m pip install -r backend/requirements-dev.txt
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
       - run:
-          name: Ruff I tests-b
-          command: |
-            python -m ruff check --select I tests/test_model_gateway.py tests/test_p17_staff_abandonment.py tests/test_recovery_decisions.py tests/test_recovery_message_policy.py tests/test_recovery_policy_registry.py tests/test_recovery_work_item_settlement.py tests/test_retention_access_closure.py tests/test_retention_contract.py tests/test_retention_eligibility.py
+          name: Ruff I repo-1
+          command: python -m ruff check --select I backend/repositories/fixture.py backend/repositories/mongodb.py backend/repositories/pagination.py backend/repositories/protocols.py
 
-  backend-i-tests-c-diagnostic:
+  backend-i-repo-2-diagnostic:
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
       - run:
-          name: Prepare import diagnostic
-          command: |
-            python -m pip install -r backend/requirements-dev.txt
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
       - run:
-          name: Ruff I tests-c
-          command: |
-            python -m ruff check --select I tests/test_retention_execution.py tests/test_safety_handoff_survives_model_failure.py tests/test_staff_actions_api.py tests/test_unified_recovery.py tests/test_workbench_action_registry.py tests/test_workbench_terminal_reopen.py
+          name: Ruff I repo-2
+          command: python -m ruff check --select I backend/services/claims.py backend/services/follow_up_recovery.py backend/services/integrations.py backend/services/messages.py
 
   customer-quality:
     docker:
@@ -489,12 +477,12 @@ workflows:
   quality:
     jobs:
       - backend-quality
-      - backend-i-core-domain-diagnostic
-      - backend-i-repo-service-a-diagnostic
-      - backend-i-service-b-scripts-diagnostic
-      - backend-i-tests-a-diagnostic
-      - backend-i-tests-b-diagnostic
-      - backend-i-tests-c-diagnostic
+      - backend-i-core-1-diagnostic
+      - backend-i-core-2-diagnostic
+      - backend-i-core-3-diagnostic
+      - backend-i-core-4-diagnostic
+      - backend-i-repo-1-diagnostic
+      - backend-i-repo-2-diagnostic
       - github-automation-quality
       - pr-policy
       - docs-quality
