@@ -87,7 +87,7 @@ services:
         condition: service_completed_successfully
       knowledge-init:
         condition: service_completed_successfully
-    environment: &backend-environment
+    environment:
       NORTHWIND_ENVIRONMENT: development
       NORTHWIND_IDENTITY_MODE: normal
       NORTHWIND_IDENTITY_DB_PATH: /var/lib/northwind/claimant-identity.sqlite3
@@ -155,29 +155,6 @@ services:
       - "50"
       - --interval-seconds
       - "30"
-    restart: unless-stopped
-
-  recovery-worker:
-    profiles: ["vp"]
-    build: .
-    depends_on:
-      mongo-init:
-        condition: service_completed_successfully
-      knowledge-init:
-        condition: service_completed_successfully
-    environment: *backend-environment
-    command:
-      [
-        "python",
-        "-m",
-        "scripts.run_recovery_worker",
-        "--limit",
-        "50",
-        "--interval-seconds",
-        "30",
-      ]
-    volumes:
-      - northwind-backend-state:/var/lib/northwind
     restart: unless-stopped
 
 volumes:
