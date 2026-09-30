@@ -233,17 +233,18 @@ mechanisms; they must not package a local `.env` file.
 ### Run the P17 recovery worker
 
 P17 follow-up, expiry, and retention progression is owned by an explicit worker process rather
-than the FastAPI lifespan. A deployment supervisor should run one long-lived process with the same
-data-profile configuration as the API:
+than the FastAPI lifespan. The `vp` Docker Compose profile starts `recovery-worker` from the same
+packaged backend image and data-profile configuration as the API. A non-Compose deployment
+supervisor should run one long-lived process with the same configuration:
 
 ```powershell
-py -3.12 -m scripts.run_recovery_worker --limit 50 --interval-seconds 30
+py -3.12 -m backend.recovery_worker_main --limit 50 --interval-seconds 30
 ```
 
 An external scheduler can instead own the cadence by invoking one bounded cycle at a time:
 
 ```powershell
-py -3.12 -m scripts.run_recovery_worker --once --limit 50
+py -3.12 -m backend.recovery_worker_main --once --limit 50
 ```
 
 Each cycle examines at most `--limit` candidates in each bounded discovery class (deadline,
@@ -251,8 +252,9 @@ retention operation, and due follow-up; valid limits are 1-100). Expiry is evalu
 so the persisted absolute deadline wins ties. Candidate reads are only hints: the existing
 repository/service CAS and authority checks are reloaded before mutation.
 
-The long-lived mode isolates a failed cycle: it logs the failure, waits for the configured interval,
-then reloads durable state and tries the next cycle. `SIGINT` and `SIGTERM` request graceful
+The recovery cycle isolates candidate failures so one malformed or transiently failing Claim does
+not block later candidates in the same bounded page. A cycle-level infrastructure failure is logged;
+the long-lived process waits for the configured interval, reloads durable state, and tries again. `SIGINT` and `SIGTERM` request graceful
 shutdown; an in-flight bounded cycle is allowed to finish and the data runtime bundle is then
 closed. The worker does not own a second workflow state machine, notification platform, or
 retention authority.
