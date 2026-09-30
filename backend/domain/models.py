@@ -3329,14 +3329,11 @@ class RetentionOperation(ContractModel):
             evidence_ids.add(evidence.evidence_id)
 
             if evidence.authorization_id is not None:
-                authorization = next(
-                    (
-                        item
-                        for item in self.delete_authorizations
-                        if item.authorization_id == evidence.authorization_id
-                    ),
-                    None,
-                )
+                authorization: RetentionDeleteAuthorization | None = None
+                for item in self.delete_authorizations:
+                    if item.authorization_id == evidence.authorization_id:
+                        authorization = item
+                        break
                 if authorization is None:
                     raise ValueError('Retention step references an unknown delete authorization.')
                 if (
