@@ -548,7 +548,9 @@ def test_recovery_cycle_isolates_one_failed_expiry_candidate(
         session = cast(dict[str, object], created['session'])
         claim_id = str(claim['claim_id'])
         session_id = str(session['session_id'])
-        revision = int(claim['revision'])
+        revision_value = claim['revision']
+        assert isinstance(revision_value, int)
+        revision = revision_value
         paused = client.post(
             f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
             headers={
