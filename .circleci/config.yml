@@ -126,6 +126,76 @@ jobs:
           name: Mypy only
           command: python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
 
+  debug-format-worker:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check worker and domain formatting
+          command: >-
+            python -m ruff format --check
+            backend/recovery_worker_main.py
+            scripts/run_recovery_worker.py
+            backend/domain/models.py
+            backend/domain/retention.py
+
+  debug-format-repositories:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check repository formatting
+          command: >-
+            python -m ruff format --check
+            backend/repositories/fixture.py
+            backend/repositories/mongodb.py
+            backend/repositories/protocols.py
+
+  debug-format-services:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check service formatting
+          command: >-
+            python -m ruff format --check
+            backend/services/recovery_worker.py
+            backend/services/retention.py
+
+  debug-format-tests:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Install Ruff
+          command: python -m pip install ruff==0.11.2
+      - run:
+          name: Check recovery test formatting
+          command: >-
+            python -m ruff format --check
+            tests/test_incomplete_claim_recovery.py
+            tests/test_retention_execution.py
+            tests/test_runtime_deployment_profiles.py
+            tests/test_backend_test_selection.py
+            scripts/select_backend_tests.py
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -447,6 +517,10 @@ workflows:
       - debug-ruff-format
       - debug-ruff-lint
       - debug-mypy
+      - debug-format-worker
+      - debug-format-repositories
+      - debug-format-services
+      - debug-format-tests
       - github-automation-quality
       - pr-policy
       - docs-quality
