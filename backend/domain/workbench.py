@@ -4,6 +4,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Generic, TypeVar
 
+from pydantic import Field
+
 from backend.domain.external_service_registry import (
     ExternalCapabilityProvenance,
     ExternalLifecycleStatus,
@@ -43,7 +45,6 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import RetrievalRecord, RetrievalSource
 from backend.domain.tag_registry import StaffTag
-from pydantic import Field
 
 
 class ClaimLifecycleState(StrEnum):
