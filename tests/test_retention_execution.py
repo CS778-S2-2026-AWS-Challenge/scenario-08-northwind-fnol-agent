@@ -421,6 +421,46 @@ def test_hold_applied_mid_cleanup_stops_next_target_and_resume_uses_same_operati
     ]
 
 
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_held_retention_does_not_occupy_discovery_and_release_requeues_same_operation(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(kind, monkeypatch)
+    operation = _operation(operation_id=f'ret-held-discovery-{kind}')
+    assert repository.reserve_retention_operation(operation) is True
+
+    hold = RetentionHoldRecord(
+        hold_id=f'hold-discovery-{kind}',
+        claim_id=operation.claim_id,
+        reason=RetentionHoldReason.INVESTIGATION,
+        authority_ref='staff:reviewer',
+        source_refs=['review:discovery'],
+        applied_at=NOW + timedelta(seconds=1),
+    )
+    repository.save_retention_hold(hold)
+
+    held = repository.get_retention_operation(operation.operation_id)
+    assert held is not None
+    assert held.status is RetentionOperationStatus.HELD
+    assert repository.list_pending_retention_operations(limit=10) == []
+
+    repository.save_retention_hold(
+        hold.model_copy(update={'released_at': NOW + timedelta(seconds=2)})
+    )
+    resumed = repository.get_retention_operation(operation.operation_id)
+    assert resumed is not None
+    assert resumed.operation_id == operation.operation_id
+    assert resumed.status is RetentionOperationStatus.RESERVED
+    assert [
+        item.operation_id for item in repository.list_pending_retention_operations(limit=10)
+    ] == [operation.operation_id]
+
 def test_mock_evidence_storage_delete_is_idempotent() -> None:
     storage = MockEvidenceStorage()
 
