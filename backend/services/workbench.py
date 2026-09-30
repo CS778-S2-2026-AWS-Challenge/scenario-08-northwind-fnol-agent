@@ -2300,16 +2300,21 @@ def list_workbench_signals(
         source_refs = signal.get('source_refs')
         refs = [str(value) for value in source_refs] if isinstance(source_refs, list) else []
         reason_codes = signal.get('reason_codes')
+        policy_sources = signal.get('policy_sources')
         items.append(
             WorkbenchSignalDetail(
                 **projected.model_dump(),
+                judgment_point_kind=signal.get('judgment_point_kind'),
+                proposed_assessment=signal.get('proposed_assessment'),
+                proposal_rationale=signal.get('proposal_rationale'),
                 reason_codes=(
                     [str(value) for value in reason_codes] if isinstance(reason_codes, list) else []
                 ),
                 decisions=[item.model_dump(mode='json') for item in by_signal.get(signal_id, [])],
                 source_evidence=[
                     retrievals[ref].model_dump(mode='json') for ref in refs if ref in retrievals
-                ],
+                ]
+                + (policy_sources if isinstance(policy_sources, list) else []),
                 created_at=signal.get('created_at'),
             )
         )

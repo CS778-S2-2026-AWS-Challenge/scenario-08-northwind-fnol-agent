@@ -2878,6 +2878,7 @@ def submit_message(
             runtime_trace,
             runtime_records,
             checkpointed=True,
+            review_signals=outcome.records.review_signals,
         )
         return ClaimContextHandlerOutcome(
             claim_id=claim_id,
@@ -2911,6 +2912,7 @@ def submit_message(
                 runtime_trace,
                 runtime_records,
                 checkpointed=True,
+                review_signals=outcome.records.review_signals,
             )
         except RevisionConflict as conflict:
             raise ApiError(

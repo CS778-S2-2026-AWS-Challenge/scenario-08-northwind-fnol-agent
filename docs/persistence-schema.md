@@ -850,6 +850,22 @@ Evidence record or protected object.
   decision.
 - Staff decisions are separate immutable records and retain the source references that
   motivated the review.
+- Validated v8 policy judgments reuse `ReviewSignalRecord` with optional
+  `judgment_point_kind`, `proposed_assessment`, `proposal_rationale`, and `policy_sources`.
+  `policy_sources` retains only cited authorized policy chunks with document/chunk identity,
+  section, version, checksum, source URI, title, and bounded retrieved text. Older signals
+  deserialize with null metadata and an empty source list.
+- Policy judgment signals are immutable children of `save_agent_turn`, committed together
+  with the Claim CAS, session, messages, decision, Runtime bundle, and idempotency result in
+  both Fixture and MongoDB. Cross-Claim records, duplicate signal identities, or conflicts
+  reject the turn. MongoDB writes use the existing transaction; there is no post-commit
+  independent signal write or alternate collection.
+- Judgment signal identity uses the `sig_` prefix and a deterministic hash of Claim ID,
+  triggering message ID, and kind. Ordinary request replay reuses the committed result.
+  The internal Runtime proposal stores bounded submitted judgments, rejection reasons,
+  and accepted signal references. Staff decisions remain separate immutable records.
+  Staff `signals` invalidation is emitted only when the turn saves a signal; claimant
+  projections and realtime resource lists do not expose it.
 - An Agent decision identifies whether its proposal came from `controlled_agent` or
   `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
   profile, executable prompt identifier, provider-reported model identifier, and provider request
@@ -873,7 +889,10 @@ Evidence record or protected object.
   that identifier.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
-  validation, and any non-empty model signal proposal rejects the complete turn before write.
+  validation, and any non-empty compatibility `proposed_signals` value rejects the complete
+  turn before write. The separate v8 `policy_judgment_proposals` contract is advisory input
+  validated against accepted facts, authorized retrieved clauses, handoff state, and turn
+  authority before it can generate a staff-only review record; it grants no decision authority.
 - A structured form field retains an immutable assertion list plus one
   `current_assertion_id`. Assertions preserve reported wording, normalized value, source
   references, relation, status, temporal precision, optional reason code, and creation time.

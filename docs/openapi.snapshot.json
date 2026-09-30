@@ -18103,9 +18103,45 @@
             "title": "Decisions",
             "type": "array"
           },
+          "judgment_point_kind": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judgment Point Kind"
+          },
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "proposal_rationale": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal Rationale"
+          },
+          "proposed_assessment": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Assessment"
           },
           "reason_codes": {
             "items": {

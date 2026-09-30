@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import Field
 
 from backend.domain.data_query import DataQueryProjection
+from backend.domain.knowledge import KnowledgeCitation
 from backend.domain.models import ContractModel
 
 
@@ -77,6 +78,10 @@ class ReviewSignalRecord(ContractModel):
     reason_codes: list[str] = Field(min_length=1, max_length=100)
     summary: str = Field(min_length=1, max_length=1000)
     created_at: datetime
+    judgment_point_kind: str | None = Field(default=None, max_length=100)
+    proposed_assessment: str | None = Field(default=None, max_length=500)
+    proposal_rationale: str | None = Field(default=None, max_length=500)
+    policy_sources: list[KnowledgeCitation] = Field(default_factory=list, max_length=10)
 
 
 class RetrievalStatus(str, Enum):
