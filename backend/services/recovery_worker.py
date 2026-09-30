@@ -50,9 +50,9 @@ def run_recovery_cycle(
     """
 
     if now.utcoffset() is None:
-        raise ValueError('Recovery worker time must be timezone-aware.')
+        raise ValueError("Recovery worker time must be timezone-aware.")
     if not 1 <= limit <= 100:
-        raise ValueError('Recovery worker limit must be between 1 and 100.')
+        raise ValueError("Recovery worker limit must be between 1 and 100.")
 
     expiring, _ = repository.list_expiring_follow_ups(
         now,
