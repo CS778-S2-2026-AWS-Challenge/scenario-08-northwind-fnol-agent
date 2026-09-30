@@ -7,7 +7,6 @@ decide Claim terminal state and is not an authentication authority.
 from __future__ import annotations
 
 from datetime import datetime
-from hashlib import sha256
 
 from backend.adapters.evidence_storage import (
     EvidenceStorage,
@@ -22,7 +21,7 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
-from backend.domain.ids import stable_operation_id
+from backend.domain.ids import stable_operation_id, stable_record_id
 from backend.domain.models import ActorType
 from backend.domain.retention import (
     INCOMPLETE_CLAIM_RETENTION_POLICY_ID,
@@ -539,7 +538,7 @@ def _append_retention_audit(
         )
     )
 
-    event_id = 'aud_ret_' + sha256(material.encode()).hexdigest()[:32]
+    event_id = stable_record_id('aud_ret', material)
 
     refs = list(
         dict.fromkeys(

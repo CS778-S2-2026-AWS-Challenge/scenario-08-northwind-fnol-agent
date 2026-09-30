@@ -6,9 +6,9 @@ RecoveryTransition decision contract.
 """
 
 from datetime import datetime
-from hashlib import sha256
 from typing import Literal, cast
 
+from backend.domain.ids import stable_digest
 from backend.domain.recovery import (
     NormalizedRecoveryEvent,
     RecoveryAuthoritativeSnapshot,
@@ -239,9 +239,7 @@ def build_recovery_work_item(
     # External reconciliation must settle the same logical obligation that was
     # opened for the original operation.
     obligation_coordinate = transition.operation_id or transition.event_id
-    digest = sha256(
-        (f'{claim_id}|{obligation_coordinate}|{transition.rule_id}|{subject_ref}').encode()
-    ).hexdigest()[:24]
+    digest = stable_digest(f'{claim_id}|{obligation_coordinate}|{transition.rule_id}|{subject_ref}')
 
     completed = status in {'completed', 'cancelled'}
 

@@ -6,7 +6,6 @@ origin is SessionRecoveryContext.interrupted_at.
 
 from dataclasses import dataclass
 from datetime import datetime
-from hashlib import sha256
 from typing import Literal
 
 from backend.domain.audit import (
@@ -18,6 +17,7 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.ids import stable_digest
 from backend.domain.models import (
     ActorType,
     FollowUpContactPermission,
@@ -54,9 +54,7 @@ def _audit_id(
     follow_up: FollowUpRecord,
     outcome: str,
 ) -> str:
-    digest = sha256(
-        (f'{follow_up.claim_id}:{follow_up.follow_up_id}:{outcome}').encode()
-    ).hexdigest()[:24]
+    digest = stable_digest(f'{follow_up.claim_id}:{follow_up.follow_up_id}:{outcome}')
     return f'aud_p17_backfill_{digest}'
 
 

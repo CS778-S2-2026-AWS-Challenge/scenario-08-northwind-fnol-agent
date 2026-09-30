@@ -10,12 +10,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
-from hashlib import sha256
 from types import MappingProxyType
 from typing import Any
 
 from pydantic import Field, model_validator
 
+from backend.domain.ids import stable_record_id
 from backend.domain.models import (
     ContractModel,
     TerminalDispositionReasonCode,
@@ -572,8 +572,7 @@ def retention_record_identity(
 ) -> str:
     """Return a bounded deterministic identity for composite storage records."""
 
-    material = '|'.join((prefix, *parts))
-    return f'{prefix}_' + sha256(material.encode()).hexdigest()[:32]
+    return stable_record_id(prefix, '|'.join((prefix, *parts)))
 
 
 def build_retention_cleanup_target(
@@ -608,7 +607,7 @@ def build_retention_cleanup_target(
     )
 
     return RetentionCleanupTarget(
-        target_id=('rtg_' + sha256(identity_material.encode()).hexdigest()[:32]),
+        target_id=stable_record_id('rtg', identity_material),
         kind=kind,
         record_type=record_type,
         record_id=record_id,
@@ -773,14 +772,29 @@ def retention_next_attempt(
     )
 
 
+def retention_tombstone_id(target_id: str) -> str:
+    """Return the tombstone identity that shares its cleanup target's digest.
+
+    Args:
+        target_id: A frozen ``rtg_`` cleanup target identity.
+
+    Returns:
+        The ``rts_`` identity for that target's minimum retained evidence.
+
+    Raises:
+        ValueError: If ``target_id`` is not a cleanup target identity.
+    """
+    if not target_id.startswith('rtg_'):
+        raise ValueError('A retention tombstone derives only from an rtg_ cleanup target.')
+    return 'rts_' + target_id.removeprefix('rtg_')
+
+
 def retention_step_evidence_id(
     operation_id: str,
     target_id: str,
     attempt: int,
 ) -> str:
-    material = f'{operation_id}|{target_id}|{attempt}'
-
-    return 'rse_' + sha256(material.encode()).hexdigest()[:32]
+    return stable_record_id('rse', f'{operation_id}|{target_id}|{attempt}')
 
 
 def retention_delete_authorization_id(
@@ -788,9 +802,7 @@ def retention_delete_authorization_id(
     target_id: str,
     attempt: int,
 ) -> str:
-    material = f'{operation_id}|{target_id}|{attempt}|delete-authorization'
-
-    return 'rda_' + sha256(material.encode()).hexdigest()[:32]
+    return stable_record_id('rda', f'{operation_id}|{target_id}|{attempt}|delete-authorization')
 
 
 def retention_candidate_after_step(

@@ -20,6 +20,7 @@ from backend.domain.follow_up_execution import (
     FollowUpStaffAbandonmentRejected,
     reduce_follow_up_staff_abandonment,
 )
+from backend.domain.ids import stable_digest
 from backend.domain.models import (
     AbandonClaimRequest,
     ActorReference,
@@ -240,9 +241,7 @@ def abandon_incomplete_claim(
     )
 
     audit_event = AuditEventEnvelope(
-        event_id=(
-            'aud_abandon_' + sha256(f'{principal.subject}:{route}:{key}'.encode()).hexdigest()[:20]
-        ),
+        event_id=('aud_abandon_' + stable_digest(f'{principal.subject}:{route}:{key}', 20)),
         event_type=AuditEventType.ACTION_COMPLETED,
         outcome=AuditOutcome.SUCCEEDED,
         subject=AuditSubject(

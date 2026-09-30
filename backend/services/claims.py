@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 from datetime import datetime
-from hashlib import sha256
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
@@ -20,7 +19,7 @@ from backend.domain.branch_registry import (
 from backend.domain.evidence import evidence_summary_for
 from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
-from backend.domain.ids import new_id
+from backend.domain.ids import new_id, stable_digest
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -1091,10 +1090,7 @@ def start_session(
 
         if resolved_follow_up is not None:
             resume_audit_event = AuditEventEnvelope(
-                event_id=(
-                    'aud_resume_'
-                    + sha256(f'{principal.subject}:{route}:{key}'.encode()).hexdigest()[:20]
-                ),
+                event_id=('aud_resume_' + stable_digest(f'{principal.subject}:{route}:{key}', 20)),
                 event_type=AuditEventType.ACTION_COMPLETED,
                 outcome=AuditOutcome.SUCCEEDED,
                 subject=AuditSubject(

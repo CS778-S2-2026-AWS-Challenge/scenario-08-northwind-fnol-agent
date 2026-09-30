@@ -144,6 +144,7 @@ from backend.domain.retention import (
     retention_step_evidence_id,
     retention_target_statuses,
     retention_tombstone_authority,
+    retention_tombstone_id,
     validate_retention_eligibility_source,
     validate_retention_hold_transition,
     validate_retention_operation_transition,
@@ -2241,7 +2242,7 @@ class MongoDBRepository:
                     }
 
                     tombstone_candidate = RetentionRecordTombstone(
-                        tombstone_id=('rts_' + target.target_id[4:]),
+                        tombstone_id=retention_tombstone_id(target.target_id),
                         operation_id=operation.operation_id,
                         target_id=target.target_id,
                         claim_id=operation.claim_id,

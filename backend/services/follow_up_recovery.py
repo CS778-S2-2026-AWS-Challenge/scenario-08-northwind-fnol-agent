@@ -1,7 +1,6 @@
 """Bounded P17 automatic follow-up execution service."""
 
 from datetime import datetime
-from hashlib import sha256
 
 from backend.domain.audit import (
     AuditActor,
@@ -25,6 +24,7 @@ from backend.domain.follow_up_execution import (
     reduce_expired_follow_up,
     reduce_follow_up_contact_withdrawal,
 )
+from backend.domain.ids import stable_digest
 from backend.domain.models import (
     ActorType,
     FollowUpRecord,
@@ -51,7 +51,7 @@ def _recovery_audit(
     created_at: datetime,
     permission: AuditPermission | None = None,
 ) -> AuditEventEnvelope:
-    identity = sha256(f'{suffix}:{claim_id}'.encode()).hexdigest()[:24]
+    identity = stable_digest(f'{suffix}:{claim_id}')
 
     return AuditEventEnvelope(
         event_id=f'aud_recovery_{identity}',
@@ -87,7 +87,7 @@ def _in_app_follow_up_message(
 ) -> MessageRecord:
     """Build the durable claimant-visible result of one committed in-app attempt."""
 
-    identity = sha256(operation_id.encode()).hexdigest()[:24]
+    identity = stable_digest(operation_id)
     return MessageRecord(
         message_id=f'msg_recovery_{identity}',
         claim_id=follow_up.claim_id,
