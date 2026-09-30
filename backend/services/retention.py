@@ -178,9 +178,14 @@ def execute_retention_object_cleanup(
 
     hold_ids = _active_hold_ids(repository, operation.claim_id)
     if hold_ids and operation.active_delete_authorization_id is None:
-        held = _held_candidate(operation, hold_ids, now=now)
-        if held != operation:
-            repository.save_retention_operation(held, operation.revision)
+        refreshed = repository.get_retention_operation(operation.operation_id)
+        if refreshed is None:
+            raise KeyError(operation.operation_id)
+        if refreshed.status is RetentionOperationStatus.HELD:
+            return refreshed
+        held = _held_candidate(refreshed, hold_ids, now=now)
+        if held != refreshed:
+            repository.save_retention_operation(held, refreshed.revision)
         return held
 
     statuses = retention_target_statuses(operation.targets, operation.step_evidence)
@@ -480,9 +485,14 @@ def execute_retention_cleanup(
         # object cleanup must stop the next unstarted database mutation.
         hold_ids = _active_hold_ids(repository, operation.claim_id)
         if hold_ids:
-            held = _held_candidate(operation, hold_ids, now=now)
-            if held != operation:
-                repository.save_retention_operation(held, operation.revision)
+            refreshed = repository.get_retention_operation(operation.operation_id)
+            if refreshed is None:
+                raise KeyError(operation.operation_id)
+            if refreshed.status is RetentionOperationStatus.HELD:
+                return refreshed
+            held = _held_candidate(refreshed, hold_ids, now=now)
+            if held != refreshed:
+                repository.save_retention_operation(held, refreshed.revision)
             return held
 
         try:
