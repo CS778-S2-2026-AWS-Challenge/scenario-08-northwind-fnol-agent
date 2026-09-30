@@ -227,6 +227,34 @@ def test_unrelated_backend_change_does_not_select_complete_journey(path: str) ->
 @pytest.mark.parametrize(
     'path',
     [
+        'backend/domain/follow_up_execution.py',
+        'backend/domain/recovery.py',
+        'backend/domain/retention.py',
+        'backend/services/recovery_worker.py',
+        'backend/services/retention.py',
+        'backend/services/terminal_claims.py',
+    ],
+)
+def test_recovery_modules_select_complete_p17_recovery_contracts(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_cross_session_recovery.py',
+        'tests/test_follow_up_execution.py',
+        'tests/test_incomplete_claim_recovery.py',
+        'tests/test_incomplete_claim_recovery_concurrency.py',
+        'tests/test_incomplete_claim_recovery_edges.py',
+        'tests/test_incomplete_claim_recovery_review.py',
+        'tests/test_p17_staff_abandonment.py',
+        'tests/test_retention_execution.py',
+        'tests/test_unified_recovery.py',
+    } <= set(selection.tests)
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
         'backend/repositories/fixture.py',
         'backend/repositories/mongodb.py',
         'backend/repositories/protocols.py',
