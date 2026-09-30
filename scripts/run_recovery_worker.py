@@ -88,7 +88,10 @@ def run_worker(
 
 def _install_signal_handlers(stop_event: Event) -> None:
     def request_shutdown(signum: int, _frame: FrameType | None) -> None:
-        LOGGER.info('Received signal %s; recovery worker will stop after the current cycle.', signum)
+        LOGGER.info(
+            'Received signal %s; recovery worker will stop after the current cycle.',
+            signum,
+        )
         stop_event.set()
 
     signal.signal(signal.SIGINT, request_shutdown)

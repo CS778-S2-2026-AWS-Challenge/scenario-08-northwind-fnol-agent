@@ -3302,7 +3302,9 @@ class RetentionOperation(ContractModel):
                 raise ValueError('Only object-byte targets may carry delete authorization.')
             key = (authorization.target_id, authorization.attempt)
             if key in authorization_keys:
-                raise ValueError('A retention object-delete attempt may have only one authorization.')
+                raise ValueError(
+                    'A retention object-delete attempt may have only one authorization.'
+                )
             authorization_ids.add(authorization.authorization_id)
             authorization_keys.add(key)
 
@@ -3310,7 +3312,9 @@ class RetentionOperation(ContractModel):
             self.active_delete_authorization_id is not None
             and self.active_delete_authorization_id not in authorization_ids
         ):
-            raise ValueError('Active retention delete authorization must reference durable evidence.')
+            raise ValueError(
+                'Active retention delete authorization must reference durable evidence.'
+            )
 
         evidence_keys: set[tuple[str, int]] = set()
         evidence_ids: set[str] = set()

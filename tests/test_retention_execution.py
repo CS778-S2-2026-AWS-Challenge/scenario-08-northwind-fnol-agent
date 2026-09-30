@@ -22,6 +22,7 @@ from backend.domain.retention import (
     RetentionOperationStatus,
     RetentionStepEvidence,
     RetentionStepStatus,
+    RetentionTargetFreezeRejected,
     RetentionTargetKind,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -204,6 +205,129 @@ def test_retention_hold_repository_has_fixture_mongo_release_parity(
     listed = repository.list_retention_holds(hold.claim_id)
     assert listed == [released]
     assert listed[0].active is False
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_retention_delete_authorization_refuses_preexisting_hold(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(kind, monkeypatch)
+    operation = _operation(operation_id=f'ret-auth-held-{kind}')
+    assert repository.reserve_retention_operation(operation) is True
+
+    hold = RetentionHoldRecord(
+        hold_id=f'hold-before-auth-{kind}',
+        claim_id=operation.claim_id,
+        reason=RetentionHoldReason.INVESTIGATION,
+        authority_ref='staff:reviewer',
+        source_refs=['review:before-auth'],
+        applied_at=NOW + timedelta(seconds=1),
+    )
+    repository.save_retention_hold(hold)
+
+    held = repository.get_retention_operation(operation.operation_id)
+    assert held is not None
+    assert held.status is RetentionOperationStatus.HELD
+    assert held.delete_authorizations == []
+    assert held.active_delete_authorization_id is None
+
+    with pytest.raises(RetentionTargetFreezeRejected):
+        repository.authorize_retention_object_target(
+            operation.operation_id,
+            'target-1',
+            held.revision,
+            now=NOW + timedelta(seconds=2),
+        )
+
+    unchanged = repository.get_retention_operation(operation.operation_id)
+    assert unchanged == held
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_retention_delete_authorization_and_result_replay_are_idempotent(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(kind, monkeypatch)
+    operation = _operation(operation_id=f'ret-auth-replay-{kind}')
+    assert repository.reserve_retention_operation(operation) is True
+
+    authorized, authorization = repository.authorize_retention_object_target(
+        operation.operation_id,
+        'target-1',
+        operation.revision,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert authorized.active_delete_authorization_id == authorization.authorization_id
+    assert len(authorized.delete_authorizations) == 1
+
+    replayed, replayed_authorization = repository.authorize_retention_object_target(
+        operation.operation_id,
+        'target-1',
+        operation.revision,
+        now=NOW + timedelta(seconds=2),
+    )
+    assert replayed == authorized
+    assert replayed_authorization == authorization
+
+    settled = repository.record_retention_object_result(
+        operation.operation_id,
+        authorization.authorization_id,
+        outcome=ObjectDeletionOutcome.DELETED,
+        now=NOW + timedelta(seconds=3),
+    )
+    assert settled.status is RetentionOperationStatus.COMPLETED
+    assert settled.active_delete_authorization_id is None
+    assert len(settled.step_evidence) == 1
+    assert settled.step_evidence[0].authorization_id == authorization.authorization_id
+    assert settled.step_evidence[0].status is RetentionStepStatus.SATISFIED
+
+    duplicate = repository.record_retention_object_result(
+        operation.operation_id,
+        authorization.authorization_id,
+        outcome=ObjectDeletionOutcome.DELETED,
+        now=NOW + timedelta(seconds=4),
+    )
+    assert duplicate == settled
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
+def test_retention_delete_failure_preserves_authorization_for_reconciliation(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(kind, monkeypatch)
+    operation = _operation(operation_id=f'ret-auth-failed-{kind}')
+    assert repository.reserve_retention_operation(operation) is True
+
+    _, authorization = repository.authorize_retention_object_target(
+        operation.operation_id,
+        'target-1',
+        operation.revision,
+        now=NOW + timedelta(seconds=1),
+    )
+    failed = repository.record_retention_object_result(
+        operation.operation_id,
+        authorization.authorization_id,
+        outcome=ObjectDeletionOutcome.FAILED,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    assert failed.status is RetentionOperationStatus.RECONCILIATION_REQUIRED
+    assert failed.active_delete_authorization_id is None
+    assert len(failed.step_evidence) == 1
+    assert failed.step_evidence[0].authorization_id == authorization.authorization_id
+    assert failed.step_evidence[0].status is RetentionStepStatus.FAILED
 
 
 class _HoldAfterFirstDeleteStorage:

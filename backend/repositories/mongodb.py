@@ -1638,7 +1638,9 @@ class MongoDBRepository:
         *,
         now: datetime,
     ) -> tuple[RetentionOperation, RetentionDeleteAuthorization]:
-        def authorize(mongo_session: Any) -> tuple[RetentionOperation, RetentionDeleteAuthorization]:
+        def authorize(
+            mongo_session: Any,
+        ) -> tuple[RetentionOperation, RetentionDeleteAuthorization]:
             operation = self._get(
                 'retention_operation',
                 operation_id,
@@ -1686,7 +1688,9 @@ class MongoDBRepository:
             if target is None:
                 raise KeyError(target_id)
             if target.kind is not RetentionTargetKind.OBJECT_BYTES:
-                raise ValueError('Only object-byte targets may be authorized for provider deletion.')
+                raise ValueError(
+                    'Only object-byte targets may be authorized for provider deletion.'
+                )
             if statuses[target_id] is RetentionStepStatus.SATISFIED:
                 raise ValueError('Satisfied retention targets cannot be re-authorized.')
 
@@ -2465,7 +2469,10 @@ class MongoDBRepository:
                     operation_document,
                     RetentionOperation,
                 )
-                if operation is not None and operation.status is not RetentionOperationStatus.COMPLETED:
+                if (
+                    operation is not None
+                    and operation.status is not RetentionOperationStatus.COMPLETED
+                ):
                     payload = operation.model_dump(mode='python')
                     payload.update(
                         {
