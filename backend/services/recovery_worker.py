@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -21,6 +22,8 @@ from backend.services.retention import (
     reserve_retention_from_terminal,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class RecoveryCycleResult:
@@ -32,6 +35,7 @@ class RecoveryCycleResult:
     contacted: int
     retention_progressed: int
     retention_blocked: int
+    failed_candidates: int
 
 
 def run_recovery_cycle(
@@ -61,13 +65,22 @@ def run_recovery_cycle(
     expired = 0
     retention_progressed = 0
     retention_blocked = 0
+    failed_candidates = 0
 
     for candidate in expiring:
-        transition = process_expiring_follow_up(
-            repository,
-            candidate,
-            now,
-        )
+        try:
+            transition = process_expiring_follow_up(
+                repository,
+                candidate,
+                now,
+            )
+        except Exception:
+            failed_candidates += 1
+            LOGGER.exception(
+                'P17 expiry candidate failed; later candidates remain eligible.',
+                extra={'follow_up_id': candidate.follow_up_id},
+            )
+            continue
         if transition is None:
             continue
 
@@ -82,9 +95,13 @@ def run_recovery_cycle(
             # A blocking recovery/external responsibility is preserved and the
             # terminal fact remains authoritative for later reconciliation.
             retention_blocked += 1
+        except Exception:
+            failed_candidates += 1
+            LOGGER.exception(
+                'P17 retention reservation failed after expiry; later candidates continue.',
+                extra={'claim_id': transition.claim.claim_id},
+            )
 
-    # Retention has its own durable discovery path so a HELD or partially
-    # completed operation is retried as the same operation on a later tick.
     pending_retention = repository.list_pending_retention_operations(limit=limit)
     for retention in pending_retention:
         try:
@@ -103,14 +120,28 @@ def run_recovery_cycle(
             retention_progressed += 1
         except RetentionTargetFreezeRejected:
             retention_blocked += 1
+        except Exception:
+            failed_candidates += 1
+            LOGGER.exception(
+                'P17 retention candidate failed; later candidates remain eligible.',
+                extra={'retention_operation_id': retention.operation_id},
+            )
 
     due, _ = repository.list_due_follow_ups(
         now,
         limit=limit,
     )
-    contacted = sum(
-        process_due_follow_up(repository, candidate, now) is not None for candidate in due
-    )
+    contacted = 0
+    for candidate in due:
+        try:
+            if process_due_follow_up(repository, candidate, now) is not None:
+                contacted += 1
+        except Exception:
+            failed_candidates += 1
+            LOGGER.exception(
+                'P17 due candidate failed; later candidates remain eligible.',
+                extra={'follow_up_id': candidate.follow_up_id},
+            )
 
     return RecoveryCycleResult(
         expiring_candidates=len(expiring),
@@ -119,4 +150,5 @@ def run_recovery_cycle(
         contacted=contacted,
         retention_progressed=retention_progressed,
         retention_blocked=retention_blocked,
+        failed_candidates=failed_candidates,
     )
