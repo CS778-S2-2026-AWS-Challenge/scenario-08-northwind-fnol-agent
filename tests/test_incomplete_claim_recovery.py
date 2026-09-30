@@ -33,11 +33,7 @@ from backend.domain.retention import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import (
-    IdempotencyRecord,
-    PersistenceRepository,
-    RevisionConflict,
-)
+from backend.repositories.protocols import IdempotencyRecord, RevisionConflict
 from backend.services import recovery_worker
 from backend.services.follow_up_recovery import (
     process_due_follow_up,
@@ -423,54 +419,6 @@ def test_mongodb_stale_incomplete_checkpoint_has_no_partial_children() -> None:
     )
 
 
-def test_recovery_cycle_isolates_failed_candidates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    failed = cast(FollowUpRecord, SimpleNamespace(follow_up_id='fup-failed'))
-    healthy = cast(FollowUpRecord, SimpleNamespace(follow_up_id='fup-healthy'))
-    repository = cast(
-        PersistenceRepository,
-        SimpleNamespace(
-            list_expiring_follow_ups=lambda _now, *, limit: ([failed, healthy], None),
-            list_pending_retention_operations=lambda *, limit: [],
-            list_due_follow_ups=lambda _now, *, limit: ([failed, healthy], None),
-        ),
-    )
-
-    def fake_expiry(
-        _repository: PersistenceRepository,
-        candidate: FollowUpRecord,
-        _now: datetime,
-    ) -> None:
-        if candidate.follow_up_id == failed.follow_up_id:
-            raise RuntimeError('broken expiry candidate')
-
-    def fake_due(
-        _repository: PersistenceRepository,
-        candidate: FollowUpRecord,
-        _now: datetime,
-    ) -> object | None:
-        if candidate.follow_up_id == failed.follow_up_id:
-            raise RuntimeError('broken due candidate')
-        return object()
-
-    monkeypatch.setattr(recovery_worker, 'process_expiring_follow_up', fake_expiry)
-    monkeypatch.setattr(recovery_worker, 'process_due_follow_up', fake_due)
-
-    result = recovery_worker.run_recovery_cycle(
-        repository,
-        MockEvidenceStorage(),
-        now=datetime(2026, 9, 30, 8, 0, tzinfo=UTC),
-        limit=10,
-    )
-
-    assert result.expiring_candidates == 2
-    assert result.expired == 0
-    assert result.due_candidates == 2
-    assert result.contacted == 1
-    assert result.failed_candidates == 2
-
-
 def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -612,21 +560,30 @@ def test_recovery_cycle_isolates_one_failed_expiry_candidate(
         assert paused.status_code == 200
         candidates.append(repository.list_follow_ups(claim_id, 'cus_demo')[0])
 
-    monkeypatch.setattr(
-        repository,
-        'list_expiring_follow_ups',
-        lambda _now, *, limit, cursor=None: (candidates[:limit], cursor),
-    )
-    monkeypatch.setattr(
-        repository,
-        'list_pending_retention_operations',
-        lambda *, limit: [],
-    )
-    monkeypatch.setattr(
-        repository,
-        'list_due_follow_ups',
-        lambda _now, *, limit, cursor=None: ([], cursor),
-    )
+    def list_expiring(
+        _now: datetime,
+        *,
+        limit: int,
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        return candidates[:limit], cursor
+
+    def list_pending(*, limit: int) -> list[object]:
+        del limit
+        return []
+
+    def list_due(
+        _now: datetime,
+        *,
+        limit: int,
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        del limit
+        return [], cursor
+
+    monkeypatch.setattr(repository, 'list_expiring_follow_ups', list_expiring)
+    monkeypatch.setattr(repository, 'list_pending_retention_operations', list_pending)
+    monkeypatch.setattr(repository, 'list_due_follow_ups', list_due)
 
     processed: list[str] = []
 

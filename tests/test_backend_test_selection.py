@@ -230,6 +230,7 @@ def test_unrelated_backend_change_does_not_select_complete_journey(path: str) ->
         'backend/domain/follow_up_execution.py',
         'backend/domain/recovery.py',
         'backend/domain/retention.py',
+        'backend/recovery_worker_main.py',
         'backend/services/recovery_worker.py',
         'backend/services/retention.py',
         'backend/services/terminal_claims.py',

@@ -240,6 +240,7 @@ BACKEND_CONSUMER_RULES = (
             'backend/domain/recovery.py',
             'backend/domain/recovery_policy_registry.py',
             'backend/domain/retention.py',
+            'backend/recovery_worker_main.py',
             'backend/services/follow_up_recovery.py',
             'backend/services/recovery_decisions.py',
             'backend/services/recovery_worker.py',
