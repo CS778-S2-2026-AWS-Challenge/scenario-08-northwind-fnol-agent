@@ -81,6 +81,51 @@ jobs:
               echo "AuditEvent contract unaffected; check skipped."
             fi
 
+  debug-ruff-format:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend static check
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff format only
+          command: python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
+
+  debug-ruff-lint:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend static check
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Ruff lint only
+          command: python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
+
+  debug-mypy:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Prepare backend static check
+          command: |
+            git fetch origin main
+            python -m pip install -r backend/requirements-dev.txt
+      - run:
+          name: Mypy only
+          command: python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -399,6 +444,9 @@ workflows:
   quality:
     jobs:
       - backend-quality
+      - debug-ruff-format
+      - debug-ruff-lint
+      - debug-mypy
       - github-automation-quality
       - pr-policy
       - docs-quality
