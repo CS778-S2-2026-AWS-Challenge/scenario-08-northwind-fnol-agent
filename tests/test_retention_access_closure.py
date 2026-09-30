@@ -657,13 +657,60 @@ def test_closed_claimant_routes_use_concealed_absence(
     claim_id = body['claim']['claim_id']
     session_id = body['session']['session_id']
 
+    registered = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={**auth_headers, 'Idempotency-Key': 'closure-route-evidence', 'If-Match': '1'},
+        json={
+            'kind': 'police_report',
+            'status': 'pending',
+            'related_fields': ['authorities.police_report_reference'],
+            'needed_for': ['later_action'],
+        },
+    )
+    assert registered.status_code == 201
+    evidence_id = registered.json()['evidence']['evidence_id']
+    evidence_path = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}'
+    write_headers = {**auth_headers, 'If-Match': str(registered.json()['revision'])}
+    action = {'source_claim_id': claim_id, 'proposal_ref': 'p', 'confirmation_ref': 'c'}
+
     claim = repository.get_claim_internal(claim_id)
 
     assert claim is not None
 
     assert repository.reserve_retention_operation(_operation(claim))
 
+    def evidence_post(suffix: str, body: dict[str, object]) -> Response:
+        return client.post(
+            f'{evidence_path}/{suffix}',
+            headers={**write_headers, 'Idempotency-Key': f'closure-evidence-{suffix}'},
+            json=body,
+        )
+
     requests: list[tuple[str, Callable[[], Response]]] = [
+        (
+            'PUT evidence content',
+            lambda: client.put(
+                f'{evidence_path}/content',
+                headers={
+                    **write_headers,
+                    'Idempotency-Key': 'closure-evidence-content',
+                    'Content-Type': 'image/jpeg',
+                },
+                content=b'bytes',
+            ),
+        ),
+        (
+            'POST evidence complete',
+            lambda: evidence_post('complete', {'upload_checksum': 'sha256:' + '0' * 64}),
+        ),
+        (
+            'POST evidence fact decision',
+            lambda: evidence_post(
+                'fact-decisions', {'field_codes': ['x'], 'decision': 'confirmed'}
+            ),
+        ),
+        ('POST evidence remove', lambda: evidence_post('remove', action)),
+        ('POST evidence reuse', lambda: evidence_post('reuse', action)),
         (
             'GET claim',
             lambda: client.get(
