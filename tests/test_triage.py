@@ -511,17 +511,32 @@ def test_workbench_triages_a_created_claim_and_claimants_never_see_it(
         assert 'fast_track' not in payload
 
 
-def test_the_amount_threshold_comes_from_settings() -> None:
+def test_each_app_applies_its_own_amount_threshold() -> None:
     with pytest.raises(ValueError, match='NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD'):
         Settings(environment='test', triage_amount_threshold_nzd=0)
-    create_app(Settings(environment='test', triage_amount_threshold_nzd=1000), FixtureRepository())
-    try:
-        triage = workbench._claim_triage(FixtureRepository(), _claim(), [], [])
-        assert triage is not None
-        assert triage.amount_threshold == 1000
-        assert 'amount_over_threshold' in triage.reasons
-    finally:
-        create_app(Settings(environment='test'), FixtureRepository())
+
+    def probe_app(threshold: float) -> TestClient:
+        app = create_app(
+            Settings(environment='test', triage_amount_threshold_nzd=threshold),
+            FixtureRepository(),
+        )
+
+        @app.get('/_triage_probe')
+        def probe() -> dict[str, object]:
+            triage = workbench._claim_triage(FixtureRepository(), _claim(), [], [])
+            assert triage is not None
+            return {'threshold': triage.amount_threshold, 'reasons': triage.reasons}
+
+        return TestClient(app)
+
+    low, high = probe_app(1000), probe_app(9000)
+    # Requests to either app, in either order, see only that app's setting.
+    assert low.get('/_triage_probe').json()['threshold'] == 1000
+    assert high.get('/_triage_probe').json()['threshold'] == 9000
+    low_again = low.get('/_triage_probe').json()
+    assert low_again['threshold'] == 1000
+    assert 'amount_over_threshold' in low_again['reasons']
+    # Outside a request the default applies.
     default = workbench._claim_triage(FixtureRepository(), _claim(), [], [])
     assert default is not None
     assert default.amount_threshold == DEFAULT_AMOUNT_THRESHOLD

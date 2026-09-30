@@ -1,9 +1,9 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
 from backend.adapters.claims_service import (
     AssessorServiceAdapter,
@@ -137,7 +137,7 @@ from backend.services.staff_agent import (
     ProfileSelectingStaffAgent,
     StaffAgentTurnProvider,
 )
-from backend.services.workbench import configure_triage
+from backend.services.workbench import TRIAGE_AMOUNT_THRESHOLD
 
 
 def create_app(
@@ -280,7 +280,6 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = resolved_settings
-    configure_triage(amount_threshold=resolved_settings.triage_amount_threshold_nzd)
     app.state.protected_value_adapter = protected_value_adapter or protected_value_adapter_for(
         resolved_settings.environment
     )
@@ -487,6 +486,17 @@ def create_app(
 
     configure_cors(app, resolved_settings)
     app.add_middleware(RequestIdMiddleware)
+
+    @app.middleware('http')
+    async def apply_triage_settings(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        token = TRIAGE_AMOUNT_THRESHOLD.set(resolved_settings.triage_amount_threshold_nzd)
+        try:
+            return await call_next(request)
+        finally:
+            TRIAGE_AMOUNT_THRESHOLD.reset(token)
+
     register_exception_handlers(app)
 
     app.include_router(health_router)

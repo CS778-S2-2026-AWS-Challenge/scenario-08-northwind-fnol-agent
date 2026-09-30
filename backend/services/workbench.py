@@ -1,6 +1,7 @@
 """Role-safe Workbench projections assembled from authoritative Claim records."""
 
 from collections.abc import Sequence
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, TypeVar
 
@@ -1754,13 +1755,12 @@ def _matches_search(item: WorkbenchClaimListItem, search: str | None) -> bool:
     return any(query in value.casefold() for value in values if value)
 
 
-_triage_amount_threshold = DEFAULT_AMOUNT_THRESHOLD
-
-
-def configure_triage(*, amount_threshold: float) -> None:
-    """Apply the process-wide triage setting; `create_app` calls this from `Settings`."""
-    global _triage_amount_threshold
-    _triage_amount_threshold = amount_threshold
+# The triage threshold of the app serving the current request. `create_app` installs a
+# middleware that sets it from that app's Settings for each request, so two apps in one
+# process never share a value. Code running outside a request uses the default.
+TRIAGE_AMOUNT_THRESHOLD: ContextVar[float] = ContextVar(
+    'triage_amount_threshold', default=DEFAULT_AMOUNT_THRESHOLD
+)
 
 
 def _claim_triage(
@@ -1788,7 +1788,7 @@ def _claim_triage(
         active_branches=evaluation.active_branches,
         requirements=evaluation.requirements,
         registry=registry,
-        amount_threshold=_triage_amount_threshold,
+        amount_threshold=TRIAGE_AMOUNT_THRESHOLD.get(),
     )
 
 
