@@ -29,7 +29,7 @@
     "structured_output": true,
     "tools": true,
     "image_input": true,
-    "document_input": false
+    "document_input": true
   },
   {
     "profile_id": "bedrock-nova2-lite",

@@ -39,7 +39,8 @@ import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
 import AttachmentPreview from './components/AttachmentPreview.jsx'
 import { modelAttachmentCompatibility } from './attachmentModelCompatibility.js'
-import ExternalServiceAction, { ExternalServiceOverview } from './components/ExternalServiceAction.jsx'
+import ExternalServiceAction from './components/ExternalServiceAction.jsx'
+import ExternalServicesPage from './components/ExternalServicesPage.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
@@ -64,7 +65,6 @@ import { profilePathForSection, profileSectionFromPath } from './profileRoutes.j
 import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
 import useClaimAutoFillEditor from './profile/useClaimAutoFillEditor.js'
-import { documentAttentionCount } from './claimDocumentProjection.js'
 import { WORKBENCH_URL } from './runtimeConfig.js'
 import {
   forgetAnonymousConversation,
@@ -711,10 +711,6 @@ function App() {
   const homepageConversationReports = claim ? conversationReports : (savedReports || [])
   const selectedHistoryClaim = claimHistory?.find((item) => item.claim_id === selectedHistoryClaimId)
     || (claim?.claim_id === selectedHistoryClaimId ? claim : null)
-  const documentOutstandingCount = evidenceLoadStatus === 'ready'
-    ? documentAttentionCount(evidenceItems)
-    : null
-
   function currentClaimantIdentityKey() {
     const authenticated = hasClaimantAccessToken()
     let identityKey = `account:${accountRef.current?.customer_id || ''}`
@@ -3614,12 +3610,37 @@ function App() {
   const isUrgentSupport = handoff?.support_need === 'urgent'
   const isProfilePage = page === 'account'
   const isStandaloneClaimHistory = !isWorkspaceActive && page === 'claim-history'
-  const profileDisplayName = account?.profile?.display_name || 'Log in to save your chat'
+  const profileDisplayName = account?.profile?.display_name || 'Log in'
   const profileEmail = account?.profile?.email || 'Profile and preferences'
   const profileNamePreview = middleEllipsisLayoutParts(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)
   const profileButtonLabel = account
     ? `Open Profile for ${profileDisplayName} (${profileEmail})`
     : 'Open Profile and preferences'
+
+  function openClaimWorkspacePage(destination) {
+    if (destination === 'overview') {
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      return
+    }
+    if (destination === 'documents') {
+      openCurrentClaimDocuments()
+      return
+    }
+    if (destination === 'history') {
+      openClaimHistory()
+      return
+    }
+    if (destination === 'privacy') {
+      setWorkspaceView('privacy')
+      setMobileView('chat')
+      return
+    }
+    setWorkspaceView('external-services')
+    setMobileView('chat')
+  }
+
+  const showsClaimDetails = workspaceView === 'chat' || workspaceView === 'external-services'
 
   return (
     <div className={`customer-app ${!isWorkspaceActive && page === 'home' ? 'entry-shell' : ''} ${isWorkspaceActive && !['login', 'register'].includes(page) ? 'workspace-shell' : ''} ${isProfilePage ? 'is-profile-page' : ''} ${isStandaloneClaimHistory ? 'is-claim-history-page' : ''}`}>
@@ -3983,21 +4004,13 @@ function App() {
                 Privacy &amp; your data
               </button>
               <button type="button" onClick={openClaimHistory}>Claim history</button>
-              <button type="button" onClick={() => setWorkspaceView('external-services')}>External services</button>
               <button
-                className="history-action-button"
+                className={workspaceView === 'external-services' ? 'is-active' : undefined}
                 type="button"
-                aria-label={documentOutstandingCount > 0
-                  ? `What to provide, ${documentOutstandingCount} outstanding`
-                  : 'What to provide'}
-                onClick={openCurrentClaimDocuments}
+                aria-current={workspaceView === 'external-services' ? 'page' : undefined}
+                onClick={() => openClaimWorkspacePage('external-services')}
               >
-                <span>What to provide</span>
-                {documentOutstandingCount > 0 && (
-                  <span className="history-action-count" aria-hidden="true">
-                    {documentOutstandingCount}
-                  </span>
-                )}
+                External services
               </button>
             </div>
             <div className="intake-history-label">Conversation history</div>
@@ -4061,32 +4074,30 @@ function App() {
                   onViewClaim={claim ? () => openClaimFeatures(claim) : null}
                 />
               ) : (
-                <>
-                  <h1>
-                    {workspaceView === 'history'
-                    ? 'Claim history'
-                    : workspaceView === 'claim-features'
-                      ? 'Claim features'
-                      : workspaceView === 'external-services'
-                        ? 'External services'
+                workspaceView === 'external-services' ? null : (
+                  <>
+                    <h1>
+                      {workspaceView === 'history'
+                      ? 'Claim history'
+                      : workspaceView === 'claim-features'
+                        ? 'Claim features'
                         : workspaceView === 'agreement'
                             ? 'Agreement & confirmation'
                             : 'Evidence history'}
-                  </h1>
-                  <p>
-                    {workspaceView === 'history'
-                    ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
-                    : workspaceView === 'claim-features'
-                      ? 'Review this Claim\'s current status and available information.'
-                      : workspaceView === 'external-services'
-                        ? 'See the external service currently recorded for this Claim, including what may be shared and what happens next.'
+                    </h1>
+                    <p>
+                      {workspaceView === 'history'
+                      ? 'Your Claims are listed by their latest server-recorded update. Open a Claim to review its available features.'
+                      : workspaceView === 'claim-features'
+                        ? 'Review this Claim\'s current status and available information.'
                         : workspaceView === 'agreement'
                             ? 'Your payout destination and preferred contact method are saved. Agreement review and final Claim confirmation happen in Step 4.'
                             : workspaceView === 'claim-evidence'
                             ? 'Review the files and supporting material recorded for the selected Claim.'
                             : 'Review files retained across your Northwind Claims, including where they came from and their latest processing state.'}
-                  </p>
-                </>
+                    </p>
+                  </>
+                )
               )}
               {workspaceView === 'history' && (
                 account ? (
@@ -4137,9 +4148,12 @@ function App() {
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
               )}
               {workspaceView === 'external-services' && (
-                claim?.external_service_action
-                  ? <ExternalServiceOverview action={claim.external_service_action} />
-                  : <p className="empty-details">No external service is currently recorded for this claim.</p>
+                <ExternalServicesPage
+                  action={claim?.external_service_action || null}
+                  claim={claim}
+                  onBackToOverview={() => openClaimWorkspacePage('overview')}
+                  onWhatToProvide={() => openClaimWorkspacePage('documents')}
+                />
               )}
               {workspaceView === 'files' && (
                 account ? (
@@ -4165,11 +4179,11 @@ function App() {
                   </div>
                 </div>
               )}
-              <div className="claim-status">{claim
-                ? claim.external_claim?.creation_status === 'created'
+              {claim && (
+                <div className="claim-status">{claim.external_claim?.creation_status === 'created'
                   ? 'Claim created'
-                  : handoff ? 'Staff assistance active' : 'In progress'
-                : 'Ready to start'}</div>
+                  : handoff ? 'Staff assistance active' : 'In progress'}</div>
+              )}
             </div>
 
             {claim && (
@@ -4465,10 +4479,10 @@ function App() {
             />
           </section>
 
-          {!detailsOpen && workspaceView === 'chat' && (
+          {!detailsOpen && showsClaimDetails && (
             <button className="details-reopen" type="button" onClick={() => setDetailsOpen(true)} aria-label="Show claim details" title="Show claim details">‹</button>
           )}
-          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && workspaceView === 'chat' ? 'is-open' : 'is-collapsed'} ${workspaceView !== 'chat' ? 'is-hidden' : ''}`} aria-labelledby="claim-details-title">
+          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && showsClaimDetails ? 'is-open' : 'is-collapsed'}`} aria-labelledby="claim-details-title">
             <div className="claim-panel-heading">
               <div>
                 <p className="eyebrow">Your claim</p>
@@ -4546,7 +4560,7 @@ function App() {
               tabIndex="0"
               hidden={detailsTab !== 'documents'}
             >
-              {detailsTab === 'documents' && workspaceView === 'chat' && (
+              {detailsTab === 'documents' && showsClaimDetails && (
                 <ClaimDocuments
                   items={evidenceItems}
                   loadStatus={evidenceLoadStatus}
