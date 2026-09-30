@@ -770,10 +770,9 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 
 A newly created claim should initialise `severity = unassessed`, `coverage = not_assessed`, and `evidence = not_started`.
 
-Runtime never writes `severity`. A stored value other than `unassessed` is a staff triage decision
-made through staff write-back (`claim_state.severity` is on the write-back allowlist; writing
-`unassessed` hands the Claim back to the triage rules). Workbench projections report the effective
-triage in `claim_state.severity` and in `triage`; see "Workbench triage".
+Neither Runtime nor staff write-back writes `severity`; the stored value stays `unassessed`.
+Workbench projections report the computed triage in `claim_state.severity` and in `triage`; see
+"Workbench triage".
 
 ### Working Claim
 
@@ -3030,8 +3029,6 @@ created (`external_claim.creation_status = created`), then this staff-only objec
 ```json
 {
   "severity": "standard",
-  "source": "system",
-  "system_severity": "standard",
   "reasons": ["third_party_recovery", "amount_unknown"],
   "rules_version": "triage-rules-v1",
   "amount_threshold": 5000.0
@@ -3049,14 +3046,21 @@ the next read. Three questions apply in order and every matched reason is return
 | `fast_track` | No reason matched |
 
 Unknown, unavailable or unchecked inputs never yield `fast_track`. `amount_threshold` is the
-configured business threshold (`NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD`, default NZD 5,000); the highest of `loss.estimated_amount` and the
-sum of confirmed contents item values is compared, and an amount equal to the threshold is not
-over it. `coverage_uncertain` comes from an uncertainty on the policy retrieval record for the
-Claim's policy number or `coverage = ambiguous`, never from `coverage = review_required` alone.
-When staff have stored a severity, `severity` is that decision, `source` is `staff`, and
-`system_severity` and `reasons` still show the current rule outcome. `claim_state.severity` in
-Workbench projections equals `triage.severity`. No claimant projection contains `triage`,
-`severity` or reason codes.
+configured business threshold (`NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD`, default NZD 5,000). The
+highest of `loss.estimated_amount` (NZD) and the sum of confirmed contents item values is
+compared, and an amount equal to the threshold is not over it. Contents values in another
+currency are converted with the dated reference table in `backend/domain/currency.py`; a
+currency outside that table makes the amount unknown.
+
+`coverage_uncertain` comes from an uncertainty on the policy retrieval record for the Claim's
+policy number or `coverage = ambiguous`, never from `coverage = review_required` alone.
+`document_outstanding` compares canonical Evidence kinds (`canonical_evidence_kind` in
+`backend/domain/evidence.py`: `incident_image` and `photo` read as `incident_photo`). A receipt or
+invoice counts as proof of ownership; no other kind stands in for a required kind, so an
+assessment report does not replace a repair quote.
+
+`claim_state.severity` in Workbench projections equals `triage.severity`. Staff cannot change the
+triage. No claimant projection contains `triage`, `severity` or reason codes.
 
 `tags` is a backend projection from authoritative Claim fields and branches, Evidence records,
 WorkItems, handoffs, external-operation results, and review Signals. The Workbench client MUST
