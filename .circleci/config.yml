@@ -643,6 +643,91 @@ jobs:
             if awk -F: '$1 == "tests/test_retention_execution.py" && $2 >= 190 && $2 <= 530 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
             exit 0
 
+  probe-mypy-mongo-hold-a:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe mongo hold lines 2400-2520
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2400 && $2 <= 2520 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-mongo-hold-b:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe mongo hold lines 2521-2600
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2521 && $2 <= 2600 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-mongo-hold-c:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe mongo hold lines 2601-2720
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy backend/repositories/mongodb.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "backend/repositories/mongodb.py" && $2 >= 2601 && $2 <= 2720 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-incomplete-entry:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe worker entrypoint test lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy tests/test_incomplete_claim_recovery.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 419 && $2 <= 535 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
+  probe-mypy-incomplete-isolation:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Probe candidate isolation test lines
+          command: |
+            python -m pip install -r backend/requirements-dev.txt
+            python -m mypy tests/test_incomplete_claim_recovery.py > /tmp/mypy.txt 2>&1 || true
+            if awk -F: '$1 == "tests/test_incomplete_claim_recovery.py" && $2 >= 536 && $2 <= 650 { found=1 } END { exit found ? 0 : 1 }' /tmp/mypy.txt; then exit 1; fi
+            exit 0
+
   customer-quality:
     docker:
       - image: cimg/node:22.14
@@ -997,6 +1082,11 @@ workflows:
       - probe-mypy-mongo-hold
       - probe-mypy-incomplete-new
       - probe-mypy-retention-new
+      - probe-mypy-mongo-hold-a
+      - probe-mypy-mongo-hold-b
+      - probe-mypy-mongo-hold-c
+      - probe-mypy-incomplete-entry
+      - probe-mypy-incomplete-isolation
       - github-automation-quality
       - pr-policy
       - docs-quality
