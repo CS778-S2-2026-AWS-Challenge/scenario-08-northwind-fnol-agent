@@ -251,6 +251,46 @@ def test_retention_delete_authorization_refuses_preexisting_hold(
     'kind',
     ['fixture', 'mongodb'],
 )
+def test_authorized_delete_stays_discoverable_after_later_hold(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(kind, monkeypatch)
+    operation = _operation(operation_id=f'ret-auth-later-hold-{kind}')
+    assert repository.reserve_retention_operation(operation) is True
+
+    authorized, authorization = repository.authorize_retention_object_target(
+        operation.operation_id,
+        'target-1',
+        operation.revision,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert authorized.active_delete_authorization_id == authorization.authorization_id
+
+    repository.save_retention_hold(
+        RetentionHoldRecord(
+            hold_id=f'hold-after-auth-{kind}',
+            claim_id=operation.claim_id,
+            reason=RetentionHoldReason.INVESTIGATION,
+            authority_ref='staff:reviewer',
+            source_refs=['review:after-auth'],
+            applied_at=NOW + timedelta(seconds=2),
+        )
+    )
+
+    held = repository.get_retention_operation(operation.operation_id)
+    assert held is not None
+    assert held.status is RetentionOperationStatus.HELD
+    assert held.active_delete_authorization_id == authorization.authorization_id
+    assert [
+        item.operation_id for item in repository.list_pending_retention_operations(limit=10)
+    ] == [operation.operation_id]
+
+
+@pytest.mark.parametrize(
+    'kind',
+    ['fixture', 'mongodb'],
+)
 def test_retention_delete_authorization_and_result_replay_are_idempotent(
     kind: str,
     monkeypatch: pytest.MonkeyPatch,
