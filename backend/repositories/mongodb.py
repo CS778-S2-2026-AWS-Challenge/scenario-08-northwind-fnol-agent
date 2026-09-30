@@ -13,6 +13,8 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any, NoReturn, TypeVar, cast
 
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
 from backend.domain.account_data import (
     IdentityDocumentRecord,
     PaymentDestinationRecord,
@@ -209,7 +211,6 @@ from backend.repositories.protocols import (
     validate_staff_agent_execution_source,
     validate_validation_seed_session,
 )
-from pydantic import BaseModel, TypeAdapter, ValidationError
 from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
