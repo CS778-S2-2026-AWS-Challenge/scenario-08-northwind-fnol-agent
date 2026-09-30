@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend import recovery_worker_main as recovery_worker_cli
 from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.core.runtime_profiles import DataRuntimeBundle
 from backend.domain.audit import AuditSubject, AuditSubjectType
@@ -46,7 +47,6 @@ from backend.services.retention import (
     freeze_retention_cleanup_targets,
     reserve_retention_from_terminal,
 )
-from backend import recovery_worker_main as recovery_worker_cli
 from backend.services import recovery_worker
 
 
