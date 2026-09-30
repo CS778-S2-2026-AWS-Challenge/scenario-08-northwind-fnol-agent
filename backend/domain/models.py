@@ -3329,16 +3329,16 @@ class RetentionOperation(ContractModel):
             evidence_ids.add(evidence.evidence_id)
 
             if evidence.authorization_id is not None:
-                authorization: RetentionDeleteAuthorization | None = None
+                matched_authorization: RetentionDeleteAuthorization | None = None
                 for item in self.delete_authorizations:
                     if item.authorization_id == evidence.authorization_id:
-                        authorization = item
+                        matched_authorization = item
                         break
-                if authorization is None:
+                if matched_authorization is None:
                     raise ValueError('Retention step references an unknown delete authorization.')
                 if (
-                    authorization.target_id != evidence.target_id
-                    or authorization.attempt != evidence.attempt
+                    matched_authorization.target_id != evidence.target_id
+                    or matched_authorization.attempt != evidence.attempt
                 ):
                     raise ValueError(
                         'Retention step and delete authorization coordinates must agree.'
