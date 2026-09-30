@@ -1,27 +1,40 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import ClaimReviewPanel from './ClaimReviewPanel.jsx'
+import ClaimReviewPanel, { ClaimNextStepsPanel, ClaimSummaryProgress } from './ClaimReviewPanel.jsx'
 
 const labels = {
   'claim.product_family': 'Claim type',
   'incident.description': 'What happened',
+  'incident.injury_or_danger': 'Injury or immediate danger',
   'incident.occurred_at': 'When it happened',
+  'incident.location': 'Incident location',
+  'loss.description': 'Damage or loss',
   'property.address': 'Affected property',
+  'property.habitable': 'Property safe to live in',
 }
 
-function renderPanel(overrides = {}) {
-  const props = {
+function panelProps(overrides = {}) {
+  return {
     form: {
       'claim.product_family': { value: 'home', status: 'confirmed', source: 'claimant' },
-      'incident.description': { value: 'A pipe burst.', status: 'confirmed', source: 'claimant' },
-      'property.address': { value: '1 Queen Street', status: 'proposed', source: 'claimant' },
+      'incident.description': { value: 'A pipe burst in the kitchen.', status: 'confirmed', source: 'claimant' },
+      'property.address': { value: '1 Queen Street', status: 'proposed', source: 'inference' },
+      'property.habitable': { value: true, status: 'confirmed', source: 'claimant' },
     },
     contentsItems: [],
     dynamicForm: {
       requirements: {
         ready: false,
-        missing_required_now: ['incident.occurred_at'],
+        current_action_total: 8,
+        current_action_satisfied: 4,
+        missing_required_now: [
+          'incident.injury_or_danger',
+          'incident.occurred_at',
+          'incident.location',
+          'loss.description',
+        ],
         pending_later: [],
       },
     },
@@ -34,43 +47,88 @@ function renderPanel(overrides = {}) {
     cancelEdit: vi.fn(),
     saveFieldCorrection: vi.fn(),
     confirmProposedFields: vi.fn(),
+    onViewNextSteps: vi.fn(),
     fieldLabel: (fieldCode) => labels[fieldCode] || fieldCode,
-    fieldStatusLabel: (status) => status === 'confirmed' ? 'Confirmed' : 'Check this',
-    fieldSourceLabel: () => 'Provided by you',
-    fieldValueText: (field) => String(field.value ?? ''),
+    fieldStatusLabel: (status) => status === 'confirmed' ? 'Confirmed' : 'Needs review',
+    fieldSourceLabel: (source) => source === 'inference' ? 'Suggested from your description' : 'Provided by you',
+    fieldValueText: (field) => typeof field.value === 'boolean' ? (field.value ? 'Yes' : 'No') : String(field.value ?? ''),
     busy: false,
     status: 'idle',
-    stepActive: true,
     ...overrides,
   }
+}
 
+function renderPanel(overrides = {}) {
+  const props = panelProps(overrides)
   render(<ClaimReviewPanel {...props} />)
   return props
 }
 
-describe('ClaimReviewPanel', () => {
-  it('shows Step 2, grouped Claim state, and announces backend-owned missing requirements', () => {
+describe('ClaimReviewPanel overview', () => {
+  it('summarises known information without repeating the missing-question list', () => {
     renderPanel()
 
-    expect(screen.getByText('Step 2 of 4 · Review information')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Claim overview' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Incident details' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Insured item and loss' })).toBeInTheDocument()
-    const missingNotice = screen.getByRole('alert')
-    expect(missingNotice).toHaveTextContent('Still needed')
-    expect(missingNotice).toHaveTextContent('When it happened')
-    expect(screen.getByText('A pipe burst.')).toBeInTheDocument()
+    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Home claim' })).toBeVisible()
+    expect(screen.getByText('We still need incident, damage, and safety details before the claim can progress.')).toBeVisible()
+    expect(screen.getByText('4 of 8 details captured')).toBeVisible()
+    expect(screen.getByText('4 details remaining')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'What we know' })).toBeVisible()
+    expect(screen.queryByText('When did it happen?')).not.toBeInTheDocument()
+    expect(screen.queryByText(/No details captured/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Add / })).not.toBeInTheDocument()
   })
 
-  it('keeps correction and confirmation actions delegated to App-owned API commands', () => {
+  it('hides sections that have no captured information', () => {
+    renderPanel({
+      form: {
+        'claim.product_family': { value: 'motor', status: 'confirmed', source: 'claimant' },
+      },
+      proposedFields: [],
+    })
+
+    expect(screen.getByRole('button', { name: /Claim overview.*Motor vehicle claim/i })).toBeVisible()
+    expect(screen.queryByRole('button', { name: /^Incident details/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Insured item and loss/i })).not.toBeInTheDocument()
+  })
+
+  it('uses one compact list surface and reveals traceability on expansion', async () => {
+    const user = userEvent.setup()
     const props = renderPanel()
 
-    const editButtons = screen.getAllByRole('button', { name: 'Edit' })
-    fireEvent.click(editButtons[0])
-    expect(props.beginEdit).toHaveBeenCalled()
+    const incident = screen.getByRole('button', { name: /Incident details.*A pipe burst in the kitchen/i })
+    expect(incident).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: /Insured item and loss.*Needs review/i })).toBeVisible()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm details' }))
-    expect(props.confirmProposedFields).toHaveBeenCalledTimes(1)
+    await user.click(incident)
+    const editDetail = screen.getByRole('button', { name: 'Edit What happened' })
+    expect(within(editDetail).getByText('Provided by you')).toBeVisible()
+    expect(within(editDetail).getByText('Confirmed')).toBeVisible()
+
+    await user.click(editDetail)
+    expect(props.beginEdit).toHaveBeenCalledWith('incident.description', 'A pipe burst in the kitchen.')
+  })
+
+  it('switches to Next steps from the compact outstanding-details action', async () => {
+    const user = userEvent.setup()
+    const props = renderPanel()
+
+    await user.click(screen.getByRole('button', { name: 'View' }))
+    expect(props.onViewNextSteps).toHaveBeenCalledOnce()
+  })
+
+  it('shows only meaningful safety and review alerts', async () => {
+    const user = userEvent.setup()
+    const props = renderPanel()
+
+    expect(screen.getByRole('heading', { name: 'Needs review' })).toBeVisible()
+    expect(screen.getByText('Safety information has not been confirmed.')).toBeVisible()
+    expect(screen.getByText('1 Agent-suggested detail needs your review.')).toBeVisible()
+
+    const aiReview = screen.getByText('1 Agent-suggested detail needs your review.').closest('.overview-alert')
+    await user.click(within(aiReview).getByRole('button', { name: 'Review' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm suggested details' }))
+    expect(props.confirmProposedFields).toHaveBeenCalledOnce()
   })
 
   it('renders the existing correction editor without creating independent Claim state', () => {
@@ -95,39 +153,103 @@ describe('ClaimReviewPanel', () => {
     expect(saveFieldCorrection).toHaveBeenCalledWith('incident.description', field)
   })
 
-  it('shows contents items as review data without inventing an edit contract', () => {
-    renderPanel({
-      form: {},
-      proposedFields: [],
-      dynamicForm: null,
-      contentsItems: [
-        {
-          item_id: 'item-1',
-          description: 'Laptop',
-          category: 'Electronics',
-          status: 'confirmed',
-          source: 'claimant',
-        },
-      ],
-    })
+  it('gently marks the affected section when conversation data changes', () => {
+    const props = panelProps()
+    const { rerender } = render(<ClaimReviewPanel {...props} />)
+    const updatedForm = {
+      ...props.form,
+      'incident.location': { value: 'Auckland', status: 'confirmed', source: 'claimant' },
+    }
 
-    expect(screen.getByRole('heading', { name: 'Insured item and loss' })).toBeInTheDocument()
-    expect(screen.getByText('Laptop')).toBeInTheDocument()
-    expect(screen.getByText('Electronics')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    rerender(<ClaimReviewPanel {...props} form={updatedForm} />)
+
+    expect(screen.getByRole('button', { name: /Incident details.*A pipe burst/i }).closest('section')).toHaveClass('is-updated')
+    expect(screen.getByRole('button', { name: /^Safety and ongoing risk/i }).closest('section')).not.toHaveClass('is-updated')
   })
 
-  it('explains how the Summary tab will populate before a conversation starts', () => {
+  it('shows a quiet Overview empty state before a conversation starts', () => {
     renderPanel({
       form: {},
       proposedFields: [],
       dynamicForm: null,
-      stepActive: false,
       conversationEmpty: true,
     })
 
-    expect(screen.getByRole('heading', { name: 'Your summary will build as you chat' })).toBeVisible()
-    expect(screen.getByText('Key dates, people, damage and supporting items will appear here automatically.')).toBeVisible()
-    expect(screen.queryByText('Details from your conversation will appear here.')).not.toBeInTheDocument()
+    expect(screen.getByText('Tell us what happened and the Agent will build this overview as you chat.')).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'What we know' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Needs review' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ClaimNextStepsPanel', () => {
+  it('groups actionable questions without repeated Missing labels or decorative bullets', () => {
+    const props = panelProps({
+      dynamicForm: {
+        requirements: {
+          missing_required_now: [
+            'incident.injury_or_danger',
+            'incident.description',
+            'incident.occurred_at',
+            'incident.location',
+          ],
+          pending_later: ['incident.location', 'loss.description'],
+        },
+      },
+    })
+    render(<ClaimNextStepsPanel {...props} />)
+
+    expect(screen.queryByRole('heading', { name: 'Next steps' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Safety checks' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Incident details' })).toBeVisible()
+    expect(screen.getByText('Was anyone injured or in immediate danger?')).toBeVisible()
+    expect(screen.getByText('Where did it happen?')).toBeVisible()
+    expect(screen.getByText('What was damaged or lost?')).toBeVisible()
+    expect(screen.queryByText('Missing')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^Add / })).toHaveLength(5)
+  })
+
+  it('opens the shared field editor from an Add action', async () => {
+    const user = userEvent.setup()
+    const props = panelProps()
+    render(<ClaimNextStepsPanel {...props} />)
+
+    await user.click(screen.getByRole('button', { name: 'Add When did it happen?' }))
+    expect(props.beginEdit).toHaveBeenCalledWith('incident.occurred_at', undefined)
+  })
+
+  it('moves confirmed information into a collapsed Completed section', () => {
+    const props = panelProps({
+      form: {
+        'claim.product_family': { value: 'motor', status: 'confirmed', source: 'claimant' },
+      },
+      dynamicForm: {
+        requirements: {
+          ready: true,
+          missing_required_now: [],
+          pending_later: [],
+        },
+      },
+    })
+    render(<ClaimNextStepsPanel {...props} />)
+
+    expect(screen.getByText('All required details are complete.')).toBeVisible()
+    expect(screen.getByText('Completed')).toBeVisible()
+    expect(screen.getByText('Claim type')).not.toBeVisible()
+  })
+})
+
+describe('ClaimSummaryProgress', () => {
+  it('renders the server-owned captured count as an accessible progress indicator', () => {
+    render(
+      <ClaimSummaryProgress
+        form={{}}
+        contentsItems={[]}
+        dynamicForm={{ requirements: { ready: false, current_action_total: 11, current_action_satisfied: 5 } }}
+      />,
+    )
+
+    expect(screen.getByText('5 of 11 completed')).toBeVisible()
+    expect(screen.getByText('Saved automatically')).toBeVisible()
+    expect(screen.getByRole('progressbar', { name: 'Claim details captured' })).toHaveAttribute('aria-valuenow', '5')
   })
 })

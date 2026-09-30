@@ -25,6 +25,21 @@ const ASSIGNED_SERVICE = {
   },
 }
 
+const MESSAGE_OFFER = {
+  offer_id: 'offer-repairer-1',
+  agent_message_id: 'msg-agent-1',
+  service_identity: 'repairer_information_or_link',
+  service_name: 'Repairer information',
+  provider: 'Northwind repair guidance',
+  purpose: 'Help you find the right repair information for this claim.',
+  shared_data_summary: ['Northwind sends no claim information for this manual service'],
+  consent_status: 'not_recorded',
+  status: 'manual_available',
+  routing: null,
+  official_url: 'https://www.example.test/repairs',
+  can_request: false,
+}
+
 describe('ExternalServicesPage', () => {
   it('makes the no-service state and required claimant action explicit', async () => {
     const user = userEvent.setup()
@@ -66,6 +81,24 @@ describe('ExternalServicesPage', () => {
     expect(screen.getByText(/No request has been sent yet/i)).toBeVisible()
     expect(screen.getByText('Controlled assessment fixture')).toBeVisible()
     expect(screen.getByText('Permission recorded')).toBeVisible()
+  })
+
+  it('shows a message-bound recommendation instead of the no-service state', () => {
+    render(
+      <ExternalServicesPage
+        action={null}
+        messageActions={[MESSAGE_OFFER]}
+        claim={CLAIM}
+        onBackToOverview={vi.fn()}
+        onWhatToProvide={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Repairer information' })).toBeVisible()
+    expect(screen.getByText('Northwind repair guidance')).toBeVisible()
+    expect(screen.getAllByText(/find the right repair information/i)).toHaveLength(2)
+    expect(screen.queryByRole('heading', { name: 'No external service is needed right now' }))
+      .not.toBeInTheDocument()
   })
 
   it('shows every claimant-safe provider detail for an assigned service', () => {
