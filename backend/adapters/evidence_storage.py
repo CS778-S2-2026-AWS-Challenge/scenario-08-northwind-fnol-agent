@@ -10,6 +10,7 @@ import boto3
 from botocore.client import Config as BotoClientConfig
 from botocore.exceptions import BotoCoreError, ClientError
 
+from backend.domain.retention import ObjectDeletionOutcome
 from backend.services.support import now_utc
 
 MAX_UPLOAD_SIZE_BYTES = 10_485_760
@@ -192,6 +193,16 @@ class EvidenceStorage(Protocol):
     ) -> bytes | None:
         raise NotImplementedError
 
+    def delete_upload(
+        self,
+        *,
+        claim_id: str,
+        evidence_id: str,
+        storage_key: str,
+    ) -> ObjectDeletionOutcome:
+        """Delete one frozen Evidence object through a provider-neutral boundary."""
+        raise NotImplementedError
+
     def store_generated_content(
         self,
         *,
@@ -319,6 +330,34 @@ class MockEvidenceStorage(EvidenceStorage):
         if storage_key is not None and storage_key != completed.storage_key:
             return None
         return self._content.get((claim_id, evidence_id))
+
+    def delete_upload(
+        self,
+        *,
+        claim_id: str,
+        evidence_id: str,
+        storage_key: str,
+    ) -> ObjectDeletionOutcome:
+        self._guard()
+
+        identity = (claim_id, evidence_id)
+        completed = self._completed.get(identity)
+
+        if completed is not None and completed.storage_key != storage_key:
+            return ObjectDeletionOutcome.UNKNOWN
+
+        existed = (
+            identity in self._content or identity in self._completed or identity in self._pending
+        )
+
+        if not existed:
+            return ObjectDeletionOutcome.ALREADY_ABSENT
+
+        self._content.pop(identity, None)
+        self._completed.pop(identity, None)
+        self._pending.pop(identity, None)
+
+        return ObjectDeletionOutcome.DELETED
 
     def store_generated_content(
         self,
@@ -562,6 +601,60 @@ class MinioEvidenceStorage(EvidenceStorage):
         if not isinstance(content, bytes) or len(content) > self.max_size_bytes:
             return None
         return content
+
+    def delete_upload(
+        self,
+        *,
+        claim_id: str,
+        evidence_id: str,
+        storage_key: str,
+    ) -> ObjectDeletionOutcome:
+        expected_prefix = self._storage_key(
+            claim_id,
+            evidence_id,
+        ).removesuffix('staging')
+
+        if not storage_key.startswith(f'{expected_prefix}finalised/'):
+            return ObjectDeletionOutcome.UNKNOWN
+
+        try:
+            self._client.head_object(
+                Bucket=self._config.bucket,
+                Key=storage_key,
+            )
+        except ClientError as error:
+            if self._not_found(error):
+                return ObjectDeletionOutcome.ALREADY_ABSENT
+            return ObjectDeletionOutcome.FAILED
+        except BotoCoreError:
+            return ObjectDeletionOutcome.FAILED
+
+        try:
+            self._client.delete_object(
+                Bucket=self._config.bucket,
+                Key=storage_key,
+            )
+        except ClientError as error:
+            if self._not_found(error):
+                return ObjectDeletionOutcome.ALREADY_ABSENT
+            return ObjectDeletionOutcome.UNKNOWN
+        except BotoCoreError:
+            return ObjectDeletionOutcome.UNKNOWN
+
+        try:
+            self._client.head_object(
+                Bucket=self._config.bucket,
+                Key=storage_key,
+            )
+        except ClientError as error:
+            if self._not_found(error):
+                return ObjectDeletionOutcome.DELETED
+            return ObjectDeletionOutcome.UNKNOWN
+        except BotoCoreError:
+            return ObjectDeletionOutcome.UNKNOWN
+
+        # The provider accepted DELETE but the object is still observable.
+        return ObjectDeletionOutcome.FAILED
 
     def store_generated_content(
         self,

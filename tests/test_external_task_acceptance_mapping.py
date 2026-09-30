@@ -343,6 +343,20 @@ def test_an_attempt_that_may_have_arrived_is_unresolved_rather_than_retryable() 
         AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
     ]
 
+    recovery_items = [
+        item
+        for item in repository.list_runtime_work_items(
+            claim_id,
+            'cus_demo',
+        )
+        if item.subject_ref == f'external-task:{task.task_id}'
+    ]
+    assert len(recovery_items) == 1
+    assert recovery_items[0].kind == 'external'
+    assert recovery_items[0].owner == 'staff'
+    assert recovery_items[0].status == 'open'
+    assert recovery_items[0].blocks_action == 'external.retry'
+
     # An unresolved outcome must not read as a claim that never made a request.
     action = claimant['external_service_action']
     assert action['status'] == 'awaiting_reconciliation'
@@ -678,6 +692,19 @@ def test_reconciliation_settles_the_existing_identity_without_another_route() ->
     assert operation.status is AssessorRoutingOperationStatus.ACCEPTED
     assert operation.result is not None
     assert operation.result.model_dump(mode='json') == settled.json()
+
+    recovery_items = [
+        item
+        for item in repository.list_runtime_work_items(
+            claim_id,
+            'cus_demo',
+        )
+        if item.subject_ref == f'external-task:{task_after.task_id}'
+    ]
+    assert [item.status for item in recovery_items] == [
+        'open',
+        'completed',
+    ]
 
     claim_after = repository.get_claim_internal(claim_id)
     assert claim_after is not None

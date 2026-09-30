@@ -1328,7 +1328,7 @@ Follow-up IDs use the `fup_` prefix. The minimum P17.1 record persists stable id
 source Session, purpose, source references, responsible party, channel, due time, status, attempt
 count, contact-permission condition, optional outcome, and timestamps. `pending` means P17.1 has
 an authorised current channel; `blocked` means contact is not authorised and therefore has no
-channel or schedule; `resolved` records that the claimant resumed. An authenticated in-app
+executable channel or schedule (a legacy historical due time may remain); `resolved` records the typed resolution. An authenticated in-app
 recovery record does not grant email, SMS, or phone authority. An anonymous browser interruption
 is persisted as `blocked` / `not_authorised` rather than as executable outbound work.
 
@@ -1367,58 +1367,6 @@ retention decisions remain outside this persistence contract.
 
 ## P17.3 Durable Follow-up execution contract
 
-### Operation creation and advancement
-
-The backend slice owns conditional persistence, existing pause/resume compatibility,
-and migration safety. It does not execute a Runtime worker, deliver notifications,
-or delete retained data. The following table defines the consumer boundary.
-
-| Record | Immutable identity | Permitted advancement | Concurrency and replay |
-| --- | --- | --- | --- |
-| FollowUpOperation | ID, Follow-up/Claim, sequence, policy, source revision, schedule, sources, creation time | Reserved to committed or cancelled; terminal evidence cannot change | Insert-only create; exact replay succeeds; advancement compares the complete expected prior record |
-| RetentionOperation | ID, Claim, policy, source revision/references, target set, creation time | Eligible/held to executing; executing to reconciliation/completed; reconciliation to executing; completed is immutable | Insert-only create; complete prior-record compare-and-set; successful step evidence is append-only |
-| FollowUpRecord | Claim/source Session, policy, original deadline | Resume clears blocked reason and schedule, records claimant_resumed | Existing Claim revision and session activation transaction remain authoritative |
-
-Operation sequence is distinct from attempt count. The repository method
-next_follow_up_operation_sequence proposes max persisted sequence + 1, including
-cancelled history. Saving requires that next sequence; the unique sequence index in Mongo
-or the Fixture lock arbitrates concurrent reservations. A loser rereads authority and history
-before retrying. Discovery is not a reservation. Only a qualifying atomic commit increments
-attempt_count by exactly one. Cancellation retains its sequence and immutable evidence.
-
-Creation never replaces a conflicting identity. Conditional advancement rejects stale
-state and immutable-field changes; exact retries return the stored result. A blocked
-obligation has no executable schedule, but only contact_not_authorised (including
-legacy reason-less blocked records) requires absent contact authority. Exhaustion
-preserves the actual contact permission and the original deadline.
-
-Retention persistence records approved execution coordinates and per-target outcomes
-only. It does not authorize cleanup, determine eligibility, or close resource access.
-Those actions require the separate retention execution boundary.
-
-The callable operation boundary is:
-
-- `save_follow_up_operation` creates only a reserved identity (or replays an exact stored record).
-- `advance_follow_up_operation` conditionally cancels a reservation without a Claim mutation.
-- `commit_follow_up_operation` settles a reservation together with the Follow-up aggregate,
-  Claim revision increment, immutable audit events, idempotency response and realtime event,
-  under the Fixture lock or one Mongo transaction. It compares the prior Follow-up and
-  operation, revalidates Claim revision, paused Session, contact-authorised pending state,
-  due time, original deadline and terminal absence. It rejects unrelated Claim edits.
-- The commit idempotency key equals operation ID; its request fingerprint is produced by
-  `follow_up_commit_fingerprint` over the complete expected/result bundle and audit evidence.
-  Exact retries replay the final operation without incrementing attempts/revision again;
-  conflicting bundles, stale expected state and terminal rewrites conflict.
-- `save_retention_operation` inserts eligible/held identity at revision 1;
-  `advance_retention_operation` requires the complete prior record and revision + 1.
-  Identity includes required policy ID/version, based-on Claim revision, non-empty source
-  references and exact targets. Step outcomes are deleted/already_absent/failed/unknown;
-  successful evidence cannot be rewritten and completed requires success for every target.
-
-These methods provide durable bookkeeping, not proof of in-app delivery or object deletion.
-The downstream executor must produce the selected in-app effect inside its atomic business
-mutation boundary; it must not mark a separately delivered provider action committed here.
-
 The recovery Follow-up binds to policy `incomplete_claim_follow_up` version `1`. New records
 persist an absolute `deadline_at`, derived once from the original
 `SessionRecoveryContext.interrupted_at` (seven days in the prototype policy). The deadline is
@@ -1428,76 +1376,47 @@ projection never has to infer lifecycle state from free text. Legacy records wit
 fields remain readable and are not silently rewritten; an inconsistent binding fails closed.
 
 Each committed in-app execution has one durable `FollowUpOperation`, identified by operation ID
-and by the `(follow_up_id, sequence)` pair. Its status is `reserved`, `committed`, or `cancelled`.
+and by the `(follow_up_id, sequence)` pair. Its status is `reserved`, `committed`, `settled`, or `cancelled`.
 Fixture and MongoDB enforce the same identity, policy binding, and immutable replay rules.
 Bounded due and expiry scans are ordered by `(due_at|deadline_at, follow_up_id)` and use the
 corresponding adapter indexes and cursor contract. The current transaction-local in-app path
 does not introduce a generic Inbox or Outbox, and ExternalTask keeps its existing operation and
 reconciliation authority.
 
-Follow-up due/deadline JSON timestamps use UTC with exactly six fractional digits and a
-Z suffix. Writes, backfill, cutoffs and cursors share this serialization. Mongo pages require
-adapter metadata `recovery_discovery_ready=true`. New authoritative writes set this marker;
-legacy records, including canonical records, require source-validated backfill first. The
-indexes `follow_up_due_ready_ordered` and `follow_up_deadline_ready_ordered` use
-`(record_type, recovery_discovery_ready, status, due_at|deadline_at, _id)` with the existing
-open-status partial filters. Each page uses an equality/range query and limit, without a
-global compatibility probe or regex fallback. Old index names can coexist during rollout;
-this slice does not drop indexes. An empty page is not proof that migration backlog is healthy.
-
 The claimant and Workbench projections expose the persisted Follow-up deadline; Workbench also
 exposes the authoritative attempt count. Retention cleanup remains a separate cross-store
-operation and is not inferred from this Follow-up record. The bounded RetentionOperation
-schema records the approved policy/source coordinates and execution progress only. Its
-consumer supplies the approved classification/hold decisions; this slice does not choose
-retention policy or implement destructive cleanup and access closure.
+operation and is not inferred from this Follow-up record. Its durable RetentionOperation schema stores source terminal ref/revision, immutable policy
+coordinate, CAS revision, monotonic access closure, frozen record/storage inventory, append-only
+step evidence, hold references, verification and completion timestamps. Object outcomes distinguish
+deleted/already_absent/failed/unknown; failed or unknown results require reconciliation.
+Approved classifications, source-linked holds and scalar tombstone authority fields are defined
+in `backend/domain/retention.py`. Holds block destruction without reopening claimant access.
 
-Missing or contradictory source records are quarantined with adapter-only
-`recovery_migration_reason=policy_binding_invalid|source_state_inconsistent` and readiness false.
-Raw timestamps, bindings, source references, and audit evidence remain unchanged. Repository
-reads expose the existing blocked reason with no executable schedule or authoritative deadline.
-Missing or explicit-null policy coordinates remain null in that compatibility representation;
-present coordinates are preserved as evidence, not certified by the read. Null coordinates are
-valid only for unsafe blocked records without a schedule or deadline. Ordinary executable
-records and operation identities still require complete policy coordinates. These are existing
-internal fields, not additional external API fields. Normal repository replacement
-is rejected to preserve raw evidence. Reservation and commit both require
-readiness; discovery never grants execution authority. Fixture uses the same blocked reasons
-to exclude unsafe obligations. Valid contact-blocked and exhausted obligations remain eligible
-for expiry. No new domain state, external API field, or operation store is introduced.
+Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The script is a
+thin operator entry point over the same repository migration rule the fixture adapter uses
+(`backfill_legacy_follow_up_record`); there is no second migration implementation. The rule is:
 
-The backend data operator owns reconciliation: retain the migration report, restore missing
-source evidence or correct contradictory data only from approved original evidence, then run
-dry-run and apply again. Apply revalidates source and target before setting readiness true and
-clearing the migration reason. A persisted business blocked reason of
-source_state_inconsistent or policy_binding_invalid is never cleared by backfill, even when
-timestamps and policy coordinates match. The same unsafe-reason exclusion applies to ordinary
-writes, migration, discovery and new reservations. Previously marked-ready unsafe records are
-also excluded and reported. The operator must first reconcile the original blocking condition
-from approved evidence and conditionally update the complete original record to a coherent
-state/reason/schedule; metadata remains unready until source-fenced backfill succeeds.
-Backfill validates the resulting FollowUpRecord before accepting that transition.
-Metadata-only quarantine can re-enter after source repair without inventing a business
-transition. Resume rejects unsafe obligations before any mutation in both adapters; it cannot
-launder a compatibility record into resolved state. No automatic deadline guess or source
-recreation is permitted.
+- An open record is a candidate when `policy_id`, `policy_version`, or `deadline_at` is unbound,
+  or when it is `blocked` without a typed `blocked_reason`. An absent field and an explicit
+  `null` are the same unbound state.
+- Only unbound, compatible fields are filled. An existing `policy_id`, `policy_version`, or
+  `deadline_at` that contradicts `incomplete_claim_follow_up` version `1` or the derived deadline
+  is never rewritten; the record fails closed as `blocked` with `policy_binding_invalid`, keeping
+  its stored coordinates and contact authority.
+- The deadline is derived only from the source Session's `SessionRecoveryContext.interrupted_at`.
+  A missing, mismatched, or inconsistent source fails closed as `source_state_inconsistent`
+  without inventing a clock. Migration, deployment, and wall-clock time are used only as the
+  audit `created_at` of the migration evidence.
+- `created_at`, `due_at`, `source_refs`, and `attempt_count` are preserved. No
+  `FollowUpOperation` is fabricated.
+- Each record commits alone. The MongoDB write matches the exact Follow-up document read
+  (including fields that were absent) and fences the exact source Session snapshot, so a
+  concurrent change to either aborts that record with a conflict; a rerun re-decides from the
+  current state. A stored document that cannot be validated is reported as `unreadable` and is
+  not written.
 
-Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The command is
-read-only by default, derives the deadline only from the source Session's persisted interruption
-time, conditionally updates records with missing policy/deadline fields under `--apply`, and
-reports records with missing or contradictory source state instead of guessing. It never derives
-a deadline from the migration execution time, deployment time, or current wall clock.
-Missing and explicit-null fields are eligible; compatible non-null bindings are preserved.
-Existing offset/variable-precision due/deadline strings are normalized without changing their
-instants, including records whose policy binding is already complete. Canonical records are
-not rewritten on repeat runs after readiness is established. Contradictory bindings/deadlines
-are rejected with only quarantine metadata added by an exact-target conditional update. Reports
-include typed reason and repair owner, and the CLI exits nonzero for rejected/conflicting rows.
-Apply requires Mongo transactions:
-an exact-source conditional write fence and target CAS commit together. The Session's
-adapter-only `recovery_backfill_fence` counter changes no domain revision or interruption
-evidence; it forces a write conflict if the source changes concurrently. Unsupported
-transaction deployments fail without a non-atomic fallback. Dry-run performs no writes.
+The script is read-only by default and writes only under `--apply`. One append-only
+`action.completed` or `action.failed` audit event records each bound or failed-closed record.
 
 ## P17.2 Bounded Terminal Disposition and Reopen Slice
 
@@ -1549,3 +1468,40 @@ Agreement acceptance uses the existing atomic Claim mutation boundary, so Claim 
 acceptance history, idempotency metadata, audit facts, and claimant realtime publication
 commit together in Fixture and MongoDB persistence. No separate legal-document repository
 or second Claim-submission lifecycle is introduced.
+
+### Final #1076 persistence coordinates
+
+FollowUp `blocked_reason` and `resolution_code` are distinct persisted fields;
+legacy `reason_code` inputs map once to the appropriate canonical field. The
+read-only compatibility property is not serialized. `active_operation_id` points
+to existing execution history and is cleared when resolved or reconciled.
+Operation `result_code` is canonical; legacy `result` is a read adapter.
+
+The repositories use bounded cursor pagination for both due and expiry discovery,
+with `follow_up_due_ordered`, `follow_up_deadline_ordered`, logical-operation
+uniqueness, `(follow_up_id, sequence)` uniqueness, `retention_operation_claim_unique`,
+and `retention_hold_claim_state` indexes. All execution and cleanup commits
+revalidate authoritative source/revision immediately before mutation.
+
+Claimant access closure is checked before historical idempotency replay. Cleanup
+retires claimant retry records and preserves staff/internal source evidence and
+minimum Audit/tombstones. Cross-store deletion uses the durable RetentionOperation
+step ledger; database completion alone cannot prove object bytes were removed.
+
+### Durable recovery record decision table
+
+The following table states, for each durable P17 record, what is immutable, what may change, and
+how each adapter guards the change. It describes the implemented contract; MongoDB atomicity
+assumes a transaction-capable deployment, and the mongomock-based tests prove adapter control
+flow and conditional predicates rather than cluster-level concurrency.
+
+| Record | Immutable identity | Mutable state and legal transitions | Write guard | Replay and conflict | Indexes | Authority |
+| --- | --- | --- | --- | --- | --- | --- |
+| `FollowUpRecord` | `follow_up_id`, `claim_id`, `source_session_id`, `created_at`, bound `policy_id`/`policy_version`/`deadline_at` | `pending` or `blocked` to `resolved`; `pending` and `blocked` switch on typed reasons; `attempt_count` only increases with committed attempts | Claim revision CAS inside the same fixture lock or MongoDB transaction as the Claim and Session mutation | A stale Claim revision or resolved obligation rejects the write; a worker reloads authoritative state | `follow_up_due_ordered`, `follow_up_deadline_ordered` | P17 recovery obligation |
+| `FollowUpOperation` | `operation_id`, `follow_up_id`, `claim_id`, `sequence`, `policy_id`, `policy_version`, `based_on_claim_revision`, `scheduled_at`, `created_at` | `reserved` to `committed` or `cancelled`; `committed` to `settled`; settled and cancelled are final | Insert-only creation checked against the next sequence and current Claim revision; transitions replace only when the stored status equals the expected prior status | An exact replay succeeds; a different immutable payload, a stale prior status, a competing sequence, or a final-state rewrite raises `IdempotencyConflict` | `follow_up_operation_id_unique`, `follow_up_operation_sequence_unique` | P17 execution history |
+| `RetentionOperation` | `operation_id`, `claim_id`, `source_terminal_ref`, `source_claim_revision`, integer `policy_version`, `source_refs`, `access_closed_at` | Status moves among `reserved`, `held`, and `reconciliation_required` and ends at `completed`, which is immutable; `revision` advances by exactly one; targets freeze once; step evidence and hold references are append-only | Insert-only creation, at most one per Claim; progress requires the expected operation `revision` | An exact replay returns the stored operation; a different payload conflicts; a stale revision raises `RevisionConflict` | `retention_operation_claim_unique`, `retention_operation_claim_updated` | Destructive cleanup execution |
+| `RetentionHoldRecord` | `hold_id`, `claim_id`, `reason`, `authority_ref`, `source_refs`, `applied_at` | Active to released, once | Insert-only creation; release matches the stored unreleased state | An exact replay succeeds; a changed coordinate or second release is rejected | `retention_hold_claim_state` | Blocks destructive cleanup only |
+
+Retention eligibility and cleanup refuse to proceed while any `FollowUpOperation` for the Claim is
+`reserved` or `committed`, while an ExternalTask outcome is unknown, or while staff responsibility
+is open. An unknown object-deletion outcome never counts as success.

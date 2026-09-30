@@ -28,6 +28,40 @@ def test_unsubmitted_transport_failure_is_retryable(
     assert classification.retryable is True
 
 
+@pytest.mark.parametrize(
+    ('failure_code', 'delivery', 'policy_id'),
+    [
+        (
+            ExternalTaskFailureCode.UNAVAILABLE,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            'recovery.external_not_submitted_retryable',
+        ),
+        (
+            ExternalTaskFailureCode.TIMEOUT,
+            ExternalTaskDelivery.SUBMITTED,
+            'recovery.external_submitted_unknown',
+        ),
+        (
+            ExternalTaskFailureCode.ACCESS_DENIED,
+            ExternalTaskDelivery.SUBMITTED,
+            'recovery.external_terminal_failure',
+        ),
+    ],
+)
+def test_external_failure_classification_carries_registry_coordinate(
+    failure_code: ExternalTaskFailureCode,
+    delivery: ExternalTaskDelivery,
+    policy_id: str,
+) -> None:
+    classification = classify_external_task_failure(
+        failure_code=failure_code,
+        delivery=delivery,
+    )
+
+    assert classification.recovery_policy_id == policy_id
+    assert classification.recovery_policy_version == 'v1'
+
+
 def test_submitted_timeout_becomes_unknown_outcome() -> None:
     """A lost acknowledgement must never be reported as an ordinary failure."""
 

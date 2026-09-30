@@ -4,8 +4,6 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Generic, TypeVar
 
-from pydantic import Field
-
 from backend.domain.external_service_registry import (
     ExternalCapabilityProvenance,
     ExternalLifecycleStatus,
@@ -45,6 +43,7 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import RetrievalRecord, RetrievalSource
 from backend.domain.tag_registry import StaffTag
+from pydantic import Field
 
 
 class ClaimLifecycleState(StrEnum):
@@ -338,6 +337,7 @@ class WorkbenchIncompleteContext(ContractModel):
     resume_point: str
     follow_up_due_at: datetime | None = None
     follow_up_status: str
+    follow_up_reason: str | None = None
     follow_up_attempts: int = Field(default=0, ge=0)
     expires_at: datetime | None = None
     retention_hold: bool = False
