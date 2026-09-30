@@ -14,6 +14,7 @@ from backend.domain.audit import (
 from backend.domain.follow_up_execution import reduce_due_follow_up
 from backend.domain.models import (
     Channel,
+    ClaimantSession,
     ClaimState,
     CustomerNextStep,
     FollowUpContactPermission,
@@ -820,7 +821,11 @@ def test_retention_reservation_closes_follow_up_operation_reads(
     )
 
 
-def _resume(repository: PersistenceRepository, claim: WorkingClaim, key: str):  # type: ignore[no-untyped-def]
+def _resume(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    key: str,
+) -> ClaimantSession:
     from backend.core.auth import Principal
     from backend.domain.models import StartSessionRequest
     from backend.services.claims import start_session
