@@ -1,10 +1,14 @@
+import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import cast
 
 import mongomock
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import (
     Channel,
@@ -37,6 +41,7 @@ from backend.services.retention import (
     freeze_retention_cleanup_targets,
     reserve_retention_from_terminal,
 )
+from scripts import run_recovery_worker as recovery_worker_cli
 
 
 def _create_claim(
@@ -410,6 +415,106 @@ def test_mongodb_stale_incomplete_checkpoint_has_no_partial_children() -> None:
         )
         is None
     )
+
+
+def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    created = _create_claim(
+        client,
+        auth_headers,
+        'p17-worker-entrypoint-create',
+    )
+    claim = created['claim']
+    session = created['session']
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    revision = int(claim['revision'])
+
+    paused = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'p17-worker-entrypoint-pause',
+            'If-Match': f'"{revision}"',
+        },
+    )
+    assert paused.status_code == 200
+
+    follow_up = repository.list_follow_ups(claim_id, 'cus_demo')[0]
+    storage = MockEvidenceStorage()
+    bundle = SimpleNamespace(
+        repository=repository,
+        evidence_storage=storage,
+        close=lambda: None,
+    )
+    monkeypatch.setattr(
+        recovery_worker_cli,
+        '_configured_bundle',
+        lambda: bundle,
+    )
+
+    def run_at(when: datetime) -> dict[str, int]:
+        monkeypatch.setattr(
+            recovery_worker_cli,
+            '_utc_now',
+            lambda: when,
+        )
+        assert recovery_worker_cli.main(['--once', '--limit', '10']) == 0
+        output = capsys.readouterr().out.strip().splitlines()
+        assert output
+        return cast(dict[str, int], json.loads(output[-1]))
+
+    assert follow_up.due_at is not None
+    first_cycle = run_at(follow_up.due_at)
+    assert first_cycle['due_candidates'] == 1
+    assert first_cycle['contacted'] == 1
+
+    messages = repository.list_messages(
+        claim_id,
+        session_id,
+        'cus_demo',
+    )
+    assert len(messages) == 1
+    assert messages[0].recovery_rule_id == 'incomplete_claim_follow_up.v1'
+
+    for _ in range(2):
+        current = repository.get_follow_up(
+            claim_id,
+            follow_up.follow_up_id,
+            'cus_demo',
+        )
+        assert current is not None
+        assert current.due_at is not None
+        cycle = run_at(current.due_at)
+        assert cycle['contacted'] == 1
+
+    exhausted = repository.get_follow_up(
+        claim_id,
+        follow_up.follow_up_id,
+        'cus_demo',
+    )
+    assert exhausted is not None
+    assert exhausted.status is FollowUpStatus.BLOCKED
+    assert exhausted.reason_code is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED
+    assert exhausted.deadline_at is not None
+
+    expiry_cycle = run_at(exhausted.deadline_at)
+    assert expiry_cycle['expired'] == 1
+    assert expiry_cycle['retention_progressed'] == 1
+
+    retention = repository.get_retention_operation_for_claim(claim_id)
+    assert retention is not None
+    assert retention.targets_frozen_at is not None
+    assert retention.revision > 1
+    assert retention.status is RetentionOperationStatus.COMPLETED
 
 
 def test_p17_full_journey_pause_resume_stops_future_recovery(

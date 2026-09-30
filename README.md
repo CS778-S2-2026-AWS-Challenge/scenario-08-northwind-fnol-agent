@@ -230,6 +230,33 @@ stub. Both exist for CI and the test suite only and are not a way to run the app
 Deployment environments inject the same variable names through their secret and configuration
 mechanisms; they must not package a local `.env` file.
 
+### Run the P17 recovery worker
+
+P17 follow-up, expiry, and retention progression is owned by an explicit worker process rather
+than the FastAPI lifespan. A deployment supervisor should run one long-lived process with the same
+data-profile configuration as the API:
+
+```powershell
+py -3.12 -m scripts.run_recovery_worker --limit 50 --interval-seconds 30
+```
+
+An external scheduler can instead own the cadence by invoking one bounded cycle at a time:
+
+```powershell
+py -3.12 -m scripts.run_recovery_worker --once --limit 50
+```
+
+Each cycle examines at most `--limit` candidates in each bounded discovery class (deadline,
+retention operation, and due follow-up; valid limits are 1-100). Expiry is evaluated before contact
+so the persisted absolute deadline wins ties. Candidate reads are only hints: the existing
+repository/service CAS and authority checks are reloaded before mutation.
+
+The long-lived mode isolates a failed cycle: it logs the failure, waits for the configured interval,
+then reloads durable state and tries the next cycle. `SIGINT` and `SIGTERM` request graceful
+shutdown; an in-flight bounded cycle is allowed to finish and the data runtime bundle is then
+closed. The worker does not own a second workflow state machine, notification platform, or
+retention authority.
+
 ### Configure protected account data
 
 The backend uses the maintained `cryptography` package's Fernet authenticated-encryption
