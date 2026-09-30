@@ -681,12 +681,11 @@ class MongoDBRepository:
             self._collection.find(
                 {
                     'record_type': 'retention_operation',
-                    'status': {
-                        '$nin': [
-                            RetentionOperationStatus.COMPLETED.value,
-                            RetentionOperationStatus.HELD.value,
-                        ]
-                    },
+                    'status': {'$ne': RetentionOperationStatus.COMPLETED.value},
+                    '$or': [
+                        {'status': {'$ne': RetentionOperationStatus.HELD.value}},
+                        {'active_delete_authorization_id': {'$ne': None}},
+                    ],
                 }
             )
             .sort([('updated_at', 1), ('_id', 1)])
