@@ -2395,14 +2395,22 @@ def submit_message(
             )
             return ()
 
-    def resolve_turn_services(changes: list[ProposedFormChange]) -> frozenset[str]:
+    def resolve_turn_services(
+        changes: list[ProposedFormChange], explicit_requests: frozenset[str]
+    ) -> frozenset[str]:
         # Resolve the same assertions the reducer will apply. A source-backed
         # proposal can still be disputed against stored authority; it must not
         # unlock a service merely because the model supplied a valid quotation.
-        family_changes = [item for item in changes if item.field_code == 'claim.product_family']
+        # The incident description joins the family: a description the claimant
+        # confirms this turn opens offers this turn (#1134).
+        turn_changes = [
+            item
+            for item in changes
+            if item.field_code in {'claim.product_family', 'incident.description'}
+        ]
         resolved = _build_form_changes(
             claim.form,
-            family_changes,
+            turn_changes,
             claimant_message,
             timestamp,
             AuthorityOutcome.AUTHORISED,
@@ -2441,6 +2449,7 @@ def submit_message(
                     if item.message_id != claimant_message.message_id
                 ),
                 current_text=message_text,
+                explicit_requests=explicit_requests,
             )
         except ExternalLifecycleContextError:
             logger.warning(

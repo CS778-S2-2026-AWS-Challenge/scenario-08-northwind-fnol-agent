@@ -4,7 +4,7 @@ from backend.domain.external_service_registry import (
     ExternalLifecycleStatus,
     ExternalServiceLifecycleProjection,
 )
-from backend.domain.models import ActorType, MessageRecord, WorkingClaim
+from backend.domain.models import ActorType, FormStatus, MessageRecord, WorkingClaim
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent_external_lifecycle import build_agent_external_lifecycle_context
 from backend.services.external_service_offers import detected_service_intents
@@ -18,7 +18,14 @@ def eligible_service_ids(
     *,
     current_text: str = '',
     lifecycle: tuple[ExternalServiceLifecycleProjection, ...] | None = None,
+    explicit_requests: frozenset[str] | None = None,
 ) -> frozenset[str]:
+    """Return the services the Agent may offer this turn.
+
+    `explicit_requests` are services the claimant asked for in the current message, as
+    verified by the model-turn validator. When it is None (controlled runtime and
+    context planning), the bounded `detected_service_intents` patterns stand in.
+    """
     if family is None or any(
         item.status.value not in {'resolved', 'cancelled'}
         for item in repository.list_handoffs(claim.claim_id, claim.customer_id)
@@ -35,10 +42,18 @@ def eligible_service_ids(
         )
         if item.operation_status is ExternalLifecycleStatus.CONSENT_REQUIRED
     }
-    renewed = {
-        item['service_identity']
-        for item in detected_service_intents(current_text, [], product_family=family)
-    }
+    renewed = (
+        set(explicit_requests)
+        if explicit_requests is not None
+        else {
+            item['service_identity']
+            for item in detected_service_intents(current_text, [], product_family=family)
+        }
+    )
+    if not _incident_described(claim):
+        # Services wait until the claimant has told and confirmed what happened,
+        # unless the claimant asks for one in their own words.
+        available &= renewed
     for consent in claim.external_service_consents:
         if consent.status.value == 'granted':
             # The claimant already said yes. The lifecycle projection normally
@@ -61,3 +76,8 @@ def eligible_service_ids(
         if elapsed_turns < 3 and consent.service_identity not in renewed:
             available.discard(consent.service_identity)
     return frozenset(available)
+
+
+def _incident_described(claim: WorkingClaim) -> bool:
+    description = claim.form.get('incident.description')
+    return description is not None and description.status is FormStatus.CONFIRMED

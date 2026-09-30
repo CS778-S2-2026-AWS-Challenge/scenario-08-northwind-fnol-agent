@@ -296,7 +296,9 @@ class AgentTurnContext:
     turn_family_resolution: TurnFamilyResolution | None = None
     selected_external_service_ids: tuple[str, ...] = ()
     eligible_service_ids: frozenset[str] | None = None
-    service_eligibility_resolver: Callable[[list[ProposedFormChange]], frozenset[str]] | None = None
+    service_eligibility_resolver: (
+        Callable[[list[ProposedFormChange], frozenset[str]], frozenset[str]] | None
+    ) = None
     external_service_context_loader: (
         Callable[[], tuple[ExternalServiceLifecycleProjection, ...]] | None
     ) = None
