@@ -4,6 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import InvariantGuardedAgent
 from tests.journey_v8_support import CLAIMANT, V8JourneyProvider, envelope, fact
 from tests.test_claim_api import submit_message
@@ -67,3 +68,24 @@ def test_a_description_confirmed_this_turn_opens_offers_this_turn(
     actions = _first_turn_actions(app, client, message, proposal)
 
     assert [action['service_identity'] for action in actions] == [ASSESSMENT]
+
+
+def test_a_misread_request_only_asks_for_consent_and_dispatches_nothing(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    # The model owns intent: if it lifts "want a tow" out of a refusal, the verbatim check
+    # passes and a card appears. The card is itself the consent request, so nothing is
+    # requested from any provider until the claimant grants it.
+    proposal = envelope(
+        fields=[fact('claim.product_family', 'motor', 'My car was rear-ended')],
+        services=[RECOVERY],
+        requested={RECOVERY: 'want a tow'},
+    )
+    message = 'My car was rear-ended on Queen St and I do not want a tow.'
+
+    actions = _first_turn_actions(app, client, message, proposal)
+
+    assert [action['service_identity'] for action in actions] == [RECOVERY]
+    assert actions[0]['lifecycle_status'] == 'consent_required'
+    claim = next(iter(repository.list_claims_internal()))
+    assert repository.list_external_tasks_internal(claim.claim_id) == []
