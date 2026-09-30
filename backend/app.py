@@ -73,6 +73,7 @@ from backend.domain.configuration import (
 from backend.domain.model_gateway import (
     STAFF_AGENT_PRIVACY_CLASS,
     STAFF_AGENT_PURPOSE,
+    ModelEvidenceContentResolver,
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
@@ -114,11 +115,18 @@ from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
     resolve_external_service_entry,
 )
-from backend.services.image_recovery import ImageRecoveryWorker
+from backend.services.image_recovery import EvidenceProcessingWorker
 from backend.services.initial_runtime_release import install_initial_runtime_release
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_profiles import model_configuration
+from backend.services.pdf_processing import (
+    PDF_MODEL_PROFILE_ID,
+    PDF_PROCESSING_PRIVACY_CLASS,
+    PDF_PROCESSING_PROMPT_VERSION,
+    PDF_PROCESSING_PURPOSE,
+    PdfEvidenceProcessor,
+)
 from backend.services.protected_values import (
     ProtectedValueAdapter,
     protected_value_adapter_for,
@@ -252,22 +260,18 @@ def create_app(
         bundle = data_runtime_bundle or build_data_runtime_bundle(resolved_settings)
 
     realtime_dispatcher = RealtimeDispatcher(bundle.repository)
-    image_recovery_worker = (
-        ImageRecoveryWorker(bundle.repository, bundle.evidence_storage)
-        if bundle.profile is not DataRuntimeProfile.FIXTURE
-        else None
-    )
+    evidence_processing_worker: EvidenceProcessingWorker | None = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         realtime_dispatcher.start()
         try:
-            if image_recovery_worker is not None:
-                image_recovery_worker.start()
+            if evidence_processing_worker is not None:
+                evidence_processing_worker.start()
             yield
         finally:
-            if image_recovery_worker is not None:
-                image_recovery_worker.stop()
+            if evidence_processing_worker is not None:
+                evidence_processing_worker.stop()
             realtime_dispatcher.stop()
             bundle.close()
 
@@ -340,8 +344,8 @@ def create_app(
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
     app.state.realtime_dispatcher = realtime_dispatcher
-    app.state.image_recovery_worker = image_recovery_worker
     app.state.claimant_runtime_action_dispatcher = ClaimantRuntimeActionDispatcher()
+    pdf_processor: PdfEvidenceProcessor | None = None
     if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
         if agent_turn_provider is not None:
             raise ValueError(
@@ -356,6 +360,37 @@ def create_app(
         )
         if not model_gateway.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+
+        def pdf_gateway(
+            evidence_resolver: ModelEvidenceContentResolver,
+        ) -> ModelGateway:
+            try:
+                configuration = model_configuration(SimpleNamespace(app=app), PDF_MODEL_PROFILE_ID)
+            except (RuntimeConfigurationResolutionError, ValueError):
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
+            if (
+                configuration is None
+                or configuration.provider != 'openrouter'
+                or configuration.model_identifier != 'openai/gpt-4o'
+                or not configuration.document_input
+            ):
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            return build_scoped_model_gateway(
+                resolved_settings,
+                purpose=PDF_PROCESSING_PURPOSE,
+                privacy_class=PDF_PROCESSING_PRIVACY_CLASS,
+                prompt_version=PDF_PROCESSING_PROMPT_VERSION,
+                profile_suffix='evidence-pdf',
+                registry=model_gateway_registry,
+                runtime_configuration=configuration,
+                evidence_resolver=evidence_resolver,
+            )
+
+        pdf_processor = PdfEvidenceProcessor(
+            bundle.repository,
+            bundle.evidence_storage,
+            pdf_gateway,
+        )
 
         def published_instruction() -> str | None:
             try:
@@ -406,6 +441,15 @@ def create_app(
         app.state.agent_runtime_status = 'not_configured'
         app.state.staff_agent_turn_provider = staff_agent_turn_provider
     app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
+    if bundle.profile is not DataRuntimeProfile.FIXTURE:
+        evidence_processing_worker = EvidenceProcessingWorker(
+            bundle.repository,
+            bundle.evidence_storage,
+            pdf_processor,
+        )
+    app.state.evidence_processing_worker = evidence_processing_worker
+    # Compatibility state name retained for existing operator/tests; both names are one worker.
+    app.state.image_recovery_worker = evidence_processing_worker
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage

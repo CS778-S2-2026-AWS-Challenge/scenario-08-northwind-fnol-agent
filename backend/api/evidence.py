@@ -332,6 +332,13 @@ def finish_evidence_upload(
         idempotency_key,
         if_match,
     )
+    if (
+        result.evidence.file_status.value == 'processing'
+        and result.evidence.media_type == 'application/pdf'
+    ):
+        worker = getattr(request.app.state, 'evidence_processing_worker', None)
+        if worker is not None:
+            worker.wake()
     if result.evidence.file_status.value in {'ready', 'failed'}:
         response.status_code = status.HTTP_200_OK
     return result
