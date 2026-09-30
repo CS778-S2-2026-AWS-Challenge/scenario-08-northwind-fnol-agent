@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
-from backend.domain.evidence import is_in_conflict
+from backend.domain.evidence import INCIDENT_PHOTO_KIND, canonical_evidence_kind, is_in_conflict
 from backend.domain.models import (
     AgentAction,
     AssessorRoutingStatus,
@@ -460,8 +460,7 @@ def _project_evidence(evidence: Sequence[EvidenceRecord], add: _TagAdder) -> Non
     ]
     pending = [item for item in evidence if _is_pending_evidence(item)]
     kind_to_tag = {
-        'incident_image': 'evidence.photos_supplied',
-        'photo': 'evidence.photos_supplied',
+        INCIDENT_PHOTO_KIND: 'evidence.photos_supplied',
         'video': 'evidence.video_supplied',
         'dashcam': 'evidence.dashcam_available',
         'receipt': 'evidence.proof_of_ownership',
@@ -471,7 +470,7 @@ def _project_evidence(evidence: Sequence[EvidenceRecord], add: _TagAdder) -> Non
         'assessment_report': 'evidence.assessment_report',
     }
     for item in ready:
-        code = kind_to_tag.get(item.kind)
+        code = kind_to_tag.get(canonical_evidence_kind(item.kind))
         if code is not None:
             add_tag(
                 code,

@@ -140,6 +140,8 @@ class Settings:
     synthetic_integration_token: str = 'synthetic-integration'
     claimant_session_ttl_minutes: int = 30
     staff_session_ttl_minutes: int = 480
+    # Intake triage value line for fast-track, in NZD (a business setting, #1136).
+    triage_amount_threshold_nzd: float = 5000.0
     identity_db_path: str = '.northwind-identity.sqlite3'
     staff_identity_db_path: str = '.northwind-staff-identity.sqlite3'
     control_plane_db_path: str = '.northwind-control-plane.sqlite3'
@@ -202,6 +204,8 @@ class Settings:
             raise ValueError('NORTHWIND_CLAIMANT_SESSION_TTL_MINUTES must be greater than zero.')
         if self.staff_session_ttl_minutes <= 0:
             raise ValueError('NORTHWIND_STAFF_SESSION_TTL_MINUTES must be greater than zero.')
+        if not self.triage_amount_threshold_nzd > 0:
+            raise ValueError('NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD must be greater than zero.')
         if bool(self.staff_bootstrap_email) != bool(self.staff_bootstrap_password):
             raise ValueError(
                 'NORTHWIND_STAFF_BOOTSTRAP_EMAIL and '
@@ -322,6 +326,9 @@ class Settings:
                 os.getenv('NORTHWIND_CLAIMANT_SESSION_TTL_MINUTES', '30')
             ),
             staff_session_ttl_minutes=int(os.getenv('NORTHWIND_STAFF_SESSION_TTL_MINUTES', '480')),
+            triage_amount_threshold_nzd=float(
+                os.getenv('NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD', '5000')
+            ),
             identity_db_path=os.getenv(
                 'NORTHWIND_IDENTITY_DB_PATH', '.northwind-identity.sqlite3'
             ).strip(),

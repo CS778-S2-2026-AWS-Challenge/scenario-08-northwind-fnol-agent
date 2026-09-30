@@ -6,7 +6,7 @@ from pydantic import Field, model_validator
 
 from backend.domain.models import ContractModel, FieldSelectionState, FormStatus
 
-FieldValueType = Literal['boolean', 'enum', 'text', 'location', 'text_list', 'temporal']
+FieldValueType = Literal['boolean', 'enum', 'text', 'location', 'text_list', 'temporal', 'number']
 
 
 class TurnFieldDefinition(ContractModel):

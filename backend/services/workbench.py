@@ -1,11 +1,13 @@
 """Role-safe Workbench projections assembled from authoritative Claim records."""
 
 from collections.abc import Sequence
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, TypeVar
 
 from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
     ExternalCapabilityProvenance,
@@ -35,6 +37,7 @@ from backend.domain.models import (
     AssessorRoutingStatus,
     ClaimCollaborationRequest,
     ClaimCreationStatus,
+    ClaimTriage,
     CollaborationRequestKind,
     CollaborationRequestStatus,
     EvidenceFileStatus,
@@ -61,12 +64,14 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.retrieval import PolicyRetrievalRecord
 from backend.domain.staff_agent import StaffAgentMessageRole
 from backend.domain.tag_registry import (
     TAG_REGISTRY_VERSION,
     get_filterable_staff_tag_definition,
     list_filterable_staff_tag_definitions,
 )
+from backend.domain.triage import DEFAULT_AMOUNT_THRESHOLD, claim_is_created, triage_claim
 from backend.domain.workbench import (
     ActionAvailability,
     ClaimLifecycleState,
@@ -1770,6 +1775,51 @@ def _matches_search(item: WorkbenchClaimListItem, search: str | None) -> bool:
     return any(query in value.casefold() for value in values if value)
 
 
+# The triage threshold of the app serving the current request. `create_app` installs a
+# middleware that sets it from that app's Settings for each request, so two apps in one
+# process never share a value. Code running outside a request uses the default.
+TRIAGE_AMOUNT_THRESHOLD: ContextVar[float] = ContextVar(
+    'triage_amount_threshold', default=DEFAULT_AMOUNT_THRESHOLD
+)
+
+
+def _claim_triage(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    evidence: Sequence[EvidenceRecord],
+    handoffs: Sequence[HandoffRecord],
+) -> ClaimTriage | None:
+    """Triage a created Claim from its current facts, Evidence and lookups."""
+    if not claim_is_created(claim):
+        return None
+    registry = build_default_registry()
+    evaluation = BranchRuleEvaluator(registry).evaluate(
+        claim, recomputation_reason='workbench_triage'
+    )
+    return triage_claim(
+        claim,
+        evidence=evidence,
+        handoffs=handoffs,
+        policy_records=[
+            item
+            for item in repository.list_retrieval_records(claim.claim_id, claim.customer_id)
+            if isinstance(item, PolicyRetrievalRecord)
+        ],
+        active_branches=evaluation.active_branches,
+        requirements=evaluation.requirements,
+        registry=registry,
+        amount_threshold=TRIAGE_AMOUNT_THRESHOLD.get(),
+    )
+
+
+def _with_effective_severity(claim: WorkingClaim, triage: ClaimTriage | None) -> WorkingClaim:
+    if triage is None or claim.claim_state.severity is triage.severity:
+        return claim
+    return claim.model_copy(
+        update={'claim_state': claim.claim_state.model_copy(update={'severity': triage.severity})}
+    )
+
+
 def _build_projection(
     repository: PersistenceRepository,
     principal: Principal,
@@ -1865,6 +1915,10 @@ def _build_projection(
         ),
         external_wait_count=len(integration_summary.waiting_external_services),
     )
+    triage = _claim_triage(repository, claim, evidence, handoffs)
+    # The projected Claim carries the effective triage, so tags and the detail
+    # state read one value; the stored severity keeps only a staff decision.
+    claim = _with_effective_severity(claim, triage)
     tags = project_staff_tags(
         claim,
         evidence=evidence,
@@ -1891,6 +1945,7 @@ def _build_projection(
         work_summary=work_summary,
         integration_summary=integration_summary,
         tags=tags,
+        triage=triage,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )

@@ -82,7 +82,11 @@ from backend.services.provider_capability_registry import (
     validate_capability_binding,
     validate_profile_compatibility,
 )
-from backend.services.request_profile_registry import registered_request_profiles, request_profile
+from backend.services.request_profile_registry import (
+    V7_INPUT_HARD_LIMIT,
+    registered_request_profiles,
+    request_profile,
+)
 from backend.services.runtime_agent_policy import (
     RuntimeAgentPolicySnapshot,
     registered_agent_tool_names,
@@ -746,7 +750,11 @@ def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
     assert plan.request_profile.profile_id == 'claimant.intake.v1'
     assert plan.request_profile.max_model_invocations == 1
     assert plan.request_profile.tool_names == []
-    assert plan.request_budget.raw_input_tokens <= plan.request_budget.hard_limit == 5500
+    assert (
+        plan.request_budget.raw_input_tokens
+        <= plan.request_budget.hard_limit
+        == V7_INPUT_HARD_LIMIT
+    )
     assert plan.request_budget.reserved_output_tokens == 180
     assert plan.context_payload['message.latest'] == 'My car was rear-ended this morning.'
     assert plan.context_plan.estimated_tokens == estimate_json_tokens(plan.context_payload)
