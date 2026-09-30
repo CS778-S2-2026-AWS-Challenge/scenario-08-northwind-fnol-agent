@@ -7,6 +7,8 @@ The plan is executed by the subsystem that already owns those facts.
 
 from datetime import datetime, timedelta
 
+from pydantic import Field
+
 from backend.domain.models import ContractModel
 from backend.domain.recovery_policy_registry import (
     INCOMPLETE_CLAIM_FOLLOW_UP_RULE,
@@ -23,16 +25,13 @@ from backend.domain.recovery_policy_registry import (
     RecoveryRetryMode,
     RecoveryRule,
     RecoverySnapshot,
+    RecoveryTransition as LifecycleRecoveryTransition,
     RecoveryTrigger,
     RecoveryWorkItemKind,
     UnknownRecoveryTransition,
     classify_recovery,
     recovery_policy,
 )
-from backend.domain.recovery_policy_registry import (
-    RecoveryTransition as LifecycleRecoveryTransition,
-)
-from pydantic import Field
 
 
 class NormalizedRecoveryEvent(ContractModel):
