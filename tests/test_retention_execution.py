@@ -433,10 +433,7 @@ def test_hold_applied_mid_cleanup_stops_next_target_and_resume_uses_same_operati
     assert held.step_evidence[0].status is RetentionStepStatus.SATISFIED
     assert held.step_evidence[0].authorization_id is not None
     assert len(held.delete_authorizations) == 1
-    assert (
-        held.delete_authorizations[0].authorization_id
-        == held.step_evidence[0].authorization_id
-    )
+    assert held.delete_authorizations[0].authorization_id == held.step_evidence[0].authorization_id
     assert held.active_delete_authorization_id is None
     assert 'hold-mid-cleanup' in held.hold_refs
 

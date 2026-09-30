@@ -2627,7 +2627,8 @@ class MongoDBRepository:
                 next_status = RetentionOperationStatus.COMPLETED
                 completed_at = released_at
             elif any(
-                status in {
+                status
+                in {
                     RetentionStepStatus.FAILED,
                     RetentionStepStatus.UNKNOWN,
                 }
