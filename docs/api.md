@@ -770,6 +770,11 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 
 A newly created claim should initialise `severity = unassessed`, `coverage = not_assessed`, and `evidence = not_started`.
 
+Runtime never writes `severity`. A stored value other than `unassessed` is a staff triage decision
+made through staff write-back (`claim_state.severity` is on the write-back allowlist; writing
+`unassessed` hands the Claim back to the triage rules). Workbench projections report the effective
+triage in `claim_state.severity` and in `triage`; see "Workbench triage".
+
 ### Working Claim
 
 The canonical backend record has these fields. API projections omit fields the caller is not authorised to see.
@@ -1030,6 +1035,9 @@ Initial common field codes:
 | `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
 | `parties.other_parties` | boolean | Whether another person or organisation is involved; participant details use separate records |
+| `incident.liability_position` | enum | `other_party_accepts`, `claimant_accepts`, `shared`, `disputed`, or `unknown`; required once `parties.other_parties` is confirmed true; a triage input, never a liability decision |
+| `loss.estimated_amount` | number | Estimated loss in NZD: the claimant's estimate or a quote or assessment total including GST; a triage input, never a settlement value |
+| `claim.cover_disagreement` | enum | `none`, `excess`, or `cover`: whether the claimant disputes the excess or the cover |
 | `authorities.police_report_reference` | string | Reference if already issued |
 | `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
@@ -3013,6 +3021,42 @@ the selected `view`, `cursor`, and `limit`. A count failure does not discard a u
 server returns its rows with `view_counts.status: "unavailable"`, an empty `items` list, and a
 non-null `limitation`. Clients must not convert unavailable totals into zero. An unknown or no
 longer published `view` returns `422 VALIDATION_ERROR` and is never treated as `all`.
+
+#### Workbench triage
+
+Every Workbench Claim list item and detail carries `triage`: `null` until the external claim is
+created (`external_claim.creation_status = created`), then this staff-only object:
+
+```json
+{
+  "severity": "standard",
+  "source": "system",
+  "system_severity": "standard",
+  "reasons": ["third_party_recovery", "amount_unknown"],
+  "rules_version": "triage-rules-v1",
+  "amount_threshold": 5000.0
+}
+```
+
+The rules in `backend/domain/triage.py` compute it when the Claim is read, from the current form,
+Evidence, handoffs, policy retrieval records and active branches, so new information changes it on
+the next read. Three questions apply in order and every matched reason is returned:
+
+| Class | Reason codes |
+|---|---|
+| `complex` | `injury_or_danger`, `liability_unresolved`, `coverage_uncertain`, `cover_disagreement`, `home_uninhabitable_or_ongoing`, `fraud_review_required` |
+| `standard` | `document_outstanding`, `fact_unresolved`, `policy_not_verified`, `vehicle_not_drivable`, `amount_over_threshold`, `amount_unknown`, `third_party_recovery` |
+| `fast_track` | No reason matched |
+
+Unknown, unavailable or unchecked inputs never yield `fast_track`. `amount_threshold` is the
+configured business threshold (default NZD 5,000); the highest of `loss.estimated_amount` and the
+sum of confirmed contents item values is compared, and an amount equal to the threshold is not
+over it. `coverage_uncertain` comes from an uncertainty on the policy retrieval record for the
+Claim's policy number or `coverage = ambiguous`, never from `coverage = review_required` alone.
+When staff have stored a severity, `severity` is that decision, `source` is `staff`, and
+`system_severity` and `reasons` still show the current rule outcome. `claim_state.severity` in
+Workbench projections equals `triage.severity`. No claimant projection contains `triage`,
+`severity` or reason codes.
 
 `tags` is a backend projection from authoritative Claim fields and branches, Evidence records,
 WorkItems, handoffs, external-operation results, and review Signals. The Workbench client MUST

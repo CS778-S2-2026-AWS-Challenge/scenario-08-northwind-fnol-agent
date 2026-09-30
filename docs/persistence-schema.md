@@ -936,6 +936,9 @@ Evidence record or protected object.
   competing ownership.
 - Staff write-back records actor, reason, outcome, evidence references, and a separate
   claimant-safe update.
+- `WorkingClaim.claim_state.severity` persists only a staff triage decision; Runtime never writes it.
+  Triage itself is not persisted: Workbench projections compute it when read, and the staff action
+  record that changed `claim_state.severity` carries the actor and time of any decision.
 - Every Workbench handoff, signal, WorkItem, message, and ownership mutation first resolves the
   exact current projected action. Its idempotency record stores the registry version, action code,
   and target alongside the resulting response.
