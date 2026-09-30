@@ -36,7 +36,6 @@ from backend.domain.retention import (
     RetentionOperation,
     RetentionOperationStatus,
     RetentionProjectedContentState,
-    RetentionStepEvidence,
     RetentionStepStatus,
     RetentionTargetFreezeReason,
     RetentionTargetFreezeRejected,
@@ -55,76 +54,6 @@ def _active_hold_ids(
     claim_id: str,
 ) -> list[str]:
     return sorted(hold.hold_id for hold in repository.list_retention_holds(claim_id) if hold.active)
-
-
-def _step_evidence_id(
-    operation_id: str,
-    target_id: str,
-    attempt: int,
-) -> str:
-    digest = sha256((f'{operation_id}|{target_id}|{attempt}').encode()).hexdigest()[:40]
-
-    return f'rse_{digest}'
-
-
-def _next_attempt(
-    operation: RetentionOperation,
-    target_id: str,
-) -> int:
-    return (
-        max(
-            (item.attempt for item in operation.step_evidence if item.target_id == target_id),
-            default=0,
-        )
-        + 1
-    )
-
-
-def _candidate_after_step(
-    operation: RetentionOperation,
-    evidence: RetentionStepEvidence,
-    *,
-    now: datetime,
-) -> RetentionOperation:
-    evidence_set = [
-        *operation.step_evidence,
-        evidence,
-    ]
-
-    statuses = retention_target_statuses(
-        operation.targets,
-        evidence_set,
-    )
-
-    if evidence.status in {
-        RetentionStepStatus.FAILED,
-        RetentionStepStatus.UNKNOWN,
-    }:
-        status = RetentionOperationStatus.RECONCILIATION_REQUIRED
-        completed_at = None
-    elif (
-        operation.targets_frozen_at is not None
-        and operation.targets
-        and all(item_status is RetentionStepStatus.SATISFIED for item_status in statuses.values())
-    ):
-        status = RetentionOperationStatus.COMPLETED
-        completed_at = now
-    else:
-        status = RetentionOperationStatus.RESERVED
-        completed_at = None
-
-    payload = operation.model_dump(mode='python')
-    payload.update(
-        {
-            'revision': operation.revision + 1,
-            'status': status,
-            'step_evidence': evidence_set,
-            'updated_at': now,
-            'completed_at': completed_at,
-        }
-    )
-
-    return RetentionOperation.model_validate(payload)
 
 
 def _held_candidate(
