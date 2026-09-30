@@ -331,3 +331,6 @@ def test_vp_compose_profile_bootstraps_knowledge_and_mounts_durable_backend_stat
     assert 'northwind-backend-state:/var/lib/northwind' in compose
     assert 'NORTHWIND_OBJECT_STORAGE_ENDPOINT: http://minio:9000' in compose
     assert 'NORTHWIND_OBJECT_STORAGE_PRESIGN_ENDPOINT:' in compose
+    assert 'recovery-worker:' in compose
+    assert 'backend.recovery_worker_main' in compose
+    assert '--interval-seconds' in compose
