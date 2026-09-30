@@ -1,5 +1,4 @@
 import json
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -43,7 +42,6 @@ from backend.services.messages import (
     _build_form_changes,
 )
 from backend.services.retrieval_review import persist_retrieval_record
-from backend.services.turn_proposal_validation import ValidatedTurn
 from backend.services.turn_reducer import compose_reply
 
 
@@ -649,50 +647,28 @@ def test_question_budget_is_persisted_across_a_restarted_claim_session() -> None
 
 
 class BudgetThenControlledAgent:
-    """Spends the question budget, then lets the controlled agent complete intake."""
+    """Spends the question budget, then lets the controlled agent complete intake.
 
-    def __init__(self, *, model_authored_extra_question: bool) -> None:
+    The model-gateway path is covered in `tests/test_question_budget_v8.py`.
+    """
+
+    def __init__(self) -> None:
         self._controlled = ControlledAgent()
-        self._model_authored_extra_question = model_authored_extra_question
-        self._intake_done = False
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         if context.message_text != 'I still need help.':
-            self._intake_done = True
             return self._controlled.propose_turn(context)
-        proposal = asking_proposal('incident.location')
-        if not (self._intake_done and self._model_authored_extra_question):
-            return proposal
-        reply = 'Could you describe any other loss or damage that occurred?'
-        return replace(
-            proposal,
-            customer_response=reply,
-            validated_turn=ValidatedTurn(
-                reply=reply,
-                form_changes=[],
-                contents_item_changes=[],
-                next_question=None,
-                service_identities=(),
-                state_changes=[],
-                escalation=None,
-                ready_to_create=False,
-                confirms_batch=False,
-                rejected=[],
-            ),
-        )
+        return asking_proposal('incident.location')
 
 
-@pytest.mark.parametrize('model_authored', [False, True], ids=['controlled', 'model_authored'])
-def test_exhausted_budget_does_not_block_a_claim_whose_requirements_are_ready(
-    model_authored: bool,
-) -> None:
+def test_exhausted_budget_does_not_block_a_claim_whose_requirements_are_ready() -> None:
     journey_input = json.loads(
         (
             Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
         ).read_text(encoding='utf-8')
     )['input']
     repository = FixtureRepository()
-    agent = BudgetThenControlledAgent(model_authored_extra_question=model_authored)
+    agent = BudgetThenControlledAgent()
     with TestClient(create_app(SETTINGS, repository, agent)) as client:
         created = _create_claim(client, 'motor', 'create-budget-ready')
         claim_id = str(created['claim']['claim_id'])
