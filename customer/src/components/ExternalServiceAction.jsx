@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { ConversationActionCard } from './ConversationContext.jsx'
 
 // Claimant wording approved by the AT-10 controlled assessor scenario, one entry per
@@ -123,6 +124,7 @@ function consentLabel(consentStatus) {
 }
 
 export function ExternalServiceOverview({ action }) {
+  const titleId = useId()
   if (!action) return null
   const state = claimantStatusCopy(action)
   const routing = action.routing
@@ -131,14 +133,14 @@ export function ExternalServiceOverview({ action }) {
   const providerNextStep = action.provider_next_step || routing?.next_step || state.detail
 
   return (
-    <section className="external-service external-service-overview" aria-labelledby="external-service-overview-title">
+    <section className="external-service external-service-overview" aria-labelledby={titleId}>
       <div className="external-services-overview-heading">
         <span className="external-services-overview-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-9" /></svg>
         </span>
         <div>
           <p className="external-services-state-label">External service</p>
-          <h2 id="external-service-overview-title">{action.service_name}</h2>
+          <h2 id={titleId}>{action.service_name}</h2>
           <p>{action.purpose}</p>
           {action.status_detail && <p className="external-services-status-detail">{state.detail}</p>}
         </div>
