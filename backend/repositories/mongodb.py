@@ -2576,14 +2576,14 @@ class MongoDBRepository:
             )
 
             if result.matched_count != 1:
-                latest = self._get(
+                latest_hold = self._get(
                     'retention_hold',
                     hold.hold_id,
                     RetentionHoldRecord,
                     session=mongo_session,
                 )
 
-                if latest == hold:
+                if latest_hold == hold:
                     return
 
                 raise IdempotencyConflict(hold.hold_id)
