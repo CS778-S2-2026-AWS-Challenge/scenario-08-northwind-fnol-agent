@@ -121,7 +121,7 @@ def _checkpoint(
         source_session_id=session.session_id,
         purpose='resume_incomplete_claim',
         policy_id='incomplete_claim_follow_up',
-        policy_version='v1',
+        policy_version=1,
         deadline_at=(interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE),
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[

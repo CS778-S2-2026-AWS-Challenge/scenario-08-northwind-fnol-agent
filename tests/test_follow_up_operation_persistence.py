@@ -105,7 +105,7 @@ def _seed_recovery(
         claim_id=claim.claim_id,
         source_session_id=session.session_id,
         policy_id='incomplete_claim_follow_up',
-        policy_version='v1',
+        policy_version=1,
         deadline_at=now + timedelta(days=7),
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[f'session:{session.session_id}'],

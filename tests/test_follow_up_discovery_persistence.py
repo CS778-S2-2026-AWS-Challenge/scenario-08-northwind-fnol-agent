@@ -112,7 +112,7 @@ def _seed_follow_up(
         claim_id=claim_id,
         source_session_id=session_id,
         policy_id='incomplete_claim_follow_up',
-        policy_version='v1',
+        policy_version=1,
         deadline_at=deadline_at,
         responsible_party=ResponsibleParty.SYSTEM,
         source_refs=[f'session:{session_id}'],
