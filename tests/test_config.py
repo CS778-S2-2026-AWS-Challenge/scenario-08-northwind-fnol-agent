@@ -173,6 +173,7 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     assert settings.model_identifier == 'qwen3.8-27b'
     assert settings.model_api_key_env is None
     assert settings.model_supports_tools is True
+    assert settings.model_supports_document_input is False
     assert settings.model_reasoning_mode == 'disabled'
     assert [item.profile_id for item in settings.model_runtime_bindings] == [
         'qwen-local',
@@ -183,6 +184,7 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     gpt = settings.model_runtime_bindings[1]
     assert gpt.model_identifier == 'openai/gpt-4o'
     assert gpt.credential_environment_variable == 'NORTHWIND_MODEL_API_KEY'
+    assert gpt.document_input is True
     bedrock = settings.model_runtime_bindings[2]
     assert bedrock.model_identifier == 'global.amazon.nova-2-lite-v1:0'
     assert bedrock.credential_environment_variable == 'AWS_BEARER_TOKEN_BEDROCK'
