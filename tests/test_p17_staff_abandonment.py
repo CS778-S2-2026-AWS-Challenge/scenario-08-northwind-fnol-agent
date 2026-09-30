@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import mongomock
 import pytest
@@ -35,6 +35,7 @@ from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
 from backend.services.claims import start_session
+from backend.services.follow_up_recovery import process_expiring_follow_up
 from backend.services.terminal_claims import abandon_incomplete_claim
 
 
@@ -55,7 +56,9 @@ def _checkpoint(
     *,
     claim_id: str = 'clm_p17_staff_abandon',
 ) -> tuple[WorkingClaim, FollowUpRecord, datetime]:
-    timestamp = datetime(2026, 9, 28, 7, 0, tzinfo=UTC)
+    # Staff abandonment reads the real clock, so anchor the interruption to it. A fixed
+    # date would put every abandonment past the recovery deadline once it elapsed.
+    timestamp = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
 
     claim = WorkingClaim(
         claim_id=claim_id,
@@ -362,3 +365,98 @@ def test_read_only_staff_cannot_abandon_incomplete_claim() -> None:
     stored = repository.get_claim_internal(claim.claim_id)
     assert stored is not None and stored.terminal_disposition is None
     assert stored.revision == claim.revision
+
+
+def _staff() -> Principal:
+    return Principal(
+        subject='stf_demo',
+        actor_type='staff',
+        auth_source='test:staff_session',
+        scopes=frozenset({'workbench:read', 'workbench:write'}),
+    )
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongo'])
+def test_expiry_and_staff_abandonment_race_has_one_typed_winner(kind: str) -> None:
+    expired_first = _repository(kind)
+    claim, follow_up, interrupted_at = _checkpoint(
+        expired_first, claim_id=f'clm_expiry_wins_{kind}'
+    )
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+
+    assert process_expiring_follow_up(expired_first, follow_up, deadline) is not None
+    with pytest.raises(ApiError) as refused:
+        abandon_incomplete_claim(
+            expired_first,
+            _staff(),
+            claim.claim_id,
+            AbandonClaimRequest(reason='Staff abandonment that arrives after expiry.'),
+            f'abandon-after-expiry-{kind}',
+            str(claim.revision + 1),
+        )
+    # A terminal Claim no longer offers claim.abandon, so the action is refused
+    # before any write.
+    assert (refused.value.status_code, refused.value.code) == (403, 'ACCESS_DENIED')
+    expired = expired_first.get_claim_internal(claim.claim_id)
+    assert expired is not None and expired.terminal_disposition is not None
+    assert (
+        expired.terminal_disposition.reason_code is TerminalDispositionReasonCode.RECOVERY_EXPIRED
+    )
+
+    abandoned_first = _repository(kind)
+    claim, follow_up, interrupted_at = _checkpoint(
+        abandoned_first, claim_id=f'clm_abandon_wins_{kind}'
+    )
+    abandon_incomplete_claim(
+        abandoned_first,
+        _staff(),
+        claim.claim_id,
+        AbandonClaimRequest(reason='Staff abandonment that commits before expiry.'),
+        f'abandon-before-expiry-{kind}',
+        str(claim.revision),
+    )
+    late_expiry = process_expiring_follow_up(
+        abandoned_first, follow_up, interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+    )
+    assert late_expiry is None
+    abandoned = abandoned_first.get_claim_internal(claim.claim_id)
+    assert abandoned is not None and abandoned.terminal_disposition is not None
+    assert abandoned.revision == claim.revision + 1
+    assert (
+        abandoned.terminal_disposition.reason_code
+        is TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT
+    )
+
+
+def test_claimant_resume_before_staff_abandonment_wins_without_partial_write() -> None:
+    repository = _repository('fixture')
+    claim, follow_up, _ = _checkpoint(repository, claim_id='clm_resume_wins')
+
+    start_session(
+        repository,
+        Principal(subject=claim.customer_id, actor_type='claimant', auth_source='test:claimant'),
+        claim.claim_id,
+        StartSessionRequest(intent='resume'),
+        'resume-before-abandon',
+    )
+    resumed = repository.get_claim_internal(claim.claim_id)
+    assert resumed is not None and resumed.revision > claim.revision
+
+    with pytest.raises(ApiError) as refused:
+        abandon_incomplete_claim(
+            repository,
+            _staff(),
+            claim.claim_id,
+            AbandonClaimRequest(reason='Staff abandonment loaded before the resume.'),
+            'abandon-after-resume',
+            str(claim.revision),
+        )
+
+    assert refused.value.status_code == 409
+    assert repository.get_claim_internal(claim.claim_id) == resumed
+    stored_follow_up = repository.get_follow_up(
+        claim.claim_id, follow_up.follow_up_id, claim.customer_id
+    )
+    assert stored_follow_up is not None
+    assert stored_follow_up.status is FollowUpStatus.RESOLVED
+    assert stored_follow_up.reason_code is not FollowUpReasonCode.STAFF_ABANDONED
