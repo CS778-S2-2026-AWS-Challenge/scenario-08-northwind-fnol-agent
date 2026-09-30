@@ -93,11 +93,17 @@ class V8PolicyJudgmentProposal(ContractModel):
     """Advisory policy application proposal for staff adjudication."""
 
     kind: Literal[
-        'liability_split', 'excess_multiplicity', 'driver_permission_status',
-        'unsafe_use_applicability', 'gradual_damage_discoverability',
-        'natural_hazard_allocation', 'occupancy_change_applicability',
-        'theft_circumstance', 'unsecured_property_dispute',
-        'multi_event_dispute', 'item_classification_dispute',
+        'liability_split',
+        'excess_multiplicity',
+        'driver_permission_status',
+        'unsafe_use_applicability',
+        'gradual_damage_discoverability',
+        'natural_hazard_allocation',
+        'occupancy_change_applicability',
+        'theft_circumstance',
+        'unsecured_property_dispute',
+        'multi_event_dispute',
+        'item_classification_dispute',
     ]
     assessment: str = Field(min_length=1, max_length=500)
     rationale: str = Field(min_length=1, max_length=500)
