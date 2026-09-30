@@ -42,7 +42,8 @@ from backend.services.retention import (
     freeze_retention_cleanup_targets,
     reserve_retention_from_terminal,
 )
-from scripts import run_recovery_worker as recovery_worker_cli
+from backend import recovery_worker_main as recovery_worker_cli
+from backend.services import recovery_worker
 
 
 def _create_claim(
@@ -481,13 +482,14 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     assert first_cycle['due_candidates'] == 1
     assert first_cycle['contacted'] == 1
 
-    messages = repository.list_messages(
-        claim_id,
-        session_id,
-        'cus_demo',
+    visible_messages = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers=auth_headers,
     )
-    assert len(messages) == 1
-    assert messages[0].recovery_rule_id == 'incomplete_claim_follow_up.v1'
+    assert visible_messages.status_code == 200
+    items = visible_messages.json()['items']
+    assert len(items) == 1
+    assert items[0]['recovery']['rule_id'] == 'incomplete_claim_follow_up.v1'
 
     for _ in range(2):
         current = repository.get_follow_up(
@@ -520,6 +522,80 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     assert retention.revision > 1
     assert retention.status is RetentionOperationStatus.COMPLETED
 
+
+
+
+def test_recovery_cycle_isolates_one_failed_expiry_candidate(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_records = [
+        _create_claim(client, auth_headers, 'p17-isolation-first'),
+        _create_claim(client, auth_headers, 'p17-isolation-second'),
+    ]
+    candidates: list[FollowUpRecord] = []
+
+    for index, created in enumerate(created_records, start=1):
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        session_id = str(session['session_id'])
+        revision = int(claim['revision'])
+        paused = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
+            headers={
+                **auth_headers,
+                'Idempotency-Key': f'p17-isolation-pause-{index}',
+                'If-Match': f'"{revision}"',
+            },
+        )
+        assert paused.status_code == 200
+        candidates.append(repository.list_follow_ups(claim_id, 'cus_demo')[0])
+
+    monkeypatch.setattr(
+        repository,
+        'list_expiring_follow_ups',
+        lambda _now, *, limit, cursor=None: (candidates[:limit], cursor),
+    )
+    monkeypatch.setattr(
+        repository,
+        'list_pending_retention_operations',
+        lambda *, limit: [],
+    )
+    monkeypatch.setattr(
+        repository,
+        'list_due_follow_ups',
+        lambda _now, *, limit, cursor=None: ([], cursor),
+    )
+
+    processed: list[str] = []
+
+    def process_candidate(
+        _repository: object,
+        candidate: FollowUpRecord,
+        _now: datetime,
+    ) -> None:
+        if candidate.follow_up_id == candidates[0].follow_up_id:
+            raise RuntimeError('synthetic bad candidate')
+        processed.append(candidate.follow_up_id)
+
+    monkeypatch.setattr(
+        recovery_worker,
+        'process_expiring_follow_up',
+        process_candidate,
+    )
+
+    result = recovery_worker.run_recovery_cycle(
+        repository,
+        MockEvidenceStorage(),
+        now=datetime(2026, 9, 30, 7, 0, tzinfo=UTC),
+        limit=10,
+    )
+
+    assert result.failed_candidates == 1
+    assert processed == [candidates[1].follow_up_id]
 
 def test_p17_full_journey_pause_resume_stops_future_recovery(
     client: TestClient,
