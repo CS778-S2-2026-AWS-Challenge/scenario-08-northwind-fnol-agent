@@ -92,6 +92,42 @@ function renderQueue(overrides = {}) {
 }
 
 describe('QueuePanel', () => {
+  it('presents the formal queue as Submitted claims without a competing view switch', () => {
+    renderQueue({ queueKind: 'submitted', view: 'created_routed' })
+
+    expect(screen.getByRole('heading', { name: 'Submitted claims' })).toBeVisible()
+    expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
+    expect(screen.getByText('Submitted · Motor · Unassigned')).toBeVisible()
+    expect(screen.queryByText(/^Completed/)).not.toBeInTheDocument()
+  })
+
+  it('presents Draft claims with submission state, type, reference, and last customer activity', () => {
+    const lastClaimantActivity = '2026-09-03T00:45:00Z'
+    renderQueue({
+      queueKind: 'drafts',
+      view: 'incomplete_claims',
+      claims: [{
+        ...claim,
+        claimant: { customer_id: 'cus_1' },
+        incident: { family: null, summary: 'Kitchen water damage' },
+        work_summary: {
+          ...claim.work_summary,
+          incomplete_context: { last_meaningful_activity_at: lastClaimantActivity },
+        },
+      }],
+    })
+
+    expect(screen.getByRole('heading', { name: 'Draft claims' })).toBeVisible()
+    expect(screen.getByText('Customers are still completing these claims. They have not entered the formal work queue.')).toBeVisible()
+    expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
+    expect(screen.getByText('Kitchen water damage', { selector: 'strong' })).toBeVisible()
+    expect(screen.getByText('Draft')).toBeVisible()
+    expect(screen.getByText('Not submitted · Type not confirmed')).toBeVisible()
+    expect(screen.getByText(`Last customer activity ${formatDateTime(lastClaimantActivity)}`)).toBeVisible()
+    expect(screen.getByText('NW-1042')).toBeVisible()
+    expect(screen.queryByLabelText('Priority Standard')).not.toBeInTheDocument()
+  })
+
   it('uses backend tag codes for filtering while displaying staff labels', async () => {
     const onTag = vi.fn()
     const user = userEvent.setup()

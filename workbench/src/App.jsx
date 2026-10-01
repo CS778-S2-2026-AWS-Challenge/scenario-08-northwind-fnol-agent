@@ -24,6 +24,9 @@ export default function App() {
         <Route path="/workbench/conversations" element={<ProtectedWorkbench />} />
         <Route path="/workbench/conversations/:conversationSessionId" element={<ProtectedWorkbench />} />
         <Route path="/workbench/agent/sessions/:agentSessionId" element={<ProtectedWorkbench />} />
+        <Route path="/workbench/drafts" element={<ProtectedWorkbench />} />
+        <Route path="/workbench/drafts/:claimId" element={<ProtectedWorkbench />} />
+        <Route path="/workbench/drafts/:claimId/:section" element={<ProtectedWorkbench />} />
         <Route path="/workbench/claims/:claimId" element={<ProtectedWorkbench />} />
         <Route path="/workbench/claims/:claimId/:section" element={<ProtectedWorkbench />} />
         <Route path="*" element={<Navigate to="/workbench" replace />} />

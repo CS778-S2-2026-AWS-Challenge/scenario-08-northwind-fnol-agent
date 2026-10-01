@@ -1,6 +1,7 @@
 import { CheckCircle2, Clock3, Info, LoaderCircle, MessageSquare, Paperclip, Send, UserRoundCheck } from 'lucide-react'
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { formatDate, formatTime, words } from '../format.js'
+import { translate as t } from '../i18n.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import AttachmentDraftControl from './AttachmentDraftControl.jsx'
 import CompactComposerTextarea from './CompactComposerTextarea.jsx'
@@ -17,6 +18,7 @@ export default function Conversation({
   evidenceRecords = [],
   requestedSessionId = null,
   draft,
+  readOnly = false,
   scrollPosition = null,
   onDraft,
   onScrollPosition,
@@ -66,7 +68,8 @@ export default function Conversation({
   const acceptAction = currentProjectedAction(detail, 'human.accept_handoff', handoff?.handoff_id)
   const resolveAction = currentProjectedAction(detail, 'human.resolve_handoff', handoff?.handoff_id)
   const canSend = Boolean(
-    isCurrentSession
+    !readOnly
+      && isCurrentSession
       && !resource?.error
       && resource?.status !== 'unavailable'
       && canSubmitCurrentAction(sendAction, detail.revision),
@@ -128,6 +131,7 @@ export default function Conversation({
     if (
       !deliveryTargetsView
       || deliveryReconciliation.status !== 'confirmed'
+      || readOnly
       || sending
       || handledDeliveryRef.current === deliveryReconciliation.message_id
     ) return
@@ -138,7 +142,7 @@ export default function Conversation({
         ? null
         : current
     ))
-    if (currentDraftRef.current === deliveryReconciliation.sent_draft) onDraft('')
+    if (currentDraftRef.current === deliveryReconciliation.sent_draft) onDraft?.('')
     completedSendKeyRef.current = conversationKey
     setCompletedSends((current) => current + 1)
   }, [
@@ -146,6 +150,7 @@ export default function Conversation({
     deliveryReconciliation,
     deliveryTargetsView,
     onDraft,
+    readOnly,
     sending,
   ])
 
@@ -198,7 +203,7 @@ export default function Conversation({
       if (result?.delivery?.message_id) {
         handledDeliveryRef.current = result.delivery.message_id
       }
-      if (currentDraftRef.current === submittedDraft) onDraft('')
+      if (currentDraftRef.current === submittedDraft) onDraft?.('')
       completedSendKeyRef.current = sendKey
       setCompletedSends((current) => current + 1)
     } catch (nextError) {
@@ -221,7 +226,7 @@ export default function Conversation({
       && !sendError.readbackFailure
       && nextDraft.trim() !== sendError.sentDraft
     ) setSendError(null)
-    onDraft(nextDraft)
+    onDraft?.(nextDraft)
   }
 
   const placeholder = historicalSession
@@ -245,7 +250,7 @@ export default function Conversation({
   return (
     <ResourceBoundary resource={viewResource} onRetry={onRetry} contentAvailable={displayedSessionMatchesView} quietRefresh={sending}>
       <section className="conversation-view">
-        {handoff && !waitingForTakeover && (
+        {!readOnly && handoff && !waitingForTakeover && (
           <AssistanceStatus
             action={acceptAction}
             handoff={handoff}
@@ -280,7 +285,15 @@ export default function Conversation({
             </li>
           )}
         </ol>
-        <form className="staff-composer" onSubmit={submit}>
+        {readOnly ? (
+          <div className="staff-composer__notice" role="status">
+            <Info size={16} aria-hidden="true" />
+            <span>
+              <strong>{t('Draft conversation is read only')}</strong>
+              <small>{t('Customer messages remain available for context. Staff messaging starts after the Claim is submitted.')}</small>
+            </span>
+          </div>
+        ) : <form className="staff-composer" onSubmit={submit}>
           {handoff && waitingForTakeover ? (
             <AssistanceStatus
               action={acceptAction}
@@ -318,7 +331,7 @@ export default function Conversation({
             sending={sending}
           />
           {visibleSendError && <p className="form-error" id="staff-message-error" role="alert">{visibleSendError}</p>}
-        </form>
+        </form>}
       </section>
     </ResourceBoundary>
   )

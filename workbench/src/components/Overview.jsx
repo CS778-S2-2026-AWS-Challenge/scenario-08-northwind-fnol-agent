@@ -11,7 +11,7 @@ import SignalsSummary from './SignalsSummary.jsx'
 import SourceSummary from './SourceSummary.jsx'
 import { TagList } from './TagList.jsx'
 
-export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, onAccept, onResolve, onOwnershipAction, onReopen, onSection, onRetry }) {
+export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, readOnly = false, onAccept, onResolve, onOwnershipAction, onReopen, onSection, onRetry }) {
   const [handoffState, collaborationState] = supportingState
   const allowedActions = (detail.allowed_actions || []).filter((action) => {
     if (action.target_type === 'handoff' && actionContextUnavailable(handoffState)) return false
@@ -38,18 +38,18 @@ export default function Overview({ detail, handoffs, collaborationRequests, supp
           {!supportingLoading && <button className="button button--quiet" type="button" onClick={onRetry}>{t('Refresh Claim')}</button>}
         </div>
       )}
-      <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />
+      {!readOnly && <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />}
       <RecoverySummary context={detail.work_summary?.incomplete_context} />
       <IntegrationSummary summary={detail.integration_summary} />
       <SourceSummary summary={detail.source_summary} />
       <MissingInformation items={detail.work_summary?.missing_information || []} />
 
-      <details className="purpose-disclosure">
+      {!readOnly && <details className="purpose-disclosure">
         <summary>{t('Ownership and handoff actions')}</summary>
         {primaryAction?.action_code !== 'human.resolve_handoff' && <HandoffResolution handoff={openHandoff} allowedAction={resolveAction} onResolve={onResolve} />}
         <OwnershipActions actions={allowedActions} requests={collaborationRequests} excludeAction={primaryKey} onAction={onOwnershipAction} />
         {!resolveAction && !allowedActions.some((action) => action.action_code.startsWith('ownership.')) && <p className="empty-note">{t('No secondary ownership action is projected.')}</p>}
-      </details>
+      </details>}
 
       <details className="purpose-disclosure">
         <summary>{t('Supporting Claim context')}</summary>

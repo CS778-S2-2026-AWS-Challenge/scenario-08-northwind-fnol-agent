@@ -219,6 +219,116 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByText('This work is assigned to another staff member.')).not.toBeInTheDocument()
   })
 
+  it('keeps every Draft detail section readable while removing mutation controls', () => {
+    const mutationHandlers = {
+      onAccept: vi.fn(),
+      onResolve: vi.fn(),
+      onSignalDecision: vi.fn(),
+      onUpdateAction: vi.fn(),
+      onSend: vi.fn(),
+      onOwnershipAction: vi.fn(),
+      onReopen: vi.fn(),
+      onExternalTaskAction: vi.fn(),
+    }
+    const action = (actionCode, targetType, targetRef) => ({
+      action_code: actionCode,
+      target_type: targetType,
+      target_ref: targetRef,
+      label: actionCode,
+      purpose: 'Synthetic mutation control.',
+      availability: 'confirmation_required',
+      confirmation: { message: 'Confirm this action.' },
+      inputs: [],
+      payload_defaults: {},
+      based_on_revision: 4,
+    })
+    const draftDetail = {
+      ...detail,
+      active_session_id: 'ses_1',
+      work_summary: {
+        ...detail.work_summary,
+        primary_action_code: 'ownership.request_cowork',
+        primary_action_target_ref: 'clm_1',
+      },
+      allowed_actions: [
+        action('ownership.request_cowork', 'claim', 'clm_1'),
+        action('human.resolve_handoff', 'handoff', 'hnd_1'),
+        action('conversation.send_claimant_message', 'session', 'ses_1'),
+        action('signal.record_decision', 'signal', 'sig_1'),
+        action('work_item.update', 'staff_action', 'act_1'),
+        action('external.accept_review', 'external_task', 'tsk_1'),
+        action('claim.reopen', 'claim', 'clm_1'),
+      ],
+    }
+    const draftResources = {
+      handoffs: {
+        status: 'available',
+        items: [{ handoff_id: 'hnd_1', status: 'accepted', requested_action: 'Review the Claim.' }],
+      },
+      collaborationRequests: { status: 'available', items: [] },
+      messages: {
+        status: 'available',
+        requested_session_id: 'ses_1',
+        resolved_session_id: 'ses_1',
+        items: [{ message_id: 'msg_1', session_id: 'ses_1', actor: 'claimant', content: { type: 'text', text: 'Current Draft information.' }, created_at: '2026-09-03T00:30:00Z' }],
+      },
+      signals: {
+        status: 'available',
+        items: [{ signal_id: 'sig_1', code: 'review_required', summary: 'Review source-linked context.', decisions: [] }],
+      },
+      workItems: {
+        status: 'available',
+        items: [{ action_id: 'act_1', action_type: 'review', requested_outcome: 'Review the record.', status: 'pending', assigned_to: 'stf_1', source_refs: [], created_at: '2026-09-03T00:40:00Z' }],
+      },
+      customerUpdates: { status: 'available', items: [] },
+      events: { status: 'available', items: [] },
+      externalRequests: {
+        status: 'available',
+        items: [{
+          task: { task_id: 'tsk_1', integration_source: 'fixture', status: 'terminal_failure', failure_code: 'PROVIDER_UNAVAILABLE', updated_at: '2026-09-03T00:50:00Z' },
+          request: null,
+          lifecycle: { service: 'assessment', request_type: 'assessment', status_label: 'Review required', status_detail: 'Provider unavailable.', stakeholder: 'assessor', authority_state: 'recorded', consent_state: 'recorded', delivery_state: 'failed', verification_state: 'unverified', pending_owner: 'claims_professional', provenance: 'synthetic', next_action: 'Review the failure.', needs_attention: true },
+        }],
+      },
+    }
+    const renderDraftSection = (section) => <ClaimWorkspace
+      {...props}
+      {...mutationHandlers}
+      detail={draftDetail}
+      resources={draftResources}
+      readOnly
+      section={section}
+      conversationSessionId="ses_1"
+    />
+    const { rerender } = render(renderDraftSection('summary'))
+
+    expect(screen.getByText('Draft Claim · Read only')).toBeVisible()
+    expect(screen.getByText(/still completing the Claim.*without accepting work or changing its state/i)).toBeVisible()
+    expect(screen.queryByText('ownership.request_cowork')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ownership and handoff actions')).not.toBeInTheDocument()
+
+    rerender(renderDraftSection('conversation'))
+    expect(screen.getByText('Current Draft information.')).toBeVisible()
+    expect(screen.getByText('Draft conversation is read only')).toBeVisible()
+    expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument()
+
+    rerender(renderDraftSection('signals'))
+    expect(screen.getByText('Review source-linked context.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Record decision' })).not.toBeInTheDocument()
+
+    rerender(renderDraftSection('activity'))
+    expect(screen.getByText('Review the record.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Record resolution' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Update action' })).not.toBeInTheDocument()
+
+    rerender(renderDraftSection('external-services'))
+    expect(screen.getAllByText('Review the failure.').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /Review external\.accept_review/i })).not.toBeInTheDocument()
+
+    Object.values(mutationHandlers).forEach((handler) => expect(handler).not.toHaveBeenCalled())
+  })
+
   it('routes an exact external-task primary action to External Services without inferring from lifecycle state', async () => {
     const user = userEvent.setup()
     const onSection = vi.fn()

@@ -29,6 +29,8 @@ const metadata = {
   views: [
     { value: 'all', label: 'All active work', group: 'overview' },
     { value: 'processing', label: 'Processing', group: 'active' },
+    { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
+    { value: 'created_routed', label: 'Created / routed', group: 'operational' },
   ],
   workflow_states: [
     { value: 'ready_for_next', label: 'Ready for next' },

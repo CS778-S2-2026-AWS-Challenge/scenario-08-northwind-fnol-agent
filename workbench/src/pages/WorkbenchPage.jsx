@@ -30,6 +30,7 @@ export default function WorkbenchPage() {
   const syncTabIdentities = tabs.syncIdentities
   const [claims, setClaims] = useState([])
   const [viewCounts, setViewCounts] = useState(UNAVAILABLE_VIEW_COUNTS)
+  const [draftCount, setDraftCount] = useState(null)
   const [filterMetadata, setFilterMetadata] = useState(null)
   const [filterMetadataLoading, setFilterMetadataLoading] = useState(true)
   const [filterMetadataError, setFilterMetadataError] = useState(null)
@@ -79,6 +80,11 @@ export default function WorkbenchPage() {
   const isAgentRoute = Boolean(routeAgentSessionId)
   const isConversations = location.pathname === '/workbench/conversations' || location.pathname.startsWith('/workbench/conversations/')
   const isConversationWorkspace = isConversations || isAgentRoute
+  const isDraftQueue = location.pathname.startsWith('/workbench/drafts')
+  const queueKind = isDraftQueue ? 'drafts' : 'submitted'
+  const activeQueueView = isDraftQueue ? 'incomplete_claims' : 'created_routed'
+  const queueBasePath = isDraftQueue ? '/workbench/drafts' : '/workbench'
+  const claimBasePath = isDraftQueue ? '/workbench/drafts' : '/workbench/claims'
   const selectedSessionId = new URLSearchParams(location.search).get('session')
   const selectedConversation = isConversations
     ? conversationRouteItem(
@@ -111,8 +117,8 @@ export default function WorkbenchPage() {
       ])
     : null
   const queueFilters = useMemo(
-    () => readQueueFilters(searchParams, filterMetadata),
-    [filterMetadata, searchParams],
+    () => readQueueFilters(searchParams, filterMetadata, activeQueueView),
+    [activeQueueView, filterMetadata, searchParams],
   )
   const {
     view,
@@ -131,6 +137,22 @@ export default function WorkbenchPage() {
   const activeExternalActionRecoveries = activeClaimId
     ? Object.values(externalActionRecoveries[activeClaimId] || {})
     : []
+  const queueHasResultFilters = Boolean(
+    workflowState
+    || priority
+    || assigneeId
+    || nextAction
+    || tagFilter
+    || search
+    || updatedBefore
+    || updatedAfter
+  )
+
+  useEffect(() => {
+    if (queueHasResultFilters || viewCounts?.status !== 'available') return
+    const count = viewCounts.items.find((item) => item.view === 'incomplete_claims')?.count
+    if (Number.isInteger(count)) setDraftCount(count)
+  }, [queueHasResultFilters, viewCounts])
   const openClaimConversationTabs = tabs.tabs
     .filter((tab) => tab.section === 'conversation' && tab.sessionId)
     .map((tab) => {
@@ -809,11 +831,11 @@ export default function WorkbenchPage() {
   }, [filterMetadataAttempt, token])
   useEffect(() => {
     if (!filterMetadata) return
-    const normalized = normalizeQueueSearchParams(searchParams, filterMetadata)
+    const normalized = normalizeQueueSearchParams(searchParams, filterMetadata, activeQueueView)
     if (normalized.toString() !== searchParams.toString()) {
       setSearchParams(normalized, { replace: true })
     }
-  }, [filterMetadata, searchParams, setSearchParams])
+  }, [activeQueueView, filterMetadata, searchParams, setSearchParams])
   useEffect(() => {
     if (
       rootRestoreAttemptedRef.current
@@ -1228,13 +1250,13 @@ export default function WorkbenchPage() {
   }, [token])
   useEffect(() => {
     if (filterMetadata && claimId && routeSection && !CLAIM_SECTIONS.has(routeSection)) {
-      navigate(queueRoute(`/workbench/claims/${claimId}`, queueFilters), { replace: true })
+      navigate(queueRoute(`${claimBasePath}/${claimId}`, queueFilters), { replace: true })
     }
-  }, [claimId, filterMetadata, navigate, queueFilters, routeSection])
+  }, [claimBasePath, claimId, filterMetadata, navigate, queueFilters, routeSection])
 
   function openClaim(claim) {
     tabs.open(claim)
-    navigate(queueRoute(`/workbench/claims/${claim.claim_id}`, queueFilters))
+    navigate(queueRoute(`${claimBasePath}/${claim.claim_id}`, queueFilters))
   }
 
   function reviewAssistanceRequest(request) {
@@ -1287,7 +1309,7 @@ export default function WorkbenchPage() {
     const query = tab?.section === 'conversation' && tab.sessionId
       ? `?session=${encodeURIComponent(tab.sessionId)}`
       : ''
-    navigate(queueRoute(`/workbench/claims/${id}${suffix}`, queueFilters, query ? tab.sessionId : null))
+    navigate(queueRoute(`${claimBasePath}/${id}${suffix}`, queueFilters, query ? tab.sessionId : null))
   }
 
   function closeTab(id) {
@@ -1300,7 +1322,7 @@ export default function WorkbenchPage() {
       const suffix = neighbour?.section && neighbour.section !== 'summary'
         ? `/${neighbour.section}`
         : ''
-      navigate(queueRoute(neighbour ? `/workbench/claims/${neighbour.claimId}${suffix}` : '/workbench', queueFilters))
+      navigate(queueRoute(neighbour ? `${claimBasePath}/${neighbour.claimId}${suffix}` : queueBasePath, queueFilters))
     }
   }
 
@@ -1343,7 +1365,7 @@ export default function WorkbenchPage() {
       ? `?session=${encodeURIComponent(currentTab.sessionId)}`
       : ''
     navigate(
-      queueRoute(`/workbench/claims/${claimId}${suffix}`, queueFilters, query ? currentTab.sessionId : null),
+      queueRoute(`${claimBasePath}/${claimId}${suffix}`, queueFilters, query ? currentTab.sessionId : null),
       { replace: true },
     )
   }
@@ -1943,11 +1965,14 @@ export default function WorkbenchPage() {
 
   return (
     <div className="workbench-app">
-      <NavigationRail profile={profile} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
+      <NavigationRail profile={profile} draftCount={draftCount} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
       <div className="workbench-stage">
         <header className="workbench-topbar">
           <button className="icon-button mobile-menu" type="button" aria-label={t('Open navigation')}><Menu size={19} /></button>
-          <div><strong>{t('Claims Workbench')}</strong><span>{t('Source-linked operational view')}</span></div>
+          <div>
+            <strong>{t('Claims Workbench')}</strong>
+            <span>{t(isDraftQueue ? 'Customer drafts · Not yet submitted' : 'Source-linked operational view')}</span>
+          </div>
           <div className="topbar-actions">
             {isConversationWorkspace ? (
               <button
@@ -2033,13 +2058,40 @@ export default function WorkbenchPage() {
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
             {queueVisible && (filterMetadata
               ? viewAvailable
-                ? <QueuePanel claims={visibleClaims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
-                : <QueueViewUnavailable view={view} onOpenAll={() => setQueueFilter('view', 'all')} />
+                ? <QueuePanel queueKind={queueKind} claims={visibleClaims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} view={view} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
+                : <QueueViewUnavailable queueKind={queueKind} view={view} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />
               : <QueueMetadataState loading={filterMetadataLoading} error={filterMetadataError} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />)}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} externalActionNotices={activeExternalActionRecoveries} section={currentSection} conversationSessionId={selectedSessionId || detail?.active_session_id || null} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onRetryExternalActionContext={refreshExternalActionContext} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} onExternalTaskAction={performExternalTaskAction} />
+                <ClaimWorkspace
+                  detail={detail}
+                  resources={resources}
+                  loading={detailLoading}
+                  stale={detailStale}
+                  error={detailError}
+                  externalActionNotices={activeExternalActionRecoveries}
+                  section={currentSection}
+                  conversationSessionId={selectedSessionId || detail?.active_session_id || null}
+                  draft={currentTab?.draft || ''}
+                  profile={profile}
+                  readOnly={isDraftQueue}
+                  onSection={changeSection}
+                  onDraft={isDraftQueue ? undefined : (draft) => claimId && tabs.update(claimId, { draft })}
+                  onRetry={() => loadDetail(claimId)}
+                  onRetrySection={() => loadSectionResources(claimId, currentSection)}
+                  onRetryExternalActionContext={refreshExternalActionContext}
+                  onAccept={isDraftQueue ? undefined : acceptHandoff}
+                  onResolve={isDraftQueue ? undefined : resolveHandoff}
+                  onSignalDecision={isDraftQueue ? undefined : decideSignal}
+                  onCreateAction={isDraftQueue ? undefined : createStaffAction}
+                  onUpdateAction={isDraftQueue ? undefined : updateStaffAction}
+                  onLoadEvidence={loadEvidence}
+                  onSend={isDraftQueue ? undefined : sendMessage}
+                  onOwnershipAction={isDraftQueue ? undefined : performOwnershipAction}
+                  onReopen={isDraftQueue ? undefined : reopenClaim}
+                  onExternalTaskAction={isDraftQueue ? undefined : performExternalTaskAction}
+                />
               </div>
             </section>
           </div>
@@ -2068,20 +2120,21 @@ function reopenFailureNotice(error, latest, queueLabel) {
   return [message, reference].filter(Boolean).join(' ')
 }
 
-function QueueViewUnavailable({ view, onOpenAll }) {
+function QueueViewUnavailable({ queueKind, view, onRetry }) {
+  const isDraftQueue = queueKind === 'drafts'
   return (
     <aside className="queue-panel" aria-label={t('Claim queue')}>
       <header className="queue-panel__header">
         <div>
           <p className="eyebrow">{t('My work')}</p>
-          <h2>{t('Claim queue')}</h2>
+          <h2>{t(isDraftQueue ? 'Draft claims' : 'Submitted claims')}</h2>
         </div>
       </header>
       <div className="queue-list">
         <div className="queue-state" role="alert">
           <strong>{t('This queue view is no longer available')}</strong>
-          <p>{t('The view “{view}” is not published by the Workbench service. Choose a current server-published queue to continue.', { view })}</p>
-          <button className="button button--quiet" type="button" onClick={onOpenAll}>{t('Open all active work')}</button>
+          <p>{t('The required view “{view}” is not published by the Workbench service. Refresh the server-owned queue contract before continuing.', { view })}</p>
+          <button className="button button--quiet" type="button" onClick={onRetry}>{t('Retry')}</button>
         </div>
       </div>
     </aside>
@@ -2511,9 +2564,9 @@ function queueFilterKey(filters) {
   return JSON.stringify(queueRequestFilters(filters))
 }
 
-function readQueueFilters(searchParams, metadata) {
+function readQueueFilters(searchParams, metadata, activeQueueView = 'created_routed') {
   if (!metadata) return EMPTY_QUEUE_FILTERS
-  const requestedView = (searchParams.get('view') || 'all').trim() || 'all'
+  const requestedView = activeQueueView
   return {
     view: requestedView,
     viewAvailable: metadata.views.some((option) => option.value === requestedView),
@@ -2535,12 +2588,10 @@ function validFilterValue(value, options, fallback = '') {
   return options.some((option) => option.value === value) ? value : fallback
 }
 
-function normalizeQueueSearchParams(searchParams, metadata) {
+function normalizeQueueSearchParams(searchParams, metadata, activeQueueView = 'created_routed') {
   const next = new URLSearchParams(searchParams)
-  const filters = readQueueFilters(next, metadata)
-  if (filters.viewAvailable) {
-    setNormalizedParam(next, 'view', filters.view === 'all' ? '' : filters.view)
-  }
+  const filters = readQueueFilters(next, metadata, activeQueueView)
+  next.delete('view')
   setNormalizedParam(next, 'workflow_state', filters.workflowState)
   setNormalizedParam(next, 'priority', filters.priority)
   setNormalizedParam(next, 'tag', filters.tagFilter)
@@ -2556,7 +2607,6 @@ function setNormalizedParam(params, name, value) {
 
 function queueRoute(path, filters, sessionId = null) {
   const params = new URLSearchParams()
-  if (filters.view !== 'all') params.set('view', filters.view)
   if (filters.workflowState) params.set('workflow_state', filters.workflowState)
   if (filters.priority) params.set('priority', filters.priority)
   if (filters.assigneeId) params.set('assignee_id', filters.assigneeId)
@@ -2570,7 +2620,7 @@ function queueRoute(path, filters, sessionId = null) {
 }
 
 const EMPTY_QUEUE_FILTERS = Object.freeze({
-  view: 'all',
+  view: 'created_routed',
   viewAvailable: false,
   workflowState: '',
   priority: '',
@@ -2589,7 +2639,6 @@ const UNAVAILABLE_VIEW_COUNTS = Object.freeze({
 })
 
 const QUEUE_FILTER_PARAM_NAMES = Object.freeze([
-  'view',
   'workflow_state',
   'priority',
   'assignee_id',
