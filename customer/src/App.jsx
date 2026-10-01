@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
   acceptClaimAgreement,
@@ -71,10 +71,16 @@ import './styles/profile-assets.css'
 import './styles/profile-responsive.css'
 import './styles/claim-history.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
+import { historyClaimIdFromPath, pageForPath, routeForPage as routeForAppPage } from './appRoutes.js'
+import { claimHeading, claimStartedLabel } from './claimHeading.js'
+import { claimantModelChoices } from './modelProducts.js'
+import { captureComposerRect, playComposerHandoff } from './composerHandoff.js'
+import ClaimEntryPage from './components/ClaimEntryPage.jsx'
+import ClaimantAvatar from './components/ClaimantAvatar.jsx'
 import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
 import useClaimAutoFillEditor from './profile/useClaimAutoFillEditor.js'
-import { WORKBENCH_URL } from './runtimeConfig.js'
+import { WORKBENCH_URL, developerModeEnabled } from './runtimeConfig.js'
 import {
   forgetAnonymousConversation,
   readAnonymousConversationHistory,
@@ -553,29 +559,12 @@ function claimProgress(dynamicForm) {
   }
 }
 
-function protectedAccountPageForPath(pathname) {
-  if (pathname === '/account/claims') return 'claim-history'
-  if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return 'claim-evidence'
-  if (/^\/account\/claims\/[^/]+$/.test(pathname)) return 'claim-features'
-  if (pathname === '/files') return 'files'
-  return null
-}
-
 function App() {
   const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialDraftWorkspaceActive = globalThis.location?.pathname === '/claims/new'
-  const initialPage = (() => {
-    const path = globalThis.location?.pathname || '/'
-    if (path === '/auth/login') return 'login'
-    if (path === '/auth/register') return 'register'
-    if (path === '/profile' || path === '/account' || initialProfileSection) {
-      return hasClaimantAccessToken() ? 'account' : 'login'
-    }
-    const protectedPage = protectedAccountPageForPath(path)
-    if (protectedPage) return hasClaimantAccessToken() ? protectedPage : 'login'
-    if (path === '/how-it-works') return 'how-it-works'
-    return 'home'
-  })()
+  const initialPage = pageForPath(globalThis.location?.pathname || '/', {
+    authenticated: hasClaimantAccessToken(),
+  })
   const [page, setPageState] = useState(initialPage)
   const [profileSection, setProfileSection] = useState(initialProfileSection)
   const [account, setAccount] = useState(null)
@@ -609,10 +598,9 @@ function App() {
   ))
   const [claimHistoryError, setClaimHistoryError] = useState('')
   const [conversationHistoryOpen, setConversationHistoryOpen] = useState(false)
-  const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => {
-    const match = globalThis.location?.pathname?.match(/^\/account\/claims\/([^/]+)/)
-    return match ? decodeURIComponent(match[1]) : null
-  })
+  const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => (
+    historyClaimIdFromPath(globalThis.location?.pathname)
+  ))
   const [detailsOpen, setDetailsOpen] = useState(true)
   const [detailsTab, setDetailsTab] = useState('summary')
   const [mobileView, setMobileView] = useState('chat')
@@ -651,6 +639,8 @@ function App() {
   const [offerConsentChecks, setOfferConsentChecks] = useState({})
   const [offerErrors, setOfferErrors] = useState({})
   const [failedMessage, setFailedMessage] = useState(null)
+  const [arrivingFromEntry, setArrivingFromEntry] = useState(false)
+  const composerHandoffFrom = useRef(null)
   // A failed retry of an already saved message belongs on that message, not as a new
   // unconfirmed bubble at the end of the conversation (#1025).
   const [recoveryFailure, setRecoveryFailure] = useState(null)
@@ -907,18 +897,26 @@ function App() {
     if (conversationPanelRef.current) conversationPanelRef.current.scrollTop = 0
   }, [workspaceView])
 
+  useLayoutEffect(() => {
+    if (!isWorkspaceActive) return
+    const fromRect = composerHandoffFrom.current
+    composerHandoffFrom.current = null
+    playComposerHandoff(conversationPanelRef.current?.querySelector('.workspace-composer'), fromRect)
+  }, [isWorkspaceActive])
+
+  const claimantModels = useMemo(() => claimantModelChoices(runtimeCapabilities.models, {
+    selectedModelId: selectedModel,
+    defaultModelId: runtimeCapabilities.default_model_profile_id,
+  }), [runtimeCapabilities, selectedModel])
+
   function routeForPage(nextPage) {
-    if (nextPage === 'login') return '/auth/login'
-    if (nextPage === 'register') return '/auth/register'
-    if (nextPage === 'account') return profilePathForSection(profileSection)
-    if (nextPage === 'claim-history') return '/account/claims'
-    if (nextPage === 'claim-features' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}`
-    if (nextPage === 'claim-evidence' && selectedHistoryClaimId) return `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
-    if (nextPage === 'files') return '/files'
-    if (nextPage === 'how-it-works') return '/how-it-works'
-    if (isWorkspaceActive && draftWorkspaceActive) return '/claims/new'
-    if (isWorkspaceActive && claim?.claim_id) return `/claims/${claim.claim_id}`
-    return '/'
+    return routeForAppPage(nextPage, {
+      profileSection,
+      historyClaimId: selectedHistoryClaimId,
+      workspaceActive: isWorkspaceActive,
+      draftWorkspace: draftWorkspaceActive,
+      claimId: claim?.claim_id,
+    })
   }
 
   function setPage(nextPage, { replace = false } = {}) {
@@ -931,22 +929,11 @@ function App() {
     }
   }
 
-  function pageForPath(pathname) {
-    if (pathname === '/auth/login') return 'login'
-    if (pathname === '/auth/register') return 'register'
-    if (pathname === '/profile' || pathname === '/account' || profileSectionFromPath(pathname)) return account ? 'account' : 'login'
-    const protectedPage = protectedAccountPageForPath(pathname)
-    if (protectedPage) return account ? protectedPage : 'login'
-    if (pathname === '/how-it-works') return 'how-it-works'
-    if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
-    return 'home'
-  }
-
   useEffect(() => {
     const onPopState = () => {
       const path = globalThis.location?.pathname || '/'
       const nextProfileSection = profileSectionFromPath(path)
-      const nextPage = pageForPath(path)
+      const nextPage = pageForPath(path, { authenticated: Boolean(account) })
       const opensDraftWorkspace = path === '/claims/new'
       setDraftWorkspaceActive(opensDraftWorkspace)
       setWorkspaceActive(opensDraftWorkspace || (path.startsWith('/claims/') && Boolean(claim)))
@@ -954,8 +941,7 @@ function App() {
         nextPage === 'account' ? globalThis.history?.state?.profileReturnClaimId || null : null,
       )
       setProfileSection(nextProfileSection)
-      const historyClaimMatch = path.match(/^\/account\/claims\/([^/]+)/)
-      setSelectedHistoryClaimId(historyClaimMatch ? decodeURIComponent(historyClaimMatch[1]) : null)
+      setSelectedHistoryClaimId(historyClaimIdFromPath(path))
       setPageState(nextPage)
       const canonicalPath = ['claim-history', 'claim-features', 'claim-evidence'].includes(nextPage)
         ? path
@@ -977,28 +963,12 @@ function App() {
   }, [account, claim?.claim_id, hasStarted, page])
 
   useEffect(() => {
-    const expectedPath = page === 'login'
-      ? '/auth/login'
-      : page === 'register'
-        ? '/auth/register'
-        : page === 'account'
-          ? profilePathForSection(profileSection)
-          : page === 'claim-history'
-            ? '/account/claims'
-            : page === 'claim-features' && selectedHistoryClaimId
-              ? `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}`
-              : page === 'claim-evidence' && selectedHistoryClaimId
-                ? `/account/claims/${encodeURIComponent(selectedHistoryClaimId)}/evidence`
-                : page === 'files'
-                  ? '/files'
-                  : page === 'how-it-works'
-                    ? '/how-it-works'
-                    : isWorkspaceActive && draftWorkspaceActive
-                      ? '/claims/new'
-                      : isWorkspaceActive && claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
+    const expectedPath = routeForPage(page)
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
     }
+  // routeForPage reads exactly the route state listed here.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftWorkspaceActive, isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
 
   const claimOperationBusy = [
@@ -1448,6 +1418,7 @@ function App() {
     let needsResyncSnapshot = false
     let needsRecoverySnapshot = false
     const maxDegradedRefreshes = 5
+    const maxRecoverySnapshots = 3
 
     function rememberEvent(eventId) {
       if (!eventId) return
@@ -1640,8 +1611,14 @@ function App() {
             signal: controller.signal,
             onOpen: recoverOnOpen
               ? async () => {
-                const projectionRecovered = await refreshFullSnapshot()
-                if (!active || controller.signal.aborted) return
+                // A snapshot read while the claimant's own turn lands is superseded
+                // by that newer local state. That is not a connection problem, so
+                // read again before treating the stream as failed.
+                let projectionRecovered = false
+                for (let attempt = 0; attempt < maxRecoverySnapshots && !projectionRecovered; attempt += 1) {
+                  projectionRecovered = await refreshFullSnapshot()
+                  if (!active || controller.signal.aborted) return
+                }
                 if (!projectionRecovered) {
                   throw new Error('Authoritative claimant realtime recovery snapshot was superseded.')
                 }
@@ -2133,6 +2110,7 @@ function App() {
 
   async function sendMessage(event, recoveryMessage = null) {
     event.preventDefault()
+    const submittedForm = event.currentTarget
     const text = recoveryMessage ? messageText(recoveryMessage) : draft.trim()
     const recoveryEvidenceRefs = recoveryMessage?.evidence_refs || []
     const recoveryAttachments = recoveryMessage
@@ -2240,6 +2218,18 @@ function App() {
     setError('')
     setFailedMessage(null)
     setRecoveryFailure(null)
+    // The message moves into the conversation as soon as it is sent; the
+    // composer is restored below only if it could not be delivered.
+    if (!recoveryMessage) setDraft('')
+    if (!activeClaim && !isWorkspaceActive) {
+      composerHandoffFrom.current = captureComposerRect(submittedForm)
+      setArrivingFromEntry(true)
+      setDraftWorkspaceActive(true)
+      setWorkspaceActive(true)
+    }
+    const restoreDraft = () => {
+      if (!recoveryMessage) setDraft((current) => current || text)
+    }
     if (isAssistanceReply) {
       setAssistanceReplyReview({
         claimId: activeClaim.claim_id,
@@ -2311,6 +2301,7 @@ function App() {
           activeTurnProgressRef.current = null
           setActiveTurnProgress(null)
           setPendingMessage(null)
+          restoreDraft()
           if (upload.aborted) {
             pendingSubmission.current = null
             setStatus('idle')
@@ -2399,7 +2390,6 @@ function App() {
           updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
         })
       }
-      setDraft('')
       if (isAssistanceReply) {
         setAssistanceReplyReview({
           claimId: activeClaim.claim_id,
@@ -2454,6 +2444,7 @@ function App() {
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
       setPendingMessage(null)
+      restoreDraft()
       if (messageWasSubmitted) {
         const serverConfirmedFailure = requestError instanceof ApiRequestError
           && Number.isInteger(requestError.status)
@@ -4000,63 +3991,43 @@ function App() {
           </section>
         </main>
       ) : !isWorkspaceActive ? (
-        <main className="entry-page">
-          <section className="entry-hero" aria-labelledby="entry-title">
-            <div className="entry-content">
-              <p className="entry-brand-line">
-                <span>Understand insurance.</span>
-                {' '}
-                <span>Understand you better.</span>
-              </p>
-              <h1 className="entry-task-title" id="entry-title">Start your insurance claim</h1>
-              <p className="entry-intro">Tell us what happened — we&apos;ll guide you through the next steps.</p>
-              <section id="claims" className="claim-starter" aria-label="Start a claim">
-                <MessageComposer
-                  draft={draft}
-                  setDraft={setDraft}
-                  onSubmit={sendMessage}
-                  inputLabel="Incident description"
-                  busy={isBusy}
-                  buttonLabel={status === 'starting' ? 'Starting claim...' : failedMessage ? 'Retry claim message' : 'Start claim'}
-                  error={error}
-                  placeholder="Tell us what happened…"
-                  showClaimTypeControl
-                  showModelControl
-                  claimType={claimType}
-                  setClaimType={setClaimType}
-                  claimTypes={runtimeCapabilities.claim_types}
-                  models={runtimeCapabilities.models}
-                  selectedModel={selectedModel}
-                  setSelectedModel={setSelectedModel}
-                  claimTypeLocked={isWorkspaceActive && Boolean(sessionId)}
-                  attachments={attachments}
-                  onFileSelected={handleFileSelected}
-                  onRemoveAttachment={removeComposerAttachment}
-                />
-                {failedMessage && (
-                  <article className="message message-claimant is-failed" role="alert">
-                    <p className="message-author">{failedMessage.sender}</p>
-                    {failedMessage.text && <p>{failedMessage.text}</p>}
-                    <ClaimantMessageAttachments
-                      evidenceItems={evidenceItems}
-                      attachments={failedMessage.attachments}
-                      previewFiles={evidencePreviewFiles.current}
-                    />
-                    <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
-                    <p className="message-failure-detail">{failedMessage.message}</p>
-                  </article>
-                )}
-              </section>
-              <div className="entry-tertiary-links">
-                <button className="text-link entry-process-link" type="button" onClick={() => setPage('how-it-works')}>
-                  How does the claim process work?
-                </button>
-              </div>
-            </div>
-          </section>
-        </main>
+        <ClaimEntryPage
+          composer={{
+            draft,
+            setDraft,
+            onSubmit: sendMessage,
+            busy: isBusy,
+            buttonLabel: failedMessage ? 'Retry claim message' : 'Start claim',
+            error,
+            models: claimantModels,
+            selectedModel,
+            setSelectedModel,
+            attachments,
+            onFileSelected: handleFileSelected,
+            onRemoveAttachment: removeComposerAttachment,
+          }}
+          failure={failedMessage && (
+            <article className="message message-claimant is-failed" role="alert">
+              <p className="message-author">{failedMessage.sender}</p>
+              {failedMessage.text && <p>{failedMessage.text}</p>}
+              <ClaimantMessageAttachments
+                evidenceItems={evidenceItems}
+                attachments={failedMessage.attachments}
+                previewFiles={evidencePreviewFiles.current}
+              />
+              <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
+              <p className="message-failure-detail">{failedMessage.message}</p>
+            </article>
+          )}
+          onOpenHowItWorks={() => setPage('how-it-works')}
+        />
       ) : (
-        <main className={`intake-page ${claimDetailsExpanded ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''}`}>
+        <main
+          className={`intake-page ${claimDetailsExpanded ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''} ${arrivingFromEntry ? 'is-arriving' : ''}`}
+          onAnimationEnd={(event) => {
+            if (event.target.classList?.contains('message-list')) setArrivingFromEntry(false)
+          }}
+        >
           <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
             {[
               ['history', 'History'],
@@ -4116,7 +4087,7 @@ function App() {
                     </span>
                     <span className="intake-history-meta">
                       {isCurrent
-                        ? `${report.incident_type || 'New report'} · ${report.claim_id}`
+                        ? `${report.incident_type || 'New report'} · ${claimStartedLabel(report)}`
                         : report.customer_next_step.summary}
                     </span>
                   </button>
@@ -4130,7 +4101,7 @@ function App() {
                 aria-label={profileButtonLabel}
                 onClick={() => openProfileFromWorkspace()}
               >
-                <span className="intake-profile-avatar" aria-hidden="true">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
+                <ClaimantAvatar className="intake-profile-avatar" displayName={account?.profile?.display_name} />
                 <span className="intake-profile-copy">
                   <span className="intake-profile-name" title={profileDisplayName} aria-hidden="true">
                     {profileNamePreview.truncated ? (
@@ -4268,8 +4239,7 @@ function App() {
               {claim && (
                 <div className="conversation-heading-main">
                   <div className="claim-heading-identity">
-                    <span>Claim:</span>
-                    <h1 id="conversation-title">{claim.claim_id}</h1>
+                    <h1 id="conversation-title">{claimHeading(claim)}</h1>
                   </div>
                 </div>
               )}
@@ -4294,7 +4264,7 @@ function App() {
               aria-live="polite"
               onScroll={handleMessageListScroll}
             >
-              {isNewConversationEmpty && <ConversationStart onChoosePrompt={setDraft} />}
+              {isNewConversationEmpty && !pendingMessage && <ConversationStart onChoosePrompt={setDraft} />}
               {conversationTimeline.map((item) => {
                 if (item.kind === 'conversation-event') {
                   return (
@@ -4340,9 +4310,7 @@ function App() {
                             </div>
                           )}
                         </div>
-                        <span className="message-avatar claimant-message-avatar" aria-hidden="true">
-                          {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
-                        </span>
+                        <ClaimantAvatar className="message-avatar claimant-message-avatar" displayName={account?.profile?.display_name} />
                       </div>
                     </article>
                   )
@@ -4376,7 +4344,9 @@ function App() {
                       <div className="message-avatar agent-avatar" aria-hidden="true">N</div>
                       <div className="agent-body">
                         <div className="agent-label">Claims assistant</div>
-                        <AgentTurnDisclosure progress={messageActivities[message.message_id]} />
+                        {developerModeEnabled() && (
+                          <AgentTurnDisclosure progress={messageActivities[message.message_id]} />
+                        )}
                         <div className="chat-bubble agent-bubble">
                           <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
                         </div>
@@ -4439,9 +4409,7 @@ function App() {
                           />
                         </div>
                       </div>
-                      <span className="message-avatar claimant-message-avatar" aria-hidden="true">
-                        {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
-                      </span>
+                      <ClaimantAvatar className="message-avatar claimant-message-avatar" displayName={account?.profile?.display_name} />
                     </div>
                   </article>}
                   <AgentTurnPlaceholder
@@ -4466,9 +4434,7 @@ function App() {
                         <p className="message-failure-detail">{failedMessage.message}</p>
                       </div>
                     </div>
-                    <span className="message-avatar claimant-message-avatar" aria-hidden="true">
-                      {account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}
-                    </span>
+                    <ClaimantAvatar className="message-avatar claimant-message-avatar" displayName={account?.profile?.display_name} />
                   </div>
                 </article>
               )}
@@ -4563,7 +4529,7 @@ function App() {
               claimType={claimType}
               setClaimType={setClaimType}
               claimTypes={runtimeCapabilities.claim_types}
-              models={runtimeCapabilities.models}
+              models={claimantModels}
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
               claimTypeLocked={Boolean(sessionId)}

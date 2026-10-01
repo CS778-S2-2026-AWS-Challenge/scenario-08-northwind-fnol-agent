@@ -62,7 +62,12 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('./api.js', () => api)
-vi.mock('./runtimeConfig.js', () => ({ WORKBENCH_URL: '/workbench/' }))
+const runtimeFlags = vi.hoisted(() => ({ developerMode: false }))
+
+vi.mock('./runtimeConfig.js', () => ({
+  WORKBENCH_URL: '/workbench/',
+  developerModeEnabled: () => runtimeFlags.developerMode,
+}))
 
 import App from './App.jsx'
 
@@ -500,6 +505,7 @@ describe('claimant intake projection', () => {
       configurable: true,
       value: vi.fn(),
     })
+    runtimeFlags.developerMode = false
     api.hasClaimantAccessToken.mockReturnValue(false)
     api.getRuntimeCapabilities.mockResolvedValue({
       claim_types: ['motor', 'home', 'contents'],
@@ -573,38 +579,117 @@ describe('claimant intake projection', () => {
     }
   })
 
-  it('shows the backend default model before creating a session', async () => {
+  it('offers the two Northwind products instead of model configurations', async () => {
     const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
     render(<App />)
 
     const model = await screen.findByRole('button', { name: 'Model' })
     expect(model).toBeEnabled()
-    expect(model).toHaveTextContent('qwen3.8-27b')
+    expect(model).toHaveTextContent('Northwind Private')
     expect(screen.queryByRole('button', { name: 'Claim type (optional)' })).not.toBeInTheDocument()
 
     await user.click(model)
-    expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
-    expect(screen.getByRole('option', {
-      name: /global\.amazon\.nova-2-lite-v1:0.*Unavailable/,
-    })).toBeDisabled()
-    await user.click(screen.getByRole('option', {
-      name: 'gemini-3.5-flash-lite',
-    }))
-    expect(model).toHaveTextContent('gemini-3.5-flash-lite')
+    const options = screen.getAllByRole('option')
+    expect(options.map((option) => option.querySelector('span span').textContent))
+      .toEqual(['Northwind Assist', 'Northwind Private'])
+    expect(screen.getByRole('option', { name: /Northwind Private.*Text only/ })).toBeInTheDocument()
+    expect(screen.getByRole('listbox', { name: 'Model' }))
+      .not.toHaveTextContent(/qwen|gpt|gemini|nova|openrouter/i)
 
-    await user.click(model)
-    await user.click(screen.getByRole('option', { name: /^gpt-5\.5/ }))
-    expect(model).toHaveTextContent('gpt-5.5')
+    await user.click(screen.getByRole('option', { name: /^Northwind Assist/ }))
+    expect(model).toHaveTextContent('Northwind Assist')
 
     await waitFor(() => expect(model).toHaveFocus())
     await user.keyboard('{ArrowDown}')
-    const selectedGpt = screen.getByRole('option', {
-      name: 'gpt-5.5',
-    })
-    await waitFor(() => expect(selectedGpt).toHaveFocus())
-    await user.keyboard('{Home}{Enter}')
-    expect(model).toHaveTextContent('qwen3.8-27b')
+    await waitFor(() => expect(screen.getByRole('option', { name: /^Northwind Assist/ })).toHaveFocus())
+    await user.keyboard('{End}{Enter}')
+    expect(model).toHaveTextContent('Northwind Private')
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeInTheDocument()
+
+    await user.click(model)
+    await user.click(screen.getByRole('option', { name: /^Northwind Assist/ }))
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.createClaim).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProfileId: 'google-gemini35-flash-lite' }),
+    ))
+  })
+
+  it('sends on Enter and opens the conversation before the Claim is created', async () => {
+    const user = userEvent.setup()
+    let resolveClaim
+    api.createClaim.mockReturnValue(new Promise((resolve) => { resolveClaim = resolve }))
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    render(<App />)
+
+    const entry = screen.getByPlaceholderText('Tell us what happened…')
+    await user.type(entry, 'A pipe burst{Shift>}{Enter}{/Shift}in the kitchen.')
+    expect(entry).toHaveValue('A pipe burst\nin the kitchen.')
+    fireEvent.keyDown(entry, { key: 'Enter', isComposing: true })
+    expect(api.createClaim).not.toHaveBeenCalled()
+
+    await user.keyboard('{Enter}')
+    expect(await screen.findByLabelText('Message sending')).toHaveTextContent('A pipe burst')
+    expect(screen.queryByRole('heading', { name: 'Start your insurance claim' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /get your claim started/ })).not.toBeInTheDocument()
+    expect(document.querySelector('#workspace-incident-input')).toHaveValue('')
+    expect(globalThis.location.pathname).toBe('/claims/new')
+
+    await act(async () => resolveClaim({
+      claim: initialClaim,
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+    }))
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(screen.getByRole('heading', { name: /^Home claim · started \d{2}:\d{2}$/ })).toBeVisible()
+    expect(api.submitClaimMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'A pipe burst\nin the kitchen.' }),
+    )
+  })
+
+  it('puts the message back in the composer when the Claim cannot be started', async () => {
+    const user = userEvent.setup()
+    api.createClaim.mockRejectedValue(new api.ApiRequestError('Northwind is unavailable.'))
+    render(<App />)
+
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst.{Enter}')
+
+    await waitFor(() => expect(document.querySelector('#workspace-incident-input')).toHaveValue('A pipe burst.'))
+    expect(api.submitClaimMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps live updates quiet when the first snapshot is superseded by the claimant turn', async () => {
+    const user = userEvent.setup()
+    let resolveTurn
+    let releaseFirstReadback
+    api.submitClaimMessage.mockReturnValue(new Promise((resolve) => { resolveTurn = resolve }))
+    api.getClaim.mockResolvedValue({
+      ...initialClaim,
+      revision: 2,
+      primary_action: primaryAction({ revision: 2 }),
+    })
+    api.getClaimMessages
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        releaseFirstReadback = () => resolve({ items: [claimantMessage] })
+      }))
+      .mockResolvedValue({ items: [claimantMessage, agentMessage] })
+    api.streamRealtimeEvents.mockImplementation(({ onOpen, signal }) => (async () => {
+      await onOpen?.()
+      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+    })())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(releaseFirstReadback).toBeTypeOf('function'))
+    await act(async () => resolveTurn(initialTurn()))
+    await screen.findByText(agentMessage.content.text)
+    await act(async () => releaseFirstReadback())
+
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledTimes(2))
+    expect(screen.getByText(agentMessage.content.text)).toBeVisible()
+    expect(api.streamRealtimeEvents).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/Live updates are reconnecting/)).not.toBeInTheDocument()
   })
 
   it('renders directional chat bubbles without duplicate claimant time metadata', async () => {
@@ -628,8 +713,10 @@ describe('claimant intake projection', () => {
     const claimantArticle = screen.getByText(claimantMessage.content.text).closest('.msg-user')
     const agentArticle = screen.getByText(agentMessage.content.text).closest('.msg-agent')
 
-    expect(claimantArticle.querySelector('.chat-message-row > .user-message-body + .claimant-message-avatar'))
-      .toHaveTextContent('YU')
+    const claimantAvatar = claimantArticle.querySelector('.chat-message-row > .user-message-body + .claimant-message-avatar')
+    expect(claimantAvatar).toHaveClass('is-anonymous')
+    expect(claimantAvatar).toHaveTextContent(/^$/)
+    expect(within(claimantAvatar).getByTestId('anonymous-avatar')).toBeInTheDocument()
     expect(claimantArticle.querySelector('.user-bubble')).toHaveClass('chat-bubble')
     expect(claimantArticle.querySelector('time.message-timestamp')).not.toBeInTheDocument()
     const agentRow = agentArticle.querySelector('.chat-message-row')
@@ -707,7 +794,11 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText('Use your saved details')).not.toBeInTheDocument()
   })
 
-  it('shows one truthful Agent placeholder for the first claimant turn', async () => {
+  it.each([
+    ['hides', false],
+    ['shows', true],
+  ])('shows one truthful Agent placeholder for the first claimant turn and %s the reviewed-information note (developer mode: %s)', async (_, developerMode) => {
+    runtimeFlags.developerMode = developerMode
     const user = userEvent.setup()
     let pushLiveUpdate
     let resolveTurn
@@ -750,10 +841,14 @@ describe('claimant intake projection', () => {
 
     await act(async () => resolveTurn(initialTurn()))
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
-    const activity = screen.getByRole('button', {
+    const activity = screen.queryByRole('button', {
       name: 'Checked relevant policy information',
     })
-    expect(activity).toHaveAttribute('aria-expanded', 'false')
+    if (developerMode) {
+      expect(activity).toHaveAttribute('aria-expanded', 'false')
+    } else {
+      expect(activity).not.toBeInTheDocument()
+    }
     expect(screen.queryByLabelText('Claims assistant is working')).not.toBeInTheDocument()
   })
 
@@ -876,7 +971,8 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByLabelText('Email address'), 'qa@example.test')
     await user.type(screen.getByLabelText('Password'), 'Synthetic-QA-Password!')
     await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
-    expect(await screen.findByText('openai/gpt-4o-mini')).toBeVisible()
+    expect(await screen.findByRole('button', { name: 'Model' })).toHaveTextContent('Northwind Assist')
+    expect(screen.queryByText('openai/gpt-4o-mini')).not.toBeInTheDocument()
     expect(api.getRuntimeCapabilities).toHaveBeenCalledTimes(2)
   })
 
@@ -1316,7 +1412,8 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
-    expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^Home claim · started \d{2}:\d{2}$/ })).toBeInTheDocument()
+    expect(screen.queryByText(new RegExp(initialClaim.claim_id))).not.toBeInTheDocument()
   })
 
   it('opens Profile as a standalone page and returns to the loaded conversation', async () => {
@@ -1363,7 +1460,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Back' }))
 
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
-    expect(screen.getByText(initialClaim.claim_id)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^Home claim · started/ })).toBeInTheDocument()
     expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
     expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
@@ -2055,7 +2152,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(api.createClaim).toHaveBeenCalledTimes(2)
-    expect(await screen.findByText('clm_ui_second')).toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe('/claims/clm_ui_second'))
     expect(screen.getByText('In progress')).toBeVisible()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()
     await waitFor(() => expect(api.streamRealtimeEvents).toHaveBeenCalled())
@@ -2085,7 +2182,7 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
-    expect(screen.getByRole('heading', { name: initialClaim.claim_id })).toBeVisible()
+    expect(screen.getByRole('heading', { name: /^Home claim · started/ })).toBeVisible()
     expect(screen.getByText(agentMessage.content.text)).toBeVisible()
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Your current conversation is still open. Review the report and select New chat again.',
@@ -2637,7 +2734,7 @@ describe('claimant intake projection', () => {
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
-    await screen.findByText(initialClaim.claim_id)
+    await screen.findByRole('heading', { name: /^Home claim · started/ })
 
     await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The water is now turned off.')
     await user.click(screen.getByRole('button', { name: 'Send' }))
@@ -2846,16 +2943,16 @@ describe('claimant intake projection', () => {
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
-    expect(await screen.findByText(reportA.claim_id)).toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe(`/claims/${reportA.claim_id}`))
 
     const historyCards = () => [...document.querySelectorAll('.intake-history-item')]
-    expect(historyCards()[0]).toHaveTextContent(reportA.claim_id)
+    expect(historyCards()[0]).toHaveTextContent('Current claim')
     expect(historyCards()[1]).toHaveTextContent('Continue claim B')
 
     await user.click(historyCards()[1])
-    expect(await screen.findByText(reportB.claim_id)).toBeInTheDocument()
+    await waitFor(() => expect(globalThis.location.pathname).toBe(`/claims/${reportB.claim_id}`))
     expect(historyCards()[0]).toHaveTextContent('Continue claim A')
-    expect(historyCards()[1]).toHaveTextContent(reportB.claim_id)
+    expect(historyCards()[1]).toHaveTextContent('Current claim')
 
     await user.click(historyCards()[1])
     expect(api.resumeClaimSession).toHaveBeenCalledTimes(2)
@@ -4734,7 +4831,7 @@ describe('claimant intake projection', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('This model cannot process images.')
     await user.click(screen.getByRole('button', { name: 'Model' }))
-    await user.click(screen.getByRole('option', { name: /gemini-3\.5-flash-lite.*Supports images/ }))
+    await user.click(screen.getByRole('option', { name: /Northwind Assist.*Supports images/ }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
@@ -4813,8 +4910,8 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Model' }))
-    expect(screen.getByRole('option', { name: /qwen3\.8-27b.*Does not support images/ })).toBeDisabled()
-    await user.click(screen.getByRole('option', { name: /gemini-3\.5-flash-lite.*Supports images/ }))
+    expect(screen.getByRole('option', { name: /Northwind Private.*Does not support images/ })).toBeDisabled()
+    await user.click(screen.getByRole('option', { name: /Northwind Assist.*Supports images/ }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(send).toBeEnabled()
     await user.click(send)
@@ -5029,7 +5126,7 @@ describe('claimant intake projection', () => {
     expect(safeRetry.clientMessageId).toBe(firstAttempt.clientMessageId)
 
     await user.click(screen.getByRole('button', { name: 'Model' }))
-    await user.click(screen.getByRole('option', { name: /^gpt-5\.5/ }))
+    await user.click(screen.getByRole('option', { name: /^Northwind Assist/ }))
     await user.click(screen.getByRole('button', { name: 'Retry message' }))
     await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(3))
     const changedModelAttempt = api.submitClaimMessage.mock.calls[2][0]

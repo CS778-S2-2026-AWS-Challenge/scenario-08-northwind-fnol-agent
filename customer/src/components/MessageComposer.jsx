@@ -323,7 +323,7 @@ export default function MessageComposer({
       value: model.id,
       label: modelDisplayName(model),
       meta: [
-        isWorkspace && model.label !== model.id ? model.id : null,
+        model.description,
         model.availability === 'unavailable' ? 'Unavailable' : null,
         compatibility.hasRequirements ? compatibility.statusLabel : null,
       ].filter(Boolean).join(' · ') || undefined,
@@ -346,6 +346,15 @@ export default function MessageComposer({
     || busy
     || disabled
   )
+
+  // Enter sends and Shift+Enter starts a new line. Enter that confirms an
+  // input-method composition (for example Chinese or Japanese) never sends.
+  function handleTextareaKeyDown(event) {
+    if (event.key !== 'Enter' || event.shiftKey) return
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
+    event.preventDefault()
+    if (!sendDisabled) event.currentTarget.form?.requestSubmit()
+  }
 
   return (
     <form className={`composer ${isWorkspace ? 'workspace-composer' : ''}`} onSubmit={onSubmit}>
@@ -413,6 +422,8 @@ export default function MessageComposer({
           className={isWorkspace ? 'input-field' : 'report-text'}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleTextareaKeyDown}
+          enterKeyHint="send"
           placeholder={placeholder}
           rows="2"
           disabled={busy || disabled}

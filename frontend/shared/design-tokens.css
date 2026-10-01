@@ -123,6 +123,9 @@
   --size-header-compact: 52px;
   --duration-standard: 200ms;
   --duration-spinner: 800ms;
+  /* Whole-layout moves, such as the composer settling from the start page into the conversation. */
+  --duration-layout: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --size-select-menu-min: 248px;
   --size-select-menu-max: 320px;
   --size-model-trigger-max: 200px;

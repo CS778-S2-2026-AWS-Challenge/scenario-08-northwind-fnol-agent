@@ -179,6 +179,21 @@ function CapabilityHarness({ file, onSubmit = (event) => event.preventDefault() 
   )
 }
 
+it.each([
+  ['uploading', 0],
+  ['uploaded', 1],
+])('sends with Enter only when the message can be sent (attachment %s)', async (initialStatus, submissions) => {
+  const user = userEvent.setup()
+  const onSubmit = vi.fn((event) => event.preventDefault())
+  render(<ComposerHarness onSubmit={onSubmit} initialStatus={initialStatus} />)
+
+  const message = screen.getByLabelText('Claim message')
+  await user.type(message, 'Kitchen flooded{Enter}')
+
+  expect(onSubmit).toHaveBeenCalledTimes(submissions)
+  expect(message).toHaveValue('Kitchen flooded')
+})
+
 it('keeps the homepage composer in one framed surface while an attachment is selected', async () => {
   const user = userEvent.setup()
   const { container } = render(<ComposerHarness variant="default" />)
