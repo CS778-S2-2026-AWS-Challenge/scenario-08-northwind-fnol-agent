@@ -212,6 +212,26 @@ describe('Workbench staff presence API', () => {
     vi.unstubAllGlobals()
   })
 
+  it('reads the current staff availability before a lease renewal', async () => {
+    const presence = {
+      staff_id: 'stf_demo',
+      online: true,
+      available: false,
+      revision: 3,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, presence))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(workbenchApi.presence('staff-token')).resolves.toEqual(presence)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/workbench/staff/presence',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer staff-token' }),
+      }),
+    )
+  })
+
   it('renews the authenticated staff availability with the bounded lease contract', async () => {
     const presence = {
       staff_id: 'stf_demo',

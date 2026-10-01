@@ -111,9 +111,9 @@ export function AuthProvider({ children }) {
 }
 
 function renewStaffPresence(token) {
-  return workbenchApi.updatePresence(token, {
+  return workbenchApi.presence(token).then((presence) => workbenchApi.updatePresence(token, {
     online: true,
-    available: true,
+    available: presence.available === true,
     leaseSeconds: STAFF_PRESENCE_LEASE_SECONDS,
-  })
+  }))
 }

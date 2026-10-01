@@ -18,6 +18,7 @@ export default function PrimaryAction({ action, ownership, profile, workflowStat
   const section = actionSection(action)
   const currentOwnerReview = ['created', 'intake_review'].includes(workflowState)
     && isCurrentOwner(ownership, profile)
+    && (!action || action.action_code === 'claim.record_decision')
 
   async function accept() {
     if (busy) return

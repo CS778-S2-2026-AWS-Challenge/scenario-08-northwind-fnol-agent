@@ -232,6 +232,9 @@ export const workbenchApi = {
   profile(token) {
     return request('/api/v1/staff/me', { token })
   },
+  presence(token) {
+    return request('/api/v1/workbench/staff/presence', { token })
+  },
   updatePresence(token, {
     online = true,
     available = true,

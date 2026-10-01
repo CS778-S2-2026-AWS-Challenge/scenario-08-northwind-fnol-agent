@@ -559,7 +559,7 @@ describe('ClaimWorkspace navigation', () => {
     Object.values(mutationHandlers).forEach((handler) => expect(handler).not.toHaveBeenCalled())
   })
 
-  it('routes an exact external-task primary action to External Services without inferring from lifecycle state', async () => {
+  it('keeps an owned Claim provider-recovery action as the exact primary action', async () => {
     const user = userEvent.setup()
     const onSection = vi.fn()
     const externalAction = {
@@ -580,6 +580,12 @@ describe('ClaimWorkspace navigation', () => {
       onSection={onSection}
       detail={{
         ...detail,
+        workflow_state: 'created',
+        ownership: {
+          state: 'assigned',
+          current_staff_access: 'primary',
+          primary_assignee: { staff_id: 'stf_1', display_name: 'Current Staff' },
+        },
         work_summary: {
           ...detail.work_summary,
           primary_action_code: externalAction.action_code,
@@ -590,6 +596,7 @@ describe('ClaimWorkspace navigation', () => {
     />)
 
     expect(screen.getByRole('heading', { name: 'Reconcile external outcome' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Review in progress' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Open external services' }))
     expect(onSection).toHaveBeenCalledWith('external-services')
   })
