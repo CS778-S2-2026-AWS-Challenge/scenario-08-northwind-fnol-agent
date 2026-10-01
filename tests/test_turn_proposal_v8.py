@@ -137,6 +137,7 @@ def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts() -
 
 def test_v8_context_lists_writable_fields_and_enum_values_for_the_fixed_sheet() -> None:
     plan = plan_model_turn(v8_context('The other driver went to hospital after the crash.'))
+    assert plan is not None
     assert plan.field_contract is not None
     writable = plan.context_payload['writable_fields']
     contract_codes = {item.field_code for item in plan.field_contract.fields}
