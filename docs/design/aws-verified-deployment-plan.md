@@ -84,6 +84,45 @@ CloudHealth resources, are changed by this framework.
 
 ## Verified evidence
 
+### Re-entry check on 2026-10-02
+
+The historical routing results below are not an inventory of resources that
+remain active. Real account checks for #1163 found that the listed CloudFront
+distribution is disabled, contains only an S3 origin, and has no API cache
+behavior. Its domain failed DNS resolution from CloudShell. `head-bucket`
+returned `404` for that origin bucket; the bucket inventory contained only
+the protected teaching access-log bucket. `describe-addresses` returned an
+empty list. A complete routing rehearsal therefore requires restoring test
+resources before testing the application; the historical `200` and `403`
+results must not be presented as current endpoint availability.
+
+The application input for this attempt is `origin/main` commit
+`f1b897d76dbb3d5d854b6172c7cc49907e3f902a`. Its `git archive` ZIP has SHA-256
+`b6cd8ca4b21e253fcbe649c811f39ffc6090b3fd052aea0dcf14a33d183130f7`;
+the uploaded CloudShell copy returned the same hash. Local `npm ci` and
+`npm run build` completed with exit 0 for `customer`, `workbench`, and `admin`.
+These are artifact/build checks, not AWS application or browser-journey results.
+
+The retained EC2 was initially stopped. It was resized to `t3.small`, started,
+and reported both system and instance status `ok`. No complete Compose stack
+was started. The security group has no SSH ingress and the CloudShell source
+address changed, so host access awaits confirmation of the bounded temporary
+SSH rule. EC2 was confirmed stopped with no public address while waiting;
+no SSH ingress was added. Retained EBS storage continues to incur charges.
+The original image archive remains in CloudShell.
+
+The cost-guard budgets still use the previous month's baseline: the lower
+guard reports a monthly limit of USD 475.23 and actual spend of USD 32.788,
+with actual-cost alert thresholds of USD 295.23 through USD 375.23 in USD 20
+steps. These thresholds do not provide alerts for each additional USD 20
+from the new month's spend. Cross-month cost tracking must be reconciled;
+budget existence alone is not successful verification of that requirement.
+
+Full application verification, the restored browser route, live model/RAG,
+three FNOL journeys, and full-stack recovery remain pending under #1163.
+
+### Historical bounded checks
+
 The following evidence came from the course account and synthetic content. The
 exact account, object, and temporary resource identifiers remain in the
 private operator record and are intentionally absent here.
