@@ -1568,8 +1568,17 @@ the partial `claim_retention_handoff` index and checks
 `retention_operation_claim_unique` per Claim; Fixture applies the same predicate. A reservation that
 fails or is refused stays discoverable on the next bounded worker cycle, and the stable `ret_`
 identity makes every retry the same reservation. A Claim leaves the set once reserved, and cleanup
-removes the Claim record, so the scan is bounded by in-flight handoffs. Reopen clears the terminal
-disposition and so removes the Claim from discovery.
+removes the Claim record. Reopen clears the terminal disposition and so removes the Claim from
+discovery.
+
+Both retention discoveries are keyset pages with an opaque `RetentionDiscoveryCursor`
+(`backend/repositories/pagination.py`): handoff orders eligible Claims by terminal `recorded_at`
+then Claim ID, and pending retention orders unfinished RetentionOperations by `updated_at` then
+operation ID (`retention_operation_pending_order`). Each page reads at most `limit + 1` records, so
+a query is bounded regardless of how many Claims are blocked. A refused or failed candidate stays
+discoverable, so the worker resumes each sweep from the previous page's cursor and wraps at the
+end; blocked work therefore cannot hold a later eligible Claim or operation off the first page
+forever. A cursor from the other sweep or a malformed cursor is refused.
 
 Retention cleanup locates each frozen database target by its own identity field scoped to the
 Claim. Audit envelopes are scoped by `subject.claim_id`, the same field the inventory freeze reads.
