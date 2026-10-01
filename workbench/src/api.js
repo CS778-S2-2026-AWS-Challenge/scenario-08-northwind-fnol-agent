@@ -438,6 +438,23 @@ export const workbenchApi = {
       body: JSON.stringify(payload),
     })
   },
+  recordClaimDecision(token, claimId, revision, payload, idempotencyKey = crypto.randomUUID()) {
+    const body = {
+      decision: payload.decision,
+      ...(payload.claimant_explanation
+        ? { claimant_explanation: payload.claimant_explanation }
+        : {}),
+    }
+    return mutationRequest(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/decisions`, {
+      method: 'POST',
+      token,
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+        'If-Match': String(revision),
+      },
+      body: JSON.stringify(body),
+    })
+  },
   resolveHandoff(token, claimId, handoffId, revision, payload) {
     return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/handoffs/${encodeURIComponent(handoffId)}/resolve`,
