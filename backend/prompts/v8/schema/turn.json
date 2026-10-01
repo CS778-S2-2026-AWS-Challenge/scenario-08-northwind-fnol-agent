@@ -323,12 +323,21 @@
                 "type": "null"
               }
             ]
+          },
+          "when": {
+            "description": "later when the claimant said they will send it later; now otherwise.",
+            "enum": [
+              "now",
+              "later"
+            ],
+            "type": "string"
           }
         },
         "required": [
           "document_kind",
           "from_party",
-          "service_identity"
+          "service_identity",
+          "when"
         ],
         "type": "object"
       },

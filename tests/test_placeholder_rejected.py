@@ -1,6 +1,7 @@
 """INV-12 rejects fabricated free-text stand-ins without dropping valid facts."""
 
 import logging
+import re
 from typing import Any
 
 import pytest
@@ -51,7 +52,8 @@ def test_placeholder_stays_missing_while_other_fact_is_saved(
     claim = repository.get_claim(journey.claim_id, 'cus_demo')
     assert claim is not None
     assert code not in claim.form
-    assert claim.form['incident.occurred_at'].value == 'last night'
+    # The claimant's 'last night' is resolved to a New Zealand date (demo journey fixes).
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2} night', claim.form['incident.occurred_at'].value)
     assert claim.form['incident.occurred_at'].status.value == 'confirmed'
     requirements = result['dynamic_form']['requirements']
     assert code in requirements['missing_required_now']
@@ -93,7 +95,7 @@ def test_placeholder_cannot_overwrite_a_previously_recorded_address(
     after = repository.get_claim(journey.claim_id, 'cus_demo')
     assert after is not None
     assert after.form['property.address'] == before.form['property.address']
-    assert after.form['incident.occurred_at'].value == 'last night'
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2} night', after.form['incident.occurred_at'].value)
 
 
 def test_registered_unknown_medical_attention_enum_is_not_a_placeholder(

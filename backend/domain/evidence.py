@@ -50,6 +50,21 @@ def canonical_evidence_kind(kind: str) -> str:
     return _LEGACY_EVIDENCE_KINDS.get(kind, kind)
 
 
+_UNSPECIFIED_EVIDENCE_KINDS = frozenset({'other_document', 'other'})
+
+
+def effective_evidence_kind(record: EvidenceRecord) -> str:
+    """The kind a received file counts as when checking what a report carries.
+
+    Files sent in the chat arrive without a kind. An image with no stated kind is
+    an incident photo for this purpose; everything else keeps its own kind.
+    """
+    kind = canonical_evidence_kind(record.kind)
+    if kind in _UNSPECIFIED_EVIDENCE_KINDS and (record.media_type or '').startswith('image/'):
+        return INCIDENT_PHOTO_KIND
+    return kind
+
+
 REGISTERED_EVIDENCE_NEEDS = frozenset(
     {
         'current_action',

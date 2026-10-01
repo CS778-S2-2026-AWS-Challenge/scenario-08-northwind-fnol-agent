@@ -261,7 +261,10 @@ $backendEnv.NORTHWIND_CONTROL_PLANE_DB_PATH = $controlPlaneDb
 $backendEnv.AGENT_RUNTIME_PROFILE = 'model_gateway'
 $backendEnv.MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
-$backendEnv.MODEL_TIMEOUT_SECONDS = '180'
+# A turn makes up to two model calls (reply, and one rewrite if the reply
+# contradicts the record); a hung provider must not leave the claimant waiting
+# minutes. Typical calls take 3-6 seconds.
+$backendEnv.MODEL_TIMEOUT_SECONDS = '60'
 
 # 6. Start the backend. The log config prints the structured diagnostic fields the runtime
 #    attaches to model-turn events, which is what you want to see while testing a journey.

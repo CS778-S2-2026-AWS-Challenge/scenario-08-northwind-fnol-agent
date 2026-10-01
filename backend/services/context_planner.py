@@ -3,6 +3,7 @@
 import json
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.domain.agent_context_runtime import (
     ContextCatalogueEntry,
@@ -371,6 +372,10 @@ def plan_context(
     catalogue, resource_values, summary_state_mismatch = _catalogue(context, route, summary)
     available = max(0, budget_limit - reserved_tokens)
     turn_focus = {
+        # The model has no clock: "20 minutes ago" is resolved against this.
+        'reported_at_local': datetime.now(UTC)
+        .astimezone(ZoneInfo('Pacific/Auckland'))
+        .strftime('%Y-%m-%dT%H:%M%z'),
         'claim_revision': context.claim.revision,
         'route': f'{route.product_family or "unresolved"}:{route.task.value}',
         'current_objective': route.task.value,

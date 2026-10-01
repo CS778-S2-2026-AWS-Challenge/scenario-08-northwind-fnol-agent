@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from backend.core.errors import ApiError
 from backend.domain.branch_registry import BranchRuleEvaluator
+from backend.domain.evidence import canonical_evidence_kind, effective_evidence_kind
 from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.field_registry import trusted_origin_assertion
 from backend.domain.ids import new_id
@@ -269,6 +271,49 @@ def detect_pending_evidence(
         created_at=timestamp,
         updated_at=timestamp,
     )
+
+
+def deferred_document_evidence(
+    claim: WorkingClaim,
+    validated: Any,
+    message: MessageRecord,
+    timestamp: datetime,
+    existing: Sequence[EvidenceRecord],
+) -> EvidenceRecord | None:
+    """Record a document the claimant said they will send later.
+
+    The model marks such a request ``when='later'``. Runtime keeps one expected
+    record per kind, so the document is reported as expected instead of missing
+    and is not asked for again. A kind already received or expected is skipped.
+    """
+
+    known = {canonical_evidence_kind(item.kind) for item in existing} | {
+        effective_evidence_kind(item) for item in existing
+    }
+    for request in getattr(validated, 'document_requests', ()):
+        if request.from_party != 'claimant' or request.when != 'later':
+            continue
+        kind = canonical_evidence_kind(request.document_kind)
+        if kind in known or kind == 'police_report':
+            continue
+        return EvidenceRecord(
+            evidence_id=new_id('evd'),
+            claim_id=claim.claim_id,
+            kind=kind,
+            status=EvidenceStatus.PENDING,
+            file_status=EvidenceFileStatus.NOT_AVAILABLE,
+            source=EvidenceSource.CLAIMANT,
+            related_fields=[],
+            needed_for=['later_action'],
+            provenance={'reported_in_message_id': message.message_id},
+            claimant_note=str(message.content.get('text') or ''),
+            wait_type='claimant',
+            responsible_party='claimant',
+            context_summary='The claimant will send this document later; intake can continue.',
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+    return None
 
 
 def recompute_progress(
@@ -652,10 +697,17 @@ def reduce_turn(
     session_after_questions = session
     pending_evidence = (
         detect_pending_evidence(claim, claimant_message, timestamp)
+        or deferred_document_evidence(
+            claim,
+            validated,
+            claimant_message,
+            timestamp,
+            repository.list_evidence(claim_id, principal.subject),
+        )
         if validated is not None
         else _pending_evidence_for_proposal(claim_id, proposal, claimant_message, timestamp)
     )
-    if pending_evidence is not None:
+    if pending_evidence is not None and pending_evidence.kind == 'police_report':
         form_changes['authorities.police_report_reference'] = StructuredFormField(
             value=None,
             source=FormSource.CLAIMANT,

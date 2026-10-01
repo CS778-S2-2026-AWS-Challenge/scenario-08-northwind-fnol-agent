@@ -55,7 +55,8 @@ def test_full_schema_is_satisfiable_after_both_provider_translations(
         schema = cast(dict[str, Any], schema)
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(raw)
-    variants = plan.response_schema['properties']['field_changes']['items']['anyOf']
+    # One fixed answer-sheet row (#1159); Runtime checks values against the turn contract.
+    item = plan.response_schema['properties']['field_changes']['items']
     expected_keys = {
         'field_code',
         'value',
@@ -66,7 +67,7 @@ def test_full_schema_is_satisfiable_after_both_provider_translations(
     }
     if media:
         expected_keys.add('source_evidence_id')
-    assert all(set(item['properties']) == expected_keys for item in variants)
+    assert set(item['properties']) == expected_keys
     google_fields = cast(dict[str, Any], schemas[1])['properties']['field_changes']['items']
     assert 'anyOf' not in google_fields
     assert set(google_fields['required']) == expected_keys
@@ -83,9 +84,17 @@ def test_google_wire_value_union_does_not_replace_runtime_field_type_authority()
     strict = cast(
         dict[str, Any], OpenAICompatibleModelGateway._strict_response_schema(plan.response_schema)
     )
-    assert not Draft202012Validator(strict).is_valid(invalid)
+    # The fixed sheet accepts any registered value shape on the wire; the turn
+    # contract in Runtime is the type authority.
+    assert Draft202012Validator(strict).is_valid(invalid)
+    change = V8FieldChange.model_validate(invalid['field_changes'][0])
     with pytest.raises(TurnFieldContractViolation):
+        validate_field_changes(plan.field_contract, [change])
+    rejected: list[Any] = []
+    assert (
         validate_field_changes(
-            plan.field_contract, [V8FieldChange.model_validate(invalid['field_changes'][0])]
+            plan.field_contract, [change], rejected_bounds=rejected, reject_invalid=True
         )
-    assert 'anyOf' in plan.response_schema['properties']['field_changes']['items']
+        == []
+    )
+    assert [item.field_code for item in rejected] == ['vehicle.drivable']

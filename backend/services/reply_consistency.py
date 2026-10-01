@@ -3,8 +3,9 @@
 Runtime does not edit the model's words. When the words contradict the ledger,
 the whole turn goes back to the model once with the ruling attached so it can
 say the same thing truthfully. The checks are structural, not semantic: they
-look for named services Runtime refused and for arrangement claims when no
-service was accepted.
+look for named services Runtime refused, arrangement or escalation claims the
+turn does not back, a service asked about in words instead of offered as a
+card, and a claimant sent to "their insurer" (Northwind is the insurer).
 """
 
 from __future__ import annotations
@@ -26,6 +27,21 @@ _GENERIC_SERVICE_WORDS = frozenset(
 # never truthful within this same turn.
 _SUBMISSION_INTENT_VERB = re.compile(
     r"\b(?:will|(?:i|we)(?:'ll|’ll))\s+(?:\S+\s+){0,2}?(?:submit|send)\b",  # noqa: RUF001
+    re.IGNORECASE,
+)
+
+
+_SERVICE_QUESTION = re.compile(
+    r'\b(?:need|want|like|require)\b[^?]{0,60}\b(?:services?|assistance|help|guidance|support)\b',
+    re.IGNORECASE,
+)
+_OTHER_INSURER = re.compile(
+    r'\b(?:contact|ask|check with|speak (?:to|with)|reach out to|call)\b[^.?!]{0,40}'
+    r'\b(?:your|the)\s+(?:insurer|insurance (?:company|provider))\b',
+    re.IGNORECASE,
+)
+_ESCALATION_CLAIM = re.compile(
+    r"\b(?:i|we)(?:'ve|’ve| have)?\s+(?:escalated|referred|passed|flagged|forwarded)\b",  # noqa: RUF001
     re.IGNORECASE,
 )
 
@@ -59,8 +75,10 @@ class ConsistencyReview:
                 'instruction': (
                     'Rewrite the reply so it matches what was actually recorded: do not name or '
                     'promise the rejected services, and do not say anything was arranged, '
-                    'booked or submitted. Keep every accepted fact and question. Return the full '
-                    'envelope again.'
+                    'booked, escalated or submitted. Offer a service only with offer_service, '
+                    "never by asking in words. Northwind is the claimant's insurer: when a "
+                    'clause is not in the supplied excerpts, say the claims team will confirm. '
+                    'Keep every accepted fact and question. Return the full envelope again.'
                 ),
             }
         }
@@ -105,6 +123,31 @@ def review_reply(validated: ValidatedTurn) -> ConsistencyReview:
             ReplyInconsistency(kind='claims_arrangement_without_service', detail=match.group(0))
         )
         break
+    sentences = re.split(r'(?<=[.!?])\s+', validated.reply.strip())
+    if not validated.service_identities:
+        # Services are offered as cards, which are the consent request. Asking in
+        # words ("Do you need any repair services?") promises something no card
+        # backs, and skips the rule that services wait for a confirmed account.
+        for sentence in sentences:
+            if sentence.rstrip().endswith('?') and _SERVICE_QUESTION.search(sentence):
+                problems.append(
+                    ReplyInconsistency(kind='offers_service_in_words', detail=sentence.strip())
+                )
+                break
+    for sentence in sentences:
+        match = _OTHER_INSURER.search(sentence)
+        if match is not None:
+            # Northwind is the claimant's insurer.
+            problems.append(ReplyInconsistency(kind='refers_to_insurer', detail=match.group(0)))
+            break
+    if validated.escalation is None:
+        for sentence in sentences:
+            match = _ESCALATION_CLAIM.search(sentence)
+            if match is not None and not sentence.rstrip().endswith('?'):
+                problems.append(
+                    ReplyInconsistency(kind='claims_escalation_without_one', detail=match.group(0))
+                )
+                break
     if validated.action == 'summarize' and not validated.summary_fields:
         problems.append(
             ReplyInconsistency(
