@@ -1735,10 +1735,23 @@ def _primary_action(
     )
     if reopen is not None:
         return reopen
+    # Provider recovery must remain the staff's primary action even when the
+    # completed FNOL is also eligible for ownership acceptance or a decision.
     preferred: list[tuple[str, str | None]] = [
-        ('ownership.accept_claim', None),
-        ('claim.record_decision', None),
+        (action.action_code, action.target_ref)
+        for action in allowed_actions
+        if action.action_code
+        in {
+            'external.reconcile_response',
+            'external.accept_review',
+        }
     ]
+    preferred.extend(
+        [
+            ('ownership.accept_claim', None),
+            ('claim.record_decision', None),
+        ]
+    )
     if active_handoffs:
         handoff = active_handoffs[-1]
         preferred.append(
@@ -1753,15 +1766,6 @@ def _primary_action(
         ('signal.record_decision', signal.signal_id)
         for signal in risk_signals
         if signal.status in {SignalReviewStatus.OPEN, SignalReviewStatus.UNDER_REVIEW}
-    )
-    preferred.extend(
-        (action.action_code, action.target_ref)
-        for action in allowed_actions
-        if action.action_code
-        in {
-            'external.reconcile_response',
-            'external.accept_review',
-        }
     )
     if current_work is not None:
         preferred.append(('work_item.update', current_work.work_item_id))
