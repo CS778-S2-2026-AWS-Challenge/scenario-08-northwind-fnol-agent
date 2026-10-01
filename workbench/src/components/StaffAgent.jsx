@@ -50,11 +50,13 @@ export default function StaffAgent({
   const [sessionNotice, setSessionNotice] = useState('')
   const [error, setError] = useState(null)
   const [position, setPosition] = useState(null)
-  const [capabilitiesLoaded, setCapabilitiesLoaded] = useState(false)
+  // 'loading' | 'loaded' | 'failed'. Sending stays closed until model availability is known.
+  const [capabilityStatus, setCapabilityStatus] = useState('loading')
   // The compact layout shows the open panel in place of the content and has no bubble to drag.
   const compactLayout = useMediaQuery(COMPACT_WORKBENCH_QUERY)
   const widgetRef = useRef(null)
   const panelRef = useRef(null)
+  const scopeToggleRef = useRef(null)
   const bubbleRef = useRef(null)
   const openerRef = useRef(null)
   const panelWasOpenRef = useRef(false)
@@ -103,20 +105,26 @@ export default function StaffAgent({
     setLoading(true)
     setSessionNotice('')
     setError(null)
-    setCapabilitiesLoaded(false)
+    setCapabilityStatus('loading')
+    // Model availability is applied on its own so a failed session or Claim list cannot reopen sending.
+    const capabilities = workbenchApi.staffAgentCapabilities(token).then(
+      (capabilityResponse) => {
+        const nextModels = capabilityResponse.models || []
+        setModels(nextModels)
+        if (capabilityResponse.default_model_profile_id) setNewSessionModel(capabilityResponse.default_model_profile_id)
+        setCapabilityStatus('loaded')
+      },
+      () => setCapabilityStatus('failed'),
+    )
     try {
-      const [sessionResponse, claimResponse, capabilityResponse] = await Promise.all([
+      const [sessionResponse, claimResponse] = await Promise.all([
         workbenchApi.staffAgentSessions(token),
         workbenchApi.claims(token, { limit: 100 }),
-        workbenchApi.staffAgentCapabilities(token),
+        capabilities,
       ])
       const nextSessions = sessionResponse.items || []
       setSessions(nextSessions)
       setClaims(claimResponse.items || [])
-      const nextModels = capabilityResponse.models || []
-      setModels(nextModels)
-      if (capabilityResponse.default_model_profile_id) setNewSessionModel(capabilityResponse.default_model_profile_id)
-      setCapabilitiesLoaded(true)
       const nextSessionId = requestedSessionId || nextSessions[0]?.session_id || null
       if (nextSessionId) await selectSession(nextSessionId)
     } catch (nextError) {
@@ -155,9 +163,12 @@ export default function StaffAgent({
   }, [embedded, open])
 
   const activeSession = sessions.find((session) => session.session_id === activeSessionId)
-  const unavailableReason = capabilitiesLoaded
-    ? staffAgentUnavailableReason(models, activeSessionId ? activeSession?.model_profile_id : newSessionModel)
-    : null
+  const unavailableReason = capabilityStatus === 'failed'
+    ? 'Staff Agent model availability could not be checked. Close and reopen the panel to try again.'
+    : capabilityStatus === 'loaded'
+      ? staffAgentUnavailableReason(models, activeSessionId ? activeSession?.model_profile_id : newSessionModel)
+      : null
+  const sendClosed = capabilityStatus !== 'loaded' || Boolean(unavailableReason)
 
   const positioned = position !== null
   useEffect(() => {
@@ -209,7 +220,7 @@ export default function StaffAgent({
       !content
       || loading
       || sending
-      || unavailableReason
+      || sendClosed
       || attachmentDraftRef.current?.hasPendingAttachments()
     ) return
     voiceInputRef.current?.cancel({ announce: false, restoreFocus: false })
@@ -362,12 +373,18 @@ export default function StaffAgent({
     }
   }
 
+  // The focused checkbox unmounts with the list, so return focus to the toggle that opened it.
+  function closeScope() {
+    setScopeOpen(false)
+    scopeToggleRef.current?.focus()
+  }
+
   function handlePanelKeyDown(event) {
     if (embedded || !panelRef.current?.contains(event.target)) return
     if (event.key === 'Escape') {
       event.preventDefault()
       if (scopeOpen) {
-        setScopeOpen(false)
+        closeScope()
         return
       }
       onOpenChange(false)
@@ -432,7 +449,7 @@ export default function StaffAgent({
             </div>
 
             <div className="agent-scope">
-              <button type="button" className="agent-scope__toggle" aria-expanded={scopeOpen} aria-controls="staff-agent-claim-scope" onClick={() => setScopeOpen((value) => !value)}>
+              <button ref={scopeToggleRef} type="button" className="agent-scope__toggle" aria-expanded={scopeOpen} aria-controls="staff-agent-claim-scope" onClick={() => setScopeOpen((value) => !value)}>
                 <span className="agent-scope__summary"><strong>{t('Claim Scope')}</strong><small>{scopeLabel(selectedClaimIds, claims)}</small></span>
                 <ChevronDown size={15} />
               </button>
@@ -462,7 +479,7 @@ export default function StaffAgent({
                   </div>
                   <div className="agent-scope__footer">
                     <small className="agent-scope__status" aria-live="polite">{scopeStatus(selectedClaimIds.length)}</small>
-                    <button className="agent-scope__done" type="button" onClick={() => setScopeOpen(false)}>{t('Done')}</button>
+                    <button className="agent-scope__done" type="button" onClick={closeScope}>{t('Done')}</button>
                   </div>
                 </fieldset>
               )}
@@ -556,12 +573,12 @@ export default function StaffAgent({
                       onValueChange={updateComposerDraft}
                       placeholder={t('Ask about selected Claims or policy…')}
                       label={t('Message Staff Agent')}
-                      submitDisabled={!message.trim() || loading || sending || attachmentsPending || Boolean(unavailableReason)}
+                      submitDisabled={!message.trim() || loading || sending || attachmentsPending || sendClosed}
                     />
                     <button
                       className="agent-composer__send compact-composer__send"
                       type="submit"
-                      disabled={!message.trim() || loading || sending || attachmentsPending || Boolean(unavailableReason)}
+                      disabled={!message.trim() || loading || sending || attachmentsPending || sendClosed}
                       aria-busy={sending}
                       aria-label={t('Send to Staff Agent')}
                       title={attachmentsPending ? 'Remove attachments to send text; file delivery is not available yet' : sending ? 'Sending to Staff Agent' : 'Send to Staff Agent'}

@@ -894,4 +894,73 @@ describe('StaffAgent', () => {
     expect(container.querySelector('.staff-agent')).not.toHaveAttribute('style')
   })
 
+  it('keeps sending closed when the session list fails but capabilities publish no model', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockRejectedValue(new ApiError('Sessions unavailable.', { status: 503 }))
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const create = vi.spyOn(workbenchApi, 'createStaffAgentSession')
+    renderAgent()
+
+    expect(await screen.findByText('Staff Agent cannot answer right now')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Message Staff Agent'), 'What is missing?{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('keeps sending closed and says why when model availability cannot be read', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockRejectedValue(new ApiError('Capabilities unavailable.', { status: 503 }))
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const create = vi.spyOn(workbenchApi, 'createStaffAgentSession')
+    renderAgent()
+
+    expect(await screen.findByText(/model availability could not be checked/)).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Message Staff Agent'), 'What is missing?{Enter}')
+
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('returns focus to the Claim Scope toggle so a second Escape closes the panel', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+
+    function ScopeHarness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Rail Staff Agent</button>
+          <StaffAgent
+            open={open}
+            onOpenChange={setOpen}
+            requestedSessionId={null}
+            token="staff-token"
+            onSessionChange={vi.fn()}
+            onConversationChanged={vi.fn()}
+          />
+        </>
+      )
+    }
+    render(<ScopeHarness />)
+
+    const opener = screen.getByRole('button', { name: 'Rail Staff Agent' })
+    await user.click(opener)
+    const toggle = await screen.findByRole('button', { name: /Claim Scope/ })
+    await user.click(toggle)
+    const checkbox = await screen.findByRole('checkbox', { name: /NW-1042/ })
+    checkbox.focus()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('checkbox', { name: /NW-1042/ })).not.toBeInTheDocument()
+    expect(toggle).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Staff Agent' })).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
 })
