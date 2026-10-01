@@ -543,7 +543,7 @@ def test_staff_abandoned_claim_is_handed_to_retention_by_the_worker(kind: str) -
         f'abandon-retention-{kind}',
         str(claim.revision),
     )
-    assert repository.list_retention_handoff_candidates(limit=10) == [claim.claim_id]
+    assert repository.list_retention_handoff_candidates(limit=10)[0] == [claim.claim_id]
 
     cycle = run_recovery_cycle(
         repository,
@@ -556,4 +556,4 @@ def test_staff_abandoned_claim_is_handed_to_retention_by_the_worker(kind: str) -
     assert (cycle.retention_progressed, cycle.failed_candidates) == (1, 0)
     assert retention is not None
     assert retention.status is RetentionOperationStatus.COMPLETED
-    assert repository.list_retention_handoff_candidates(limit=10) == []
+    assert repository.list_retention_handoff_candidates(limit=10)[0] == []

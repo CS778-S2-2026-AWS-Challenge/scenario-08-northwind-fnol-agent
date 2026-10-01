@@ -2,7 +2,7 @@
 
 import json
 import signal
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from threading import Event
 from types import SimpleNamespace
@@ -117,6 +117,8 @@ def test_emitted_cycle_result_is_one_json_line(capsys: pytest.CaptureFixture[str
         'expired': 0,
         'expiring_candidates': 0,
         'failed_candidates': 0,
+        'handoff_cursor': None,
+        'pending_retention_cursor': None,
         'retention_blocked': 0,
         'retention_progressed': 0,
     }
@@ -212,14 +214,18 @@ class _Repository:
     def list_expiring_follow_ups(self, _now: datetime, *, limit: int) -> tuple[list[Any], None]:
         return self.expiring, None
 
-    def list_pending_retention_operations(self, *, limit: int) -> list[Any]:
-        return self.retention
+    def list_pending_retention_operations(
+        self, *, limit: int, cursor: str | None = None
+    ) -> tuple[list[Any], None]:
+        return self.retention, None
 
     def list_due_follow_ups(self, _now: datetime, *, limit: int) -> tuple[list[Any], None]:
         return self.due, None
 
-    def list_retention_handoff_candidates(self, *, limit: int) -> list[str]:
-        return ['clm_expired']
+    def list_retention_handoff_candidates(
+        self, *, limit: int, cursor: str | None = None
+    ) -> tuple[list[str], None]:
+        return ['clm_expired'], None
 
 
 def test_cycle_rejects_naive_time_and_unbounded_page() -> None:
@@ -270,3 +276,36 @@ def test_cycle_counts_blocked_and_failed_candidates_without_stopping(
         retention_blocked=2,
         failed_candidates=2,
     )
+
+
+def test_loop_resumes_retention_sweeps_from_the_previous_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[tuple[str | None, str | None]] = []
+    stop = Event()
+
+    def cycle(
+        *_args: Any,
+        handoff_cursor: str | None,
+        pending_retention_cursor: str | None,
+        **_kwargs: Any,
+    ) -> RecoveryCycleResult:
+        received.append((handoff_cursor, pending_retention_cursor))
+        if len(received) == 2:
+            stop.set()
+        return replace(RESULT, handoff_cursor='h-1', pending_retention_cursor='p-1')
+
+    monkeypatch.setattr(worker_main, 'run_recovery_cycle', cycle)
+
+    worker_main.run_worker(
+        object(),  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        limit=5,
+        interval_seconds=0.001,
+        once=False,
+        stop_event=stop,
+        now_fn=lambda: NOW,
+        emit=lambda _result: None,
+    )
+
+    assert received == [(None, None), ('h-1', 'p-1')]

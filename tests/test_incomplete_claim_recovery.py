@@ -587,9 +587,9 @@ def test_recovery_cycle_isolates_one_failed_expiry_candidate(
     ) -> tuple[list[FollowUpRecord], str | None]:
         return candidates[:limit], cursor
 
-    def list_pending(*, limit: int) -> list[object]:
-        del limit
-        return []
+    def list_pending(*, limit: int, cursor: str | None = None) -> tuple[list[object], None]:
+        del limit, cursor
+        return [], None
 
     def list_due(
         _now: datetime,

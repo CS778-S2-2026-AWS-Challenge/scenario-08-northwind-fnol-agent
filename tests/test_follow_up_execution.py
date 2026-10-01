@@ -1031,7 +1031,7 @@ def test_failed_retention_handoff_after_expiry_is_retried_by_a_later_cycle(
         expired.terminal_disposition.reason_code is TerminalDispositionReasonCode.RECOVERY_EXPIRED
     )
     assert repository.get_retention_operation_for_claim(claim.claim_id) is None
-    assert repository.list_retention_handoff_candidates(limit=10) == [claim.claim_id]
+    assert repository.list_retention_handoff_candidates(limit=10)[0] == [claim.claim_id]
 
     second = run_recovery_cycle(repository, storage, now=deadline + timedelta(minutes=1), limit=10)
     assert (second.expiring_candidates, second.expired) == (0, 0)
@@ -1039,7 +1039,7 @@ def test_failed_retention_handoff_after_expiry_is_retried_by_a_later_cycle(
     retention = repository.get_retention_operation_for_claim(claim.claim_id)
     assert retention is not None
     assert retention.status is RetentionOperationStatus.COMPLETED
-    assert repository.list_retention_handoff_candidates(limit=10) == []
+    assert repository.list_retention_handoff_candidates(limit=10)[0] == []
 
     third = run_recovery_cycle(repository, storage, now=deadline + timedelta(minutes=2), limit=10)
     assert (third.expired, third.retention_progressed, third.failed_candidates) == (0, 0, 0)

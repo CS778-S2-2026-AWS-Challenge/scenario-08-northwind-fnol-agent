@@ -283,7 +283,7 @@ def test_authorized_delete_stays_discoverable_after_later_hold(
     assert held.status is RetentionOperationStatus.HELD
     assert held.active_delete_authorization_id == authorization.authorization_id
     assert [
-        item.operation_id for item in repository.list_pending_retention_operations(limit=10)
+        item.operation_id for item in repository.list_pending_retention_operations(limit=10)[0]
     ] == [operation.operation_id]
 
 
@@ -483,7 +483,7 @@ def test_held_retention_does_not_occupy_discovery_and_release_requeues_same_oper
     held = repository.get_retention_operation(operation.operation_id)
     assert held is not None
     assert held.status is RetentionOperationStatus.HELD
-    assert repository.list_pending_retention_operations(limit=10) == []
+    assert repository.list_pending_retention_operations(limit=10)[0] == []
 
     repository.save_retention_hold(
         hold.model_copy(update={'released_at': NOW + timedelta(seconds=2)})
@@ -493,7 +493,7 @@ def test_held_retention_does_not_occupy_discovery_and_release_requeues_same_oper
     assert resumed.operation_id == operation.operation_id
     assert resumed.status is RetentionOperationStatus.RESERVED
     assert [
-        item.operation_id for item in repository.list_pending_retention_operations(limit=10)
+        item.operation_id for item in repository.list_pending_retention_operations(limit=10)[0]
     ] == [operation.operation_id]
 
 
