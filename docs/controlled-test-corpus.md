@@ -465,6 +465,12 @@ report (`backend/domain/branch_registry.py`).
 | Repair quote | `repair_quote` | Repairer, date, itemised parts and labour, total including GST, quote validity (90 days, unless the pack is `expired`) | Photos, timeline | Real business names or registration numbers |
 | Attendance note | `other_document` | Who attended, when, what was found, what was done | Follow-up needed | Real business names |
 | Unavailable notice | `other_document` | Which material is unavailable, why, and when it is expected | Contact for follow-up | Any statement that the material exists |
+| Consent record | `other_document` | Who consents, to what (for example sharing details with a repairer or the other party's insurer), the date, the claimant's name and policy number | Expiry or withdrawal terms | Real signatures, images of identity documents |
+| Conflict record | `other_document` | Which statements or documents disagree, on which field, when it was noticed and by whom | The resolution once known | Any judgement of honesty or fraud |
+
+No `v1` pack uses a consent record or a conflict record; they are defined so that later versions
+follow the same rules. Within a pack, a deliberate mismatch is listed in the oracle's
+`intended_conflicts`, not written as a conflict record.
 
 Every document states in its footer: "SYNTHETIC TEST DOCUMENT - Northwind FNOL student project -
 not a real record", and "Page X of N" on every page.
