@@ -299,6 +299,191 @@ function readyDynamicForm() {
   }
 }
 
+function agreementAcceptedReadback(agreement) {
+  return {
+    ...initialClaim,
+    revision: 4,
+    submission_agreement: agreement,
+    dynamic_form: readyDynamicForm(),
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.create_claim',
+      actionType: 'claim_creation',
+      available: true,
+      revision: 4,
+    }),
+  }
+}
+
+function createdClaimReadback(agreement) {
+  return {
+    ...agreementAcceptedReadback(agreement),
+    revision: 5,
+    external_claim: {
+      claim_number: 'NWF-2026-RECOVERED',
+      creation_status: 'created',
+      route: 'Claims intake review',
+      next_step: 'A claims specialist will review the submitted details.',
+      expected_by: '2026-09-16T01:00:00Z',
+    },
+    external_service_action: null,
+    customer_next_step: {
+      status: 'claim_created',
+      summary: 'Claims intake review',
+      required_items: [],
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.continue_conversation',
+      available: false,
+      revision: 5,
+    }),
+  }
+}
+
+function configureAgreementSubmissionFailureJourney() {
+  const paymentDestination = {
+    payment_destination_id: 'pyd_1234567890abcdef1234',
+    account_type: 'cheque',
+    masked_account_number: '***************6700',
+    revision: 1,
+    active: true,
+  }
+  const agreement = {
+    agreement_id: 'northwind-fnol-claim-submission',
+    version: '1',
+    display_copy: 'I have reviewed the information shown for this claim.',
+    confirmations: [{
+      key: 'reviewed_and_confirmed',
+      label: 'I confirm this submission.',
+      required: true,
+    }],
+  }
+
+  api.hasClaimantAccessToken.mockReturnValue(true)
+  api.getAuthenticatedAccount.mockResolvedValue({
+    customer_id: 'cus_demo',
+    profile: {
+      display_name: 'Test claimant',
+      email: 'test@example.test',
+      phone: '',
+    },
+    preferences: { email: true, sms: false },
+    revision: 2,
+  })
+  api.listPaymentDestinations.mockResolvedValue({
+    items: [paymentDestination],
+    page: { next_cursor: null },
+  })
+  api.submitClaimMessage.mockResolvedValue({
+    ...initialTurn(),
+    dynamic_form: readyDynamicForm(),
+    claim_revision: 2,
+    decision: {
+      customer_next_step: {
+        status: 'ready_to_create',
+        summary: 'Review payout and contact details.',
+        required_items: [],
+      },
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.review_payout_contact',
+      available: true,
+      requiredInputs: ['payment_destination_id', 'claimant.contact_preference'],
+      revision: 2,
+    }),
+  })
+  api.selectClaimPayoutContact.mockResolvedValue({
+    claim_id: initialClaim.claim_id,
+    revision: 3,
+    payment_destination_id: paymentDestination.payment_destination_id,
+    contact_preference: {
+      value: 'email',
+      status: 'confirmed',
+      source: 'claimant',
+    },
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.review_agreement',
+      available: true,
+      revision: 3,
+    }),
+  })
+  api.getClaim.mockResolvedValue({
+    ...initialClaim,
+    revision: 3,
+    payment_destination_id: paymentDestination.payment_destination_id,
+    submission_agreement: agreement,
+    form: {
+      ...initialClaim.form,
+      'claimant.contact_preference': {
+        value: 'email',
+        status: 'confirmed',
+        source: 'claimant',
+      },
+    },
+    dynamic_form: readyDynamicForm(),
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.review_agreement',
+      available: true,
+      revision: 3,
+    }),
+  })
+  api.acceptClaimAgreement.mockResolvedValue({
+    claim_id: initialClaim.claim_id,
+    revision: 4,
+    agreement,
+    acceptance: {
+      acceptance_id: 'aga_test',
+      agreement_id: agreement.agreement_id,
+      version: agreement.version,
+      confirmations: { reviewed_and_confirmed: true },
+      accepted_at: '2026-09-23T10:00:00Z',
+    },
+    customer_next_step: {
+      status: 'agreement_required',
+      summary: 'Continue to agreement and confirmation.',
+      required_items: [],
+    },
+    primary_action: primaryAction({
+      actionCode: 'claimant.create_claim',
+      actionType: 'claim_creation',
+      available: true,
+      revision: 4,
+    }),
+  })
+
+  return { agreement }
+}
+
+async function openAgreementForFailureTest(user, agreement) {
+  render(<App />)
+  await user.type(
+    screen.getByPlaceholderText('Tell us what happened…'),
+    'My claim details are complete.',
+  )
+  await user.click(screen.getByRole('button', { name: 'Start claim' }))
+  await screen.findByRole('heading', { name: 'Payout & contact' })
+
+  await user.click(screen.getByRole('radio', { name: /cheque .*6700/i }))
+  await user.click(screen.getByRole('radio', { name: /Email test@example.test/i }))
+  await user.click(screen.getByRole('button', { name: 'Continue to agreement' }))
+  await screen.findByText(agreement.display_copy)
+  await user.click(screen.getByRole('checkbox', { name: 'I confirm this submission.' }))
+}
+
 describe('claimant intake projection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -3140,6 +3325,194 @@ describe('claimant intake projection', () => {
     )
     expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
   })
+
+  it.each(['acceptance', 'creation'])(
+    'shows an announced network failure in Step 4 and safely retries during %s',
+    async (phase) => {
+      const user = userEvent.setup()
+      let requestSequence = 0
+      api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+      const { agreement } = configureAgreementSubmissionFailureJourney()
+      const networkError = Object.assign(
+        new api.ApiRequestError(
+          'We could not reach the claim service. Check your connection and try again.',
+        ),
+        { code: 'NETWORK_ERROR', retryable: true },
+      )
+
+      if (phase === 'acceptance') {
+        api.acceptClaimAgreement.mockRejectedValue(networkError)
+      } else {
+        api.createExternalClaim.mockRejectedValue(networkError)
+      }
+
+      await openAgreementForFailureTest(user, agreement)
+      if (phase === 'creation') {
+        api.getClaim.mockResolvedValue(agreementAcceptedReadback(agreement))
+      }
+      await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+      const errorHeading = await screen.findByRole('heading', {
+        name: 'Submission interrupted',
+      })
+      const agreementAlert = errorHeading.closest('[role="alert"]')
+      expect(agreementAlert).not.toBeNull()
+      expect(agreementAlert).toBeVisible()
+      expect(agreementAlert).toHaveTextContent(
+        phase === 'acceptance'
+          ? 'recording your agreement'
+          : 'submitting your Claim',
+      )
+      expect(agreementAlert).toHaveTextContent(
+        'This screen does not show your Claim as created.',
+      )
+      expect(
+        screen.queryByRole('heading', { name: 'Claim submitted' }),
+      ).not.toBeInTheDocument()
+
+      if (phase === 'acceptance') {
+        const firstRequest = api.acceptClaimAgreement.mock.calls[0][0]
+        const retry = screen.getByRole('button', { name: 'Submit claim' })
+        expect(retry).toBeEnabled()
+        await user.click(retry)
+        await waitFor(() => expect(api.acceptClaimAgreement).toHaveBeenCalledTimes(2))
+        expect(api.acceptClaimAgreement.mock.calls[1][0].idempotencyKey)
+          .toBe(firstRequest.idempotencyKey)
+      } else {
+        const firstRequest = api.createExternalClaim.mock.calls[0][0]
+        const retry = await screen.findByRole('button', {
+          name: 'Retry claim submission',
+        })
+        expect(retry).toBeEnabled()
+        await user.click(retry)
+        await waitFor(() => expect(api.createExternalClaim).toHaveBeenCalledTimes(2))
+        expect(api.createExternalClaim.mock.calls[1][0].idempotencyKey)
+          .toBe(firstRequest.idempotencyKey)
+      }
+    },
+  )
+
+
+  it('recovers an accepted agreement after the acceptance response is lost', async () => {
+    const user = userEvent.setup()
+    const { agreement } = configureAgreementSubmissionFailureJourney()
+    const networkError = Object.assign(
+      new api.ApiRequestError(
+        'We could not reach the claim service. Check your connection and try again.',
+      ),
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+    api.acceptClaimAgreement.mockRejectedValue(networkError)
+
+    await openAgreementForFailureTest(user, agreement)
+    api.getClaim.mockResolvedValue(agreementAcceptedReadback(agreement))
+    const readsBeforeSubmit = api.getClaim.mock.calls.length
+
+    await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(readsBeforeSubmit + 1))
+    expect(await screen.findByText(
+      'Agreement confirmed. Claim submission can be retried without recording a second acceptance.',
+    )).toHaveAttribute('role', 'status')
+    expect(screen.getByRole('button', { name: 'Retry claim submission' })).toBeEnabled()
+    expect(screen.queryByRole('heading', { name: 'Submission interrupted' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Submission result is unclear' })).not.toBeInTheDocument()
+    expect(api.createExternalClaim).not.toHaveBeenCalled()
+  })
+
+  it('recovers a created Claim after the creation response is lost', async () => {
+    const user = userEvent.setup()
+    const { agreement } = configureAgreementSubmissionFailureJourney()
+    const networkError = Object.assign(
+      new api.ApiRequestError(
+        'We could not reach the claim service. Check your connection and try again.',
+      ),
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+    api.createExternalClaim.mockRejectedValue(networkError)
+
+    await openAgreementForFailureTest(user, agreement)
+    api.getClaim.mockResolvedValue(createdClaimReadback(agreement))
+    const readsBeforeSubmit = api.getClaim.mock.calls.length
+
+    await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(readsBeforeSubmit + 1))
+    const successHeading = await screen.findByRole('heading', { name: 'Claim submitted' })
+    const successPanel = successHeading.closest('section')
+    expect(successPanel).not.toBeNull()
+    expect(within(successPanel).getByText('NWF-2026-RECOVERED')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Submission interrupted' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry claim submission' })).not.toBeInTheDocument()
+  })
+
+  it('keeps an explicit unknown state and request identity when authoritative readback fails', async () => {
+    const user = userEvent.setup()
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    const { agreement } = configureAgreementSubmissionFailureJourney()
+    const networkError = Object.assign(
+      new api.ApiRequestError(
+        'We could not reach the claim service. Check your connection and try again.',
+      ),
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+    api.acceptClaimAgreement.mockRejectedValue(networkError)
+
+    await openAgreementForFailureTest(user, agreement)
+    api.getClaim.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('The current Claim could not be loaded.'),
+      { code: 'NETWORK_ERROR', retryable: true },
+    ))
+
+    await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+    const errorHeading = await screen.findByRole('heading', {
+      name: 'Submission result is unclear',
+    })
+    const agreementAlert = errorHeading.closest('[role="alert"]')
+    expect(agreementAlert).not.toBeNull()
+    expect(agreementAlert).toHaveTextContent(
+      'the current Claim status could not confirm the result',
+    )
+    const firstRequest = api.acceptClaimAgreement.mock.calls[0][0]
+
+    const retry = screen.getByRole('button', { name: 'Submit claim' })
+    expect(retry).toBeEnabled()
+    await user.click(retry)
+    await waitFor(() => expect(api.acceptClaimAgreement).toHaveBeenCalledTimes(2))
+    expect(api.acceptClaimAgreement.mock.calls[1][0].idempotencyKey)
+      .toBe(firstRequest.idempotencyKey)
+  })
+
+  it.each([
+    [409, 'REVISION_CONFLICT', 'Submission was not accepted', 'Review the latest claim information and try again.'],
+    [422, 'AGREEMENT_CONFIRMATION_REQUIRED', 'Submission was not accepted', 'Review the latest claim information and try again.'],
+    [503, 'CLAIM_SERVICE_UNAVAILABLE', 'Submission result is unclear', 'Do not assume your Claim was created.'],
+  ])(
+    'distinguishes Step 4 HTTP %s failure feedback',
+    async (statusCode, code, title, expectedText) => {
+      const user = userEvent.setup()
+      const { agreement } = configureAgreementSubmissionFailureJourney()
+      api.acceptClaimAgreement.mockRejectedValue(Object.assign(
+        new api.ApiRequestError('The claim service could not complete this request.'),
+        { code, status: statusCode, retryable: statusCode >= 500 },
+      ))
+
+      await openAgreementForFailureTest(user, agreement)
+      await user.click(screen.getByRole('button', { name: 'Submit claim' }))
+
+      const errorHeading = await screen.findByRole('heading', { name: title })
+      const agreementAlert = errorHeading.closest('[role="alert"]')
+      expect(agreementAlert).not.toBeNull()
+      expect(agreementAlert).toBeVisible()
+      expect(agreementAlert).toHaveTextContent(expectedText)
+      expect(
+        screen.queryByRole('heading', { name: 'Claim submitted' }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Submit claim' })).toBeEnabled()
+    },
+  )
 
   it('keeps agreement review in the Agent message flow before final submission', async () => {
     const user = userEvent.setup()
