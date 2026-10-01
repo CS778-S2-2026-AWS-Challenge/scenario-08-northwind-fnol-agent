@@ -133,7 +133,15 @@ def test_approval_is_atomic_idempotent_and_role_safe(
     staff_auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
-    claim = _store_created_claim(repository)
+    claim, session = _created_claim()
+    # Older created Claims may retain the pre-fix resumable flag. Claimant reads must still
+    # agree with the terminal Session boundary without rewriting the durable record.
+    claim = claim.model_copy(
+        update={
+            'customer_next_step': claim.customer_next_step.model_copy(update={'can_resume': True})
+        }
+    )
+    repository.create_claim(claim, session)
     route = f'/api/v1/workbench/claims/{claim.claim_id}/decisions'
     workbench_before = client.get(
         f'/api/v1/workbench/claims/{claim.claim_id}', headers=staff_auth_headers
@@ -185,11 +193,14 @@ def test_approval_is_atomic_idempotent_and_role_safe(
         'decided_at': decision['decided_at'],
         'claimant_explanation': 'Your claim has been approved.',
     }
+    assert claimant.json()['customer_next_step']['can_resume'] is False
     assert 'internal_note' not in claimant.text
     assert 'decided_by' not in claimant.text
     claimant_list = client.get('/api/v1/claims', headers=auth_headers)
     assert claimant_list.status_code == 200
     assert claimant_list.json()['items'][0]['claim_decision'] == claimant.json()['claim_decision']
+    assert claimant_list.json()['items'][0]['can_resume'] is False
+    assert claimant_list.json()['items'][0]['customer_next_step']['can_resume'] is False
 
     workbench = client.get(f'/api/v1/workbench/claims/{claim.claim_id}', headers=staff_auth_headers)
     assert workbench.status_code == 200

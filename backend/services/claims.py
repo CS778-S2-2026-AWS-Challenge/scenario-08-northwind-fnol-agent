@@ -364,6 +364,7 @@ def claimant_claim(
         identity_repository=identity_repository,
         agreement_accepted=agreement_acceptance_is_current(claim),
     )
+    next_step = _claimant_resume_safe_next_step(claim, next_step)
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     policyholder, driver, witnesses = project_claim_participants(claim)
     claim_decision = _claimant_claim_decision(repository, claim)
@@ -406,6 +407,7 @@ def _claim_list_item(
     repository: PersistenceRepository,
     claim: WorkingClaim,
 ) -> ClaimListItem:
+    next_step = _claimant_resume_safe_next_step(claim, claim.customer_next_step)
     return ClaimListItem(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -413,12 +415,23 @@ def _claim_list_item(
         workflow_state=claim.claim_state.workflow_state,
         external_claim=claim.external_claim,
         claim_decision=_claimant_claim_decision(repository, claim),
-        customer_next_step=claim.customer_next_step,
+        customer_next_step=next_step,
         incomplete_context=_claimant_incomplete_context(repository, claim),
         created_at=claim.created_at,
         updated_at=claim.updated_at,
-        can_resume=claim.customer_next_step.can_resume,
+        can_resume=next_step.can_resume,
     )
+
+
+def _claimant_resume_safe_next_step(
+    claim: WorkingClaim,
+    next_step: CustomerNextStep,
+) -> CustomerNextStep:
+    """Keep legacy terminal records consistent with the Session boundary."""
+
+    if claim.terminal_disposition is not None and next_step.can_resume:
+        return next_step.model_copy(update={'can_resume': False})
+    return next_step
 
 
 def _claimant_claim_decision(

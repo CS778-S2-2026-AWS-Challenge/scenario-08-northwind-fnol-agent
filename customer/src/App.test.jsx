@@ -99,6 +99,21 @@ function primaryAction({
   }
 }
 
+function formattedDateTime(value) {
+  const date = new Date(value)
+  const dateLabel = new Intl.DateTimeFormat('en-NZ', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
+  const timeLabel = new Intl.DateTimeFormat('en-NZ', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date)
+  return `${dateLabel} · ${timeLabel}`
+}
+
 const initialClaim = {
   claim_id: 'clm_ui_vp',
   revision: 1,
@@ -334,6 +349,7 @@ function createdClaimReadback(agreement) {
       route: 'Claims intake review',
       next_step: 'A claims specialist will review the submitted details.',
       expected_by: '2026-09-16T01:00:00Z',
+      created_at: '2026-09-15T01:00:00Z',
     },
     external_service_action: null,
     customer_next_step: {
@@ -2902,6 +2918,92 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('button', { name: /Open Home claim/ })).toBeVisible()
   })
 
+  it('opens a terminal conversation as a read-only Claim without starting a Session', async () => {
+    const user = userEvent.setup()
+    const terminalClaim = {
+      ...initialClaim,
+      claim_id: 'clm_terminal_history',
+      can_resume: false,
+      external_claim: {
+        claim_number: 'NWF-2026-TERMINAL',
+        creation_status: 'created',
+      },
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'This Claim has completed review.',
+        responsible_party: 'system',
+        can_resume: false,
+      },
+      claim_decision: {
+        decision: 'approved',
+        decided_at: '2026-09-16T02:30:00Z',
+        claimant_explanation: 'Your claim has been approved.',
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [terminalClaim], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByRole('heading', { name: 'NWF-2026-TERMINAL' }))
+      .toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Claim approved' })).toBeInTheDocument()
+    expect(screen.getByText('Your claim has been approved.')).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/account/claims/clm_terminal_history')
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
+  it('uses a fresh non-resumable readback instead of submitting a stale resume request', async () => {
+    const user = userEvent.setup()
+    const staleListClaim = {
+      ...initialClaim,
+      claim_id: 'clm_stale_terminal_history',
+      can_resume: true,
+      external_claim: {
+        claim_number: 'NWF-2026-STALE',
+        creation_status: 'created',
+      },
+    }
+    const currentClaim = {
+      ...staleListClaim,
+      can_resume: undefined,
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'This Claim has completed review.',
+        responsible_party: 'system',
+        can_resume: false,
+      },
+      claim_decision: {
+        decision: 'rejected',
+        decided_at: '2026-09-16T02:45:00Z',
+        claimant_explanation: 'The policy does not cover this loss.',
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [staleListClaim], page: { next_cursor: null } })
+    api.getClaim.mockResolvedValue(currentClaim)
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByRole('heading', { name: 'Claim rejected' })).toBeInTheDocument()
+    expect(screen.getByText('The policy does not cover this loss.')).toBeInTheDocument()
+    expect(api.getClaim).toHaveBeenCalledWith('clm_stale_terminal_history')
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+    expect(screen.queryByText(/terminal Claim must be reopened/i)).not.toBeInTheDocument()
+  })
+
   it('keeps conversation history rows stable when switching the active Claim', async () => {
     const user = userEvent.setup()
     const reportA = {
@@ -3351,6 +3453,7 @@ describe('claimant intake projection', () => {
         route: 'Claims intake review',
         next_step: 'A claims specialist will review the submitted details.',
         expected_by: '2026-09-16T01:00:00Z',
+        created_at: '2026-09-15T01:00:00Z',
       },
       external_service_action: null,
       customer_next_step: {
@@ -3383,6 +3486,8 @@ describe('claimant intake projection', () => {
     expect(
       await screen.findByText(agreement.display_copy),
     ).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Claim submission progress' }))
+      .toHaveAttribute('aria-valuetext', 'Step 4 of 4: Review & submit')
 
     await user.click(screen.getByRole('checkbox', {
       name: 'I confirm this submission.',
@@ -3406,20 +3511,35 @@ describe('claimant intake projection', () => {
       }),
     ))
 
-    const successHeading = await screen.findByRole('heading', { name: 'Claim submitted' })
-    const successPanel = successHeading.closest('section')
+    const successHeading = await screen.findByRole('heading', {
+      name: 'Your claim has been submitted',
+    })
+    const successPanel = successHeading.closest('.claim-submitted-page')
     expect(successPanel).not.toBeNull()
     expect(within(successPanel).getByText('NWF-2026-16ECDD')).toBeInTheDocument()
+    expect(within(successPanel).getByText('Submitted')).toBeInTheDocument()
+    expect(within(successPanel).queryByText('created')).not.toBeInTheDocument()
+    expect(
+      within(successPanel).getByRole('heading', { name: 'Claims intake review' }),
+    ).toBeInTheDocument()
     expect(
       within(successPanel).getByText('A claims specialist will review the submitted details.'),
     ).toBeInTheDocument()
-    expect(within(successPanel).getByText('2026-09-16T01:00:00Z')).toBeInTheDocument()
+    const expectedTime = within(successPanel)
+      .getByText(formattedDateTime('2026-09-16T01:00:00Z'))
+    expect(expectedTime.closest('p')).toHaveTextContent(
+      `Expected by ${formattedDateTime('2026-09-16T01:00:00Z')}`,
+    )
+    expect(within(successPanel).queryByText('2026-09-16T01:00:00Z')).not.toBeInTheDocument()
+    expect(screen.queryByText(agreement.display_copy)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Submit claim' })).not.toBeInTheDocument()
 
     await user.click(
       within(successPanel).getByRole('button', { name: 'Back to conversation' }),
     )
-    expect(screen.queryByRole('heading', { name: 'Claim submitted' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', {
+      name: 'Your claim has been submitted',
+    })).not.toBeInTheDocument()
   })
 
   it.each(['acceptance', 'creation'])(
@@ -3456,7 +3576,7 @@ describe('claimant intake projection', () => {
       expect(agreementAlert).toBeVisible()
       expect(agreementAlert).toHaveTextContent("your claim hasn't been sent")
       expect(
-        screen.queryByRole('heading', { name: 'Claim submitted' }),
+        screen.queryByRole('heading', { name: 'Your claim has been submitted' }),
       ).not.toBeInTheDocument()
 
       if (phase === 'acceptance') {
@@ -3527,8 +3647,10 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Submit claim' }))
 
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledTimes(readsBeforeSubmit + 1))
-    const successHeading = await screen.findByRole('heading', { name: 'Claim submitted' })
-    const successPanel = successHeading.closest('section')
+    const successHeading = await screen.findByRole('heading', {
+      name: 'Your claim has been submitted',
+    })
+    const successPanel = successHeading.closest('.claim-submitted-page')
     expect(successPanel).not.toBeNull()
     expect(within(successPanel).getByText('NWF-2026-RECOVERED')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: "Couldn't send your claim" })).not.toBeInTheDocument()
@@ -3595,7 +3717,7 @@ describe('claimant intake projection', () => {
       expect(agreementAlert).toBeVisible()
       expect(agreementAlert).toHaveTextContent(expectedText)
       expect(
-        screen.queryByRole('heading', { name: 'Claim submitted' }),
+        screen.queryByRole('heading', { name: 'Your claim has been submitted' }),
       ).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Submit claim' })).toBeEnabled()
     },

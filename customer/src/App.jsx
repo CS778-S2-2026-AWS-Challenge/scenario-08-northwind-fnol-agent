@@ -450,12 +450,11 @@ function App() {
   const isWorkspaceActive = workspaceActive && (hasStarted || draftWorkspaceActive)
   const savedReports = claimHistory === null
     ? null
-    : claimHistory.filter((item) => item.can_resume)
+    : claimHistory
   const conversationReports = claim
     ? claimHistory?.some((item) => item.claim_id === claim.claim_id)
       ? claimHistory
-          .map((item) => item.claim_id === claim.claim_id ? claim : item)
-          .filter((item) => item.claim_id === claim.claim_id || item.can_resume)
+        .map((item) => item.claim_id === claim.claim_id ? claim : item)
       : [claim, ...(savedReports || [])]
     : (savedReports || [])
   const homepageConversationReports = claim ? conversationReports : (savedReports || [])
@@ -2871,13 +2870,9 @@ function App() {
       const savedClaim = await getClaim(claimId)
       const canResume = savedClaim.can_resume ?? savedClaim.customer_next_step?.can_resume
       if (canResume === false) {
-        if (hasClaimantAccessToken()) {
-          setClaimHistory((history) => history?.filter((item) => item.claim_id !== claimId) || history)
-        } else {
-          setClaimHistory(forgetAnonymousConversation(claimId))
-        }
-        setError('This conversation can no longer be resumed, so it was removed from history.')
-        setStatus('error')
+        rememberClaimInHistory(savedClaim)
+        openClaimFeatures(savedClaim)
+        setStatus('idle')
         return
       }
       const session = await resumeClaimSession({ claimId })
@@ -2933,6 +2928,14 @@ function App() {
 
   function resumeHomepageConversation(claimId) {
     closeConversationHistorySidebar()
+    const savedClaim = claimHistory?.find((item) => item.claim_id === claimId)
+      || (claim?.claim_id === claimId ? claim : null)
+    const canResume = savedClaim?.can_resume ?? savedClaim?.customer_next_step?.can_resume
+    if (savedClaim && canResume === false) {
+      setError('')
+      openClaimFeatures(savedClaim)
+      return
+    }
     if (claimId === claim?.claim_id && sessionId) {
       setError('')
       setWorkspaceActive(true)
@@ -3887,7 +3890,7 @@ function App() {
           </aside>
           <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
-              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''} ${workspaceView === 'privacy' ? 'is-privacy-page' : ''}`}
+              className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''} ${workspaceView === 'privacy' ? 'is-privacy-page' : ''} ${workspaceView === 'agreement' ? 'is-agreement-page' : ''}`}
               hidden={workspaceView === 'chat'}
             >
               {workspaceView === 'privacy' ? (
@@ -3897,7 +3900,7 @@ function App() {
                   onViewClaim={claim ? () => openClaimFeatures(claim) : null}
                 />
               ) : (
-                workspaceView === 'external-services' ? null : (
+                ['agreement', 'external-services'].includes(workspaceView) ? null : (
                   <>
                     <h1>
                       {workspaceView === 'history'
@@ -3954,26 +3957,21 @@ function App() {
                 )
               )}
               {workspaceView === 'agreement' && (
-                <>
-                  {agreementSubmissionError?.claimId === claim?.claim_id && (
-                    <div className="claim-history-state is-error" role="alert">
-                      <h2>{agreementSubmissionError.title}</h2>
-                      <p>{agreementSubmissionError.message}</p>
-                    </div>
-                  )}
-                  <AgreementConfirmationPanel
-                    claim={claim}
-                    busy={isBusy}
-                    status={status}
-                    onSubmit={submitAgreementAndCreate}
+                <AgreementConfirmationPanel
+                  claim={claim}
+                  busy={isBusy}
+                  status={status}
+                  submissionError={agreementSubmissionError?.claimId === claim?.claim_id
+                    ? agreementSubmissionError
+                    : null}
+                  onSubmit={submitAgreementAndCreate}
                   onReviewInformation={() => {
                     setDetailsOpen(true)
                     setDetailsTab('summary')
                     setWorkspaceView('chat')
                   }}
-                    onReturnToConversation={() => setWorkspaceView('chat')}
-                  />
-                </>
+                  onReturnToConversation={() => setWorkspaceView('chat')}
+                />
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
