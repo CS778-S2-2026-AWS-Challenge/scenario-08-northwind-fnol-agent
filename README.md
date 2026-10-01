@@ -91,6 +91,17 @@ unsatisfiable provider schema. They are not production runtime dependencies.
 The backend uses Pillow (MIT-CMU) to decode bounded JPEG/PNG uploads before marking files
 ready. This checks file usability, not malware or the truth of image-derived Claim facts.
 
+The controlled test corpus tools in `tests/corpus/tools/` use three libraries listed in
+`tests/corpus/tools/requirements.txt`:
+
+- ReportLab (BSD) renders the synthetic PDF documents of each pack;
+- pypdf (BSD-3-Clause) removes pages and truncates files for the boundary variants;
+- pdfplumber (MIT) lets the checker read the text the documents print.
+
+They are needed only to build or check packs; the application does not use them, and CI type-checks
+the tools without them. Python's standard library has no PDF writer or reader, and the corpus needs
+exact control of every printed field and page break. All three have regular releases on PyPI.
+
 ### Run the app
 
 Start the complete system — MongoDB, MinIO with the approved knowledge corpus ingested, the
