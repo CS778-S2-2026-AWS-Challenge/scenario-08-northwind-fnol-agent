@@ -589,6 +589,11 @@ class MongoDBRepository:
             partialFilterExpression={'record_type': 'retention_operation'},
         )
         self._collection.create_index(
+            [('record_type', 1), ('updated_at', 1), ('operation_id', 1)],
+            name='retention_operation_pending_order',
+            partialFilterExpression={'record_type': 'retention_operation'},
+        )
+        self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('created_at', 1)],
             name='branch_evaluation_claim_created',
         )
@@ -690,52 +695,102 @@ class MongoDBRepository:
         self,
         *,
         limit: int,
-    ) -> list[RetentionOperation]:
-        if not 1 <= limit <= 100:
-            raise ValueError('Retention discovery limit must be between 1 and 100.')
-        documents = (
-            self._collection.find(
-                {
-                    'record_type': 'retention_operation',
-                    'status': {'$ne': RetentionOperationStatus.COMPLETED.value},
-                    '$or': [
-                        {'status': {'$ne': RetentionOperationStatus.HELD.value}},
-                        {'active_delete_authorization_id': {'$ne': None}},
-                    ],
-                }
-            )
-            .sort([('updated_at', 1), ('_id', 1)])
-            .limit(limit)
+        cursor: str | None = None,
+    ) -> tuple[list[RetentionOperation], str | None]:
+        from backend.repositories.pagination import (
+            RETENTION_DISCOVERY_MAX_LIMIT,
+            RetentionDiscoveryCursor,
+            decode_retention_discovery_cursor,
+            encode_retention_discovery_cursor,
+            repository_datetime_value,
         )
-        return [
+
+        if not 1 <= limit <= RETENTION_DISCOVERY_MAX_LIMIT:
+            raise ValueError('Retention discovery limit must be between 1 and 100.')
+        query: dict[str, Any] = {
+            'record_type': 'retention_operation',
+            'status': {'$ne': RetentionOperationStatus.COMPLETED.value},
+            '$or': [
+                {'status': {'$ne': RetentionOperationStatus.HELD.value}},
+                {'active_delete_authorization_id': {'$ne': None}},
+            ],
+        }
+        if cursor is not None:
+            after = decode_retention_discovery_cursor(cursor, scope='pending')
+            ordered_at = repository_datetime_value(after.ordered_at)
+            query['$and'] = [
+                {
+                    '$or': [
+                        {'updated_at': {'$gt': ordered_at}},
+                        {'updated_at': ordered_at, 'operation_id': {'$gt': after.record_id}},
+                    ]
+                }
+            ]
+        documents = (
+            self._collection.find(query)
+            .sort([('updated_at', 1), ('operation_id', 1)])
+            .limit(limit + 1)
+        )
+        operations = [
             operation
             for document in documents
             if (operation := self._model_from_document(document, RetentionOperation)) is not None
         ]
+        page = operations[:limit]
+        next_cursor = None
+        if len(operations) > limit:
+            final = page[-1]
+            next_cursor = encode_retention_discovery_cursor(
+                RetentionDiscoveryCursor('pending', final.updated_at, final.operation_id)
+            )
+        return page, next_cursor
 
     def list_retention_handoff_candidates(
         self,
         *,
         limit: int,
-    ) -> list[str]:
-        if not 1 <= limit <= 100:
+        cursor: str | None = None,
+    ) -> tuple[list[str], str | None]:
+        from backend.repositories.pagination import (
+            RETENTION_DISCOVERY_MAX_LIMIT,
+            RetentionDiscoveryCursor,
+            decode_retention_discovery_cursor,
+            encode_retention_discovery_cursor,
+            repository_datetime_value,
+        )
+
+        if not 1 <= limit <= RETENTION_DISCOVERY_MAX_LIMIT:
             raise ValueError('Retention handoff discovery limit must be between 1 and 100.')
-        # Eligible Claims leave this set once reserved; cleanup removes the Claim record, so
-        # the scan is bounded by in-flight handoffs rather than by historical volume.
-        documents = self._collection.find(
-            {
-                'record_type': 'claim',
-                'terminal_disposition.reason_code': {
-                    '$in': sorted(reason.value for reason in RETENTION_ELIGIBLE_TERMINAL_REASONS)
-                },
-                'terminal_disposition.value': {
-                    '$in': sorted(value.value for value in RETENTION_ELIGIBLE_TERMINAL_VALUES)
-                },
+        query: dict[str, Any] = {
+            'record_type': 'claim',
+            'terminal_disposition.reason_code': {
+                '$in': sorted(reason.value for reason in RETENTION_ELIGIBLE_TERMINAL_REASONS)
             },
-            projection={'claim_id': 1},
-        ).sort([('terminal_disposition.recorded_at', 1), ('claim_id', 1)])
+            'terminal_disposition.value': {
+                '$in': sorted(value.value for value in RETENTION_ELIGIBLE_TERMINAL_VALUES)
+            },
+        }
+        if cursor is not None:
+            after = decode_retention_discovery_cursor(cursor, scope='handoff')
+            ordered_at = repository_datetime_value(after.ordered_at)
+            query['$or'] = [
+                {'terminal_disposition.recorded_at': {'$gt': ordered_at}},
+                {
+                    'terminal_disposition.recorded_at': ordered_at,
+                    'claim_id': {'$gt': after.record_id},
+                },
+            ]
+        # One bounded window per page: at most limit + 1 Claims and limit lookups.
+        documents = list(
+            self._collection.find(
+                query, projection={'claim_id': 1, 'terminal_disposition.recorded_at': 1}
+            )
+            .sort([('terminal_disposition.recorded_at', 1), ('claim_id', 1)])
+            .limit(limit + 1)
+        )
+        window = documents[:limit]
         candidates: list[str] = []
-        for document in documents:
+        for document in window:
             claim_id = document.get('claim_id')
             if not isinstance(claim_id, str):
                 continue
@@ -745,9 +800,17 @@ class MongoDBRepository:
             )
             if reserved is None:
                 candidates.append(claim_id)
-                if len(candidates) == limit:
-                    break
-        return candidates
+        next_cursor = None
+        if len(documents) > limit:
+            final = window[-1]
+            recorded_at = final.get('terminal_disposition', {}).get('recorded_at')
+            if isinstance(recorded_at, str) and isinstance(final.get('claim_id'), str):
+                next_cursor = encode_retention_discovery_cursor(
+                    RetentionDiscoveryCursor(
+                        'handoff', datetime.fromisoformat(recorded_at), final['claim_id']
+                    )
+                )
+        return candidates, next_cursor
 
     def reserve_eligible_retention_operation(
         self,

@@ -289,47 +289,90 @@ class FixtureRepository(PersistenceRepository):
         self,
         *,
         limit: int,
-    ) -> list[RetentionOperation]:
-        if not 1 <= limit <= 100:
+        cursor: str | None = None,
+    ) -> tuple[list[RetentionOperation], str | None]:
+        from backend.repositories.pagination import (
+            RETENTION_DISCOVERY_MAX_LIMIT,
+            RetentionDiscoveryCursor,
+            decode_retention_discovery_cursor,
+            encode_retention_discovery_cursor,
+        )
+
+        if not 1 <= limit <= RETENTION_DISCOVERY_MAX_LIMIT:
             raise ValueError('Retention discovery limit must be between 1 and 100.')
+        after = (
+            decode_retention_discovery_cursor(cursor, scope='pending')
+            if cursor is not None
+            else None
+        )
         with self._claim_mutation_lock:
-            operations = sorted(
-                (
-                    operation
-                    for operation in self._retention_operations.values()
-                    if operation.status is not RetentionOperationStatus.COMPLETED
-                    and (
-                        operation.status is not RetentionOperationStatus.HELD
-                        or operation.active_delete_authorization_id is not None
-                    )
-                ),
-                key=lambda operation: (
-                    operation.updated_at,
-                    operation.operation_id,
-                ),
+            pending: list[RetentionOperation] = []
+            for operation in self._retention_operations.values():
+                if operation.status is RetentionOperationStatus.COMPLETED:
+                    continue
+                if (
+                    operation.status is RetentionOperationStatus.HELD
+                    and operation.active_delete_authorization_id is None
+                ):
+                    continue
+                key = (operation.updated_at, operation.operation_id)
+                if after is not None and key <= (after.ordered_at, after.record_id):
+                    continue
+                pending.append(deepcopy(operation))
+            pending.sort(key=lambda item: (item.updated_at, item.operation_id))
+        page = pending[:limit]
+        next_cursor = None
+        if len(pending) > limit:
+            final = page[-1]
+            next_cursor = encode_retention_discovery_cursor(
+                RetentionDiscoveryCursor('pending', final.updated_at, final.operation_id)
             )
-            return deepcopy(operations[:limit])
+        return page, next_cursor
 
     def list_retention_handoff_candidates(
         self,
         *,
         limit: int,
-    ) -> list[str]:
-        if not 1 <= limit <= 100:
+        cursor: str | None = None,
+    ) -> tuple[list[str], str | None]:
+        from backend.repositories.pagination import (
+            RETENTION_DISCOVERY_MAX_LIMIT,
+            RetentionDiscoveryCursor,
+            decode_retention_discovery_cursor,
+            encode_retention_discovery_cursor,
+        )
+
+        if not 1 <= limit <= RETENTION_DISCOVERY_MAX_LIMIT:
             raise ValueError('Retention handoff discovery limit must be between 1 and 100.')
+        after = (
+            decode_retention_discovery_cursor(cursor, scope='handoff')
+            if cursor is not None
+            else None
+        )
         with self._claim_mutation_lock:
             reserved = {operation.claim_id for operation in self._retention_operations.values()}
             eligible: list[tuple[datetime, str]] = []
             for claim in self._claims.values():
                 terminal = claim.terminal_disposition
                 if (
-                    terminal is not None
-                    and terminal.reason_code in RETENTION_ELIGIBLE_TERMINAL_REASONS
-                    and terminal.value in RETENTION_ELIGIBLE_TERMINAL_VALUES
-                    and claim.claim_id not in reserved
+                    terminal is None
+                    or terminal.reason_code not in RETENTION_ELIGIBLE_TERMINAL_REASONS
+                    or terminal.value not in RETENTION_ELIGIBLE_TERMINAL_VALUES
                 ):
-                    eligible.append((terminal.recorded_at, claim.claim_id))
-            return [claim_id for _, claim_id in sorted(eligible)[:limit]]
+                    continue
+                key = (terminal.recorded_at, claim.claim_id)
+                if after is not None and key <= (after.ordered_at, after.record_id):
+                    continue
+                eligible.append(key)
+            eligible.sort()
+        window = eligible[:limit]
+        next_cursor = None
+        if len(eligible) > limit:
+            ordered_at, claim_id = window[-1]
+            next_cursor = encode_retention_discovery_cursor(
+                RetentionDiscoveryCursor('handoff', ordered_at, claim_id)
+            )
+        return [claim_id for _, claim_id in window if claim_id not in reserved], next_cursor
 
     def reserve_eligible_retention_operation(
         self,

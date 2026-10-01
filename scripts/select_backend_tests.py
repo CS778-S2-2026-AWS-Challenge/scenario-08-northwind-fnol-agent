@@ -282,6 +282,7 @@ BACKEND_CONSUMER_RULES = (
             'tests/test_retention_contract.py',
             'tests/test_retention_eligibility.py',
             'tests/test_retention_execution.py',
+            'tests/test_retention_discovery_sweep.py',
             'tests/test_retention_hold_actions.py',
             'tests/test_retention_repository_guards.py',
             'tests/test_follow_up_execution_guards.py',

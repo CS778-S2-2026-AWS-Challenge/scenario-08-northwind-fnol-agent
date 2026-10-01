@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TypeVar
 
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.domain.retention import (
     RetentionEligibilityRejected,
     RetentionTargetFreezeRejected,
 )
+from backend.repositories.pagination import InvalidRepositoryCursorError
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.follow_up_recovery import (
     process_due_follow_up,
@@ -23,6 +26,7 @@ from backend.services.retention import (
 )
 
 LOGGER = logging.getLogger(__name__)
+T = TypeVar('T')
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +40,9 @@ class RecoveryCycleResult:
     retention_progressed: int
     retention_blocked: int
     failed_candidates: int
+    # Where the next cycle resumes each retention sweep; None restarts from the start.
+    handoff_cursor: str | None = None
+    pending_retention_cursor: str | None = None
 
 
 def run_recovery_cycle(
@@ -44,6 +51,8 @@ def run_recovery_cycle(
     *,
     now: datetime,
     limit: int = 50,
+    handoff_cursor: str | None = None,
+    pending_retention_cursor: str | None = None,
 ) -> RecoveryCycleResult:
     """Advance one bounded page of recovery work.
 
@@ -52,6 +61,11 @@ def run_recovery_cycle(
     Candidate reads are hints only; each service reloads and revalidates its
     authoritative records before committing. One broken candidate is isolated
     from later candidates in the same bounded cycle.
+
+    Retention handoff and pending-retention discovery are keyset sweeps. A blocked
+    candidate legitimately stays discoverable, so each cycle resumes from the cursor
+    the previous cycle returned instead of rereading the oldest page; a candidate
+    behind a full page of blocked work is reached within one sweep.
     """
 
     if now.utcoffset() is None:
@@ -80,7 +94,10 @@ def run_recovery_cycle(
     # closure) is the durable handoff source. A reservation that is refused or fails
     # here stays discoverable on later cycles, and the stable operation identity makes
     # every retry the same reservation.
-    for claim_id in repository.list_retention_handoff_candidates(limit=limit):
+    handoff_ids, next_handoff_cursor = _retention_page(
+        repository.list_retention_handoff_candidates, limit, handoff_cursor
+    )
+    for claim_id in handoff_ids:
         try:
             reserve_retention_from_terminal(repository, claim_id, now=now)
         except RetentionEligibilityRejected:
@@ -92,7 +109,9 @@ def run_recovery_cycle(
                 claim_id,
             )
 
-    pending_retention = repository.list_pending_retention_operations(limit=limit)
+    pending_retention, next_pending_cursor = _retention_page(
+        repository.list_pending_retention_operations, limit, pending_retention_cursor
+    )
     for retention in pending_retention:
         try:
             if retention.targets_frozen_at is None:
@@ -138,4 +157,20 @@ def run_recovery_cycle(
         retention_progressed=retention_progressed,
         retention_blocked=retention_blocked,
         failed_candidates=failed_candidates,
+        handoff_cursor=next_handoff_cursor,
+        pending_retention_cursor=next_pending_cursor,
     )
+
+
+def _retention_page(
+    discover: Callable[..., tuple[list[T], str | None]],
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[T], str | None]:
+    """Read one sweep page, restarting the sweep when a stored cursor is unusable."""
+
+    try:
+        return discover(limit=limit, cursor=cursor)
+    except InvalidRepositoryCursorError:
+        LOGGER.warning('Retention discovery cursor was rejected; restarting the sweep.')
+        return discover(limit=limit, cursor=None)

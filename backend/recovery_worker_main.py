@@ -45,13 +45,17 @@ def run_worker(
     stop_event: Event | None = None,
     now_fn: Callable[[], datetime] = _utc_now,
     emit: Callable[[RecoveryCycleResult], None] = _emit_json,
+    handoff_cursor: str | None = None,
+    pending_retention_cursor: str | None = None,
 ) -> int:
     """Run bounded recovery cycles until one cycle completes or shutdown is requested.
 
     Each cycle owns at most one configured page for expiry, retention and due-contact
     discovery. A failed cycle is logged and isolated from later cycles; durable
     repository state is reloaded by the next cycle. Signal ownership stays in main
-    so this function remains deterministic in tests.
+    so this function remains deterministic in tests. The retention sweep cursors
+    returned by one cycle are passed to the next, so blocked retention work cannot
+    hold later work behind it; a failed cycle keeps the previous positions.
     """
 
     if not 1 <= limit <= 100:
@@ -70,6 +74,8 @@ def run_worker(
                 storage,
                 now=now_fn(),
                 limit=limit,
+                handoff_cursor=handoff_cursor,
+                pending_retention_cursor=pending_retention_cursor,
             )
         except Exception:
             LOGGER.exception('P17 recovery cycle failed; durable work remains eligible for retry.')
@@ -77,6 +83,8 @@ def run_worker(
                 return 1
         else:
             emit(result)
+            handoff_cursor = result.handoff_cursor
+            pending_retention_cursor = result.pending_retention_cursor
             if once:
                 return 0
 
@@ -118,6 +126,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         action='store_true',
         help='run exactly one bounded cycle for an external scheduler and exit',
     )
+    parser.add_argument(
+        '--handoff-cursor',
+        default=None,
+        help='resume the retention handoff sweep from a cursor printed by a previous cycle',
+    )
+    parser.add_argument(
+        '--pending-retention-cursor',
+        default=None,
+        help='resume the pending retention sweep from a cursor printed by a previous cycle',
+    )
     args = parser.parse_args(argv)
 
     stop_event = Event()
@@ -134,6 +152,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             once=args.once,
             stop_event=stop_event,
             now_fn=_utc_now,
+            handoff_cursor=args.handoff_cursor,
+            pending_retention_cursor=args.pending_retention_cursor,
         )
     finally:
         bundle.close()

@@ -717,29 +717,49 @@ class PersistenceRepository(ClaimRepository, Protocol):
         self,
         *,
         limit: int,
-    ) -> list[RetentionOperation]:
-        """Return a bounded deterministic page of unfinished retention work."""
+        cursor: str | None = None,
+    ) -> tuple[list[RetentionOperation], str | None]:
+        """Return one keyset page of unfinished retention work.
+
+        Args:
+            limit: Maximum operations read for the page (1-100).
+            cursor: Position returned by the previous page, or ``None`` to start.
+
+        Returns:
+            Operations ordered by ``updated_at`` then operation ID, and the cursor of
+            the next page, or ``None`` at the end of the sweep.
+
+        Raises:
+            ValueError: If ``limit`` is outside 1-100.
+            InvalidRepositoryCursorError: If ``cursor`` is malformed or foreign.
+        """
         raise NotImplementedError
 
     def list_retention_handoff_candidates(
         self,
         *,
         limit: int,
-    ) -> list[str]:
-        """Return retention-eligible terminal Claim IDs with no RetentionOperation yet.
+        cursor: str | None = None,
+    ) -> tuple[list[str], str | None]:
+        """Return one keyset page of retention-eligible terminal Claims without retention.
 
         Eligibility is ``RETENTION_ELIGIBLE_TERMINAL_REASONS`` and ``_VALUES``: recovery
         expiry, staff abandonment and authorised closure. The terminal disposition is
-        the durable handoff source, so a reservation that failed stays discoverable.
+        the durable handoff source, so a reservation that failed stays discoverable. A
+        page reads at most ``limit`` eligible Claims; already reserved Claims in that
+        window are skipped, so a page may hold fewer IDs than ``limit``.
 
         Args:
-            limit: Maximum Claim IDs in one bounded page (1-100).
+            limit: Maximum eligible Claims read for the page (1-100).
+            cursor: Position returned by the previous page, or ``None`` to start.
 
         Returns:
-            Claim IDs ordered by terminal recording time, then Claim ID.
+            Claim IDs ordered by terminal ``recorded_at`` then Claim ID, and the cursor
+            of the next page, or ``None`` at the end of the sweep.
 
         Raises:
             ValueError: If ``limit`` is outside 1-100.
+            InvalidRepositoryCursorError: If ``cursor`` is malformed or foreign.
         """
         raise NotImplementedError
 
