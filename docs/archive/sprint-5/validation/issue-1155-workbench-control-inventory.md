@@ -8,9 +8,9 @@ owners. It is Sprint 5 stage B evidence for #1155, #771, and #1066.
 
 | Item | Value |
 | --- | --- |
-| Code head under test | `fix/workbench-control-inventory` at `80eaff92`, based on `origin/main` at `661174fa`; Workbench files are identical to `83baa668`, where the browser runs took place on `954c7374` |
+| Code head under test | `fix/workbench-control-inventory` at `f1e0d37b`, based on `origin/main` at `661174fa` |
 | First round | `main@eb51fc02`, 2026-10-01, independently re-verified by the #1140 owner on #1155 |
-| Browser runs | On this branch during development; each repair was checked on the commit that introduced it or a later one, and the access-denied queue, tab privacy, and compact Staff Agent were re-checked at the code head |
+| Browser runs | Inventory rows were observed on this branch during development, before the final review fixes. Every repair in the next section, including the two review fixes, was re-run at exactly `f1e0d37b` (clean working tree) at 1024 and 390 px |
 | Date | 2026-10-02 |
 | Data runtime | `DATA_RUNTIME_PROFILE=fixture`, `NORTHWIND_OBJECT_STORAGE_ADAPTER=fixture` |
 | Agent runtime | `AGENT_RUNTIME_PROFILE=controlled`; no Staff Agent model is published |
@@ -42,21 +42,21 @@ input or a duplicate accessible name.
 
 ## Repairs delivered with this record
 
-Each repair has focused tests and was re-checked in the browser on the stated viewport.
+Each repair has focused tests. The browser evidence column was re-run at exactly `f1e0d37b`.
 
 | Finding | Repair | Commit | Tests | Browser evidence |
 | --- | --- | --- | --- | --- |
-| Own mutation raised "This Claim changed in another session" | Remember the revision returned by the staff member's own revision-checked mutation and suppress a notice at or below it | `33c4946d` | `revision.test.js`; `WorkbenchPage.test.jsx` own-mutation case (fails without the repair) | Message send on AT-04 at 1440 px: no notice |
-| Queue hidden at phone width; toggle label did not match | Compact layout shows the queue when no Claim is open; toggle name and `aria-expanded` follow the visible state and return to the queue | `1181774c` | `WorkbenchPage.test.jsx` phone-width case | 390 px: queue 390 x 734 visible; open Claim then toggle returns to `/workbench` |
+| Own mutation raised "This Claim changed in another session" | Remember the revision returned by the staff member's own revision-checked mutation and suppress a notice at or below it; hold notices while that mutation is in flight | `33c4946d`, `f1e0d37b` | `revision.test.js`; `WorkbenchPage.test.jsx` own-mutation and in-flight cases (both fail without the repair) | AT-04 send: no notice at any 200 ms poll; out-of-band change: notice for revision 12 |
+| Queue hidden at phone width; toggle label did not match | Compact layout shows the queue when no Claim is open; toggle name and `aria-expanded` follow the visible state and return to the queue | `1181774c` | `WorkbenchPage.test.jsx` phone-width case | 390 px: open Claim shows "Show Claim queue" (`aria-expanded=false`); toggle returns to `/workbench` with the queue visible |
 | Header menu button hidden at every width with no action | Removed | `1181774c` | Not applicable | Not applicable |
-| Collapsed rail controls had no accessible name | Explicit labels on Workbench, Claim conversations, Staff Agent | `105cc741` | `NavigationRail.test.jsx` | 1024 px accessibility tree names all four rail controls |
-| Unavailable composer collapsed to 40 px | Explicit grid placement for textarea and send button | `49ca5bd4` | Not applicable (layout) | 1024 px AT-02: textarea 567 px wide |
-| Staff Agent bubble could cover the end of content and messages | End space clears the bubble on layouts that show it | `18b31dc6` | Not applicable (layout) | 1024 px AT-04 Overview, Activity, Evidence, Conversation scrolled to end: no visible text intersects the bubble |
-| Staff Agent panel did not take focus; Escape did nothing | Non-modal dialog: focus to message box, Tab contained, Escape closes Claim Scope then panel, focus returns to opener or bubble | `13447e9f` | `StaffAgent.test.jsx` dialog, bubble, and embedded cases | 1440 px: rail opener, Escape, focus returned |
-| Staff Agent sent and created a session with no available model | Readable reason from capabilities; send disabled; no session created | `13447e9f` | `StaffAgent.test.jsx` unavailable and reason cases | 1440 px and 390 px: notice shown, send disabled |
-| Open Claim tabs leaked across staff accounts on one browser | Tabs stored per staff identity; former browser-wide record removed | `1b506b93` | `usePersistentTabs.test.jsx` privacy, identity switch, legacy cases | Primary account opened tabs; second and operations accounts saw none |
-| Staff Agent rail button did nothing at phone width | Open panel fills the content area; bubble stays hidden; no dragging | `823fa07b` | `StaffAgent.test.jsx` compact case | 390 px: panel 390 x 734, focus in message box, Escape returns focus |
-| Operations account told to "retry when the service is available" | Access denial explained without Retry | `80eaff92` | `WorkbenchPage.test.jsx` access-denied case | Operations account at 1440 px |
+| Collapsed rail controls had no accessible name | Explicit labels on Workbench, Claim conversations, Staff Agent | `105cc741` | `NavigationRail.test.jsx` | 1024 px: all four rail controls named |
+| Unavailable composer collapsed to 40 px | Explicit grid placement for textarea and send button | `49ca5bd4` | Not applicable (layout) | 1024 px AT-02, sending unavailable: textarea 566 px wide |
+| Staff Agent bubble could cover the end of content and messages | End space clears the bubble on layouts that show it | `18b31dc6` | Not applicable (layout) | 1024 px AT-04 Overview, Activity, Conversation scrolled to the end: no visible text intersects the bubble |
+| Staff Agent panel did not take focus; Escape did nothing | Non-modal dialog: focus to message box, Tab contained, Escape closes Claim Scope (focus to its toggle) then the panel, focus returns to opener or bubble | `13447e9f`, `9ee2ae53` | `StaffAgent.test.jsx` dialog, bubble, embedded, and scope-Escape cases | 1024 px: Escape on a scope checkbox kept focus on the toggle; second Escape closed the panel and focused the rail button |
+| Staff Agent sent and created a session with no available model | Readable reason from capabilities, applied independently of the session and Claim lists; sending closed until capabilities load or when they fail | `13447e9f`, `9ee2ae53` | `StaffAgent.test.jsx` unavailable, reason, failed-list, and failed-capabilities cases | 1024 px: notice and disabled send; injected capabilities failure: "availability could not be checked" with send disabled |
+| Open Claim tabs leaked across staff accounts on one browser | Tabs stored per staff identity; former browser-wide record removed | `1b506b93` | `usePersistentTabs.test.jsx` privacy, identity switch, legacy cases | Primary account had four tabs; the operations account signed in next saw none |
+| Staff Agent rail button did nothing at phone width | Open panel fills the content area; bubble stays hidden; no dragging | `823fa07b` | `StaffAgent.test.jsx` compact case | 390 px: panel 390 x 734, focus in message box, Escape returns focus to the rail button |
+| Operations account told to "retry when the service is available" | Access denial explained without Retry | `80eaff92` | `WorkbenchPage.test.jsx` access-denied case | Operations account: "No Workbench access" without Retry |
 
 The presence-renewal finding is implemented by #1167, which also wires `ownership.accept_claim`.
 This record does not change presence.
@@ -268,7 +268,7 @@ client route, or client-local state behind the control.
 | Open Staff Agent bubble | Desktop, panel closed | Opens the panel | `works` | Hidden at phone width by design |
 | Close Staff Agent | Panel open | Closes and returns focus | `works` | Escape also closes |
 | Session, New session model, New | Panel open | `GET /workbench/agent/sessions`, capabilities | `works` | "No published model"; New shows "New conversation ready" |
-| Claim Scope, Claim checkboxes, Done | Panel open | Client-local scope, up to five Claims | `works` | Two selected: "2 of 5", composer chip "2 Claims selected"; Escape closes the list before the panel |
+| Claim Scope, Claim checkboxes, Done | Panel open | Client-local scope, up to five Claims | `works` | Two selected: "2 of 5", composer chip "2 Claims selected"; Escape closes the list and keeps focus on its toggle |
 | Message Staff Agent, Send to Staff Agent | Panel open | `POST .../agent/sessions/{id}/messages` | `honest-unavailable` | No model published: notice shown, send disabled, no session created |
 | Choose and Attach photos or files, Use voice input | Panel open | Client-local | `placeholder` | Attachments cannot be sent; send is blocked while attached |
 | Copy, edit draft, Review action, Confirm and execute, Sources used | Agent answer with drafts | Registered draft execution | `unreachable` | Needs the `model_gateway` runtime |
