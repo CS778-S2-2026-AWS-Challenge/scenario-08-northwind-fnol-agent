@@ -133,7 +133,7 @@ and private runtime archive, CloudShell runtime archive, and local temporary
 runtime archive were removed. CloudFront was set disabled, EC2 stop requested,
 the test Elastic IP released, and temporary SSH ingress removed. Final
 control-plane readback showed EC2 `stopped`, no public IP, no SSH ingress,
-and CloudFront `Enabled=false` with its disable update still propagating.
+and CloudFront `Enabled=false`, `Status=Deployed`: disable propagation completed.
 Retained EBS data/backup volumes,
 private static assets, and the private image artifact still incur storage
 costs. These are recoverable retained artifacts, not an active deployment.
