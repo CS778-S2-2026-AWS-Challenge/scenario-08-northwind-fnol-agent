@@ -10,6 +10,24 @@ const CLAIM_CREATION_STATUS_LABELS = Object.freeze({
   created: 'Submitted',
 })
 
+const INCOMPLETE_CREATION_COPY = Object.freeze({
+  pending: Object.freeze({
+    heading: 'Claim submission is still processing',
+    message: 'Northwind has not confirmed that your claim was created yet.',
+    role: 'status',
+  }),
+  failed: Object.freeze({
+    heading: "Your claim hasn't been created",
+    message: 'The claim service did not create your claim. Follow the next step below to continue.',
+    role: 'alert',
+  }),
+})
+const UNKNOWN_CREATION_COPY = Object.freeze({
+  heading: 'Claim submission status needs attention',
+  message: 'Northwind has not confirmed that your claim was created.',
+  role: 'alert',
+})
+
 function readable(value) {
   if (value === null || value === undefined || value === '') return 'Not recorded'
   if (typeof value === 'string' || typeof value === 'number') return String(value)
@@ -149,7 +167,7 @@ export default function AgreementConfirmationPanel({
         .every((confirmation) => confirmations[confirmation.key] === true)
     : false
 
-  if (externalClaim) {
+  if (externalClaim?.creation_status === 'created') {
     const submittedAt = dateTimePresentation(externalClaim.created_at, claim?.locale)
     const expectedBy = dateTimePresentation(externalClaim.expected_by, claim?.locale)
     const creationStatus = CLAIM_CREATION_STATUS_LABELS[externalClaim.creation_status]
@@ -244,6 +262,28 @@ export default function AgreementConfirmationPanel({
             </button>
           </footer>
         </article>
+      </section>
+    )
+  }
+
+  if (externalClaim) {
+    const creationState = INCOMPLETE_CREATION_COPY[externalClaim.creation_status]
+      || UNKNOWN_CREATION_COPY
+
+    return (
+      <section
+        className={`claim-history-state ${externalClaim.creation_status === 'failed' ? 'is-error' : ''}`.trim()}
+        role={creationState.role}
+        aria-labelledby="claim-creation-state-heading"
+      >
+        <h2 id="claim-creation-state-heading">{creationState.heading}</h2>
+        <p>{creationState.message}</p>
+        {externalClaim.next_step && (
+          <p><strong>Next step:</strong> {readable(externalClaim.next_step)}</p>
+        )}
+        <button className="primary-button" type="button" onClick={onReturnToConversation}>
+          Back to conversation
+        </button>
       </section>
     )
   }

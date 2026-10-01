@@ -204,6 +204,65 @@ describe('AgreementConfirmationPanel', () => {
     expect(screen.getAllByText('Completed')).toHaveLength(2)
   })
 
+  it.each([
+    [
+      'pending',
+      'Claim submission is still processing',
+      'Northwind has not confirmed that your claim was created yet.',
+      'Check the existing submission before trying again.',
+      'status',
+    ],
+    [
+      'failed',
+      "Your claim hasn't been created",
+      'The claim service did not create your claim.',
+      'Contact Northwind support to continue.',
+      'alert',
+    ],
+  ])('does not render a success receipt for a %s creation result', (
+    creationStatus,
+    heading,
+    message,
+    nextStep,
+    role,
+  ) => {
+    const onReturnToConversation = vi.fn()
+
+    render(
+      <AgreementConfirmationPanel
+        claim={{
+          ...claim,
+          external_claim: {
+            claim_number: null,
+            creation_status: creationStatus,
+            route: 'Claims intake review',
+            next_step: nextStep,
+            expected_by: null,
+            created_at: null,
+          },
+        }}
+        busy={false}
+        status="idle"
+        onSubmit={vi.fn()}
+        onReviewInformation={vi.fn()}
+        onReturnToConversation={onReturnToConversation}
+      />,
+    )
+
+    const state = screen.getByRole(role)
+    expect(within(state).getByRole('heading', { name: heading })).toBeTruthy()
+    expect(within(state).getByText(message, { exact: false })).toBeTruthy()
+    expect(within(state).getByText(nextStep, { exact: false })).toBeTruthy()
+    expect(
+      screen.queryByRole('heading', { name: 'Your claim has been submitted' }),
+    ).toBeNull()
+    expect(screen.queryByText('Claim submitted')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Submit claim' })).toBeNull()
+
+    fireEvent.click(within(state).getByRole('button', { name: 'Back to conversation' }))
+    expect(onReturnToConversation).toHaveBeenCalledTimes(1)
+  })
+
   it('supports creation retry without recording another acceptance', () => {
     const onSubmit = vi.fn()
 
