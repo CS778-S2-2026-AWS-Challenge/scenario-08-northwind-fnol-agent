@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-01.2'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-01.3'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -178,6 +178,24 @@ def _input(
 WORKBENCH_ACTION_REGISTRY = {
     item.action_code: item
     for item in (
+        RegisteredWorkbenchAction(
+            'ownership.accept_claim',
+            WorkbenchActionTargetType.CLAIM,
+            'Take Claim',
+            'Take responsibility for an unassigned, created Claim.',
+            WorkbenchActionPermission.ANY_STAFF,
+            ConfirmationLevel.EXPLICIT,
+            'Take this Claim as its primary owner?',
+            ('ownership.assign', 'claim.revision.advance', 'audit.append'),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'CLAIM_ALREADY_ASSIGNED',
+                'CLAIM_NOT_READY_FOR_ACCEPTANCE',
+                'STAFF_NOT_AVAILABLE',
+                'REVISION_CONFLICT',
+                'IDEMPOTENCY_CONFLICT',
+            ),
+        ),
         RegisteredWorkbenchAction(
             'external.accept_review',
             WorkbenchActionTargetType.EXTERNAL_TASK,

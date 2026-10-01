@@ -238,6 +238,7 @@ class WorkbenchReservation(ContractModel):
 
 class WorkbenchOwnershipProjection(ContractModel):
     state: OwnershipState
+    accept_claim: bool = False
     primary_assignee: WorkbenchStaffSummary | None = None
     coworkers: list[WorkbenchStaffSummary] = Field(default_factory=list)
     coworker_count: int = Field(default=0, ge=0)

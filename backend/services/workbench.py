@@ -8,6 +8,8 @@ from typing import Any, TypeVar
 from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
+from backend.domain.claim_ownership import claim_acceptance_eligible
+from backend.domain.claim_ownership import completed_fnol as claim_decision_eligible
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
     ExternalCapabilityProvenance,
@@ -59,7 +61,6 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     SupportNeed,
-    TerminalDispositionReasonCode,
     TerminalDispositionValue,
     WorkbenchHandoff,
     WorkbenchSession,
@@ -405,6 +406,14 @@ def _ownership(
         access = CurrentStaffAccess.READ_ONLY
     return WorkbenchOwnershipProjection(
         state=OwnershipState.ASSIGNED if assignee_id else OwnershipState.UNASSIGNED,
+        accept_claim=(
+            principal.actor_type == 'staff'
+            and 'workbench:write' in principal.scopes
+            and 'claims_professional' in principal.roles
+            and claim_acceptance_eligible(claim, active_handoffs)
+            and (presence := repository.get_staff_presence(principal.subject)) is not None
+            and presence.is_claimable(now_utc())
+        ),
         primary_assignee=(
             WorkbenchStaffSummary(staff_id=assignee_id) if assignee_id is not None else None
         ),
@@ -1466,18 +1475,6 @@ def _allowed_actions(
     return actions
 
 
-def claim_decision_eligible(claim: WorkingClaim) -> bool:
-    terminal = claim.terminal_disposition
-    return bool(
-        claim.claim_state.workflow_state is WorkflowState.CREATED
-        and claim.external_claim is not None
-        and claim.external_claim.creation_status is ClaimCreationStatus.CREATED
-        and terminal is not None
-        and terminal.value is TerminalDispositionValue.COMPLETED
-        and terminal.reason_code is TerminalDispositionReasonCode.CLAIM_CREATED
-    )
-
-
 def _claim_decision(
     repository: PersistenceRepository,
     claim: WorkingClaim,
@@ -1734,7 +1731,10 @@ def _primary_action(
     )
     if reopen is not None:
         return reopen
-    preferred: list[tuple[str, str | None]] = [('claim.record_decision', None)]
+    preferred: list[tuple[str, str | None]] = [
+        ('ownership.accept_claim', None),
+        ('claim.record_decision', None),
+    ]
     if active_handoffs:
         handoff = active_handoffs[-1]
         preferred.append(
@@ -1984,6 +1984,17 @@ def _build_projection(
             retention is not None and retention.status is RetentionOperationStatus.COMPLETED
         ),
     )
+    if ownership.accept_claim:
+        allowed_actions.insert(
+            0,
+            _registered_action(
+                'ownership.accept_claim',
+                claim.claim_id,
+                claim.revision,
+                source_refs=[claim.claim_id],
+                result_state='pending_confirmation',
+            ),
+        )
     primary_action = _primary_action(
         allowed_actions,
         active_handoffs,
@@ -2196,6 +2207,7 @@ def list_workbench_claims(
     updated_after: datetime | None = None,
     limit: int = 25,
     cursor: str | None = None,
+    ownership: str | None = None,
 ) -> WorkbenchClaimListResponse:
     require_staff_capability(principal, 'workbench:read')
     for field_name, value in (
@@ -2226,6 +2238,10 @@ def list_workbench_claims(
             ) from error
     filtered_items: list[WorkbenchClaimListItem] = []
     for claim in repository.list_claims_internal():
+        if ownership == 'unassigned' and not claim_acceptance_eligible(
+            claim, repository.list_handoffs(claim.claim_id, claim.customer_id)
+        ):
+            continue
         projected = _build_projection(repository, principal, claim, include_detail=False)
         assert isinstance(projected, WorkbenchClaimListItem)
         if workflow_state is not None and projected.workflow_state is not workflow_state:
@@ -2258,7 +2274,11 @@ def list_workbench_claims(
             items=[],
             limitation='Queue totals are temporarily unavailable.',
         )
-    items = [item for item in filtered_items if _matches_view(repository, item, view)]
+    items = [
+        item
+        for item in filtered_items
+        if (ownership == 'unassigned' and view is None) or _matches_view(repository, item, view)
+    ]
     items.sort(
         key=lambda item: (
             item.priority_projection.rank,
