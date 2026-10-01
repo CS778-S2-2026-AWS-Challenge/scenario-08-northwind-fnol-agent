@@ -57,6 +57,7 @@ them:
 - [Recovery Policy Registry](design/agent-runtime/recovery-policy-registry.md)
 - [FNOL Agent Behaviour Catalogue](agent-behaviour-catalogue.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
+- [Claim Decision Frontend Alignment](claim-decision-frontend-alignment.md)
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Control Plane Roles and Publication Lifecycle](control-plane-governance.md)
 - [First Control Plane Interface Contract](control-plane-interface.md)
