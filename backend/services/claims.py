@@ -17,6 +17,7 @@ from backend.domain.models import (
     AgentAction,
     AssertionRelation,
     ClaimantClaim,
+    ClaimantClaimDecision,
     ClaimantContentsItem,
     ClaimantHandoff,
     ClaimantIncompleteContext,
@@ -348,6 +349,7 @@ def claimant_claim(
     )
     motor_other_driver = repository.get_motor_other_driver(claim.claim_id, claim.customer_id)
     policyholder, driver, witnesses = project_claim_participants(claim)
+    claim_decision = _claimant_claim_decision(repository, claim)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -365,6 +367,7 @@ def claimant_claim(
         ),
         evidence_summary=evidence_summary_for(claimant_evidence),
         payment_destination_id=claim.payment_destination_id,
+        claim_decision=claim_decision,
         submission_agreement=(
             current_submission_agreement() if next_step.status == 'agreement_required' else None
         ),
@@ -392,11 +395,28 @@ def _claim_list_item(
         incident_type=claim.incident_type,
         workflow_state=claim.claim_state.workflow_state,
         external_claim=claim.external_claim,
+        claim_decision=_claimant_claim_decision(repository, claim),
         customer_next_step=claim.customer_next_step,
         incomplete_context=_claimant_incomplete_context(repository, claim),
         created_at=claim.created_at,
         updated_at=claim.updated_at,
         can_resume=claim.customer_next_step.can_resume,
+    )
+
+
+def _claimant_claim_decision(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> ClaimantClaimDecision | None:
+    if claim.claim_decision_id is None:
+        return None
+    decision = repository.get_claim_decision(claim.claim_id, claim.claim_decision_id)
+    if decision is None or decision.claimant_explanation is None:
+        raise RuntimeError('The Claim decision reference is inconsistent.')
+    return ClaimantClaimDecision(
+        decision=decision.decision,
+        decided_at=decision.decided_at,
+        claimant_explanation=decision.claimant_explanation,
     )
 
 

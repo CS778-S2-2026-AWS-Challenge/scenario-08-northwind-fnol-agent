@@ -552,6 +552,7 @@ def submit_staff_agent_message(
                 ],
             }
             for definition in WORKBENCH_ACTION_REGISTRY.values()
+            if definition.action_code != 'claim.record_decision'
         ),
     )
     result = provider.respond(agent_context)

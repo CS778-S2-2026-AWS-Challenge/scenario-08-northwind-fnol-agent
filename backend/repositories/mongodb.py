@@ -68,6 +68,7 @@ from backend.domain.models import (
     BranchEvaluationStatus,
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
+    ClaimDecisionRecord,
     ContentsItemEvidenceAssociation,
     CustomerUpdateRecord,
     EvidenceClaimLink,
@@ -174,6 +175,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_claim_decision_mutation_audit,
     validate_handoff_mutation_audit,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
@@ -296,6 +298,7 @@ IMMUTABLE_CHILD_RECORD_KINDS = frozenset(
         'runtime_work_item',
         'staff_agent_execution',
         'claim_asset_snapshot',
+        'claim_decision',
         'motor_other_driver',
         'contents_item_evidence_association',
     }
@@ -1727,6 +1730,7 @@ class MongoDBRepository:
             or claim.active_session_id != session.session_id
             or session.status is not SessionStatus.ACTIVE
             or session.context_revision != claim.revision
+            or claim.claim_decision_id is not None
         ):
             raise KeyError(claim.claim_id)
         self._atomic(lambda mongo_session: self._create_claim(claim, session, mongo_session))
@@ -5299,6 +5303,10 @@ class MongoDBRepository:
             'signal_decision', SignalDecisionRecord, {'claim_id': claim_id}, 'created_at'
         )
 
+    def get_claim_decision(self, claim_id: str, decision_id: str) -> ClaimDecisionRecord | None:
+        record = self._get('claim_decision', decision_id, ClaimDecisionRecord)
+        return record if record is not None and record.claim_id == claim_id else None
+
     def list_collaboration_requests(self, claim_id: str) -> list[ClaimCollaborationRequest]:
         return self._list(
             'collaboration_request',
@@ -5387,6 +5395,7 @@ class MongoDBRepository:
         staff_action: StaffActionRecord | None = None,
         customer_update: CustomerUpdateRecord | None = None,
         signal_decision: SignalDecisionRecord | None = None,
+        claim_decision: ClaimDecisionRecord | None = None,
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
@@ -5400,9 +5409,17 @@ class MongoDBRepository:
             )
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
-        supplied = (staff_action, customer_update, signal_decision, handoff, message)
+        supplied = (
+            staff_action,
+            customer_update,
+            signal_decision,
+            claim_decision,
+            handoff,
+            message,
+        )
         try:
             validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+            validate_claim_decision_mutation_audit(claim, claim_decision, idempotency, audit_event)
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         if (
@@ -5410,6 +5427,15 @@ class MongoDBRepository:
             or not any(item is not None for item in supplied)
             or any(item is not None and item.claim_id != claim.claim_id for item in supplied)
             or idempotency.claim_id != claim.claim_id
+            or (
+                claim_decision is not None
+                and (
+                    claim_decision.decided_by != idempotency.actor_id
+                    or claim_decision.decision_id != idempotency.claim_decision_id
+                    or claim.claim_decision_id != claim_decision.decision_id
+                    or claim_decision.source_claim_revision != expected_revision
+                )
+            )
             or (
                 message is not None
                 and (
@@ -5427,6 +5453,8 @@ class MongoDBRepository:
             records.append(('customer_update', customer_update.update_id, customer_update))
         if signal_decision is not None:
             records.append(('signal_decision', signal_decision.signal_decision_id, signal_decision))
+        if claim_decision is not None:
+            records.append(('claim_decision', claim_decision.decision_id, claim_decision))
         if handoff is not None:
             records.append(('handoff', handoff.handoff_id, handoff))
         if message is not None:
@@ -6286,7 +6314,16 @@ class MongoDBRepository:
                 raise IdempotencyConflict(idempotency.key)
         else:
             self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
-        self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+        claim_decision_id = next(
+            (identifier for kind, identifier, _record in records if kind == 'claim_decision'),
+            None,
+        )
+        self._ensure_claim_revision(
+            claim,
+            expected_revision,
+            mongo_session=mongo_session,
+            new_claim_decision_id=claim_decision_id,
+        )
         if required_staff_id is not None:
             presence = self._collection.find_one(
                 {
@@ -6532,6 +6569,7 @@ class MongoDBRepository:
         expected_revision: int,
         *,
         mongo_session: Any,
+        new_claim_decision_id: str | None = None,
     ) -> None:
         current = self._collection.find_one(
             {
@@ -6540,13 +6578,21 @@ class MongoDBRepository:
                 'customer_id': claim.customer_id,
                 'revision': expected_revision,
             },
-            projection={'revision': 1, 'active_session_id': 1},
+            projection={'revision': 1, 'active_session_id': 1, 'claim_decision_id': 1},
             session=mongo_session,
         )
         if current is None:
             self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
             return
         if current.get('active_session_id') != claim.active_session_id:
+            raise KeyError(claim.claim_id)
+        if new_claim_decision_id is None:
+            if current.get('claim_decision_id') != claim.claim_decision_id:
+                raise KeyError(claim.claim_id)
+        elif (
+            current.get('claim_decision_id') is not None
+            or claim.claim_decision_id != new_claim_decision_id
+        ):
             raise KeyError(claim.claim_id)
 
     def _replace_claim_revision(
