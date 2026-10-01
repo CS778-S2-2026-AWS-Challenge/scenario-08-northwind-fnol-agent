@@ -235,5 +235,7 @@ __marimo__/
 # tests/corpus/tools/fetch_corpus.py; working files and the image cache stay local.
 tests/corpus/controlled/*/cases/
 tests/corpus/controlled/*/sampling.json
+tests/corpus/controlled/.*.incoming/
+tests/corpus/controlled/.*.previous/
 tests/corpus/work/
 tests/corpus/tools/.image-cache/
