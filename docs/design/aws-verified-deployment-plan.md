@@ -213,7 +213,9 @@ against one pinned application commit. The browser-reachable MinIO signing
 origin and persistent SQLite identity/Control Plane volume are also required
 by the runtime contract; the synthetic CloudFront API check proves neither.
 No data migration or application-code change was performed during this
-preflight. Issue #1139 remains incomplete.
+preflight. Issue #1139 is closed for the accepted bounded infrastructure
+validation. Issue #1163 owns the remaining full application activation gates
+below; those gates remain unverified and block deployment freeze.
 
 1. Launch one smallest suitable EC2 instance without an IAM role and attach an
    Elastic IP.
