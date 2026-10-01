@@ -94,10 +94,16 @@ gh auth login
 python -m tests.corpus.tools.fetch_corpus
 ```
 
-The script downloads the asset named in `release.json` and checks its SHA-256. It extracts the
-asset to a temporary folder and checks every file against the committed manifest. Only when every
-hash matches does it install the files under `tests/corpus/controlled/`; on any mismatch it stops
-and changes nothing. The fetched folders are ignored by Git.
+The script downloads the asset named in `release.json` and checks its SHA-256. Before extracting
+anything, it checks that the asset holds exactly the files the committed manifests list, plus the
+manifests: a folder entry, or an extra, missing or repeated file stops it, and so does a manifest
+path that is not a plain relative path. It then extracts the asset to a temporary folder and
+checks every file's SHA-256 against the manifest. On any mismatch it stops and changes nothing.
+Installing has two phases: every corpus is first staged beside its folder under
+`tests/corpus/controlled/`, and then the staged files are swapped in. The committed manifests are
+never replaced. If a swap step fails or is interrupted, the previous files are put back; if even
+that fails, the script keeps the backup folder that holds them, names it, and refuses to run again
+until it is dealt with. The fetched folders are ignored by Git.
 
 Rebuilding packs from their specs is for making the next version, not for using this one.
 `tests/corpus/tools/build_pack.py` needs the libraries in `tests/corpus/tools/requirements.txt`
