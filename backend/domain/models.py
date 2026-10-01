@@ -1122,6 +1122,7 @@ class WorkingClaim(ContractModel):
     assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
     active_session_id: str | None = None
     payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
+    claim_decision_id: str | None = Field(default=None, pattern=r'^cdec_[a-f0-9]{20}$')
     agreement_acceptances: list[ClaimAgreementAcceptance] = Field(default_factory=list)
     external_claim: ExternalClaimResult | None = None
     external_claim_source_revision: int | None = Field(default=None, ge=1)
@@ -2252,6 +2253,38 @@ class SignalDecisionResponse(ContractModel):
     revision: int = Field(ge=1)
 
 
+class ClaimDecisionValue(str, Enum):
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+
+
+class ClaimDecisionRequest(ContractModel):
+    decision: ClaimDecisionValue
+    internal_note: StrippedNonEmptyText | None = Field(default=None, max_length=1000)
+    claimant_explanation: StrippedNonEmptyText | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode='after')
+    def require_rejection_explanation(self) -> 'ClaimDecisionRequest':
+        if self.decision is ClaimDecisionValue.REJECTED and self.claimant_explanation is None:
+            raise ValueError('A rejected Claim decision requires a claimant-safe explanation.')
+        return self
+
+
+class ClaimDecisionRecord(ClaimDecisionRequest):
+    claimant_explanation: StrippedNonEmptyText = Field(max_length=1000)
+    decision_id: str = Field(pattern=r'^cdec_[a-f0-9]{20}$')
+    claim_id: str
+    decided_by: str = Field(min_length=1, max_length=100)
+    decided_at: datetime
+    source_claim_revision: int = Field(ge=1)
+
+
+class ClaimantClaimDecision(ContractModel):
+    decision: ClaimDecisionValue
+    decided_at: datetime
+    claimant_explanation: str = Field(min_length=1, max_length=1000)
+
+
 class WorkbenchHandoff(ContractModel):
     """Staff-only handoff projection including the complete transfer packet."""
 
@@ -2709,6 +2742,7 @@ class ClaimantClaim(ContractModel):
     motor_other_driver: MotorOtherDriverProjection | None = None
     evidence_summary: EvidenceSummary
     payment_destination_id: str | None = Field(default=None, pattern=r'^pyd_[a-f0-9]{20}$')
+    claim_decision: ClaimantClaimDecision | None = None
     submission_agreement: ClaimSubmissionAgreement | None = None
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None
@@ -2740,6 +2774,7 @@ class ClaimListItem(ContractModel):
     incident_type: str | None = None
     workflow_state: WorkflowState
     external_claim: ExternalClaimResult | None = None
+    claim_decision: ClaimantClaimDecision | None = None
     customer_next_step: CustomerNextStep
     incomplete_context: ClaimantIncompleteContext | None = None
     created_at: datetime

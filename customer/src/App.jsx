@@ -556,6 +556,51 @@ function protectedAccountPageForPath(pathname) {
   return null
 }
 
+function isDefinitiveAgreementSubmissionRefusal(requestError) {
+  return requestError instanceof ApiRequestError
+    && (requestError.status === 409 || requestError.status === 422)
+}
+
+function agreementSubmissionFailure(requestError, stage) {
+  const action = stage === 'acceptance'
+    ? 'recording your agreement'
+    : 'submitting your Claim'
+
+  if (requestError instanceof ApiRequestError && requestError.code === 'NETWORK_ERROR') {
+    return {
+      kind: 'network',
+      title: 'Submission interrupted',
+      message: `Northwind could not be reached while ${action}, so no result was received. Check your connection and try again. This screen does not show your Claim as created.`,
+    }
+  }
+
+  if (isDefinitiveAgreementSubmissionRefusal(requestError)) {
+    const reason = requestError.message || 'Northwind refused this request.'
+    return {
+      kind: 'refused',
+      title: 'Submission was not accepted',
+      message: `${reason} Review the latest claim information and try again. This screen does not show your Claim as created.`,
+    }
+  }
+
+  return {
+    kind: 'unknown',
+    title: 'Submission result is unclear',
+    message: `Northwind returned a result that does not confirm whether ${action} completed. Do not assume your Claim was created. Try again; the same submission identity will be reused so Northwind can reconcile the attempt without creating a duplicate.`,
+  }
+}
+
+function agreementSubmissionReconciliationFailure(stage) {
+  const action = stage === 'acceptance'
+    ? 'recording your agreement'
+    : 'submitting your Claim'
+  return {
+    kind: 'unknown',
+    title: 'Submission result is unclear',
+    message: `Northwind did not confirm whether ${action} completed, and the current Claim status could not confirm the result. Do not assume your Claim was created. Try again; the same submission identity will be reused so Northwind can reconcile the attempt without creating a duplicate.`,
+  }
+}
+
 function App() {
   const initialProfileSection = profileSectionFromPath(globalThis.location?.pathname)
   const initialDraftWorkspaceActive = globalThis.location?.pathname === '/claims/new'
@@ -594,6 +639,7 @@ function App() {
   const [status, setStatus] = useState('idle')
   const [autoFillBusy, setAutoFillBusy] = useState(false)
   const [error, setError] = useState('')
+  const [agreementSubmissionError, setAgreementSubmissionError] = useState(null)
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
@@ -2797,10 +2843,14 @@ function App() {
     if (!canAccept && !alreadyAccepted) return
 
     setError('')
+    setAgreementSubmissionError(null)
     setStatus('creating-claim')
 
+    let submissionStage = canAccept ? 'acceptance' : 'creation'
+    let submissionRevision = claim.revision
+
     try {
-      let revision = claim.revision
+      let revision = submissionRevision
 
       if (canAccept) {
         const agreement = claim.submission_agreement
@@ -2828,6 +2878,7 @@ function App() {
         })
 
         revision = accepted.revision
+        submissionRevision = accepted.revision
 
         setClaim((current) => ({
           ...current,
@@ -2837,6 +2888,7 @@ function App() {
         }))
         setNextStep(accepted.customer_next_step)
         pendingAgreementAcceptance.current = null
+        submissionStage = 'creation'
       }
 
       if (!pendingClaimCreation.current) {
@@ -2861,8 +2913,53 @@ function App() {
       setNextStep(response.customer_next_step)
       pendingClaimCreation.current = null
       pendingAgreementAcceptance.current = null
+      setAgreementSubmissionError(null)
       setStatus('idle')
     } catch (requestError) {
+      let visibleFailure = agreementSubmissionFailure(requestError, submissionStage)
+
+      if (!isDefinitiveAgreementSubmissionRefusal(requestError)) {
+        try {
+          const currentClaim = await getClaim(claim.claim_id)
+          const snapshotApplied = applyClaimSnapshot(currentClaim, {
+            minimumRevision: submissionRevision,
+          })
+
+          if (!snapshotApplied) {
+            visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+          } else if (currentClaim.external_claim?.creation_status === 'created') {
+            pendingClaimCreation.current = null
+            pendingAgreementAcceptance.current = null
+            setAgreementSubmissionError(null)
+            setError('')
+            setStatus('idle')
+            return
+          } else if (
+            submissionStage === 'acceptance'
+            && currentClaim.primary_action?.action_code === 'claimant.create_claim'
+          ) {
+            pendingAgreementAcceptance.current = null
+            setAgreementSubmissionError(null)
+            setError('')
+            setStatus('idle')
+            return
+          } else {
+            const expectedPendingAction = submissionStage === 'acceptance'
+              ? 'claimant.review_agreement'
+              : 'claimant.create_claim'
+            if (currentClaim.primary_action?.action_code !== expectedPendingAction) {
+              visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+            }
+          }
+        } catch {
+          visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+        }
+      }
+
+      setAgreementSubmissionError({
+        claimId: claim.claim_id,
+        ...visibleFailure,
+      })
       showError(requestError)
     }
   }
@@ -4159,18 +4256,26 @@ function App() {
                 )
               )}
               {workspaceView === 'agreement' && (
-                <AgreementConfirmationPanel
-                  claim={claim}
-                  busy={isBusy}
-                  status={status}
-                  onSubmit={submitAgreementAndCreate}
+                <>
+                  {agreementSubmissionError?.claimId === claim?.claim_id && (
+                    <div className="claim-history-state is-error" role="alert">
+                      <h2>{agreementSubmissionError.title}</h2>
+                      <p>{agreementSubmissionError.message}</p>
+                    </div>
+                  )}
+                  <AgreementConfirmationPanel
+                    claim={claim}
+                    busy={isBusy}
+                    status={status}
+                    onSubmit={submitAgreementAndCreate}
                   onReviewInformation={() => {
                     setDetailsOpen(true)
                     setDetailsTab('summary')
                     setWorkspaceView('chat')
                   }}
-                  onReturnToConversation={() => setWorkspaceView('chat')}
-                />
+                    onReturnToConversation={() => setWorkspaceView('chat')}
+                  />
+                </>
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />

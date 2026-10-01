@@ -67,6 +67,7 @@ from backend.domain.models import (
     BranchEvaluationStatus,
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
+    ClaimDecisionRecord,
     ContentsItemEvidenceAssociation,
     CustomerUpdateRecord,
     EvidenceClaimLink,
@@ -187,6 +188,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_claim_decision_mutation_audit,
     validate_handoff_mutation_audit,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
@@ -239,6 +241,7 @@ class FixtureRepository(PersistenceRepository):
         self._staff_actions: dict[str, StaffActionRecord] = {}
         self._customer_updates: dict[str, CustomerUpdateRecord] = {}
         self._signal_decisions: dict[str, SignalDecisionRecord] = {}
+        self._claim_decisions: dict[str, ClaimDecisionRecord] = {}
         self._collaboration_requests: dict[str, ClaimCollaborationRequest] = {}
         self._claim_coworkers: dict[str, ClaimCoworkerRecord] = {}
         self._handoffs: dict[str, HandoffRecord] = {}
@@ -2350,6 +2353,7 @@ class FixtureRepository(PersistenceRepository):
             'staff_actions': len(self._staff_actions),
             'customer_updates': len(self._customer_updates),
             'signal_decisions': len(self._signal_decisions),
+            'claim_decisions': len(self._claim_decisions),
             'collaboration_requests': len(self._collaboration_requests),
             'claim_coworkers': len(self._claim_coworkers),
             'handoffs': len(self._handoffs),
@@ -2394,6 +2398,7 @@ class FixtureRepository(PersistenceRepository):
         self._staff_actions.clear()
         self._customer_updates.clear()
         self._signal_decisions.clear()
+        self._claim_decisions.clear()
         self._collaboration_requests.clear()
         self._claim_coworkers.clear()
         self._handoffs.clear()
@@ -2535,6 +2540,8 @@ class FixtureRepository(PersistenceRepository):
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         with self._claim_mutation_lock:
+            if claim.claim_decision_id is not None:
+                raise KeyError(claim.claim_id)
             existing_claim = self._claims.get(claim.claim_id)
             existing_session = self._sessions.get(session.session_id)
             if existing_claim is not None or existing_session is not None:
@@ -2816,6 +2823,7 @@ class FixtureRepository(PersistenceRepository):
                 self._staff_actions,
                 self._customer_updates,
                 self._signal_decisions,
+                self._claim_decisions,
                 self._collaboration_requests,
                 self._claim_coworkers,
                 self._handoffs,
@@ -2871,6 +2879,7 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         *,
         allow_active_session_change: bool = False,
+        new_claim_decision_id: str | None = None,
     ) -> WorkingClaim:
         """Validate the shared Claim State precondition before any child write."""
         self._ensure_claim_access_open(claim.claim_id)
@@ -2884,6 +2893,14 @@ class FixtureRepository(PersistenceRepository):
         if (
             not allow_active_session_change
             and stored_claim.active_session_id != claim.active_session_id
+        ):
+            raise KeyError(claim.claim_id)
+        if new_claim_decision_id is None:
+            if stored_claim.claim_decision_id != claim.claim_decision_id:
+                raise KeyError(claim.claim_id)
+        elif (
+            stored_claim.claim_decision_id is not None
+            or claim.claim_decision_id != new_claim_decision_id
         ):
             raise KeyError(claim.claim_id)
         return stored_claim
@@ -6756,6 +6773,12 @@ class FixtureRepository(PersistenceRepository):
             key=lambda item: (item.created_at, item.signal_decision_id),
         )
 
+    def get_claim_decision(self, claim_id: str, decision_id: str) -> ClaimDecisionRecord | None:
+        decision = self._claim_decisions.get(decision_id)
+        if decision is None or decision.claim_id != claim_id:
+            return None
+        return deepcopy(decision)
+
     def list_collaboration_requests(self, claim_id: str) -> list[ClaimCollaborationRequest]:
         return sorted(
             [
@@ -6873,6 +6896,7 @@ class FixtureRepository(PersistenceRepository):
         staff_action: StaffActionRecord | None = None,
         customer_update: CustomerUpdateRecord | None = None,
         signal_decision: SignalDecisionRecord | None = None,
+        claim_decision: ClaimDecisionRecord | None = None,
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
@@ -6887,9 +6911,16 @@ class FixtureRepository(PersistenceRepository):
             self._validate_staff_agent_execution_source(staff_agent_execution)
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
-        stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        stored_claim = self._validate_claim_mutation(
+            claim,
+            expected_revision,
+            new_claim_decision_id=(
+                claim_decision.decision_id if claim_decision is not None else None
+            ),
+        )
         try:
             validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
+            validate_claim_decision_mutation_audit(claim, claim_decision, idempotency, audit_event)
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         if required_staff_id is not None:
@@ -6903,9 +6934,18 @@ class FixtureRepository(PersistenceRepository):
                 )
             ):
                 raise KeyError('staff_not_available')
-        if not any((staff_action, customer_update, signal_decision, handoff, message)):
+        if not any(
+            (staff_action, customer_update, signal_decision, claim_decision, handoff, message)
+        ):
             raise KeyError(claim.claim_id)
-        records = (staff_action, customer_update, signal_decision, handoff, message)
+        records = (
+            staff_action,
+            customer_update,
+            signal_decision,
+            claim_decision,
+            handoff,
+            message,
+        )
         active_session_id = claim.active_session_id or ''
         stored_session = self._sessions.get(active_session_id) if message is not None else None
         existing_staff_action = (
@@ -6921,6 +6961,11 @@ class FixtureRepository(PersistenceRepository):
             if signal_decision is not None
             else None
         )
+        existing_claim_decision = (
+            self._claim_decisions.get(claim_decision.decision_id)
+            if claim_decision is not None
+            else None
+        )
         existing_handoff = self._handoffs.get(handoff.handoff_id) if handoff is not None else None
         existing_message = self._messages.get(message.message_id) if message is not None else None
         child_ownership_matches = all(
@@ -6929,6 +6974,7 @@ class FixtureRepository(PersistenceRepository):
                 existing_staff_action,
                 existing_customer_update,
                 existing_signal_decision,
+                existing_claim_decision,
                 existing_handoff,
                 existing_message,
             )
@@ -6951,6 +6997,16 @@ class FixtureRepository(PersistenceRepository):
             )
             and (customer_update is None or customer_update.created_by == idempotency.actor_id)
             and (signal_decision is None or signal_decision.actor_id == idempotency.actor_id)
+            and (
+                claim_decision is None
+                or (
+                    existing_claim_decision is None
+                    and claim_decision.decided_by == idempotency.actor_id
+                    and claim_decision.decision_id == idempotency.claim_decision_id
+                    and claim.claim_decision_id == claim_decision.decision_id
+                    and claim_decision.source_claim_revision == expected_revision
+                )
+            )
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and (
                 message is None
@@ -6997,6 +7053,7 @@ class FixtureRepository(PersistenceRepository):
                 ('staff_action', staff_action is not None),
                 ('customer_update', customer_update is not None),
                 ('signal_decision', signal_decision is not None),
+                ('claim_decision', claim_decision is not None),
                 ('handoff', handoff is not None),
                 ('message', message is not None),
             )
@@ -7030,6 +7087,8 @@ class FixtureRepository(PersistenceRepository):
             self._customer_updates[customer_update.update_id] = deepcopy(customer_update)
         if signal_decision is not None:
             self._signal_decisions[signal_decision.signal_decision_id] = deepcopy(signal_decision)
+        if claim_decision is not None:
+            self._claim_decisions[claim_decision.decision_id] = deepcopy(claim_decision)
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if message is not None:

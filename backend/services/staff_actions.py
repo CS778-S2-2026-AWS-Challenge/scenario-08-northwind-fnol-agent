@@ -14,6 +14,8 @@ from backend.domain.models import (
     AcceptHandoffRequest,
     ActorType,
     AgentAction,
+    ClaimDecisionRecord,
+    ClaimDecisionRequest,
     Coverage,
     CreateStaffActionRequest,
     CreateStaffMessageRequest,
@@ -58,9 +60,14 @@ from backend.repositories.protocols import (
     staff_agent_execution_for,
     with_staff_agent_source,
 )
+from backend.services.claim_decision_audit import build_claim_decision_audit_event
 from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.integrations import reconcile_assessor_routing
-from backend.services.staff_access import ClaimStaffAccess, require_claim_collaborator
+from backend.services.staff_access import (
+    ClaimStaffAccess,
+    claim_staff_access,
+    require_claim_collaborator,
+)
 from backend.services.staff_presence import require_claimable_staff
 from backend.services.support import (
     now_utc,
@@ -69,6 +76,7 @@ from backend.services.support import (
     require_idempotency_key,
 )
 from backend.services.workbench import (
+    claim_decision_eligible,
     require_workbench_action,
     risk_signals,
     workbench_handoff,
@@ -232,6 +240,125 @@ def _handoff(
     if handoff is None:
         raise _not_found('The handoff was not found.')
     return handoff
+
+
+_APPROVAL_EXPLANATION = 'Your claim has been approved.'
+
+
+def decide_claim(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    payload: ClaimDecisionRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> ClaimDecisionRecord:
+    """Create the sole authoritative approval or rejection for a Claim."""
+
+    require_staff_capability(principal, 'workbench:write')
+    if 'claims_professional' not in principal.roles:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='Only a claims professional can decide a Claim.',
+        )
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    route = f'/api/v1/workbench/claims/{claim_id}/decisions'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    if replay is not None:
+        return ClaimDecisionRecord.model_validate(replay)
+
+    claim = _staff_claim(repository, principal, claim_id)
+    if claim.revision != expected:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+    if claim_staff_access(repository, claim, principal) is not ClaimStaffAccess.PRIMARY:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='Only the current primary owner can decide this Claim.',
+        )
+    if claim.claim_decision_id is not None:
+        raise ApiError(
+            status_code=409,
+            code='CLAIM_ALREADY_DECIDED',
+            message='This Claim already has a final decision.',
+        )
+    if not claim_decision_eligible(claim):
+        raise ApiError(
+            status_code=409,
+            code='CLAIM_NOT_READY_FOR_DECISION',
+            message='The Claim must be externally created before it can be decided.',
+        )
+
+    projected_action = require_workbench_action(
+        repository,
+        principal,
+        claim,
+        expected,
+        'claim.record_decision',
+        claim.claim_id,
+    )
+    timestamp = now_utc()
+    decision = ClaimDecisionRecord(
+        decision_id=new_id('cdec'),
+        claim_id=claim.claim_id,
+        decision=payload.decision,
+        internal_note=payload.internal_note,
+        claimant_explanation=(
+            payload.claimant_explanation
+            if payload.claimant_explanation is not None
+            else _APPROVAL_EXPLANATION
+        ),
+        decided_by=principal.subject,
+        decided_at=timestamp,
+        source_claim_revision=expected,
+    )
+    updated = claim.model_copy(
+        update={
+            'claim_decision_id': decision.decision_id,
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+        }
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+        claim_decision_id=decision.decision_id,
+        action_registry_version=projected_action.registry_version,
+        action_code=projected_action.action_code,
+        target_ref=projected_action.target_ref,
+        response_payload=decision.model_dump(mode='json'),
+    )
+    audit_event = build_claim_decision_audit_event(
+        principal=principal,
+        claim=updated,
+        decision=decision,
+        route=route,
+        idempotency_key=key,
+        required_permission=projected_action.action_code,
+        created_at=timestamp,
+    )
+    _save(
+        repository,
+        updated,
+        expected,
+        idempotency,
+        claim_decision=decision,
+        audit_event=audit_event,
+    )
+    return decision
 
 
 def accept_handoff(

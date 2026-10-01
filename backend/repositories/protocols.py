@@ -28,6 +28,7 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     ClaimCollaborationRequest,
     ClaimCoworkerRecord,
+    ClaimDecisionRecord,
     ContentsItemEvidenceAssociation,
     CustomerUpdateRecord,
     EvidenceClaimLink,
@@ -123,6 +124,7 @@ class IdempotencyRecord:
     message_id: str | None = None
     agent_message_id: str | None = None
     decision_id: str | None = None
+    claim_decision_id: str | None = None
     runtime_trace_id: str | None = None
     runtime_result_id: str | None = None
     handoff_id: str | None = None
@@ -207,6 +209,39 @@ def validate_handoff_mutation_audit(
     if audit_event is None:
         raise ValueError('A Handoff mutation requires its atomic audit fact.')
     validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
+
+
+def validate_claim_decision_mutation_audit(
+    claim: WorkingClaim,
+    decision: ClaimDecisionRecord | None,
+    idempotency: IdempotencyRecord,
+    audit_event: AuditEventEnvelope | None,
+) -> None:
+    """Require the immutable audit fact committed with a Claim decision."""
+
+    if decision is None:
+        return
+    if (
+        audit_event is None
+        or decision.claim_id != claim.claim_id
+        or claim.claim_decision_id != decision.decision_id
+        or idempotency.claim_decision_id != decision.decision_id
+        or audit_event.event_type is not AuditEventType.ACTION_COMPLETED
+        or audit_event.outcome is not AuditOutcome.SUCCEEDED
+        or audit_event.subject.subject_type is not AuditSubjectType.CLAIM
+        or audit_event.subject.subject_id != claim.claim_id
+        or audit_event.subject.claim_id != claim.claim_id
+        or audit_event.claim_revision != claim.revision
+        or audit_event.actor.actor_id != idempotency.actor_id
+        or audit_event.idempotency_key != idempotency.key
+        or audit_event.correlation_id != idempotency.key
+        or decision.decision_id not in audit_event.source_refs
+        or audit_event.permission is None
+        or audit_event.permission.required_permission != 'claim.record_decision'
+        or audit_event.permission.outcome is not AuditPermissionOutcome.AUTHORISED
+        or audit_event.visibility not in {AuditVisibility.INTERNAL_ONLY, AuditVisibility.AUDIT_ONLY}
+    ):
+        raise ValueError('The Claim decision audit fact does not match the persisted mutation.')
 
 
 def with_staff_agent_source(
@@ -1742,6 +1777,9 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def list_signal_decisions(self, claim_id: str) -> list[SignalDecisionRecord]:
         raise NotImplementedError
 
+    def get_claim_decision(self, claim_id: str, decision_id: str) -> ClaimDecisionRecord | None:
+        raise NotImplementedError
+
     def list_collaboration_requests(self, claim_id: str) -> list[ClaimCollaborationRequest]:
         raise NotImplementedError
 
@@ -1771,6 +1809,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         staff_action: StaffActionRecord | None = None,
         customer_update: CustomerUpdateRecord | None = None,
         signal_decision: SignalDecisionRecord | None = None,
+        claim_decision: ClaimDecisionRecord | None = None,
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,

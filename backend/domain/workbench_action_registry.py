@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-01.1'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-01.2'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -265,6 +265,47 @@ WORKBENCH_ACTION_REGISTRY = {
                 ),
             ),
             ('customer_next_step.update', 'customer_update.append'),
+        ),
+        RegisteredWorkbenchAction(
+            'claim.record_decision',
+            WorkbenchActionTargetType.CLAIM,
+            'Record Claim decision',
+            'Approve or reject this externally created Claim once.',
+            WorkbenchActionPermission.PRIMARY_OWNER,
+            ConfirmationLevel.HIGH_IMPACT,
+            'This final Claim decision cannot be changed in this version.',
+            ('claim_decision.append', 'claim.revision.advance', 'audit.append'),
+            (
+                _input(
+                    'decision',
+                    'Decision',
+                    WorkbenchActionInputControl.SELECT,
+                    choices=(('approved', 'Approve'), ('rejected', 'Reject')),
+                ),
+                _input(
+                    'claimant_explanation',
+                    'Claimant explanation',
+                    WorkbenchActionInputControl.TEXTAREA,
+                    required=False,
+                    required_when=('decision', 'rejected'),
+                ),
+                _input(
+                    'internal_note',
+                    'Internal note',
+                    WorkbenchActionInputControl.TEXTAREA,
+                    required=False,
+                ),
+            ),
+            ('claim_decision.update',),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'CLAIM_ALREADY_DECIDED',
+                'CLAIM_NOT_READY_FOR_DECISION',
+                'IDEMPOTENCY_CONFLICT',
+                'RESOURCE_NOT_FOUND',
+                'REVISION_CONFLICT',
+                'VALIDATION_ERROR',
+            ),
         ),
         RegisteredWorkbenchAction(
             'signal.record_decision',

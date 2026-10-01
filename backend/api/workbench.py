@@ -20,6 +20,8 @@ from backend.domain.models import (
     AbandonClaimRequest,
     AcceptHandoffRequest,
     AgentAction,
+    ClaimDecisionRecord,
+    ClaimDecisionRequest,
     CollaborationMutationResponse,
     CreateCoworkRequest,
     CreateStaffActionRequest,
@@ -85,6 +87,7 @@ from backend.services.staff_actions import (
     accept_external_review,
     accept_handoff,
     create_staff_action,
+    decide_claim,
     reconcile_external_response,
     resolve_handoff,
     send_staff_message,
@@ -787,6 +790,29 @@ def update_action(
 ) -> StaffActionMutationResponse:
     return update_staff_action(
         repository_for(request), principal, claim_id, action_id, payload, idempotency_key, if_match
+    )
+
+
+@router.post(
+    '/{claim_id}/decisions',
+    response_model=ClaimDecisionRecord,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_claim_decision(
+    claim_id: str,
+    payload: ClaimDecisionRequest,
+    request: Request,
+    principal: Principal = Depends(require_workbench_write),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimDecisionRecord:
+    return decide_claim(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
     )
 
 

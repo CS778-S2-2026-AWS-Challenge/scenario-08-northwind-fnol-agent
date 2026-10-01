@@ -713,6 +713,7 @@ Examples use readable prefixes, but clients MUST treat all identifiers as opaque
 | External task | `tsk_01J4Y7VZ82` |
 | External request | `erq_4d29a6dbafdf5ed57152f15c` |
 | Decision | `dec_01J4Y7W90S` |
+| Claim decision | `cdec_5a4c0ef19dd8ad4470a1` |
 | Handoff | `hnd_01J4Y7XG2C` |
 | Signal | `sig_01J4Y7Z0EH` |
 | Staff action | `act_01J4Y80B7D` |
@@ -2840,6 +2841,7 @@ item, signal, or external task exists.
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
 | `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/accept-review` | Accept a projected external-result or terminal-failure review |
 | `POST` | `/workbench/claims/{claim_id}/external-tasks/{task_id}/reconcile` | Reconcile one projected unknown external outcome without resubmitting it |
+| `POST` | `/workbench/claims/{claim_id}/decisions` | Record the sole final staff approval or rejection |
 | `POST` | `/workbench/claims/{claim_id}/signals/{signal_id}/decisions` | Decide an internal signal |
 | `POST` | `/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` | Accept a handoff |
 | `POST` | `/workbench/claims/{claim_id}/messages` | Send a persisted claimant-visible staff message |
@@ -3480,6 +3482,59 @@ this `action_id`. For completion, outcome, reason codes, source refs, state chan
 party, and related refs must equal the registered fields projected in `payload_defaults`; only
 projected input fields such as summaries and status may be supplied by the operator. Response `200`
 returns the action, resulting claim revision, and customer update when created.
+
+### `POST /api/v1/workbench/claims/{claim_id}/decisions`
+
+Creates the sole authoritative Claim-level approval or rejection. This is distinct from an Agent
+decision, review-signal decision, FNOL terminal disposition, and payment or settlement. The caller
+must be an authenticated `claims_professional` with `workbench:write`, must be the Claim's current
+primary owner, and must resolve the exact non-blocked `claim.record_decision` action. The request
+requires `Idempotency-Key` and numeric Claim `If-Match` headers.
+
+```json
+{
+  "decision": "rejected",
+  "claimant_explanation": "The policy does not cover this loss.",
+  "internal_note": "The exclusion was verified against the applicable policy wording."
+}
+```
+
+`decision` is exactly `approved` or `rejected`. Rejection requires a non-empty
+`claimant_explanation`; approval uses `Your claim has been approved.` when the field is omitted.
+`internal_note` is optional and staff-only. The request cannot supply `decision_id`, `claim_id`,
+`decided_by`, timestamps, or revision authority because unknown fields are rejected and those
+values are server-derived.
+
+The Claim is eligible only when `workflow_state=created`, its external Claim creation status is
+`created`, and its terminal disposition is `completed / CLAIM_CREATED`. Response `201` returns the
+authoritative resource directly:
+
+```json
+{
+  "decision": "rejected",
+  "internal_note": "The exclusion was verified against the applicable policy wording.",
+  "claimant_explanation": "The policy does not cover this loss.",
+  "decision_id": "cdec_5a4c0ef19dd8ad4470a1",
+  "claim_id": "clm_01J4Y7Q2AW",
+  "decided_by": "stf_01J4Y82HDS",
+  "decided_at": "2026-10-01T10:00:00Z",
+  "source_claim_revision": 8
+}
+```
+
+The Claim reference, immutable decision record, actor-scoped idempotency response, internal
+append-only audit fact, and one role-safe realtime event are one Fixture lock or MongoDB
+transaction. An exact replay returns the original resource without another revision or event.
+Reusing the key with another body returns `409 IDEMPOTENCY_CONFLICT`. A stale first writer returns
+`409 REVISION_CONFLICT`; a request based on the current revision after a decision exists returns
+`409 CLAIM_ALREADY_DECIDED`. An otherwise ineligible Claim returns
+`409 CLAIM_NOT_READY_FOR_DECISION`.
+
+Claimant Claim detail and list projections expose only `decision`, `decided_at`, and
+`claimant_explanation`. They never expose the actor or internal note. Authorised Workbench detail
+exposes the full record. Ordinary Claim, WorkItem, handoff, signal, and Agent mutations preserve
+the immutable decision reference and cannot create, replace, or clear it. Approval records no
+amount and triggers no payment, settlement, reversal, appeal, or provider side effect.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/signals/{signal_id}/decisions`
 
@@ -4481,6 +4536,8 @@ All errors use one envelope:
 | `PAYMENT_DESTINATION_STATE_CONFLICT` | `409` | Common designation targeted an inactive Payment Destination |
 | `SESSION_NOT_ACTIVE` | `409` | Session is expired or already revoked |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
+| `CLAIM_ALREADY_DECIDED` | `409` | A final Claim decision already exists |
+| `CLAIM_NOT_READY_FOR_DECISION` | `409` | The external Claim creation contract is not complete |
 | `DEMO_SEED_REQUIRES_EMPTY_QUEUE` | `409` | Controlled demo seed requires an empty Claim queue |
 | `DEMO_CLAIMANT_UNAVAILABLE` | `409` | Synthetic claimant identity is unavailable for a controlled demo seed |
 | `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |

@@ -37,6 +37,7 @@ from backend.domain.models import (
     AssessorRoutingStatus,
     ClaimCollaborationRequest,
     ClaimCreationStatus,
+    ClaimDecisionRecord,
     ClaimTriage,
     CollaborationRequestKind,
     CollaborationRequestStatus,
@@ -58,6 +59,7 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     SupportNeed,
+    TerminalDispositionReasonCode,
     TerminalDispositionValue,
     WorkbenchHandoff,
     WorkbenchSession,
@@ -1159,6 +1161,27 @@ def _allowed_actions(
     terminal = claim.terminal_disposition
     if terminal is not None and not active_handoffs and not external_attention:
         if terminal.value is TerminalDispositionValue.COMPLETED:
+            if claim_decision_eligible(claim) and claim.claim_decision_id is None:
+                blocker = None
+                if 'claims_professional' not in principal.roles:
+                    blocker = 'Only a claims professional can decide this Claim.'
+                elif ownership.current_staff_access is not CurrentStaffAccess.PRIMARY:
+                    blocker = 'Only the primary owner can decide this Claim.'
+                return [
+                    _registered_action(
+                        'claim.record_decision',
+                        claim.claim_id,
+                        claim.revision,
+                        availability=(
+                            ActionAvailability.BLOCKED
+                            if blocker is not None
+                            else ActionAvailability.CONFIRMATION_REQUIRED
+                        ),
+                        blocked_reason=blocker,
+                        source_refs=terminal.source_refs,
+                        result_state=('blocked' if blocker is not None else 'pending_confirmation'),
+                    )
+                ]
             return []
         blocker = None
         if (
@@ -1205,6 +1228,27 @@ def _allowed_actions(
             )
         )
 
+    if claim_decision_eligible(claim) and claim.claim_decision_id is None:
+        blocker = None
+        if 'claims_professional' not in principal.roles:
+            blocker = 'Only a claims professional can decide this Claim.'
+        elif ownership.current_staff_access is not CurrentStaffAccess.PRIMARY:
+            blocker = 'Only the primary owner can decide this Claim.'
+        actions.append(
+            _registered_action(
+                'claim.record_decision',
+                claim.claim_id,
+                claim.revision,
+                availability=(
+                    ActionAvailability.BLOCKED
+                    if blocker is not None
+                    else ActionAvailability.CONFIRMATION_REQUIRED
+                ),
+                blocked_reason=blocker,
+                source_refs=(terminal.source_refs if terminal is not None else ()),
+                result_state=('blocked' if blocker is not None else 'pending_confirmation'),
+            )
+        )
     for task, result, attention_type, review_action in external_attention:
         other_owner = (
             ownership.primary_assignee is not None
@@ -1420,6 +1464,30 @@ def _allowed_actions(
             )
         )
     return actions
+
+
+def claim_decision_eligible(claim: WorkingClaim) -> bool:
+    terminal = claim.terminal_disposition
+    return bool(
+        claim.claim_state.workflow_state is WorkflowState.CREATED
+        and claim.external_claim is not None
+        and claim.external_claim.creation_status is ClaimCreationStatus.CREATED
+        and terminal is not None
+        and terminal.value is TerminalDispositionValue.COMPLETED
+        and terminal.reason_code is TerminalDispositionReasonCode.CLAIM_CREATED
+    )
+
+
+def _claim_decision(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> ClaimDecisionRecord | None:
+    if claim.claim_decision_id is None:
+        return None
+    decision = repository.get_claim_decision(claim.claim_id, claim.claim_decision_id)
+    if decision is None:
+        raise RuntimeError('The Claim decision reference is inconsistent.')
+    return decision
 
 
 def _source_summary(
@@ -1666,7 +1734,7 @@ def _primary_action(
     )
     if reopen is not None:
         return reopen
-    preferred: list[tuple[str, str | None]] = []
+    preferred: list[tuple[str, str | None]] = [('claim.record_decision', None)]
     if active_handoffs:
         handoff = active_handoffs[-1]
         preferred.append(
@@ -2035,6 +2103,7 @@ def _build_projection(
         **base,
         active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
+        claim_decision=_claim_decision(repository, claim),
         contents_items=claim.contents_items,
         policyholder=policyholder,
         driver=driver,

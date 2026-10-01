@@ -19,6 +19,7 @@ from backend.domain.external_services import (
 )
 from backend.domain.models import (
     ClaimCollaborationRequest,
+    ClaimDecisionRecord,
     ClaimState,
     ClaimTerminalDisposition,
     ClaimTriage,
@@ -511,6 +512,7 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     integration_summary: WorkbenchClaimDetailIntegrationSummary
     active_session_id: str | None = None
     claim_state: ClaimState
+    claim_decision: ClaimDecisionRecord | None = None
     contents_items: list[ContentsItem] = Field(default_factory=list)
     policyholder: PolicyholderProjection | None = None
     driver: DriverProjection | None = None
