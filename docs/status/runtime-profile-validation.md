@@ -28,12 +28,12 @@ The validation branch was synchronized with `main@4c90e2a` before the latest che
 containers use one image built from the final reviewed branch head; the pull-request evidence names
 that exact head after the configured remote quality checks pass.
 
-## AWS account capability validation
+## Final AWS framework validation
 
 On 1 October 2026, the school-provided team account was checked through the
 AWS console in the Sydney region (`ap-southeast-2`). This validation was
-performed against the exact current `origin/main` head:
-`a4ea7b49c6c25bb1bd0e6e922a085974553f33a4`.
+performed against the final framework recorded in
+`docs/design/aws-verified-deployment-plan.md` and selected in #1080.
 
 The console session used the school SSO permission set. No credentials,
 account identifiers, policyholder data, or secret values were recorded here.
@@ -43,30 +43,23 @@ deployed.
 
 | Capability | Classification | Evidence observed | Boundary and next step |
 | --- | --- | --- | --- |
-| Sydney region access | `validated` | The S3, DynamoDB, EC2, ECS, ECR, CloudWatch, Secrets Manager, and Bedrock consoles opened in `ap-southeast-2` under the school permission set | Console access is not equivalent to an SDK or application-runtime credential; validate the exact API calls before wiring a runtime profile |
+| Sydney region and static delivery | `validated` | The bounded private S3-to-CloudFront static path succeeded in `ap-southeast-2`; direct S3 access was denied | CloudFront is static delivery only |
 | S3 bucket creation | `validated` | An empty general-purpose bucket was created successfully in Sydney using the console. No objects were uploaded | The empty test bucket is temporary and must be removed after the user confirms cleanup; this proves S3 create permission, not Evidence or Knowledge Base integration |
 | S3 existing state | `validated` | Two existing Sydney general-purpose buckets were visible, including the project static-check bucket | Ownership and intended use of existing buckets remain to be confirmed; do not reuse the accelerator access-log bucket for project data |
-| DynamoDB table visibility | `validated` | Table `nw-ec2-ddb-test-20260928` was visible and `Active`, with on-demand read/write capacity and zero stored bytes | This proves the account can expose an existing table; migration writes and the application adapter still require a bounded API test and contract reconciliation |
 | EC2 launch surface | `validated` | Sydney had no instances, while the EC2 console exposed `Launch instances` | No instance was launched. A launch would create a persistent cost risk and requires an explicit smallest-size, stop/teardown plan |
-| ECS cluster surface | `validated` | Sydney showed zero clusters and exposed `Create cluster` | No cluster or service was created. Fargate task execution, task roles, networking, and image pulls remain unverified |
-| ECR | `unconfigured` | The ECR console opened and exposed private-repository navigation | No repository or image push was performed; repository creation and push permissions remain to be tested only when an approved image test is ready |
-| CloudWatch | `unconfigured` | The Sydney CloudWatch console opened | No log group, metric, alarm, or dashboard was created; observability permissions and cost impact remain unverified |
-| Secrets Manager | `unconfigured` | The Sydney Secrets Manager console opened and exposed `Store a new secret` | No secret was created and no secret value was entered; runtime secret injection remains unverified |
-| Bedrock model inference | `validated` | The Sydney Playground successfully completed bounded Amazon Nova Pro 1.0 on-demand invocations using synthetic, non-sensitive prompts. Observed completed calls included 65 input/1,687 output tokens, 148 input/5,120 output tokens, 15,709 input/5,120 output tokens, and 26,035 input/5,120 output tokens | This proves interactive model invocation for the school permission set, not application-runtime credentials, Bedrock Knowledge Bases, citations, or production readiness |
-| Bedrock Knowledge Bases | `unconfigured` | No Knowledge Base, vector store, data source, ingestion job, or retrieval request was created | Knowledge Base provisioning, S3 access, retrieval, citations, and failure semantics remain separate validation work |
+| Docker Compose and EC2 application | `unreachable` | Docker and the Compose plugin installed, but the repository MinIO client image could not be pulled; the stack did not start | Backend, MongoDB, MinIO, and the external model gateway therefore remain unverified |
+| HTTPS API, CORS, and application journey | `unconfigured` | No browser-safe API origin was configured; claimant, Workbench, and three FNOL paths were not run on EC2 | Requires a successful Compose startup first |
+| CloudWatch and budget visibility | `partially validated` | Bounded synthetic monitoring and budget evidence exists | Coverage of a running application is still pending |
 | AWS credits | `unavailable` | The Billing and Cost Management Credits page reported no active or remaining credits at the time of checking | The account must not be treated as having a guaranteed course credit. Budgets are alerts, not credit balances; confirm the teaching team's billing arrangement before persistent deployment |
-| Repository AWS runtime | `local_only` | The current repository still requires the AWS profile to fail closed when its complete capability bundle is absent | Console access does not change the local runtime contract. The app remains on the existing local MongoDB/MinIO and model-gateway path until an approved AWS adapter and deployment evidence exist |
+| Repository AWS runtime | `local_only` | The current repository remains on the existing local MongoDB/MinIO and external model-gateway path | No AWS provider or application-data migration was enabled |
 
 ### Cost and cleanup boundary
 
-No EC2 instance, ECS cluster, ECR repository, DynamoDB table, CloudWatch
-resource, secret, Knowledge Base, or uploaded S3 object was created during
-this check. Bounded Bedrock Nova Pro on-demand inference was invoked with
-synthetic text only. The completed Playground calls prove that the school
-account can consume a metered AWS service. Based on the visible token counts
-and the applicable on-demand model rates, the test was intentionally bounded
-to an estimated approximately `$0.20-$0.35`; the authoritative amount was not
-yet visible because AWS billing data is delayed.
+No persistent EC2 application, ECS cluster, ECR repository, DynamoDB table,
+CloudWatch application resource, secret, Knowledge Base, or application data
+was created during this check. The bounded static delivery and monitoring
+checks used synthetic data only. This record does not claim a persistent
+application deployment or a data migration.
 
 The only new persistent resource was the empty S3 permission-test bucket
 named `nw-fnol-permission-check-20261001`; it contains zero objects. Its
@@ -86,19 +79,20 @@ committed AWS credentials. Therefore no CLI/API command can be reported as
 successful for this account, and no browser observation is being presented as
 proof of application connectivity.
 
-The next bounded checks are:
+The next checks for this framework are:
 
-1. confirm the temporary S3 bucket cleanup decision;
-2. test ECR repository creation and a small image push only if the team has
-   approved the image and its storage lifecycle;
-3. verify the exact ECS/Fargate, execution-role, Secrets Manager, and
-   CloudWatch permissions without entering real secrets or customer data;
-4. validate Bedrock Knowledge Bases ingestion, retrieval, citations, and
-   failure semantics separately from the now-verified model invocation.
+1. resolve the Compose MinIO client image dependency without changing the
+   application contract or silently substituting an unreviewed image;
+2. start the existing Compose topology and verify Backend health, MongoDB and
+   MinIO restart/readback, the external model gateway, and synthetic
+   Evidence/RAG paths;
+3. configure and verify the HTTPS API origin, reverse proxy, and CORS;
+4. run the three FNOL paths and Staff Workbench journey against EC2;
+5. record CloudWatch, budget, stop, cleanup, and rollback evidence for the
+   resources actually used.
 
-DynamoDB write/read was explicitly excluded from this validation pass. Its
-existing-table visibility remains recorded above, but no write capability or
-application adapter claim is made.
+Bedrock, Bedrock Knowledge Bases, DynamoDB, ECS/Fargate, an S3 Evidence
+adapter, and MongoDB/MinIO-to-AWS migration are outside this validation.
 
 These checks remain separate from the repository's local runtime-profile
 validation and must be recorded with the same evidence classifications.
@@ -136,24 +130,21 @@ automatic dispatch, durable processing state, idempotency, and recovery.
 
 ## Week 5 Day 4 cloud boundary revalidation
 
-## Issue #1139 AWS capability validation
+## Issue #1139 final-framework validation
 
-The bounded Sydney validation used `origin/main@c9fd8f6be570ba3f68216217b294d9d7000effbc`
-and synthetic data only. EC2 launch/system checks, Docker installation, Docker
-Compose installation, DynamoDB synthetic put/read/repeat-write, Secrets
-Manager synthetic readback, CloudWatch log/metric submission, EventBridge
-synthetic event submission, ECR push, and a minimal Fargate task run succeeded.
-The private S3-to-CloudFront static path also remained validated.
+The bounded Sydney validation used the current framework and synthetic data
+only. EC2 launch/system checks, Docker installation, Docker Compose
+installation, bounded monitoring, and the private S3-to-CloudFront static path
+were recorded as evidence.
 
 The application Compose check did not reach Backend startup. The repository's
 current `minio/mc` image reference could not be pulled in the checked EC2
 environment; temporary image substitutions were attempted only in the EC2
 copy and were not committed. Consequently, EC2 Backend liveness/readiness,
 MongoDB/MinIO restart readback, external model gateway, RAG, API HTTPS/CORS,
-and the full FNOL smoke remain unverified. Bedrock CLI invocation was denied,
-Knowledge Bases was unconfigured, and no runtime instance profile was
-discoverable. These are explicit deployment blockers rather than local fixture
-successes. No application data migration was executed.
+and the full FNOL smoke remain unverified. These are the remaining framework
+blockers rather than local fixture successes. No application data migration was
+executed.
 
 Issue #432 revalidated this boundary on 3 September 2026 against `main@8d4d4e5`. The local
 environment exposed no AWS or Cloudflare credential variable names, and the AWS CLI was not
