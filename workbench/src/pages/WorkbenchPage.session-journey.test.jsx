@@ -39,7 +39,11 @@ vi.mock('../components/QueuePanel.jsx', () => ({ default: () => null }))
 vi.mock('../components/StaffAgent.jsx', () => ({ default: () => null }))
 
 const metadata = {
-  views: [{ value: 'all', label: 'All active work', group: 'overview' }],
+  views: [
+    { value: 'all', label: 'All active work', group: 'overview' },
+    { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
+    { value: 'created_routed', label: 'Created / routed', group: 'operational' },
+  ],
   workflow_states: [],
   priorities: [],
   tags: [],

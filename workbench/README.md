@@ -5,8 +5,8 @@ static employee frontend.
 
 ## About this client
 
-Supported deep links include `/workbench/claims/{claim_id}`, `/workbench/conversations/{session_id}`,
-and `/workbench/agent/sessions/{session_id}`.
+Supported deep links include `/workbench/claims/{claim_id}`, `/workbench/drafts/{claim_id}`,
+`/workbench/conversations/{session_id}`, and `/workbench/agent/sessions/{session_id}`.
 
 ## Current application boundary
 
@@ -15,6 +15,13 @@ and `/workbench/agent/sessions/{session_id}`.
   the client uses backend tag codes for filtering and never activates a tag itself.
 - The queue uses the backend cursor and bounded page size rather than slicing a local database
   mirror.
+- The default Workbench route displays only the server-published submitted-Claim projection.
+  Customer Draft Claims use the separate `/workbench/drafts` route and remain outside the formal
+  queue count, search, and filter context.
+- Draft detail routes pass an explicit read-only mode through the shared Claim workspace. Staff can
+  inspect current detail, conversation history, Evidence, external-service records, and recovery
+  context, but the client exposes neither mutation controls nor mutation callbacks until the Claim
+  enters the submitted queue.
 - Opening a Claim never accepts or changes it. Handoff acceptance and resolution remain explicit,
   revision-checked actions with separate internal results and claimant-safe updates.
 - Claim tabs persist locally without opening duplicate contexts for one Claim.

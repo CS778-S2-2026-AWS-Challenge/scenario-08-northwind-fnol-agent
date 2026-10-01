@@ -1,17 +1,19 @@
-import { ChevronDown, Filter, Inbox, Search } from 'lucide-react'
+import { ChevronDown, Clock3, Filter, Inbox, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { claimIdentity } from '../claim-identity.js'
 import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, formatQueueDateTime, words } from '../format.js'
 import { translate as t } from '../i18n.js'
 
-export default function QueuePanel({ claims, loading, error, onRetry, selectedId, filterMetadata, viewCounts, view, onView, workflowState, onWorkflowState, priority, onPriority, tagFilter, onTag, search, onSearch, additionalFiltersActive, onClearFilters, nextCursor, onLoadMore, onOpen }) {
+export default function QueuePanel({ queueKind = 'legacy', claims, loading, error, onRetry, selectedId, filterMetadata, viewCounts, view, onView, workflowState, onWorkflowState, priority, onPriority, tagFilter, onTag, search, onSearch, additionalFiltersActive, onClearFilters, nextCursor, onLoadMore, onOpen }) {
+  const isDraftQueue = queueKind === 'drafts'
+  const isSubmittedQueue = queueKind === 'submitted'
   const hasSecondaryFilters = Boolean(workflowState || priority || tagFilter)
   const [filtersOpen, setFiltersOpen] = useState(hasSecondaryFilters)
   const searchInput = useRef(null)
   const searchTimer = useRef(null)
   const hasResultFilters = hasSecondaryFilters || search || additionalFiltersActive
-  const hasActiveFilters = view !== 'all' || hasResultFilters
+  const hasActiveFilters = queueKind === 'legacy' ? view !== 'all' || hasResultFilters : hasResultFilters
   const countByView = new Map(
     viewCounts?.status === 'available'
       ? viewCounts.items.map((item) => [item.view, item.count])
@@ -20,12 +22,16 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
   const selectedCount = countByView.get(view)
   const noPublishedClaims = viewCounts?.status === 'available'
     && viewCounts.items.every((item) => item.count === 0)
-  const trulyEmpty = !loading && !error && !hasActiveFilters && claims.length === 0 && noPublishedClaims
+  const selectedQueueEmpty = viewCounts?.status === 'available' && selectedCount === 0
+  const trulyEmpty = !loading
+    && !error
+    && !hasActiveFilters
+    && claims.length === 0
+    && (queueKind === 'legacy' ? noPublishedClaims : selectedQueueEmpty)
   const countLabel = selectedCount === undefined
     ? t('Total unavailable')
     : t(error ? '{count} total · stale' : loading ? '{count} total · updating' : '{count} total', { count: selectedCount })
   const viewGroups = groupViews(filterMetadata.views)
-
   useEffect(() => {
     window.clearTimeout(searchTimer.current)
     if (searchInput.current && searchInput.current.value !== search) {
@@ -45,29 +51,39 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
   }
 
   return (
-    <aside className="queue-panel" aria-label={t('Claim queue')}>
+    <aside
+      className={`queue-panel${isDraftQueue || queueKind === 'legacy' ? ' queue-panel--five-rows' : ''}`}
+      aria-label={t('Claim queue')}
+    >
       <header className="queue-panel__header">
         <div>
           <p className="eyebrow">{t('My work')}</p>
-          <h2>{t('Claim queue')}</h2>
+          <h2>{t(isDraftQueue ? 'Draft claims' : isSubmittedQueue ? 'Submitted claims' : 'Claim queue')}</h2>
         </div>
         <span className="queue-count">{countLabel}</span>
       </header>
+      {isDraftQueue && (
+        <p className="queue-context-note">
+          {t('Customers are still completing these claims. They have not entered the formal work queue.')}
+        </p>
+      )}
       {!trulyEmpty && <>
-        <label className="queue-work-view">
-          <span>{t('Current work')}</span>
-          <select value={view} onChange={(event) => onView(event.target.value)}>
-            {viewGroups.map(({ group, options }) => (
-              <optgroup label={words(group)} key={group}>
-                {options.map((option) => (
-                  <option value={option.value} key={option.value}>
-                    {option.label}{countByView.has(option.value) ? ` (${countByView.get(option.value)})` : ''}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </label>
+        {queueKind === 'legacy' && (
+          <label className="queue-work-view">
+            <span>{t('Current work')}</span>
+            <select value={view} onChange={(event) => onView(event.target.value)}>
+              {viewGroups.map(({ group, options }) => (
+                <optgroup label={words(group)} key={group}>
+                  {options.map((option) => (
+                    <option value={option.value} key={option.value}>
+                      {option.label}{countByView.has(option.value) ? ` (${countByView.get(option.value)})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="search-field">
           <Search size={16} aria-hidden="true" />
           <span className="sr-only">{t('Search claims')}</span>
@@ -127,7 +143,11 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
           <div className="queue-state">
             <Inbox size={20} aria-hidden="true" />
             <p>{trulyEmpty
-              ? t('No claims currently need active work.')
+              ? t(isDraftQueue
+                ? 'No Draft claims are waiting for a customer to finish.'
+                : isSubmittedQueue
+                  ? 'No submitted claims currently need work.'
+                  : 'No claims currently need active work.')
               : hasResultFilters
                 ? t('No claims match the current filters.')
                 : t('No claims are currently in this queue.')}</p>
@@ -138,6 +158,10 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
           const identity = claimIdentity(claim)
           const reason = queueReason(claim)
           const updatedLabel = t('Updated {date}', { date: formatDateTime(claim.updated_at) })
+          const claimantActivityAt = draftClaimantActivityAt(claim)
+          const claimantActivityLabel = claimantActivityAt
+            ? t('Last customer activity {date}', { date: formatDateTime(claimantActivityAt) })
+            : t('Customer activity unavailable')
           return (
             <button
               className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}${error ? ' is-stale' : ''}`}
@@ -148,18 +172,33 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
             >
               <span className="queue-item__topline">
                 <strong title={identity.cardTitle}>{identity.cardTitle}</strong>
-                <span
-                  className={`priority priority--${claim.priority_projection?.level}`}
-                  aria-label={t('Priority {priority}', { priority: words(claim.priority_projection?.level) })}
-                >
-                  {words(claim.priority_projection?.level)}
-                </span>
+                {isDraftQueue ? (
+                  <span className="draft-status">{t('Draft')}</span>
+                ) : (
+                  <span
+                    className={`priority priority--${claim.priority_projection?.level}`}
+                    aria-label={t('Priority {priority}', { priority: words(claim.priority_projection?.level) })}
+                  >
+                    {words(claim.priority_projection?.level)}
+                  </span>
+                )}
               </span>
-              <span className="queue-item__status">{queueStatus(claim)} · {ownershipLabel(claim.ownership)}</span>
-              {reason !== identity.cardTitle ? <span className="queue-item__reason">{reason}</span> : null}
+              <span className="queue-item__status">
+                {isDraftQueue
+                  ? `${t('Not submitted')} · ${claimTypeLabel(claim)}`
+                  : isSubmittedQueue
+                    ? `${t('Submitted')} · ${claimTypeLabel(claim)} · ${ownershipLabel(claim.ownership)}`
+                    : `${queueStatus(claim)} · ${ownershipLabel(claim.ownership)}`}
+              </span>
+              {isDraftQueue ? (
+                <span className="queue-item__reason queue-item__activity">
+                  <Clock3 size={14} aria-hidden="true" />
+                  {claimantActivityLabel}
+                </span>
+              ) : reason !== identity.cardTitle ? <span className="queue-item__reason">{reason}</span> : null}
               <span className="queue-item__meta">
                 <span className="queue-item__reference">{identity.referenceLabel}</span>
-                <time dateTime={claim.updated_at} aria-label={updatedLabel} title={updatedLabel}>{formatQueueDateTime(claim.updated_at)}</time>
+                {!isDraftQueue && <time dateTime={claim.updated_at} aria-label={updatedLabel} title={updatedLabel}>{formatQueueDateTime(claim.updated_at)}</time>}
               </span>
             </button>
           )
@@ -170,10 +209,12 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
   )
 }
 
+function claimTypeLabel(claim) {
+  return claim.incident?.family ? words(claim.incident.family) : t('Type not confirmed')
+}
+
 function queueStatus(claim) {
-  const claimType = claim.incident?.family
-    ? words(claim.incident.family)
-    : t('Type not confirmed')
+  const claimType = claimTypeLabel(claim)
 
   if (claim.terminal_disposition) {
     return `${words(claim.terminal_disposition.value)} · ${claimType} · ${words(claim.workflow_state)} retained`
@@ -202,6 +243,12 @@ function queueReason(claim) {
   }
 
   return claim.incident?.summary || t('No further context available.')
+}
+
+function draftClaimantActivityAt(claim) {
+  return claim.work_summary?.last_claimant_activity_at
+    || claim.work_summary?.incomplete_context?.last_meaningful_activity_at
+    || null
 }
 
 function groupViews(views) {

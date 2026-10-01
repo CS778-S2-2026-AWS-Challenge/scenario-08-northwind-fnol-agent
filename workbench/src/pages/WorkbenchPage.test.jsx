@@ -24,6 +24,15 @@ const api = vi.hoisted(() => ({
   workItems: vi.fn(),
   realtimeEvents: vi.fn(),
   acceptHandoff: vi.fn(),
+  resolveHandoff: vi.fn(),
+  decideSignal: vi.fn(),
+  createStaffAction: vi.fn(),
+  updateStaffAction: vi.fn(),
+  sendMessage: vi.fn(),
+  requestCowork: vi.fn(),
+  requestTransfer: vi.fn(),
+  requeue: vi.fn(),
+  decideCollaboration: vi.fn(),
   acceptExternalTaskReview: vi.fn(),
   reconcileExternalTaskResponse: vi.fn(),
   reopenClaim: vi.fn(),
@@ -58,28 +67,33 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, externalActionNotices = [], onAccept, onReopen, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => <div>
-    {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
-    {resources.handoffs?.error && <p>Handoff context unavailable</p>}
-    {resources.externalRequests?.error && <p>External context unavailable</p>}
-    {externalActionNotices.map((notice) => (
-      <div role="alert" key={`${notice.claimId}:${notice.taskId}`}>
-        <p>{notice.message}</p>
-        <p>{notice.taskId}</p>
-        <button type="button" disabled={notice.recovering} onClick={() => onRetryExternalActionContext(notice.taskId)}>
-          Retry external readback
-        </button>
-      </div>
-    ))}
-    <button type="button" onClick={onRetry}>Test claim refresh</button>
-    {detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
-    {detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
-    {detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
-      const promise = onExternalTaskAction(detail.allowed_actions[0], {})
-      externalActionTracker.lastPromise = promise
-      promise.catch(() => {})
-    }}>Test projected external action</button>}
-  </div>,
+  default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
+    const mutationCallbacks = [onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onExternalTaskAction].filter(Boolean)
+    return <div>
+      <output data-testid="workspace-mode">{readOnly ? 'read-only' : 'interactive'}</output>
+      <output data-testid="mutation-callback-count">{mutationCallbacks.length}</output>
+      {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
+      {resources.handoffs?.error && <p>Handoff context unavailable</p>}
+      {resources.externalRequests?.error && <p>External context unavailable</p>}
+      {externalActionNotices.map((notice) => (
+        <div role="alert" key={`${notice.claimId}:${notice.taskId}`}>
+          <p>{notice.message}</p>
+          <p>{notice.taskId}</p>
+          <button type="button" disabled={notice.recovering} onClick={() => onRetryExternalActionContext(notice.taskId)}>
+            Retry external readback
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={onRetry}>Test claim refresh</button>
+      {!readOnly && detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
+      {!readOnly && detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
+      {!readOnly && detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
+        const promise = onExternalTaskAction(detail.allowed_actions[0], {})
+        externalActionTracker.lastPromise = promise
+        promise.catch(() => {})
+      }}>Test projected external action</button>}
+    </div>
+  },
 }))
 vi.mock('../components/StaffAgent.jsx', () => ({
   default: ({ open, embedded = false, requestedSessionId, onBusinessActionExecuted }) => {
@@ -103,6 +117,8 @@ const metadata = {
     { value: 'abandoned', label: 'Abandoned', group: 'terminal' },
     { value: 'closed', label: 'Closed', group: 'terminal' },
     { value: 'urgent', label: 'Urgent', group: 'operational' },
+    { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
+    { value: 'created_routed', label: 'Created / routed', group: 'operational' },
   ],
   workflow_states: [{ value: 'collecting', label: 'Collecting' }],
   priorities: [{ value: 'routine', label: 'Routine' }],
@@ -188,6 +204,9 @@ function renderPage(initialEntry) {
         <Route path="/workbench/conversations" element={page} />
         <Route path="/workbench/conversations/:conversationSessionId" element={page} />
         <Route path="/workbench/agent/sessions/:agentSessionId" element={page} />
+        <Route path="/workbench/drafts" element={page} />
+        <Route path="/workbench/drafts/:claimId" element={page} />
+        <Route path="/workbench/drafts/:claimId/:section" element={page} />
         <Route path="/workbench/claims/:claimId" element={page} />
         <Route path="/workbench/claims/:claimId/:section" element={page} />
       </Routes>
@@ -257,7 +276,7 @@ describe('WorkbenchPage queue routing', () => {
     await waitFor(() => {
       const location = screen.getByTestId('location').textContent
       expect(location).toContain('/workbench/claims/clm_route_1/conversation?')
-      expect(location).toContain('view=waiting_user')
+      expect(location).not.toContain('view=')
       expect(location).toContain('search=NW-900')
       expect(location).toContain('session=ses_saved')
     })
@@ -273,8 +292,96 @@ describe('WorkbenchPage queue routing', () => {
     renderPage('/workbench')
 
     expect(await screen.findByText('NW-900')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Submitted claims' })).toBeVisible()
+    expect(api.claims).toHaveBeenCalledWith(
+      'staff-token',
+      expect.objectContaining({ view: 'created_routed' }),
+    )
+    expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/workbench')
     expect(api.claim).not.toHaveBeenCalled()
+  })
+
+  it('opens Draft claims in an explicit read-only workspace with no mutation callbacks', async () => {
+    const user = userEvent.setup()
+    const acceptAction = {
+      action_code: 'human.accept_handoff',
+      target_type: 'handoff',
+      target_ref: 'hnd_1',
+      availability: 'confirmation_required',
+      based_on_revision: 1,
+    }
+    api.claim.mockResolvedValue({
+      ...claim,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: acceptAction.action_code,
+        primary_action_target_ref: acceptAction.target_ref,
+      },
+      allowed_actions: [acceptAction],
+    })
+    renderPage('/workbench/drafts?search=NW-900&priority=routine')
+
+    expect(await screen.findByRole('heading', { name: 'Draft claims' })).toBeVisible()
+    expect(screen.getByText('Customer drafts · Not yet submitted')).toBeVisible()
+    expect(screen.getByText('Customers are still completing these claims. They have not entered the formal work queue.')).toBeVisible()
+    expect(api.claims).toHaveBeenCalledWith(
+      'staff-token',
+      expect.objectContaining({
+        view: 'incomplete_claims',
+        search: 'NW-900',
+        priority: 'routine',
+      }),
+    )
+    expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
+
+    await user.click(await screen.findByText('NW-900'))
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workbench/drafts/clm_route_1?priority=routine&search=NW-900',
+    ))
+    expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1')
+    expect(screen.getByTestId('workspace-mode')).toHaveTextContent('read-only')
+    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('0')
+    expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
+    expect(api.acceptHandoff).not.toHaveBeenCalled()
+    expect(api.resolveHandoff).not.toHaveBeenCalled()
+    expect(api.decideSignal).not.toHaveBeenCalled()
+    expect(api.createStaffAction).not.toHaveBeenCalled()
+    expect(api.updateStaffAction).not.toHaveBeenCalled()
+    expect(api.sendMessage).not.toHaveBeenCalled()
+    expect(api.requestCowork).not.toHaveBeenCalled()
+    expect(api.requestTransfer).not.toHaveBeenCalled()
+    expect(api.requeue).not.toHaveBeenCalled()
+    expect(api.decideCollaboration).not.toHaveBeenCalled()
+    expect(api.acceptExternalTaskReview).not.toHaveBeenCalled()
+    expect(api.reconcileExternalTaskResponse).not.toHaveBeenCalled()
+    expect(api.reopenClaim).not.toHaveBeenCalled()
+  })
+
+  it('keeps the submitted Claim workspace interactive for projected actions', async () => {
+    const acceptAction = {
+      action_code: 'human.accept_handoff',
+      target_type: 'handoff',
+      target_ref: 'hnd_1',
+      availability: 'confirmation_required',
+      based_on_revision: 1,
+    }
+    api.claim.mockResolvedValue({
+      ...claim,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: acceptAction.action_code,
+        primary_action_target_ref: acceptAction.target_ref,
+      },
+      allowed_actions: [acceptAction],
+    })
+
+    renderPage('/workbench/claims/clm_route_1')
+
+    expect(await screen.findByTestId('workspace-mode')).toHaveTextContent('interactive')
+    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('9')
+    expect(screen.getByRole('button', { name: 'Test projected accept' })).toBeVisible()
   })
 
   it('does not override an explicit Claim route with a different persisted active tab', async () => {
@@ -296,26 +403,21 @@ describe('WorkbenchPage queue routing', () => {
     expect(screen.getByTestId('location')).not.toHaveTextContent('clm_old')
   })
 
-  it('preserves an unpublished URL view and does not issue a guessed queue request', async () => {
-    const user = userEvent.setup()
+  it('normalizes a legacy URL view to the submitted queue without dropping supported filters', async () => {
     renderPage('/workbench?view=retired_queue&assignee_id=unassigned&next_action=ASK')
 
-    expect(await screen.findByText('This queue view is no longer available')).toBeInTheDocument()
-    expect(api.claims).not.toHaveBeenCalled()
-    expect(screen.getByTestId('location')).toHaveTextContent(
-      '/workbench?view=retired_queue&assignee_id=unassigned&next_action=ASK',
-    )
-
-    await user.click(screen.getByRole('button', { name: 'Open all active work' }))
-
-    await waitFor(() => expect(api.claims).toHaveBeenCalledOnce())
+    expect(await screen.findByText('NW-900')).toBeInTheDocument()
     expect(api.claims).toHaveBeenCalledWith(
       'staff-token',
-      expect.objectContaining({ assignee_id: 'unassigned', next_action: 'ASK' }),
+      expect.objectContaining({
+        view: 'created_routed',
+        assignee_id: 'unassigned',
+        next_action: 'ASK',
+      }),
     )
-    expect(screen.getByTestId('location')).toHaveTextContent(
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
       '/workbench?assignee_id=unassigned&next_action=ASK',
-    )
+    ))
   })
 
   it('preserves the published queue and every non-view filter on Claim navigation', async () => {
@@ -330,7 +432,7 @@ describe('WorkbenchPage queue routing', () => {
       expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_1?')
     })
     const location = screen.getByTestId('location').textContent
-    expect(location).toContain('view=waiting_user')
+    expect(location).not.toContain('view=')
     expect(location).toContain('workflow_state=collecting')
     expect(location).toContain('priority=routine')
     expect(location).toContain('assignee_id=unassigned')
@@ -345,7 +447,7 @@ describe('WorkbenchPage queue routing', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent(
-        '/workbench/claims/clm_route_1?view=waiting_user&assignee_id=unassigned',
+        '/workbench/claims/clm_route_1?assignee_id=unassigned',
       )
     })
   })
@@ -395,11 +497,11 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.claim).toHaveBeenCalledTimes(2)
     expect(await screen.findByText(/reopened at revision 8.*moved to Processing/i)).toBeInTheDocument()
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
-      '/workbench/claims/clm_route_1?view=processing',
+      '/workbench/claims/clm_route_1',
     ))
     expect(api.claims).toHaveBeenLastCalledWith(
       'staff-token',
-      expect.objectContaining({ view: 'processing' }),
+      expect.objectContaining({ view: 'created_routed' }),
     )
   })
 
@@ -707,7 +809,8 @@ describe('WorkbenchPage queue routing', () => {
       { requestId: 'req_filtered_1' },
     ))
 
-    await user.selectOptions(screen.getByLabelText('Current work'), 'processing')
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    await user.selectOptions(screen.getByLabelText('Claim priority'), 'routine')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('req_filtered_1')
     expect(screen.queryByText('NW-900')).not.toBeInTheDocument()
