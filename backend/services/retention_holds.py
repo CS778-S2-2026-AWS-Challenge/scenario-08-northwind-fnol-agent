@@ -28,6 +28,7 @@ from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
+    RevisionConflict,
 )
 from backend.services.support import (
     now_utc,
@@ -113,63 +114,78 @@ def _commit(
     note: str,
     recorded_at: datetime,
 ) -> WorkbenchRetentionHold:
-    """Persist the hold, its audit event, then the replay record.
+    """Commit the hold, its audit event and replay record as one revision-fenced mutation.
 
-    Every identity and timestamp derives from the request, so a retry after a
-    partial failure re-commits the same hold and audit event as exact replays.
+    The repository rechecks the Claim revision the action was offered on inside the
+    same atomic boundary, so a concurrent Claim mutation makes this a revision
+    conflict with no hold, audit or replay record written.
     """
 
+    response = project_retention_hold(hold)
+    audit_event = AuditEventEnvelope(
+        event_id='aud_hold_' + stable_digest(f'{principal.subject}:{route}:{key}', 20),
+        event_type=AuditEventType.ACTION_COMPLETED,
+        outcome=AuditOutcome.SUCCEEDED,
+        subject=AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim.claim_id,
+            claim_id=claim.claim_id,
+        ),
+        actor=AuditActor(
+            actor_type=ActorType.STAFF,
+            actor_id=principal.subject,
+            auth_source=principal.auth_source,
+        ),
+        reason=note,
+        source_refs=[f'retention-hold:{hold.hold_id}', *hold.source_refs],
+        permission=AuditPermission(
+            required_permission=f'{action.action_code}:primary_owner',
+            outcome=AuditPermissionOutcome.AUTHORISED,
+        ),
+        visibility=AuditVisibility.INTERNAL_ONLY,
+        idempotency_key=key,
+        claim_revision=claim.revision,
+        created_at=recorded_at,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+        action_registry_version=action.registry_version,
+        action_code=action.action_code,
+        target_ref=action.target_ref,
+        response_payload=response.model_dump(mode='json'),
+    )
     try:
-        repository.save_retention_hold(hold)
-        repository.append_audit_event(
-            AuditEventEnvelope(
-                event_id='aud_hold_' + stable_digest(f'{principal.subject}:{route}:{key}', 20),
-                event_type=AuditEventType.ACTION_COMPLETED,
-                outcome=AuditOutcome.SUCCEEDED,
-                subject=AuditSubject(
-                    subject_type=AuditSubjectType.CLAIM,
-                    subject_id=claim.claim_id,
-                    claim_id=claim.claim_id,
-                ),
-                actor=AuditActor(
-                    actor_type=ActorType.STAFF,
-                    actor_id=principal.subject,
-                    auth_source=principal.auth_source,
-                ),
-                reason=note,
-                source_refs=[f'retention-hold:{hold.hold_id}', *hold.source_refs],
-                permission=AuditPermission(
-                    required_permission=f'{action.action_code}:primary_owner',
-                    outcome=AuditPermissionOutcome.AUTHORISED,
-                ),
-                visibility=AuditVisibility.INTERNAL_ONLY,
-                idempotency_key=key,
-                claim_revision=claim.revision,
-                created_at=recorded_at,
-            )
+        repository.commit_retention_hold_action(
+            hold,
+            expected_claim_revision=claim.revision,
+            audit_event=audit_event,
+            idempotency=idempotency,
         )
+    except RevisionConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=conflict.current_revision,
+        ) from conflict
+    except KeyError as missing:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The claim was not found.',
+        ) from missing
     except (IdempotencyConflict, ValueError) as conflict:
         raise ApiError(
             status_code=409,
             code='IDEMPOTENCY_CONFLICT',
             message='The retention hold conflicts with an existing request.',
         ) from conflict
-
-    response = project_retention_hold(hold)
-    repository.save_idempotency(
-        IdempotencyRecord(
-            actor_id=principal.subject,
-            route=route,
-            key=key,
-            request_fingerprint=fingerprint,
-            claim_id=claim.claim_id,
-            session_id=claim.active_session_id or '',
-            action_registry_version=action.registry_version,
-            action_code=action.action_code,
-            target_ref=action.target_ref,
-            response_payload=response.model_dump(mode='json'),
-        )
-    )
     return response
 
 

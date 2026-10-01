@@ -2565,153 +2565,52 @@ class MongoDBRepository:
 
         self._atomic(persist)
 
+    def commit_retention_hold_action(
+        self,
+        hold: RetentionHoldRecord,
+        *,
+        expected_claim_revision: int,
+        audit_event: AuditEventEnvelope,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        def commit(mongo_session: Any) -> None:
+            claim = self._collection.find_one(
+                {'_id': self._record_id('claim', hold.claim_id), 'record_type': 'claim'},
+                projection={'revision': 1},
+                session=mongo_session,
+            )
+            if claim is None:
+                raise KeyError(hold.claim_id)
+            if claim.get('revision') != expected_claim_revision:
+                raise RevisionConflict(int(claim.get('revision', 0)))
+            self._persist_retention_hold(hold, mongo_session)
+            self._insert_audit_event(audit_event, mongo_session=mongo_session)
+            self._save_idempotency(idempotency, mongo_session)
+
+        self._atomic(commit)
+
     def save_retention_hold(
         self,
         hold: RetentionHoldRecord,
     ) -> None:
-        def persist(mongo_session: Any) -> None:
-            current = self._get(
-                'retention_hold',
-                hold.hold_id,
-                RetentionHoldRecord,
-                session=mongo_session,
-            )
+        self._atomic(lambda mongo_session: self._persist_retention_hold(hold, mongo_session))
 
-            if current is None:
-                if hold.released_at is not None:
-                    raise ValueError('A retention hold must be persisted before release.')
+    def _persist_retention_hold(self, hold: RetentionHoldRecord, mongo_session: Any) -> None:
+        current = self._get(
+            'retention_hold',
+            hold.hold_id,
+            RetentionHoldRecord,
+            session=mongo_session,
+        )
 
-                operation_document = self._collection.find_one(
-                    {
-                        'record_type': 'retention_operation',
-                        'claim_id': hold.claim_id,
-                    },
-                    session=mongo_session,
-                )
-                operation = self._model_from_document(
-                    operation_document,
-                    RetentionOperation,
-                )
-                if (
-                    operation is not None
-                    and operation.status is not RetentionOperationStatus.COMPLETED
-                ):
-                    payload = operation.model_dump(mode='python')
-                    payload.update(
-                        {
-                            'revision': operation.revision + 1,
-                            'status': RetentionOperationStatus.HELD,
-                            'hold_refs': sorted(set(operation.hold_refs).union({hold.hold_id})),
-                            'updated_at': max(operation.updated_at, hold.applied_at),
-                            'completed_at': None,
-                        }
-                    )
-                    held = RetentionOperation.model_validate(payload)
-                    validate_retention_operation_transition(operation, held)
-                    held_document = held.model_dump(mode='json')
-                    held_document.update(
-                        {
-                            '_id': self._record_id('retention_operation', held.operation_id),
-                            'record_type': 'retention_operation',
-                            'customer_id': None,
-                            'claim_id': held.claim_id,
-                        }
-                    )
-                    result = self._collection.replace_one(
-                        {
-                            '_id': held_document['_id'],
-                            'record_type': 'retention_operation',
-                            'revision': operation.revision,
-                        },
-                        held_document,
-                        session=mongo_session,
-                    )
-                    if result.modified_count != 1:
-                        latest = self._get(
-                            'retention_operation',
-                            operation.operation_id,
-                            RetentionOperation,
-                            session=mongo_session,
-                        )
-                        if latest is None:
-                            raise KeyError(operation.operation_id)
-                        raise RevisionConflict(latest.revision)
-
-                try:
-                    self._collection.insert_one(
-                        {
-                            **hold.model_dump(mode='json'),
-                            '_id': self._record_id('retention_hold', hold.hold_id),
-                            'record_type': 'retention_hold',
-                            'customer_id': None,
-                            'claim_id': hold.claim_id,
-                        },
-                        session=mongo_session,
-                    )
-                except DuplicateKeyError as error:
-                    winner = self._get(
-                        'retention_hold',
-                        hold.hold_id,
-                        RetentionHoldRecord,
-                        session=mongo_session,
-                    )
-                    if winner != hold:
-                        raise IdempotencyConflict(hold.hold_id) from error
-                return
-
-            if current == hold:
-                return
-
-            validate_retention_hold_transition(
-                current,
-                hold,
-            )
-
-            released_at = hold.released_at
-            assert released_at is not None
-
-            document = hold.model_dump(mode='json')
-            document.update(
-                {
-                    '_id': self._record_id(
-                        'retention_hold',
-                        hold.hold_id,
-                    ),
-                    'record_type': 'retention_hold',
-                    'customer_id': None,
-                    'claim_id': hold.claim_id,
-                }
-            )
-
-            result = self._collection.replace_one(
-                {
-                    '_id': document['_id'],
-                    'record_type': 'retention_hold',
-                    'claim_id': hold.claim_id,
-                    'released_at': (current.model_dump(mode='json')['released_at']),
-                },
-                document,
-                session=mongo_session,
-            )
-
-            if result.matched_count != 1:
-                latest_hold = self._get(
-                    'retention_hold',
-                    hold.hold_id,
-                    RetentionHoldRecord,
-                    session=mongo_session,
-                )
-
-                if latest_hold == hold:
-                    return
-
-                raise IdempotencyConflict(hold.hold_id)
+        if current is None:
+            if hold.released_at is not None:
+                raise ValueError('A retention hold must be persisted before release.')
 
             operation_document = self._collection.find_one(
                 {
                     'record_type': 'retention_operation',
                     'claim_id': hold.claim_id,
-                    'status': RetentionOperationStatus.HELD.value,
                 },
                 session=mongo_session,
             )
@@ -2719,93 +2618,215 @@ class MongoDBRepository:
                 operation_document,
                 RetentionOperation,
             )
-            if operation is None:
-                return
-
-            if (
-                self._collection.find_one(
+            if operation is not None and operation.status is not RetentionOperationStatus.COMPLETED:
+                payload = operation.model_dump(mode='python')
+                payload.update(
                     {
-                        'record_type': 'retention_hold',
-                        'claim_id': hold.claim_id,
-                        'released_at': None,
+                        'revision': operation.revision + 1,
+                        'status': RetentionOperationStatus.HELD,
+                        'hold_refs': sorted(set(operation.hold_refs).union({hold.hold_id})),
+                        'updated_at': max(operation.updated_at, hold.applied_at),
+                        'completed_at': None,
+                    }
+                )
+                held = RetentionOperation.model_validate(payload)
+                validate_retention_operation_transition(operation, held)
+                held_document = held.model_dump(mode='json')
+                held_document.update(
+                    {
+                        '_id': self._record_id('retention_operation', held.operation_id),
+                        'record_type': 'retention_operation',
+                        'customer_id': None,
+                        'claim_id': held.claim_id,
+                    }
+                )
+                result = self._collection.replace_one(
+                    {
+                        '_id': held_document['_id'],
+                        'record_type': 'retention_operation',
+                        'revision': operation.revision,
                     },
-                    projection={'_id': 1},
+                    held_document,
                     session=mongo_session,
                 )
-                is not None
-            ):
-                return
-
-            statuses = retention_target_statuses(
-                operation.targets,
-                operation.step_evidence,
-            )
-            next_status: RetentionOperationStatus
-            completed_at: datetime | None
-            if operation.targets and all(
-                status is RetentionStepStatus.SATISFIED for status in statuses.values()
-            ):
-                next_status = RetentionOperationStatus.COMPLETED
-                completed_at = released_at
-            elif any(
-                status
-                in {
-                    RetentionStepStatus.FAILED,
-                    RetentionStepStatus.UNKNOWN,
-                }
-                for status in statuses.values()
-            ):
-                next_status = RetentionOperationStatus.RECONCILIATION_REQUIRED
-                completed_at = None
-            else:
-                next_status = RetentionOperationStatus.RESERVED
-                completed_at = None
-
-            payload = operation.model_dump(mode='python')
-            payload.update(
-                {
-                    'revision': operation.revision + 1,
-                    'status': next_status,
-                    'updated_at': max(operation.updated_at, released_at),
-                    'completed_at': completed_at,
-                }
-            )
-            resumed = RetentionOperation.model_validate(payload)
-            validate_retention_operation_transition(operation, resumed)
-            resumed_document = resumed.model_dump(mode='json')
-            resumed_document.update(
-                {
-                    '_id': self._record_id(
+                if result.modified_count != 1:
+                    latest = self._get(
                         'retention_operation',
-                        resumed.operation_id,
-                    ),
-                    'record_type': 'retention_operation',
-                    'customer_id': None,
-                    'claim_id': resumed.claim_id,
-                }
-            )
-            operation_result = self._collection.replace_one(
-                {
-                    '_id': resumed_document['_id'],
-                    'record_type': 'retention_operation',
-                    'revision': operation.revision,
-                },
-                resumed_document,
+                        operation.operation_id,
+                        RetentionOperation,
+                        session=mongo_session,
+                    )
+                    if latest is None:
+                        raise KeyError(operation.operation_id)
+                    raise RevisionConflict(latest.revision)
+
+            try:
+                self._collection.insert_one(
+                    {
+                        **hold.model_dump(mode='json'),
+                        '_id': self._record_id('retention_hold', hold.hold_id),
+                        'record_type': 'retention_hold',
+                        'customer_id': None,
+                        'claim_id': hold.claim_id,
+                    },
+                    session=mongo_session,
+                )
+            except DuplicateKeyError as error:
+                winner = self._get(
+                    'retention_hold',
+                    hold.hold_id,
+                    RetentionHoldRecord,
+                    session=mongo_session,
+                )
+                if winner != hold:
+                    raise IdempotencyConflict(hold.hold_id) from error
+            return
+
+        if current == hold:
+            return
+
+        validate_retention_hold_transition(
+            current,
+            hold,
+        )
+
+        released_at = hold.released_at
+        assert released_at is not None
+
+        document = hold.model_dump(mode='json')
+        document.update(
+            {
+                '_id': self._record_id(
+                    'retention_hold',
+                    hold.hold_id,
+                ),
+                'record_type': 'retention_hold',
+                'customer_id': None,
+                'claim_id': hold.claim_id,
+            }
+        )
+
+        result = self._collection.replace_one(
+            {
+                '_id': document['_id'],
+                'record_type': 'retention_hold',
+                'claim_id': hold.claim_id,
+                'released_at': (current.model_dump(mode='json')['released_at']),
+            },
+            document,
+            session=mongo_session,
+        )
+
+        if result.matched_count != 1:
+            latest_hold = self._get(
+                'retention_hold',
+                hold.hold_id,
+                RetentionHoldRecord,
                 session=mongo_session,
             )
-            if operation_result.modified_count != 1:
-                latest = self._get(
-                    'retention_operation',
-                    operation.operation_id,
-                    RetentionOperation,
-                    session=mongo_session,
-                )
-                if latest != resumed:
-                    raise RevisionConflict(
-                        latest.revision if latest is not None else operation.revision
-                    )
 
-        self._atomic(persist)
+            if latest_hold == hold:
+                return
+
+            raise IdempotencyConflict(hold.hold_id)
+
+        operation_document = self._collection.find_one(
+            {
+                'record_type': 'retention_operation',
+                'claim_id': hold.claim_id,
+                'status': RetentionOperationStatus.HELD.value,
+            },
+            session=mongo_session,
+        )
+        operation = self._model_from_document(
+            operation_document,
+            RetentionOperation,
+        )
+        if operation is None:
+            return
+
+        if (
+            self._collection.find_one(
+                {
+                    'record_type': 'retention_hold',
+                    'claim_id': hold.claim_id,
+                    'released_at': None,
+                },
+                projection={'_id': 1},
+                session=mongo_session,
+            )
+            is not None
+        ):
+            return
+
+        statuses = retention_target_statuses(
+            operation.targets,
+            operation.step_evidence,
+        )
+        next_status: RetentionOperationStatus
+        completed_at: datetime | None
+        if operation.targets and all(
+            status is RetentionStepStatus.SATISFIED for status in statuses.values()
+        ):
+            next_status = RetentionOperationStatus.COMPLETED
+            completed_at = released_at
+        elif any(
+            status
+            in {
+                RetentionStepStatus.FAILED,
+                RetentionStepStatus.UNKNOWN,
+            }
+            for status in statuses.values()
+        ):
+            next_status = RetentionOperationStatus.RECONCILIATION_REQUIRED
+            completed_at = None
+        else:
+            next_status = RetentionOperationStatus.RESERVED
+            completed_at = None
+
+        payload = operation.model_dump(mode='python')
+        payload.update(
+            {
+                'revision': operation.revision + 1,
+                'status': next_status,
+                'updated_at': max(operation.updated_at, released_at),
+                'completed_at': completed_at,
+            }
+        )
+        resumed = RetentionOperation.model_validate(payload)
+        validate_retention_operation_transition(operation, resumed)
+        resumed_document = resumed.model_dump(mode='json')
+        resumed_document.update(
+            {
+                '_id': self._record_id(
+                    'retention_operation',
+                    resumed.operation_id,
+                ),
+                'record_type': 'retention_operation',
+                'customer_id': None,
+                'claim_id': resumed.claim_id,
+            }
+        )
+        operation_result = self._collection.replace_one(
+            {
+                '_id': resumed_document['_id'],
+                'record_type': 'retention_operation',
+                'revision': operation.revision,
+            },
+            resumed_document,
+            session=mongo_session,
+        )
+        if operation_result.modified_count != 1:
+            latest = self._get(
+                'retention_operation',
+                operation.operation_id,
+                RetentionOperation,
+                session=mongo_session,
+            )
+            if latest != resumed:
+                raise RevisionConflict(
+                    latest.revision if latest is not None else operation.revision
+                )
 
     def list_retention_holds(
         self,

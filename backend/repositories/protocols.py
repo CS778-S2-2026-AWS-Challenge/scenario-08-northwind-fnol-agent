@@ -859,6 +859,34 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Persist or monotonically release one source-linked retention hold."""
         raise NotImplementedError
 
+    def commit_retention_hold_action(
+        self,
+        hold: RetentionHoldRecord,
+        *,
+        expected_claim_revision: int,
+        audit_event: AuditEventEnvelope,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically apply or release one hold under the expected Claim revision.
+
+        The Claim revision is checked first; the hold transition (including the
+        RetentionOperation hold/resume it implies), the Audit event and the actor's
+        idempotency record then commit together or not at all.
+
+        Args:
+            hold: The new or released hold record.
+            expected_claim_revision: Claim revision the Workbench action was offered on.
+            audit_event: Internal Audit event for the action.
+            idempotency: Replay record holding the first response.
+
+        Raises:
+            KeyError: The Claim no longer exists.
+            RevisionConflict: The Claim revision changed after the action was offered.
+            IdempotencyConflict: The audit event or replay key already holds other data.
+            ValueError: The hold transition is not allowed.
+        """
+        raise NotImplementedError
+
     def list_retention_holds(
         self,
         claim_id: str,

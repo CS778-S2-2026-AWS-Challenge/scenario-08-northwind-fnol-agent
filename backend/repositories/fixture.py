@@ -1663,6 +1663,40 @@ class FixtureRepository(PersistenceRepository):
 
             self._retention_operations[operation.operation_id] = deepcopy(operation)
 
+    def commit_retention_hold_action(
+        self,
+        hold: RetentionHoldRecord,
+        *,
+        expected_claim_revision: int,
+        audit_event: AuditEventEnvelope,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        with self._claim_mutation_lock:
+            claim = self._claims.get(hold.claim_id)
+            if claim is None:
+                raise KeyError(hold.claim_id)
+            if claim.revision != expected_claim_revision:
+                raise RevisionConflict(claim.revision)
+            # Restore every store this action touches if any write fails.
+            snapshot = (
+                dict(self._retention_holds),
+                dict(self._retention_operations),
+                dict(self._audit_events),
+                dict(self._idempotency),
+            )
+            try:
+                self.save_retention_hold(hold)
+                self.append_audit_event(audit_event)
+                self.save_idempotency(idempotency)
+            except BaseException:
+                (
+                    self._retention_holds,
+                    self._retention_operations,
+                    self._audit_events,
+                    self._idempotency,
+                ) = snapshot
+                raise
+
     def save_retention_hold(
         self,
         hold: RetentionHoldRecord,
