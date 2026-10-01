@@ -305,6 +305,91 @@ describe('Workbench API failures', () => {
   })
 })
 
+describe('workbenchApi Claim decisions', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    sessionStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it('sends the current revision, stable operation key, staff auth, and claimant-safe body', async () => {
+    const decision = {
+      decision_id: 'cdec_1234567890abcdef1234',
+      claim_id: 'clm_decision',
+      decision: 'rejected',
+      claimant_explanation: 'The submitted evidence is insufficient.',
+      decided_by: 'stf_demo',
+      decided_at: '2026-10-01T00:00:00Z',
+      source_claim_revision: 7,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, decision))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await workbenchApi.recordClaimDecision(
+      'staff-token',
+      'clm_decision',
+      7,
+      {
+        decision: 'rejected',
+        claimant_explanation: 'The submitted evidence is insufficient.',
+        actor_id: 'must-not-be-sent',
+        staff_id: 'must-not-be-sent',
+        decided_at: 'must-not-be-sent',
+        internal_note: 'must-not-be-sent',
+      },
+      'decision-attempt-key',
+    )
+
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/workbench/claims/clm_decision/decisions')
+    expect(options.method).toBe('POST')
+    expect(options.headers).toMatchObject({
+      Authorization: 'Bearer staff-token',
+      'Content-Type': 'application/json',
+      'If-Match': '7',
+      'Idempotency-Key': 'decision-attempt-key',
+    })
+    expect(JSON.parse(options.body)).toEqual({
+      decision: 'rejected',
+      claimant_explanation: 'The submitted evidence is insufficient.',
+    })
+  })
+
+  it('reuses the caller-owned key for an ambiguous retry and accepts a new key for a new attempt', async () => {
+    const decision = {
+      decision_id: 'cdec_1234567890abcdef1234',
+      claim_id: 'clm_retry',
+      decision: 'approved',
+      claimant_explanation: 'Your claim has been approved.',
+      decided_by: 'stf_demo',
+      decided_at: '2026-10-01T00:00:00Z',
+      source_claim_revision: 3,
+    }
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network unavailable'))
+      .mockResolvedValueOnce(jsonResponse(201, decision))
+      .mockResolvedValueOnce(jsonResponse(201, decision))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(workbenchApi.recordClaimDecision(
+      'staff-token', 'clm_retry', 3, { decision: 'approved' }, 'same-attempt-key',
+    )).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+    await workbenchApi.recordClaimDecision(
+      'staff-token', 'clm_retry', 3, { decision: 'approved' }, 'same-attempt-key',
+    )
+    await workbenchApi.recordClaimDecision(
+      'staff-token', 'clm_retry', 4, { decision: 'approved' }, 'new-attempt-key',
+    )
+
+    expect(fetchMock.mock.calls[0][1].headers['Idempotency-Key']).toBe('same-attempt-key')
+    expect(fetchMock.mock.calls[1][1].headers['Idempotency-Key']).toBe('same-attempt-key')
+    expect(fetchMock.mock.calls[2][1].headers['Idempotency-Key']).toBe('new-attempt-key')
+    expect(fetchMock.mock.calls[0][1].headers['If-Match']).toBe('3')
+    expect(fetchMock.mock.calls[1][1].headers['If-Match']).toBe('3')
+    expect(fetchMock.mock.calls[2][1].headers['If-Match']).toBe('4')
+  })
+})
+
 describe('workbenchApi external task actions', () => {
   beforeEach(() => {
     clearStoredSession()

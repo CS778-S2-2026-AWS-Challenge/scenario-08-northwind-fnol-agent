@@ -41,6 +41,7 @@ const props = {
   onSend: vi.fn(),
   onOwnershipAction: vi.fn(),
   onReopen: vi.fn(),
+  onClaimDecision: vi.fn(),
 }
 
 describe('ClaimWorkspace navigation', () => {
@@ -217,6 +218,62 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByRole('heading', { name: 'Available staff actions' })).not.toBeInTheDocument()
     expect(screen.queryByText('Accept Claim')).not.toBeInTheDocument()
     expect(screen.queryByText('This work is assigned to another staff member.')).not.toBeInTheDocument()
+  })
+
+  it('shows approval controls only for the exact confirmation-required Claim decision action', () => {
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_1',
+      label: 'Record Claim decision',
+      purpose: 'Approve or reject this externally created Claim once.',
+      availability: 'confirmation_required',
+      confirmation: { level: 'high_impact', message: 'This final Claim decision cannot be changed in this version.' },
+      inputs: [],
+      based_on_revision: 4,
+    }
+    const actionable = {
+      ...detail,
+      workflow_state: 'created',
+      work_summary: {
+        ...detail.work_summary,
+        primary_action_code: decisionAction.action_code,
+        primary_action_target_ref: decisionAction.target_ref,
+      },
+      allowed_actions: [decisionAction],
+    }
+    const { rerender } = render(<ClaimWorkspace {...props} detail={actionable} />)
+
+    expect(screen.getByRole('button', { name: 'Approve Claim' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Reject Claim' })).toBeVisible()
+
+    rerender(<ClaimWorkspace {...props} detail={{ ...actionable, allowed_actions: [] }} />)
+    expect(screen.queryByRole('button', { name: 'Approve Claim' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject Claim' })).not.toBeInTheDocument()
+  })
+
+  it('shows the authoritative completed decision and no approval controls', () => {
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        revision: 5,
+        claim_decision: {
+          decision: 'approved',
+          claimant_explanation: 'Your claim has been approved.',
+          internal_note: 'Staff-only note.',
+          decided_by: 'stf_demo',
+          decided_at: '2026-10-01T01:00:00Z',
+        },
+        allowed_actions: [],
+      }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Claim approved' })).toBeVisible()
+    expect(screen.getByText('Your claim has been approved.')).toBeVisible()
+    expect(screen.queryByText('Staff-only note.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve Claim' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject Claim' })).not.toBeInTheDocument()
   })
 
   it('keeps every Draft detail section readable while removing mutation controls', () => {
