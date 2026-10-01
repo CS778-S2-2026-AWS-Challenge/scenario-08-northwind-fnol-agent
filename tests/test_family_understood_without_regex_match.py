@@ -6,7 +6,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.domain.branch_registry import FAMILY_FIELDS, FAMILY_RULE_IDS, BranchRuleEvaluator
+from backend.domain.branch_registry import (
+    CLAIMANT_HIDDEN_FIELDS,
+    FAMILY_FIELDS,
+    FAMILY_RULE_IDS,
+    BranchRuleEvaluator,
+)
 from backend.domain.intake import infer_controlled_product_family
 from backend.domain.models import FieldSelectionState, FormSource, FormStatus
 from backend.repositories.fixture import FixtureRepository
@@ -102,7 +107,10 @@ def test_unresolved_family_exposes_all_family_fields_without_making_them_require
     plan = plan_model_turn(replace(context, claim=claim, branch_evaluation=evaluation))
     assert plan is not None and plan.route.model_required
     assert plan.field_contract is not None
-    assert family_fields <= plan.field_contract.by_code.keys()
+    # Protected values (licence and other-party policy numbers) use dedicated routes
+    # and never enter the model's contract.
+    assert family_fields - CLAIMANT_HIDDEN_FIELDS <= plan.field_contract.by_code.keys()
+    assert not CLAIMANT_HIDDEN_FIELDS & plan.field_contract.by_code.keys()
     assert claim.form == {} and claim.incident_type is None
 
 

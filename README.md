@@ -210,7 +210,7 @@ $env:NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 $env:AGENT_RUNTIME_PROFILE = 'model_gateway'
 $env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
-$env:MODEL_TIMEOUT_SECONDS = '180'
+$env:MODEL_TIMEOUT_SECONDS = '60'
 
 # 5. Backend (in this shell). Poll http://127.0.0.1:8000/health/ready before trusting it.
 py -3.12 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --log-config scripts/dev-logging.json

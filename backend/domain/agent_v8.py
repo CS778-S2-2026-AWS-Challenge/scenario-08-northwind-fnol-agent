@@ -117,6 +117,9 @@ class V8DocumentRequest(ContractModel):
     document_kind: str = Field(min_length=1, max_length=100)
     from_party: Literal['claimant', 'third_party']
     service_identity: str | None = Field(default=None, max_length=100)
+    # 'later' when the claimant has said they will send it later; Runtime then
+    # records it as expected and it is no longer asked for.
+    when: Literal['now', 'later'] = 'now'
 
 
 class V8EvidenceInterpretation(ContractModel):

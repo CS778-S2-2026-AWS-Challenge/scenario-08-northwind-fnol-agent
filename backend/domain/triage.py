@@ -16,7 +16,7 @@ from enum import Enum
 
 from backend.domain.branch_registry import BranchRegistrySnapshot
 from backend.domain.currency import to_nzd
-from backend.domain.evidence import canonical_evidence_kind
+from backend.domain.evidence import canonical_evidence_kind, effective_evidence_kind
 from backend.domain.field_registry import parse_registered_number
 from backend.domain.models import (
     AssessorRoutingStatus,
@@ -256,9 +256,7 @@ def _outstanding_documents(
         if branch is not None:
             wanted.update(canonical_evidence_kind(kind) for kind in branch.document_requirements)
     received = {
-        canonical_evidence_kind(item.kind)
-        for item in evidence
-        if item.status is EvidenceStatus.RECEIVED
+        effective_evidence_kind(item) for item in evidence if item.status is EvidenceStatus.RECEIVED
     }
     return {
         kind for kind in wanted if not (_SATISFYING_KINDS.get(kind, frozenset({kind})) & received)

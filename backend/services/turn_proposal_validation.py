@@ -6,6 +6,7 @@ import logging
 import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -38,6 +39,7 @@ from backend.domain.models import (
     StateChange,
 )
 from backend.domain.safety_vocabulary import WEAK_SAFETY_PATTERN
+from backend.domain.temporal_resolution import resolve_reported_time
 from backend.domain.turn_field_contract import TurnFieldContract, TurnFieldViolation
 from backend.services.turn_field_contract import validate_field_changes
 
@@ -464,6 +466,7 @@ def validate_turn_proposal(
     ) = None,
     authorised_service_ids: Collection[str] = (),
     authorized_policy_sources: Sequence[Mapping[str, object]] = (),
+    reported_at: datetime | None = None,
 ) -> ValidatedTurn:
     """Validate one model envelope without applying claim mutations.
 
@@ -571,6 +574,16 @@ def validate_turn_proposal(
             # "I don't know when" is a disposition, not a time. Record it as such
             # so the report carries the gap instead of a fabricated value.
             disposition = 'claimant_will_supply'
+        if disposition == 'value' and selected.value_type == 'temporal':
+            # The model does not know the current time; resolve the claimant's
+            # words against the moment they reported, never store its invention.
+            resolved = resolve_reported_time(
+                change.value, change.reported_text, reported_at or datetime.now(UTC)
+            )
+            if resolved is None:
+                reject('field_change', change.field_code, 'unresolved_time')
+                continue
+            change = change.model_copy(update={'value': resolved})
         if (
             disposition == 'claimant_will_supply'
             and change.value is not None

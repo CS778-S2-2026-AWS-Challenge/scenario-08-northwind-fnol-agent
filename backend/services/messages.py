@@ -23,7 +23,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
-from backend.domain.evidence import canonical_evidence_kind
+from backend.domain.evidence import canonical_evidence_kind, effective_evidence_kind
 from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -1684,14 +1684,24 @@ def _document_projection(
     if not wanted:
         return ()
     received: dict[str, list[str]] = {}
+    expected_later: set[str] = set()
     for item in repository.list_evidence(claim.claim_id, claim.customer_id):
         if item.status is EvidenceStatus.RECEIVED:
-            received.setdefault(canonical_evidence_kind(item.kind), []).append(item.evidence_id)
+            received.setdefault(effective_evidence_kind(item), []).append(item.evidence_id)
+        elif item.status is EvidenceStatus.PENDING:
+            # The claimant said they will send it later; do not ask again.
+            expected_later.add(canonical_evidence_kind(item.kind))
     return tuple(
         {
             'kind': kind,
             'branch': branch_id,
-            'status': 'received' if kind in received else 'not_received',
+            'status': (
+                'received'
+                if kind in received
+                else 'expected_later'
+                if kind in expected_later
+                else 'not_received'
+            ),
             'evidence_ids': received.get(kind, []),
         }
         for kind, branch_id in wanted.items()

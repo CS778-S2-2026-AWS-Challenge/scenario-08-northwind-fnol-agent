@@ -69,6 +69,10 @@ export function fieldValueText(field) {
   }
   if (typeof field.value === 'boolean') return field.value ? 'Yes' : 'No'
   if (Array.isArray(field.value)) return field.value.join(', ')
+  if (typeof field.value === 'string') {
+    const time = reportedTimeText(field.value, field.precision)
+    if (time) return time
+  }
   if (field.value && typeof field.value === 'object') {
     return field.value.claimant_wording
       || field.value.formatted
@@ -77,4 +81,49 @@ export function fieldValueText(field) {
       )).join(', ')
   }
   return String(field.value ?? '')
+}
+
+// Incident times are stored in New Zealand time as 2026-10-01T17:20+13:00, or as
+// 2026-10-01 with an optional part of day ("2026-10-01 evening"). Shown to the
+// claimant as "Today, about 5:20 pm", "Yesterday evening" or "Mon 28 Sep".
+const NZ_TIME_ZONE = 'Pacific/Auckland'
+const MOMENT_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})[+-]\d{2}:\d{2}$/
+const DAY_PATTERN = /^(\d{4}-\d{2}-\d{2})(?: (morning|afternoon|evening|night))?$/
+const APPROXIMATE_PRECISIONS = new Set(['approximate', 'range'])
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function nzDay(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: NZ_TIME_ZONE }).format(date)
+}
+
+function dayName(isoDay, now) {
+  const today = nzDay(now)
+  const yesterday = nzDay(new Date(now.getTime() - 24 * 60 * 60 * 1000))
+  if (isoDay === today) return 'Today'
+  if (isoDay === yesterday) return 'Yesterday'
+  const date = new Date(`${isoDay}T00:00:00Z`)
+  return `${WEEKDAYS[date.getUTCDay()]} ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`
+}
+
+function clockText(hour, minute) {
+  const suffix = hour < 12 ? 'am' : 'pm'
+  const twelveHour = hour % 12 === 0 ? 12 : hour % 12
+  return `${twelveHour}:${String(minute).padStart(2, '0')} ${suffix}`
+}
+
+export function reportedTimeText(value, precision, now = new Date()) {
+  const moment = MOMENT_PATTERN.exec(value)
+  if (moment) {
+    const about = APPROXIMATE_PRECISIONS.has(precision) ? 'about ' : ''
+    return `${dayName(moment[1], now)}, ${about}${clockText(Number(moment[2]), Number(moment[3]))}`
+  }
+  const day = DAY_PATTERN.exec(value)
+  if (!day) return null
+  const name = dayName(day[1], now)
+  const part = day[2]
+  if (!part) return name
+  if (name === 'Today') return part === 'night' ? 'Tonight' : `This ${part}`
+  if (name === 'Yesterday' && part === 'night') return 'Last night'
+  return `${name} ${part}`
 }

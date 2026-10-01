@@ -3,12 +3,15 @@
 import json
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.domain.agent_v8 import V8Escalation
 from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import InvariantGuardedAgent
+from backend.services.turn_proposal_validation import ValidatedTurn
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 
 # A Home claim asking for a Motor-only service: Runtime refuses the suggestion.
@@ -138,3 +141,63 @@ def test_consistent_reply_costs_one_call() -> None:
     )
     # Describing the offer itself, without claiming it is already arranged, remains fine.
     assert review_reply(offered_without_promise).consistent
+
+
+def _validated(
+    reply: str, *, services: tuple[str, ...] = (), escalated: bool = False
+) -> ValidatedTurn:
+    return ValidatedTurn(
+        reply=reply,
+        form_changes=[],
+        contents_item_changes=[],
+        next_question=None,
+        service_identities=services,
+        state_changes=[],
+        escalation=(
+            V8Escalation(kind='professional_review', reason='Coverage needs a person.')
+            if escalated
+            else None
+        ),
+        ready_to_create=False,
+        confirms_batch=False,
+        rejected=[],
+    )
+
+
+@pytest.mark.parametrize(
+    ('reply', 'kind'),
+    [
+        (
+            'Glad nobody is hurt. Would you need any repair services or guidance at this point?',
+            'offers_service_in_words',
+        ),
+        ('Do you need any specific assistance at this time?', 'offers_service_in_words'),
+        (
+            'Rental cover is not in the wording I have. Please check with your insurer.',
+            'refers_to_insurer',
+        ),
+        ("I've escalated this for a review.", 'claims_escalation_without_one'),
+        ('Do you need guidance for traffic crash reporting?', 'offers_service_in_words'),
+    ],
+)
+def test_review_catches_words_the_turn_does_not_back(reply: str, kind: str) -> None:
+    from backend.services.reply_consistency import review_reply
+
+    review = review_reply(_validated(reply))
+
+    assert [item.kind for item in review.inconsistencies] == [kind]
+
+
+def test_review_allows_fact_questions_offers_by_card_and_real_escalation() -> None:
+    from backend.services.reply_consistency import review_reply
+
+    assert review_reply(_validated('Does the car need towing?')).consistent
+    assert review_reply(
+        _validated('Can I help with a tow?', services=('vehicle_recovery_request',))
+    ).consistent
+    assert review_reply(
+        _validated("I've passed this to a claims specialist.", escalated=True)
+    ).consistent
+    assert review_reply(
+        _validated('That clause is not in the wording I have; our claims team will confirm.')
+    ).consistent
