@@ -315,6 +315,22 @@ describe('WorkbenchPage queue routing', () => {
     }
   })
 
+  it('explains a staff account without Workbench access instead of offering a retry', async () => {
+    api.claimFilterMetadata.mockRejectedValue(Object.assign(new Error('Access denied for the staff boundary.'), {
+      status: 403,
+      code: 'ACCESS_DENIED',
+      requestId: 'req_denied',
+    }))
+
+    renderPage('/workbench')
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('No Workbench access')
+    expect(alert).toHaveTextContent('retrying will not help')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(api.claims).not.toHaveBeenCalled()
+  })
+
   it('keeps the bare Workbench queue when no persisted active Claim exists', async () => {
     renderPage('/workbench')
 

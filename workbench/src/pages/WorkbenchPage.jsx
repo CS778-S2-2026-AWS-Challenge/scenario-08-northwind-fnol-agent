@@ -2376,7 +2376,14 @@ function QueueMetadataState({ loading, error, onRetry }) {
       </header>
       <div className="queue-list" aria-live="polite" aria-busy={loading}>
         {loading && <p className="queue-state" role="status">{t('Loading queue filters...')}</p>}
-        {!loading && error && (
+        {!loading && error && (error.status === 403 || error.code === 'ACCESS_DENIED') && (
+          <div className="queue-state" role="alert">
+            <strong>{t('No Workbench access')}</strong>
+            <p>{t('This staff account is not authorised to read Workbench Claims, so retrying will not help. Ask your administrator to review your staff role.')}</p>
+            {failureReference(error) && <small>{failureReference(error)}</small>}
+          </div>
+        )}
+        {!loading && error && !(error.status === 403 || error.code === 'ACCESS_DENIED') && (
           <div className="queue-state" role="alert">
             <strong>{t('Claim queue unavailable')}</strong>
             <p>{t('The Workbench could not load the server-published queue controls. The current URL has been preserved; retry when the service is available.')}</p>

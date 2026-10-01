@@ -10,6 +10,8 @@ const ZH_CN = {
   '{count} Draft claims': '{count} 个草稿案件',
   'Claim conversations': '案件会话',
   'Staff Agent': '员工助手',
+  'No Workbench access': '没有 Workbench 访问权限',
+  'This staff account is not authorised to read Workbench Claims, so retrying will not help. Ask your administrator to review your staff role.': '此员工账号无权读取 Workbench 案件，重试也无法解决。请联系管理员检查你的员工角色。',
   'Staff Agent cannot answer right now': '员工助手暂时无法回答',
   'Messages cannot be sent until a model is available. Your draft and earlier sessions stay here.': '在模型可用之前无法发送消息。你的草稿和之前的会话会保留在这里。',
   'No Staff Agent model is published for this Workbench environment.': '当前 Workbench 环境没有发布可用的员工助手模型。',
