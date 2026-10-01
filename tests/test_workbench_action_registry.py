@@ -22,7 +22,7 @@ from backend.services.support import now_utc
 
 
 def test_action_registry_owns_every_projected_action_contract_dimension() -> None:
-    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-28.1'
+    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-10-01.1'
     assert set(WORKBENCH_ACTION_REGISTRY) == {
         'claim.abandon',
         'claim.reopen',
@@ -37,6 +37,8 @@ def test_action_registry_owns_every_projected_action_contract_dimension() -> Non
         'ownership.request_cowork',
         'ownership.request_transfer',
         'ownership.requeue',
+        'retention.hold.apply',
+        'retention.hold.release',
         'signal.record_decision',
         'work_item.create',
         'work_item.update',

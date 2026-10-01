@@ -39,7 +39,12 @@ from backend.domain.models import (
     UpdateStaffActionRequest,
     WorkflowState,
 )
-from backend.domain.retention import StaffRetentionProjection
+from backend.domain.retention import (
+    ApplyRetentionHoldRequest,
+    ReleaseRetentionHoldRequest,
+    StaffRetentionProjection,
+    WorkbenchRetentionHold,
+)
 from backend.domain.workbench import (
     WorkbenchClaimDetail,
     WorkbenchClaimFilterMetadata,
@@ -70,6 +75,7 @@ from backend.services.ownership import (
     requeue_claim,
 )
 from backend.services.retention import project_staff_retention
+from backend.services.retention_holds import apply_retention_hold, release_retention_hold
 from backend.services.review_writeback import (
     decide_review_signal,
     get_review_connected_workbench_detail,
@@ -298,6 +304,53 @@ def abandon_workbench_claim(
         repository_for(request),
         principal,
         claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.post(
+    '/{claim_id}/retention-holds',
+    response_model=WorkbenchRetentionHold,
+    status_code=status.HTTP_201_CREATED,
+)
+def apply_workbench_retention_hold(
+    claim_id: str,
+    payload: ApplyRetentionHoldRequest,
+    request: Request,
+    principal: Principal = Depends(require_workbench_write),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> WorkbenchRetentionHold:
+    return apply_retention_hold(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.post(
+    '/{claim_id}/retention-holds/{hold_id}/release',
+    response_model=WorkbenchRetentionHold,
+)
+def release_workbench_retention_hold(
+    claim_id: str,
+    hold_id: str,
+    payload: ReleaseRetentionHoldRequest,
+    request: Request,
+    principal: Principal = Depends(require_workbench_write),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> WorkbenchRetentionHold:
+    return release_retention_hold(
+        repository_for(request),
+        principal,
+        claim_id,
+        hold_id,
         payload,
         idempotency_key,
         if_match,

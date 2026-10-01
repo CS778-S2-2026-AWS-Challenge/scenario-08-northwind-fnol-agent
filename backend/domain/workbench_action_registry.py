@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-28.1'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-01.1'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -24,6 +24,7 @@ class WorkbenchActionTargetType(StrEnum):
     SESSION = 'session'
     COLLABORATION_REQUEST = 'collaboration_request'
     EXTERNAL_TASK = 'external_task'
+    RETENTION_HOLD = 'retention_hold'
 
 
 class WorkbenchActionPermission(StrEnum):
@@ -380,6 +381,81 @@ WORKBENCH_ACTION_REGISTRY = {
                 'actor_id',
                 'resulting_revision',
                 'follow_up_ref',
+            ),
+        ),
+        RegisteredWorkbenchAction(
+            'retention.hold.apply',
+            WorkbenchActionTargetType.CLAIM,
+            'Place retention hold',
+            'Stop destructive retention cleanup for this Claim while the hold is active.',
+            WorkbenchActionPermission.PRIMARY_OWNER,
+            ConfirmationLevel.EXPLICIT,
+            'Retention cleanup for this Claim will stop until the hold is released.',
+            ('retention_hold.create', 'retention_operation.hold', 'audit.append'),
+            (
+                _input(
+                    'reason',
+                    'Why must this Claim be retained?',
+                    WorkbenchActionInputControl.SELECT,
+                    choices=(
+                        ('legal_hold', 'Legal hold'),
+                        ('dispute', 'Dispute'),
+                        ('investigation', 'Investigation'),
+                        ('authorised_staff_review', 'Authorised staff review'),
+                    ),
+                ),
+                _input(
+                    'note',
+                    'What is the source of this hold decision?',
+                    WorkbenchActionInputControl.TEXTAREA,
+                ),
+            ),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'IDEMPOTENCY_CONFLICT',
+                'INVALID_STATE_TRANSITION',
+                'RESOURCE_NOT_FOUND',
+                'REVISION_CONFLICT',
+                'VALIDATION_ERROR',
+            ),
+            audit_requirements=(
+                'action_code',
+                'target_ref',
+                'actor_id',
+                'resulting_revision',
+                'hold_ref',
+            ),
+        ),
+        RegisteredWorkbenchAction(
+            'retention.hold.release',
+            WorkbenchActionTargetType.RETENTION_HOLD,
+            'Release retention hold',
+            'Release this hold so retention cleanup can resume the same operation.',
+            WorkbenchActionPermission.PRIMARY_OWNER,
+            ConfirmationLevel.EXPLICIT,
+            'Retention cleanup may resume once no other hold remains active.',
+            ('retention_hold.release', 'audit.append'),
+            (
+                _input(
+                    'note',
+                    'Why can this hold be released?',
+                    WorkbenchActionInputControl.TEXTAREA,
+                ),
+            ),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'IDEMPOTENCY_CONFLICT',
+                'INVALID_STATE_TRANSITION',
+                'RESOURCE_NOT_FOUND',
+                'REVISION_CONFLICT',
+                'VALIDATION_ERROR',
+            ),
+            audit_requirements=(
+                'action_code',
+                'target_ref',
+                'actor_id',
+                'resulting_revision',
+                'hold_ref',
             ),
         ),
         RegisteredWorkbenchAction(

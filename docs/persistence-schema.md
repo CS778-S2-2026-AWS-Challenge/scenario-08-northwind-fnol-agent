@@ -1600,3 +1600,5 @@ same record. The digest length is part of the v1 contract and must not change fo
 | `wki_recovery_` | Recovery Runtime WorkItem | 24 | Claim, operation or event coordinate, rule ID, subject |
 | `aud_recovery_`, `aud_p17_backfill_`, `aud_ret_` | Recovery, backfill and retention Audit events | 24 / 24 / 32 | Event suffix and Claim; Follow-up and outcome; operation step |
 | `aud_resume_`, `aud_abandon_` | Resume and staff-abandonment Audit events | 20 | Actor, route, idempotency key |
+| `rhl_` | `RetentionHoldRecord.hold_id` from `retention.hold.apply` | 24 | Claim, actor, route, idempotency key |
+| `aud_hold_` | Retention hold apply and release Audit events | 20 | Actor, route, idempotency key |

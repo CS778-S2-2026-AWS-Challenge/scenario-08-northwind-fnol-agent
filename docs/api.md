@@ -4764,6 +4764,33 @@ capability at both the route and the application-service boundary. A read-only
 staff principal receives `403 ACCESS_DENIED` and no Claim, Follow-up, or audit
 state changes.
 
+Retention holds are applied and released only by registered Workbench actions:
+
+- `POST /api/v1/workbench/claims/{claim_id}/retention-holds` (`retention.hold.apply`)
+  takes `{reason, note}`, where `reason` is a `RetentionHoldReason`
+  (`legal_hold`, `dispute`, `investigation`, `authorised_staff_review`) and `note`
+  (1-1000 characters) records the source of the hold decision. It returns
+  `201 Created` with the `WorkbenchRetentionHold` resource.
+- `POST /api/v1/workbench/claims/{claim_id}/retention-holds/{hold_id}/release`
+  (`retention.hold.release`) takes `{note}` and returns `200 OK` with the released
+  `WorkbenchRetentionHold`. A hold that is already released returns
+  `409 INVALID_STATE_TRANSITION`; an unknown hold returns `404 RESOURCE_NOT_FOUND`.
+
+Both actions require `workbench:write`, the Claim's primary owner
+(`PRIMARY_OWNER` permission, explicit confirmation), `Idempotency-Key`, and an
+`If-Match` Claim revision. They are offered only on a terminal Claim whose
+retention has not completed: apply while no hold is active, release for each
+active hold. Other staff see the action as `blocked`; executing an action the
+projection does not offer returns `403 ACCESS_DENIED`; a stale revision returns
+`409 REVISION_CONFLICT`. An exact replay returns the first response; the same key
+with different data returns `409 IDEMPOTENCY_CONFLICT`. Each action appends one
+internal-only `action.completed` Audit event whose reason is the note. A hold
+does not change the Claim revision, terminal disposition, or claimant access;
+while any hold is active, retention cleanup stays `held`, and release lets the
+same RetentionOperation resume. `WorkbenchRetentionHold` returns `hold_id`,
+`claim_id`, `reason`, `applied_at`, `released_at`, and `active`; it is never
+returned to claimant clients.
+
 Once retention reserves access closure, old Session, Claim/evidence reads and
 claimant idempotent retries use the existing concealed RESOURCE_NOT_FOUND
 response. A historical success response must not bypass current closure.

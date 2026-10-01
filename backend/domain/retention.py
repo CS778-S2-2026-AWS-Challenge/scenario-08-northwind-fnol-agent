@@ -910,6 +910,30 @@ class StaffRetentionProjection(ContractModel):
     )
 
 
+class ApplyRetentionHoldRequest(ContractModel):
+    """Staff request to stop destructive retention cleanup for one Claim."""
+
+    reason: RetentionHoldReason
+    note: str = Field(min_length=1, max_length=1000)
+
+
+class ReleaseRetentionHoldRequest(ContractModel):
+    """Staff request to release one active retention hold."""
+
+    note: str = Field(min_length=1, max_length=1000)
+
+
+class WorkbenchRetentionHold(ContractModel):
+    """Staff-only retention hold resource; never projected to claimant clients."""
+
+    hold_id: str
+    claim_id: str
+    reason: RetentionHoldReason
+    applied_at: datetime
+    released_at: datetime | None = None
+    active: bool
+
+
 class ClaimantRetentionProjection(ContractModel):
     """Minimal claimant projection for an already closed retention boundary."""
 

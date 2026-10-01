@@ -251,6 +251,7 @@ def test_unrelated_backend_change_does_not_select_complete_journey(path: str) ->
         'backend/recovery_worker_main.py',
         'backend/services/recovery_worker.py',
         'backend/services/retention.py',
+        'backend/services/retention_holds.py',
         'backend/services/terminal_claims.py',
     ],
 )
@@ -267,6 +268,7 @@ def test_recovery_modules_select_complete_p17_recovery_contracts(path: str) -> N
         'tests/test_incomplete_claim_recovery_review.py',
         'tests/test_p17_staff_abandonment.py',
         'tests/test_retention_execution.py',
+        'tests/test_retention_hold_actions.py',
         'tests/test_unified_recovery.py',
     } <= set(selection.tests)
 
