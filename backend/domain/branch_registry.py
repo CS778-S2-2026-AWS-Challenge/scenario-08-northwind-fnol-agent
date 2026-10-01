@@ -20,6 +20,7 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     BranchEvaluationResult,
     BranchResult,
+    ClaimantFieldInput,
     FactPrecision,
     FieldSelectionResult,
     FieldSelectionState,
@@ -1483,6 +1484,26 @@ def claimant_projection_fields(
         and field.selection_state
         not in {FieldSelectionState.INACTIVE, FieldSelectionState.SYSTEM_OWNED}
     ]
+
+
+def claimant_field_inputs(
+    field_codes: Iterable[str],
+    registry: BranchRegistrySnapshot | None = None,
+) -> dict[str, ClaimantFieldInput]:
+    """Describe how the claimant can enter each claimant-visible field given."""
+
+    active_registry = registry or build_default_registry()
+    definitions = active_registry.field_by_code
+    inputs: dict[str, ClaimantFieldInput] = {}
+    for code in sorted(set(field_codes)):
+        definition = definitions.get(code)
+        if definition is None or not definition.claimant_visible or definition.system_owned:
+            continue
+        inputs[code] = ClaimantFieldInput(
+            value_type=definition.value_type,
+            allowed_values=sorted(definition.allowed_values),
+        )
+    return inputs
 
 
 def validate_registered_field_value(

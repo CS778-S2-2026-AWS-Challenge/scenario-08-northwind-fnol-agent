@@ -164,6 +164,62 @@ def bind_provider_schema(
     return bound
 
 
+# Every registered value shape, as one shared cell. Which fields this turn takes,
+# and each enum's registered values, reach the model in the turn context
+# (writable_fields, built from the same contract); Runtime enforces the contract
+# with validate_field_changes and drops any change it does not accept.
+_ANY_FIELD_VALUE_SCHEMA: dict[str, object] = {
+    'anyOf': [
+        {'type': 'string', 'minLength': 1, 'maxLength': 300},
+        {'type': 'number', 'minimum': 0},
+        {'type': 'boolean'},
+        {
+            'type': 'array',
+            'minItems': 1,
+            'maxItems': 50,
+            'items': {'type': 'string', 'minLength': 1, 'maxLength': 100},
+        },
+        {'type': 'null'},
+    ]
+}
+
+
+def bind_fixed_turn_schema(
+    schema: dict[str, object],
+    registry: BranchRegistrySnapshot | None = None,
+) -> dict[str, object]:
+    """Bind field_changes to one cell shape that is identical for every turn.
+
+    The field-code list covers every claimant-writable field in the registry, so
+    the bound schema depends only on the registry version and providers can
+    cache it. Turn-specific permission stays with Runtime validation.
+    """
+    active_registry = registry or build_default_registry()
+    bound = deepcopy(schema)
+    properties = bound.get('properties')
+    if not isinstance(properties, dict):
+        raise ValueError('The response schema has no properties object.')
+    field_changes = properties.get('field_changes')
+    if not isinstance(field_changes, dict):
+        return bound
+    base_item = field_changes.get('items')
+    if not isinstance(base_item, dict) or not isinstance(base_item.get('properties'), dict):
+        raise ValueError('The field-change schema has no item contract.')
+    writable_codes = sorted(
+        field.code
+        for field in active_registry.fields
+        if field.claimant_visible and not field.system_owned
+    )
+    item = deepcopy(base_item)
+    item['properties'] = {
+        **item['properties'],
+        'field_code': {'type': 'string', 'enum': writable_codes},
+        'value': deepcopy(_ANY_FIELD_VALUE_SCHEMA),
+    }
+    field_changes['items'] = item
+    return bound
+
+
 def normalise_field_value(field: TurnFieldDefinition, value: Any) -> Any:
     if field.value_type == 'boolean' and isinstance(value, str):
         normalized = value.strip().casefold()
@@ -249,7 +305,18 @@ def validate_field_changes(
     changes: list[Any],
     *,
     rejected_bounds: list[TurnFieldViolation] | None = None,
+    reject_invalid: bool = False,
 ) -> list[Any]:
+    """Return the changes this turn accepts.
+
+    By default any field outside the contract or any invalid value fails the
+    whole proposal. With ``reject_invalid`` (the fixed answer sheet, whose
+    provider schema no longer narrows fields per turn) each such change is
+    recorded in ``rejected_bounds`` and dropped, and the rest of the turn
+    stands; the field is simply asked again later.
+    """
+    if reject_invalid and rejected_bounds is None:
+        raise ValueError('reject_invalid needs rejected_bounds to record the dropped changes.')
     allowed = contract.by_code
     validated: list[Any] = []
     violations: list[TurnFieldViolation] = []
@@ -257,13 +324,15 @@ def validate_field_changes(
         field_code = str(change.field_code)
         field = allowed.get(field_code)
         if field is None:
-            violations.append(
-                TurnFieldViolation(
-                    field_code=field_code,
-                    expected_value_type='not_allowed',
-                    reason_code='field_not_allowed',
-                )
+            violation = TurnFieldViolation(
+                field_code=field_code,
+                expected_value_type='not_allowed',
+                reason_code='field_not_allowed',
             )
+            if reject_invalid and rejected_bounds is not None:
+                rejected_bounds.append(violation)
+            else:
+                violations.append(violation)
             continue
         value = normalise_field_value(field, change.value)
         within_bound = not (
@@ -305,7 +374,9 @@ def validate_field_changes(
                 expected_value_type=field.value_type,
                 reason_code='invalid_value',
             )
-            if rejected_bounds is not None and _free_text_placeholder(field, value):
+            if rejected_bounds is not None and (
+                reject_invalid or _free_text_placeholder(field, value)
+            ):
                 rejected_bounds.append(violation)
             else:
                 violations.append(violation)

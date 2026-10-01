@@ -239,7 +239,11 @@ function claimProgressStats(form, contentsItems, dynamicForm) {
     ...Object.keys(form || {}),
     ...requirements.missingRequiredNow,
   ]).size + (contentsItems || []).length
-  const complete = requirements.currentActionSatisfied ?? fallbackComplete
+  // Given details count as noted whether or not the claimant has checked them yet,
+  // matching the progress on the "Just noted" card in the conversation.
+  const complete = requirements.currentActionTotal !== null
+    ? requirements.currentActionTotal - requirements.missingRequiredNow.length
+    : requirements.currentActionSatisfied ?? fallbackComplete
   const total = requirements.currentActionTotal ?? fallbackTotal
   return {
     complete: Math.min(complete, total),
@@ -255,7 +259,7 @@ export function ClaimSummaryProgress({ form, contentsItems, dynamicForm }) {
   return (
     <section className="claim-summary-progress" aria-label="Claim information progress">
       <div className="claim-summary-progress-copy">
-        <strong>{total > 0 ? `${complete} of ${total} completed` : 'Ready to capture details'}</strong>
+        <strong>{total > 0 ? `${complete} of ${total} noted` : 'Ready to capture details'}</strong>
         <span className="claim-summary-save-state">
           <span className="claim-summary-save-dot" aria-hidden="true" />
           <span>Saved automatically</span>
@@ -482,7 +486,7 @@ export default function ClaimReviewPanel({
         <p className="claim-overview-copy">{overviewCopy}</p>
         {requirements.available && (
           <div className="claim-overview-progress">
-            <strong>{progress.total > 0 ? `${progress.complete} of ${progress.total} details captured` : 'Ready to build'}</strong>
+            <strong>{progress.total > 0 ? `${progress.complete} of ${progress.total} details noted` : 'Ready to build'}</strong>
             <div
               className="claim-overview-progress-track"
               role="progressbar"

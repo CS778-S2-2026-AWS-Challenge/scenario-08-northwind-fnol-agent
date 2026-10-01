@@ -1163,6 +1163,11 @@ can distinguish still-missing fields from fields already settled into a resting 
 from authoritative Claim State, the selected registered branch, and the current action. Clients
 must not calculate readiness or choose required fields locally.
 
+The projection also carries `field_inputs`: for every projected or recorded claimant-visible field,
+its registered `value_type` and, for an enum, its `allowed_values`. Clients use it to offer the right
+control when the claimant corrects a value (Yes/No for a boolean, the registered choices for an
+enum) instead of free text the registry would reject. System-owned fields are never listed.
+
 Each field assertion records a stable identifier, the reported wording when available, normalized
 value, source references, relation, status, precision, optional reason code, and creation time. A
 later claimant statement is resolved against existing assertions rather than silently discarded.

@@ -1468,6 +1468,11 @@ def test_claim_read_carries_the_latest_dynamic_form_to_the_current_revision(
     assert projection['field_registry_version'] == turn['dynamic_form']['field_registry_version']
     assert projection['branch_rules_version'] == turn['dynamic_form']['branch_rules_version']
     assert projection['fields'] == turn['dynamic_form']['fields']
+    inputs = projection['field_inputs']
+    assert inputs['vehicle.drivable'] == {'value_type': 'boolean', 'allowed_values': []}
+    assert inputs['incident.liability_position']['value_type'] == 'enum'
+    assert 'disputed' in inputs['incident.liability_position']['allowed_values']
+    assert 'claimant.client_number' not in inputs
 
 
 def test_create_claim_is_idempotent_and_conflicting_reuse_is_rejected(

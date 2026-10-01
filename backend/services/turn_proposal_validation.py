@@ -546,8 +546,14 @@ def validate_turn_proposal(
     changes: list[ProposedFormChange] = []
     pending_changes: list[tuple[V8FieldChange, NeededFor]] = []
     field_bound_rejections: list[TurnFieldViolation] = []
+    # The v8 answer sheet is fixed per registry version, so a field this turn
+    # does not allow, or a value of the wrong shape, can reach Runtime. Drop and
+    # record that one change instead of failing the claimant's whole turn.
     validated_changes = validate_field_changes(
-        field_contract, proposal.field_changes, rejected_bounds=field_bound_rejections
+        field_contract,
+        proposal.field_changes,
+        rejected_bounds=field_bound_rejections,
+        reject_invalid=True,
     )
     for rejection in field_bound_rejections:
         reject('field_change', rejection.field_code, rejection.reason_code)

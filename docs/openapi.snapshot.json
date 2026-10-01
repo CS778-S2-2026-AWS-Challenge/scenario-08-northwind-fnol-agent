@@ -4307,6 +4307,30 @@
         "title": "ClaimantExternalServiceStatus",
         "type": "string"
       },
+      "ClaimantFieldInput": {
+        "additionalProperties": false,
+        "description": "How a claimant enters one registered field: its value type and, for an\nenum, the registered values it accepts.",
+        "properties": {
+          "allowed_values": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Values",
+            "type": "array"
+          },
+          "value_type": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Value Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value_type"
+        ],
+        "title": "ClaimantFieldInput",
+        "type": "object"
+      },
       "ClaimantHandoff": {
         "additionalProperties": false,
         "description": "Customer-safe projection; internal routing and packet details are excluded.",
@@ -6764,6 +6788,13 @@
             "minimum": 1.0,
             "title": "Claim Revision",
             "type": "integer"
+          },
+          "field_inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ClaimantFieldInput"
+            },
+            "title": "Field Inputs",
+            "type": "object"
           },
           "field_registry_version": {
             "minLength": 1,

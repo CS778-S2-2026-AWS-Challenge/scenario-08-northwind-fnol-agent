@@ -3,7 +3,11 @@
 from collections.abc import Sequence
 from datetime import datetime
 
-from backend.domain.branch_registry import BranchRuleEvaluator, claimant_projection_fields
+from backend.domain.branch_registry import (
+    BranchRuleEvaluator,
+    claimant_field_inputs,
+    claimant_projection_fields,
+)
 from backend.domain.ids import new_id
 from backend.domain.models import (
     AgentAction,
@@ -67,6 +71,7 @@ def claimant_dynamic_form_projection(
     evaluation = latest_applied_branch_evaluation(repository, claim)
     if evaluation is None:
         return None
+    fields = claimant_projection_fields(evaluation)
     return DynamicFormProjection(
         claim_id=claim.claim_id,
         claim_revision=claim.revision,
@@ -76,8 +81,9 @@ def claimant_dynamic_form_projection(
         active_branches=[
             result.branch_id for result in evaluation.branch_results if result.status == 'active'
         ],
-        fields=claimant_projection_fields(evaluation),
+        fields=fields,
         requirements=evaluation.requirements,
+        field_inputs=claimant_field_inputs([*(item.field_code for item in fields), *claim.form]),
     )
 
 
