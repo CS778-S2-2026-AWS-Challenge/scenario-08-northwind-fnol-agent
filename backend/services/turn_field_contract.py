@@ -164,9 +164,10 @@ def bind_provider_schema(
     return bound
 
 
-# Every registered value shape, as one shared cell. Which value a field takes is
-# already in the turn context (field_value_contracts); Runtime enforces it with
-# validate_field_changes and the narrow repair call.
+# Every registered value shape, as one shared cell. Which fields this turn takes,
+# and each enum's registered values, reach the model in the turn context
+# (writable_fields, built from the same contract); Runtime enforces the contract
+# with validate_field_changes and drops any change it does not accept.
 _ANY_FIELD_VALUE_SCHEMA: dict[str, object] = {
     'anyOf': [
         {'type': 'string', 'minLength': 1, 'maxLength': 300},

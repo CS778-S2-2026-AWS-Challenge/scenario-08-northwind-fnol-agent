@@ -1537,9 +1537,11 @@ class GatewayAgent:
                             ],
                         },
                     )
-                    # Core v8 fact failures are atomic.  Persist-first recovery
-                    # handles the saved inbound message; do not silently spend
-                    # another model call or apply a partially repaired turn.
+                    # v8 validation drops and records individual field changes it
+                    # cannot accept (validate_turn_proposal, reject_invalid), so a
+                    # contract violation reaching here is a defect, not model
+                    # noise: fail through persist-first recovery rather than
+                    # spend another model call on a repair.
                     raise ModelGatewayError(
                         ModelGatewayErrorCode.MALFORMED_RESPONSE
                     ) from contract_error

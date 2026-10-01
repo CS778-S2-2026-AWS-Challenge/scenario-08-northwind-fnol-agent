@@ -3,12 +3,17 @@ import { fieldLabel, fieldValueText } from './claimFieldPresentation.js'
 // What the "Just noted" card under an assistant reply shows, read straight from
 // the Claim form so it never differs from what is stored.
 //
-// A fact belongs to the claimant message that last stated it: the newest
-// claimant message named in the field's sources or assertion history. A
-// correction made on the card or in the details panel keeps the fact where it
-// is; saying it again in a later message moves it to that message's card.
+// A fact belongs to the claimant message behind its current assertion: the one
+// whose words set the stored value. A typed "yes", a repeat of the same value or
+// a conflicting answer adds sources but does not change the value, so the fact
+// stays where it is. A correction made on the card or in the details panel has
+// no message source; the fact stays with the message that last stated it.
+//
+// Only suggested ("proposed") and confirmed facts appear. A fact with two
+// conflicting answers is settled through the details panel, which the review
+// prompt in the conversation keeps open for it.
 
-const CARD_STATUSES = new Set(['proposed', 'confirmed', 'disputed'])
+const CARD_STATUSES = new Set(['proposed', 'confirmed'])
 const HIDDEN_FIELDS = new Set(['claimant.client_number'])
 
 function hasValue(field) {
@@ -17,14 +22,10 @@ function hasValue(field) {
   return !(Array.isArray(value) && value.length === 0)
 }
 
-function lastStatedIn(field, claimantOrder) {
-  const refs = [
-    ...(field.source_refs || []),
-    ...(field.assertions || []).flatMap((assertion) => assertion.source_refs || []),
-  ]
+function claimantMessageIn(refs, claimantOrder) {
   let latest = null
   let latestIndex = -1
-  for (const ref of refs) {
+  for (const ref of refs || []) {
     const index = claimantOrder.get(ref)
     if (index !== undefined && index > latestIndex) {
       latest = ref
@@ -34,13 +35,27 @@ function lastStatedIn(field, claimantOrder) {
   return latest
 }
 
+function statedIn(field, claimantOrder) {
+  const assertions = field.assertions || []
+  if (assertions.length === 0) return claimantMessageIn(field.source_refs, claimantOrder)
+  const currentIndex = field.current_assertion_id
+    ? assertions.findIndex((item) => item.assertion_id === field.current_assertion_id)
+    : -1
+  const start = currentIndex >= 0 ? currentIndex : assertions.length - 1
+  for (let index = start; index >= 0; index -= 1) {
+    const messageId = claimantMessageIn(assertions[index].source_refs, claimantOrder)
+    if (messageId) return messageId
+  }
+  return null
+}
+
 function fact(fieldCode, field) {
   return {
     fieldCode,
     field,
     label: fieldLabel(fieldCode),
     value: fieldValueText(field),
-    toCheck: field.status !== 'confirmed',
+    toCheck: field.status === 'proposed',
   }
 }
 
@@ -61,7 +76,7 @@ export function factCardsByAgentMessage(messages, form) {
     if (HIDDEN_FIELDS.has(fieldCode) || !field || !CARD_STATUSES.has(field.status) || !hasValue(field)) {
       continue
     }
-    const claimantMessageId = lastStatedIn(field, claimantOrder)
+    const claimantMessageId = statedIn(field, claimantOrder)
     if (!claimantMessageId) continue
     const facts = factsByClaimantMessage.get(claimantMessageId) || []
     facts.push(fact(fieldCode, field))

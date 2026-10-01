@@ -346,6 +346,19 @@ def _catalogue(
     return entries, values, summary_state_mismatch
 
 
+def writable_fields_projection(contract: TurnFieldContract) -> dict[str, object]:
+    """Field codes this turn may write, by value type; enums carry their values."""
+
+    by_type: dict[str, list[str]] = {}
+    enums: dict[str, list[str]] = {}
+    for item in contract.fields:
+        if item.value_type == 'enum':
+            enums[item.field_code] = list(item.allowed_values)
+        else:
+            by_type.setdefault(item.value_type, []).append(item.field_code)
+    return {'by_type': by_type, 'enum_values': enums}
+
+
 def plan_context(
     context: AgentTurnContext,
     route: TurnRoute,
@@ -368,6 +381,11 @@ def plan_context(
         ),
     }
     inline: dict[str, Any] = {'turn_focus': turn_focus}
+    if field_contract is not None:
+        # The provider answer sheet is fixed per registry version, so this is
+        # where the model learns which fields this turn takes and each enum's
+        # registered values. Runtime validates against the same contract.
+        inline['writable_fields'] = writable_fields_projection(field_contract)
     selected: list[str] = []
     references: list[ContextReference] = []
     decisions: list[ContextLoadDecision] = []

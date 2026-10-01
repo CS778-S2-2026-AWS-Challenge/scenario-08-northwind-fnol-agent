@@ -9,6 +9,13 @@ function displayValue(fact, input) {
   return fact.value
 }
 
+// Structured values (a time range, an address object) are corrected in the
+// details panel, which edits their parts; the card only edits plain values.
+function isEditable(fact) {
+  const { value } = fact.field
+  return Array.isArray(value) || value === null || typeof value !== 'object'
+}
+
 function initialDraft(fact, input) {
   const { value } = fact.field
   if (input?.value_type === 'boolean') return value === true ? 'true' : value === false ? 'false' : ''
@@ -35,6 +42,7 @@ function FactEditor({ fact, input, busy, onSave, onCancel }) {
       ? (input.allowed_values || []).map((value) => [value, choiceLabel(value)])
       : null
   const empty = !String(draft).trim()
+    || (input?.value_type === 'number' && Number.isNaN(Number(draft)))
 
   return (
     <form
@@ -53,6 +61,7 @@ function FactEditor({ fact, input, busy, onSave, onCancel }) {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           disabled={busy}
+          autoFocus
         >
           {!draft && <option value="">Choose…</option>}
           {choices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -66,6 +75,7 @@ function FactEditor({ fact, input, busy, onSave, onCancel }) {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           disabled={busy}
+          autoFocus
         />
       )}
       <button className="primary-button" type="submit" disabled={busy || empty}>Save</button>
@@ -111,7 +121,19 @@ export default function RecordedFactsCard({
     <section className="recorded-facts" aria-label="Just noted">
       <header className="recorded-facts-header">
         <h3>Just noted</h3>
-        {latest && progress && <span className="recorded-facts-progress">{progressLabel(progress)}</span>}
+        {latest && progress && (
+          <span className="recorded-facts-progress" role="status">{progressLabel(progress)}</span>
+        )}
+        {!latest && (
+          <button
+            className="text-button recorded-facts-fold"
+            type="button"
+            aria-expanded="true"
+            onClick={() => setExpandedChoice(false)}
+          >
+            Hide
+          </button>
+        )}
       </header>
       <dl className="recorded-facts-list">
         {facts.map((fact) => (
@@ -132,7 +154,7 @@ export default function RecordedFactsCard({
                   {fact.toCheck
                     ? <span className="recorded-facts-state">To check</span>
                     : <span className="recorded-facts-state is-checked">Checked</span>}
-                  {editing && (
+                  {editing && isEditable(fact) && (
                     <button
                       className="text-button recorded-facts-edit"
                       type="button"

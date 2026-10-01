@@ -2138,6 +2138,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   cursor: pointer;
 }
 .recorded-facts-collapsed:hover { color: var(--color-text-primary); }
+.recorded-facts-collapsed:focus-visible,
+.recorded-facts-fold:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
+.recorded-facts-fold { font-size: var(--font-size-caption); }
 @media (max-width: 640px) {
   .recorded-facts-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
 }

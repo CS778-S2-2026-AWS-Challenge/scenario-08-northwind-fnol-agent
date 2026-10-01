@@ -790,13 +790,15 @@ function App() {
     [messages],
   )
   const conversationActionKind = conversationAction?.kind || null
-  // "Just noted" cards replace the "Review claim details" prompt. The prompt
-  // stays when it asks about anything no card shows, such as contents items.
-  const cardedFieldCodes = new Set([...factCards.values()].flat().map((fact) => fact.fieldCode))
+  // The latest "Just noted" card replaces the "Review claim details" prompt only
+  // when every detail the prompt asks about is on that open card. Otherwise the
+  // prompt stays: details on folded earlier cards, contents items, a fact with
+  // two conflicting answers, or a whole-claim summary the claimant is checking.
+  const latestCardCodes = new Set((factCards.get(latestFactCardId) || []).map((fact) => fact.fieldCode))
   const visibleConversationActionKind = (
     conversationActionKind === 'review-details'
     && conversationAction.requiredItems.length > 0
-    && conversationAction.requiredItems.every((fieldCode) => cardedFieldCodes.has(fieldCode))
+    && conversationAction.requiredItems.every((fieldCode) => latestCardCodes.has(fieldCode))
   )
     ? null
     : conversationActionKind

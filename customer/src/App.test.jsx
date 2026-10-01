@@ -1667,7 +1667,9 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(
       /Your request has been sent\. You can continue adding information while you wait\./,
     )).toBeInTheDocument()
-    expect(screen.queryByText('Staff assisting')).not.toBeInTheDocument()
+    const conversation = document.querySelector('.message-list')
+    expect(conversation).not.toHaveTextContent('Staff assisting')
+    expect(conversation).not.toHaveTextContent('A Northwind staff member is now assisting you.')
     expect(screen.queryByRole('button', { name: 'Staff assistance' })).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
     expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
@@ -4110,6 +4112,43 @@ describe('claimant intake projection', () => {
     })))
     expect(await within(card).findAllByText('Checked')).toHaveLength(2)
     expect(within(card).queryByRole('button', { name: 'Looks right' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the review prompt for a conflicting answer and confirms only suggested facts', async () => {
+    const user = userEvent.setup()
+    const turn = notedTurn()
+    turn.form_changes.push({
+      field_code: 'incident.occurred_at',
+      field: { value: 'Monday', status: 'disputed', source: 'claimant', source_refs: [claimantMessage.message_id] },
+    })
+    turn.primary_action = primaryAction({
+      revision: 2,
+      actionCode: 'claimant.review_details',
+      actionType: 'claimant_input',
+      available: true,
+      requiredInputs: ['incident.location', 'vehicle.drivable', 'incident.occurred_at'],
+    })
+    api.submitClaimMessage.mockResolvedValue(turn)
+    api.confirmClaimFields.mockResolvedValue({
+      revision: 3,
+      confirmed_fields: {},
+      dynamic_form: turn.dynamic_form,
+      customer_next_step: initialClaim.customer_next_step,
+      primary_action: primaryAction({ revision: 3 }),
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    const card = await screen.findByRole('region', { name: 'Just noted' })
+    expect(card).not.toHaveTextContent('Monday')
+    expect(screen.getByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
+    await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
+      fieldCodes: ['incident.location', 'vehicle.drivable'],
+    })))
   })
 
   it('edits a Yes/No fact on the card with a choice, not free text', async () => {

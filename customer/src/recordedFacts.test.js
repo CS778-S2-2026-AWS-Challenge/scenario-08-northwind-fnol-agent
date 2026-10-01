@@ -40,6 +40,32 @@ describe('Just noted cards', () => {
     expect(codes(cards, 'a1')).toEqual(['vehicle.drivable'])
   })
 
+  it('keeps a fact where its value was stated when a later "yes" or repeat adds sources', () => {
+    const cards = factCardsByAgentMessage(messages, {
+      'incident.location': {
+        value: 'Queen St',
+        status: 'confirmed',
+        source_refs: ['m1', 'm2'],
+        current_assertion_id: 'as1',
+        assertions: [
+          { assertion_id: 'as1', source_refs: ['m1'] },
+          { assertion_id: 'as2', source_refs: ['m2'] },
+        ],
+      },
+    })
+
+    expect(codes(cards, 'a1')).toEqual(['incident.location'])
+    expect(cards.has('a2')).toBe(false)
+  })
+
+  it('leaves a fact with conflicting answers off the cards', () => {
+    const cards = factCardsByAgentMessage(messages, {
+      'incident.occurred_at': said('Monday', ['m1', 'm2'], 'disputed', [['m1'], ['m2']]),
+    })
+
+    expect(cards.size).toBe(0)
+  })
+
   it('leaves out hidden, empty and unsourced fields', () => {
     const cards = factCardsByAgentMessage(messages, {
       'claimant.client_number': said('C-1', ['m1']),
