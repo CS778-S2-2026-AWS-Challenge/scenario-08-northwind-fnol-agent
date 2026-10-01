@@ -378,6 +378,9 @@ the append-only audit collection through a bounded, filterable projection.
     either side belongs to another Claim or customer.
 48. Create/revise/list emergency-repair mitigation records and their Evidence/WorkItem links in
     the same authoritative Claim mutation when Claim State also changes.
+49. Resolve the one immutable Claim decision referenced by `WorkingClaim.claim_decision_id`, and
+    atomically create it with the Claim revision, actor-scoped replay result, audit fact, and
+    realtime publication while rejecting concurrent or ordinary pointer changes.
 
 ## Account Profile and Protected Record Mapping
 
@@ -969,6 +972,21 @@ Evidence record or protected object.
 - Every Workbench handoff, signal, WorkItem, message, and ownership mutation first resolves the
   exact current projected action. Its idempotency record stores the registry version, action code,
   and target alongside the resulting response.
+- `claim_decision:{decision_id}` stores one immutable `ClaimDecisionRecord`; `decision_id` uses
+  `cdec_`. `WorkingClaim.claim_decision_id` is the sole current pointer and is nullable for legacy
+  or undecided Claims. The record contains `claim_id`, `approved` or `rejected`, optional
+  staff-only `internal_note`, non-empty claimant-safe explanation, server-derived staff actor and
+  time, and the source Claim revision. Claimant projections join only the safe
+  decision, time, and explanation; Workbench detail may join the full record.
+- Only the `claim.record_decision` staff mutation may change the Claim decision pointer, and only
+  from null to the new record's exact ID. Fixture and MongoDB reject ordinary Claim, WorkItem,
+  handoff, signal, and Agent writes that add, replace, or clear it. The mutation also requires
+  `IdempotencyRecord.claim_decision_id` and a matching internal `action.completed` audit fact.
+  Fixture commits and rolls back the Claim, decision, idempotency, audit, and realtime event under
+  its material-Claim lock. MongoDB commits the same documents in its existing transaction; the
+  Claim revision compare-and-set permits only one concurrent winner. The immutable child identity
+  plus the single CAS-protected Claim pointer is the uniqueness boundary, so this slice requires
+  no new MongoDB index or data backfill.
 - `WorkingClaim.terminal_disposition` is either null or one embedded authoritative record with
   `value`, registered `reason_code`, non-empty immutable `source_refs`, typed `recorded_by`,
   `recorded_at`, and `recorded_revision`. It does not replace `claim_state`. `completed` requires a

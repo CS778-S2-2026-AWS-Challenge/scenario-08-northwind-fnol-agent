@@ -386,6 +386,7 @@ def test_authoritative_record_projection_matrix_fails_closed() -> None:
         RealtimeResource.CUSTOMER_UPDATES,
     )
     assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['signal_decision'] == (RealtimeResource.SIGNALS,)
+    assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['claim_decision'] == (RealtimeResource.CLAIM,)
     assert AUTHORITATIVE_RECORD_PROJECTION_IMPACTS['collaboration_request'] == (
         RealtimeResource.COLLABORATION_REQUESTS,
     )

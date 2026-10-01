@@ -305,6 +305,7 @@ AUTHORITATIVE_RECORD_PROJECTION_IMPACTS: dict[str, tuple[RealtimeResource, ...]]
     ),
     'customer_update': (RealtimeResource.CUSTOMER_UPDATES,),
     'signal_decision': (RealtimeResource.SIGNALS,),
+    'claim_decision': (RealtimeResource.CLAIM,),
     'review_signal': (RealtimeResource.SIGNALS,),
     'staff_agent_execution': (),
     'agent_decision': (),
