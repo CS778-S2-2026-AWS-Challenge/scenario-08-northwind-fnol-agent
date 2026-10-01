@@ -3353,19 +3353,12 @@ describe('claimant intake projection', () => {
       await user.click(screen.getByRole('button', { name: 'Submit claim' }))
 
       const errorHeading = await screen.findByRole('heading', {
-        name: 'Submission interrupted',
+        name: "Couldn't send your claim",
       })
       const agreementAlert = errorHeading.closest('[role="alert"]')
       expect(agreementAlert).not.toBeNull()
       expect(agreementAlert).toBeVisible()
-      expect(agreementAlert).toHaveTextContent(
-        phase === 'acceptance'
-          ? 'recording your agreement'
-          : 'submitting your Claim',
-      )
-      expect(agreementAlert).toHaveTextContent(
-        'This screen does not show your Claim as created.',
-      )
+      expect(agreementAlert).toHaveTextContent("your claim hasn't been sent")
       expect(
         screen.queryByRole('heading', { name: 'Claim submitted' }),
       ).not.toBeInTheDocument()
@@ -3415,8 +3408,8 @@ describe('claimant intake projection', () => {
       'Agreement confirmed. Claim submission can be retried without recording a second acceptance.',
     )).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: 'Retry claim submission' })).toBeEnabled()
-    expect(screen.queryByRole('heading', { name: 'Submission interrupted' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Submission result is unclear' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: "Couldn't send your claim" })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: "We're not sure it went through" })).not.toBeInTheDocument()
     expect(api.createExternalClaim).not.toHaveBeenCalled()
   })
 
@@ -3442,7 +3435,7 @@ describe('claimant intake projection', () => {
     const successPanel = successHeading.closest('section')
     expect(successPanel).not.toBeNull()
     expect(within(successPanel).getByText('NWF-2026-RECOVERED')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Submission interrupted' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: "Couldn't send your claim" })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Retry claim submission' })).not.toBeInTheDocument()
   })
 
@@ -3468,13 +3461,11 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Submit claim' }))
 
     const errorHeading = await screen.findByRole('heading', {
-      name: 'Submission result is unclear',
+      name: "We're not sure it went through",
     })
     const agreementAlert = errorHeading.closest('[role="alert"]')
     expect(agreementAlert).not.toBeNull()
-    expect(agreementAlert).toHaveTextContent(
-      'the current Claim status could not confirm the result',
-    )
+    expect(agreementAlert).toHaveTextContent("it won't create a duplicate")
     const firstRequest = api.acceptClaimAgreement.mock.calls[0][0]
 
     const retry = screen.getByRole('button', { name: 'Submit claim' })
@@ -3486,9 +3477,9 @@ describe('claimant intake projection', () => {
   })
 
   it.each([
-    [409, 'REVISION_CONFLICT', 'Submission was not accepted', 'Review the latest claim information and try again.'],
-    [422, 'AGREEMENT_CONFIRMATION_REQUIRED', 'Submission was not accepted', 'Review the latest claim information and try again.'],
-    [503, 'CLAIM_SERVICE_UNAVAILABLE', 'Submission result is unclear', 'Do not assume your Claim was created.'],
+    [409, 'REVISION_CONFLICT', "Your claim wasn't accepted", 'Please check your details and try again.'],
+    [422, 'AGREEMENT_CONFIRMATION_REQUIRED', "Your claim wasn't accepted", 'Please check your details and try again.'],
+    [503, 'CLAIM_SERVICE_UNAVAILABLE', "We're not sure it went through", "it won't create a duplicate"],
   ])(
     'distinguishes Step 4 HTTP %s failure feedback',
     async (statusCode, code, title, expectedText) => {
