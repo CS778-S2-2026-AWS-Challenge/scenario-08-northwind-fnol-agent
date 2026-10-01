@@ -12,7 +12,7 @@ import { usePersistentTabs } from '../hooks/usePersistentTabs.js'
 import { translate as t, useLanguage } from '../i18n.js'
 import { actionFailureMessage, failureReason, failureReference } from '../failure.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
-import { revisionNotice as buildRevisionNotice } from '../revision.js'
+import { revisionNotice as buildRevisionNotice, mutationResultRevision } from '../revision.js'
 import ConversationsPage from './ConversationsPage.jsx'
 
 const MAX_MESSAGE_READBACK_PAGES = 100
@@ -52,6 +52,7 @@ export default function WorkbenchPage() {
   const conversationsRequestId = useRef(0)
   const [detail, setDetail] = useState(null)
   const detailRef = useRef(null)
+  const ownRevisionsRef = useRef(new Map())
   const rootRestoreAttemptedRef = useRef(false)
   const currentClaimIdRef = useRef(null)
   const detailRequestId = useRef(0)
@@ -218,7 +219,11 @@ export default function WorkbenchPage() {
     detailRef.current = response
     setDetail((current) => {
       if (announceRevision) {
-        const notice = buildRevisionNotice(current, response)
+        const notice = buildRevisionNotice(
+          current,
+          response,
+          ownRevisionsRef.current.get(response.claim_id),
+        )
         if (notice) setRevisionNotice(notice)
       }
       return response
@@ -1283,12 +1288,13 @@ export default function WorkbenchPage() {
       throw new Error(request.blockedReason || 'This assistance request cannot be taken over from the current projection. Review the latest Claim state and try again.')
     }
     try {
-      await workbenchApi.acceptHandoff(
+      const result = await workbenchApi.acceptHandoff(
         token,
         request.claim_id,
         request.handoff.handoff_id,
         request.detail.revision,
       )
+      rememberOwnRevision(request.claim_id, mutationResultRevision(result))
     } catch (error) {
       let latest = null
       try {
@@ -1392,6 +1398,16 @@ export default function WorkbenchPage() {
     }, { replace: true })
   }
 
+  function rememberOwnRevision(claimId, revision) {
+    if (!Number.isInteger(revision)) return
+    const known = ownRevisionsRef.current.get(claimId)
+    if (Number.isInteger(known) && known >= revision) return
+    ownRevisionsRef.current.set(claimId, revision)
+    setRevisionNotice((notice) => (
+      notice?.claimId === claimId && notice.revision <= revision ? null : notice
+    ))
+  }
+
   async function runClaimMutation(label, operation, { strictReadback = false, backgroundDetailRefresh = false } = {}) {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
@@ -1435,6 +1451,7 @@ export default function WorkbenchPage() {
       error.message = actionFailureMessage(label, error, latest)
       throw error
     }
+    rememberOwnRevision(previous.claim_id, mutationResultRevision(mutationResult))
     let claimReadback = null
     if (currentClaimIdRef.current === previous.claim_id) {
       if (strictReadback) {
@@ -1849,7 +1866,7 @@ export default function WorkbenchPage() {
     const mutationRequestId = ++detailRequestId.current
     let accepted = false
     try {
-      await workbenchApi.reopenClaim(
+      const result = await workbenchApi.reopenClaim(
         token,
         current.claim_id,
         action.based_on_revision,
@@ -1857,6 +1874,7 @@ export default function WorkbenchPage() {
         idempotencyKey,
       )
       accepted = true
+      rememberOwnRevision(current.claim_id, mutationResultRevision(result))
       const latest = await workbenchApi.claim(token, current.claim_id)
       applyReopenProjection(latest, true, null, mutationRequestId, current.claim_id)
     } catch (error) {
