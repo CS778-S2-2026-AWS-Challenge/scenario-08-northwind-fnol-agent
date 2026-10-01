@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import mongomock
 import pytest
 
+import backend.services.recovery_worker as recovery_worker_module
 from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.domain.audit import (
     AuditActor,
@@ -37,6 +38,7 @@ from backend.domain.recovery_policy_registry import (
     INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE,
     INCOMPLETE_CLAIM_FOLLOW_UP_RETRY_INTERVAL,
 )
+from backend.domain.retention import RetentionOperationStatus
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import (
@@ -996,3 +998,50 @@ def test_withdrawal_after_the_deadline_is_refused_as_a_no_op() -> None:
     )
     stored = repository.get_follow_up(claim.claim_id, follow_up.follow_up_id, claim.customer_id)
     assert stored == follow_up
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongo'])
+def test_failed_retention_handoff_after_expiry_is_retried_by_a_later_cycle(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expiry and retention reservation are separate commits, so the terminal
+    disposition must keep the handoff discoverable after a transient failure."""
+
+    repository = _repository(kind)
+    claim, _, _, interrupted_at = _checkpoint(repository)
+    deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
+    real_reserve = recovery_worker_module.reserve_retention_from_terminal
+    attempts: list[str] = []
+
+    def fail_once(repo: PersistenceRepository, claim_id: str, *, now: datetime) -> object:
+        attempts.append(claim_id)
+        if len(attempts) == 1:
+            raise RuntimeError('transient repository failure')
+        return real_reserve(repo, claim_id, now=now)
+
+    monkeypatch.setattr(recovery_worker_module, 'reserve_retention_from_terminal', fail_once)
+    storage = MockEvidenceStorage()
+
+    first = run_recovery_cycle(repository, storage, now=deadline, limit=10)
+    expired = repository.get_claim_internal(claim.claim_id)
+    assert (first.expired, first.failed_candidates) == (1, 1)
+    assert expired is not None and expired.terminal_disposition is not None
+    assert (
+        expired.terminal_disposition.reason_code is TerminalDispositionReasonCode.RECOVERY_EXPIRED
+    )
+    assert repository.get_retention_operation_for_claim(claim.claim_id) is None
+    assert repository.list_retention_handoff_candidates(limit=10) == [claim.claim_id]
+
+    second = run_recovery_cycle(repository, storage, now=deadline + timedelta(minutes=1), limit=10)
+    assert (second.expiring_candidates, second.expired) == (0, 0)
+    assert second.retention_progressed == 1
+    retention = repository.get_retention_operation_for_claim(claim.claim_id)
+    assert retention is not None
+    assert retention.status is RetentionOperationStatus.COMPLETED
+    assert repository.list_retention_handoff_candidates(limit=10) == []
+
+    third = run_recovery_cycle(repository, storage, now=deadline + timedelta(minutes=2), limit=10)
+    assert (third.expired, third.retention_progressed, third.failed_candidates) == (0, 0, 0)
+    assert attempts == [claim.claim_id, claim.claim_id]
+    assert repository.get_retention_operation_for_claim(claim.claim_id) == retention

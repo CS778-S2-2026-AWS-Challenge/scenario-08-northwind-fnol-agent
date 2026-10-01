@@ -67,23 +67,28 @@ def run_recovery_cycle(
 
     for candidate in expiring:
         try:
-            transition = process_expiring_follow_up(repository, candidate, now)
-            if transition is None:
-                continue
-            expired += 1
-            try:
-                reserve_retention_from_terminal(
-                    repository,
-                    transition.claim.claim_id,
-                    now=now,
-                )
-            except RetentionEligibilityRejected:
-                retention_blocked += 1
+            if process_expiring_follow_up(repository, candidate, now) is not None:
+                expired += 1
         except Exception:
             failed_candidates += 1
             LOGGER.exception(
                 'Recovery expiry candidate %s failed; later candidates will continue.',
                 candidate.follow_up_id,
+            )
+
+    # The expired Claim's terminal disposition is the durable handoff source. A
+    # reservation that is refused or fails here stays discoverable on later cycles,
+    # and the stable operation identity makes every retry the same reservation.
+    for claim_id in repository.list_retention_handoff_candidates(limit=limit):
+        try:
+            reserve_retention_from_terminal(repository, claim_id, now=now)
+        except RetentionEligibilityRejected:
+            retention_blocked += 1
+        except Exception:
+            failed_candidates += 1
+            LOGGER.exception(
+                'Retention handoff for Claim %s failed; a later cycle will retry it.',
+                claim_id,
             )
 
     pending_retention = repository.list_pending_retention_operations(limit=limit)

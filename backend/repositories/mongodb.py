@@ -99,6 +99,7 @@ from backend.domain.models import (
     SignalDecisionRecord,
     StaffActionRecord,
     StaffActionStatus,
+    TerminalDispositionReasonCode,
     WorkingClaim,
     assert_follow_up_operation_transition,
 )
@@ -569,6 +570,16 @@ class MongoDBRepository:
             },
         )
         self._collection.create_index(
+            [('record_type', 1), ('terminal_disposition.recorded_at', 1), ('claim_id', 1)],
+            name='claim_recovery_expiry_handoff',
+            partialFilterExpression={
+                'record_type': 'claim',
+                'terminal_disposition.reason_code': (
+                    TerminalDispositionReasonCode.RECOVERY_EXPIRED.value
+                ),
+            },
+        )
+        self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('updated_at', 1), ('_id', 1)],
             name='retention_operation_claim_updated',
             partialFilterExpression={'record_type': 'retention_operation'},
@@ -697,6 +708,39 @@ class MongoDBRepository:
             for document in documents
             if (operation := self._model_from_document(document, RetentionOperation)) is not None
         ]
+
+    def list_retention_handoff_candidates(
+        self,
+        *,
+        limit: int,
+    ) -> list[str]:
+        if not 1 <= limit <= 100:
+            raise ValueError('Retention handoff discovery limit must be between 1 and 100.')
+        # Expired Claims leave this set once reserved; cleanup removes the Claim record, so
+        # the scan is bounded by in-flight handoffs rather than by historical volume.
+        documents = self._collection.find(
+            {
+                'record_type': 'claim',
+                'terminal_disposition.reason_code': (
+                    TerminalDispositionReasonCode.RECOVERY_EXPIRED.value
+                ),
+            },
+            projection={'claim_id': 1},
+        ).sort([('terminal_disposition.recorded_at', 1), ('claim_id', 1)])
+        candidates: list[str] = []
+        for document in documents:
+            claim_id = document.get('claim_id')
+            if not isinstance(claim_id, str):
+                continue
+            reserved = self._collection.find_one(
+                {'record_type': 'retention_operation', 'claim_id': claim_id},
+                projection={'_id': 1},
+            )
+            if reserved is None:
+                candidates.append(claim_id)
+                if len(candidates) == limit:
+                    break
+        return candidates
 
     def reserve_eligible_retention_operation(
         self,
@@ -2109,10 +2153,14 @@ class MongoDBRepository:
                 if field is None:
                     return None
 
+                # Audit envelopes carry their Claim only inside the subject, matching
+                # the inventory query that froze these targets.
+                claim_field = 'subject.claim_id' if storage_type == 'audit_event' else 'claim_id'
+
                 return {
                     'record_type': storage_type,
                     field: target.record_id,
-                    'claim_id': operation.claim_id,
+                    claim_field: operation.claim_id,
                 }
 
             source_document = None

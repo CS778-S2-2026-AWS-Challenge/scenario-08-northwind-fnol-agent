@@ -86,6 +86,7 @@ from backend.domain.models import (
     SignalDecisionRecord,
     StaffActionRecord,
     StaffActionStatus,
+    TerminalDispositionReasonCode,
     WorkingClaim,
     assert_follow_up_operation_transition,
 )
@@ -304,6 +305,27 @@ class FixtureRepository(PersistenceRepository):
                 ),
             )
             return deepcopy(operations[:limit])
+
+    def list_retention_handoff_candidates(
+        self,
+        *,
+        limit: int,
+    ) -> list[str]:
+        if not 1 <= limit <= 100:
+            raise ValueError('Retention handoff discovery limit must be between 1 and 100.')
+        with self._claim_mutation_lock:
+            reserved = {operation.claim_id for operation in self._retention_operations.values()}
+            expired = sorted(
+                (
+                    (claim.terminal_disposition.recorded_at, claim.claim_id)
+                    for claim in self._claims.values()
+                    if claim.terminal_disposition is not None
+                    and claim.terminal_disposition.reason_code
+                    is TerminalDispositionReasonCode.RECOVERY_EXPIRED
+                    and claim.claim_id not in reserved
+                ),
+            )
+            return [claim_id for _, claim_id in expired[:limit]]
 
     def reserve_eligible_retention_operation(
         self,

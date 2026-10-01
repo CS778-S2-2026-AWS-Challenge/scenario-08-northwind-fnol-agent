@@ -218,6 +218,9 @@ class _Repository:
     def list_due_follow_ups(self, _now: datetime, *, limit: int) -> tuple[list[Any], None]:
         return self.due, None
 
+    def list_retention_handoff_candidates(self, *, limit: int) -> list[str]:
+        return ['clm_expired']
+
 
 def test_cycle_rejects_naive_time_and_unbounded_page() -> None:
     repository: Any = _Repository()

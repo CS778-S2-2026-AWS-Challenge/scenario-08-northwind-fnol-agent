@@ -686,6 +686,27 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """Return a bounded deterministic page of unfinished retention work."""
         raise NotImplementedError
 
+    def list_retention_handoff_candidates(
+        self,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """Return Claim IDs whose recovery expiry has no RetentionOperation yet.
+
+        The terminal disposition is the durable handoff source, so a reservation that
+        failed after expiry stays discoverable until reservation succeeds.
+
+        Args:
+            limit: Maximum Claim IDs in one bounded page (1-100).
+
+        Returns:
+            Claim IDs ordered by terminal recording time, then Claim ID.
+
+        Raises:
+            ValueError: If ``limit`` is outside 1-100.
+        """
+        raise NotImplementedError
+
     def reserve_eligible_retention_operation(
         self,
         operation: RetentionOperation,
