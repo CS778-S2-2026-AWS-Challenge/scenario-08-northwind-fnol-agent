@@ -2837,6 +2837,7 @@ item, signal, or external task exists.
 | `GET` | `/workbench/claims/{claim_id}/runtime-work-items` | Read claimant Runtime WorkItems reconciled against current Claim facts |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
+| `POST` | `/workbench/claims/{claim_id}/accept` | Take an unassigned Claim after successful FNOL creation |
 | `POST` | `/workbench/claims/{claim_id}/assignments` | Assign or reassign ownership |
 | `POST` | `/workbench/claims/{claim_id}/cowork-requests` | Request or invite cowork access through a projected ownership action |
 | `POST` | `/workbench/claims/{claim_id}/transfer-requests` | Request a primary-owner transfer through a projected ownership action |
@@ -3426,13 +3427,52 @@ lease is not claimable even when `online` and `available` are true. A successful
 starts a five-minute online lease. `GET /api/v1/workbench/staff/online` returns only unexpired
 records that are both online and available.
 
-`POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` is the Claim acceptance
-action for the current contract. Before the existing revision-checked, idempotent mutation runs,
+`POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` accepts an existing
+handoff. Before the existing revision-checked, idempotent mutation runs,
 the authenticated staff member must be authorised, online, available, and unexpired. The same
 mutation writes the handoff assignment, `WorkingClaim.assignee_id`, the Claim revision, and its
 idempotency result. Offline, unavailable, expired, already-claimed, and stale requests have
 explicit structured outcomes. Presence is staff-only and is never included in claimant-safe
 responses.
+
+### `POST /api/v1/workbench/claims/{claim_id}/accept`
+
+This Claim-level action takes an unassigned Claim after successful FNOL creation. It requires
+an authenticated `claims_professional` with Workbench read/write capabilities and an unexpired,
+online, available staff presence lease. The request body is `{}`; additional fields, including
+an assignee or actor, are rejected. Required headers are `If-Match` and `Idempotency-Key`.
+
+Eligibility requires `workflow_state=created`, an external result with `creation_status=created`,
+and `terminal_disposition=completed` with reason `CLAIM_CREATED`. This disposition means the
+FNOL was completed, not that a staff decision closed the Claim. A Claim with an existing decision,
+an assignee, or an assigned active handoff cannot be taken. Closed, abandoned, and incomplete
+Claims are excluded. The operation neither creates nor progresses a handoff.
+
+List and detail return `ownership.accept_claim`, derived from the same Claim and current-staff
+eligibility. Eligible detail also includes the registered `ownership.accept_claim` action for the
+Claim target, with explicit confirmation. Clients use that action and the projected revision;
+the boolean is a display convenience and does not grant authority.
+
+Response `200` is the resulting `WorkbenchClaimDetail`: primary assignee is the authenticated
+staff member, access is `primary`, revision advances once, and `accept_claim` becomes false.
+The existing decision-action rules then apply. Claim, presence revision guard, actor-scoped
+idempotency response, internal `action.completed` audit, and existing realtime event commit
+atomically. Audit identifies the staff actor, Claim, server time, action, and resulting revision.
+
+An exact retry returns the original response without additional effects, even if the original
+presence lease has since expired. Another attempt on an assigned Claim returns
+`409 CLAIM_ALREADY_ASSIGNED`; concurrent losers receive the same code. A stale unassigned
+Claim returns `409 REVISION_CONFLICT`. Ineligible state returns
+`409 CLAIM_NOT_READY_FOR_ACCEPTANCE`; unavailable or expired presence returns
+`409 STAFF_NOT_AVAILABLE`. Conflicting retry data uses `409 IDEMPOTENCY_CONFLICT`.
+
+`GET /api/v1/workbench/claims?ownership=unassigned` returns only the above Claim-eligible,
+unassigned records, including completed FNOL records. It reuses existing pagination, ordering,
+other filters, and view counts. Omit `view` to include completed FNOL Claims; an explicit
+`view=all` retains its existing active-queue meaning. Offline staff with read access can still
+see the list, but cannot take a Claim. Existing `assignee_id=unassigned` keeps its broader
+meaning and is not changed. After acceptance, other staff refetch detail or the list on the
+existing realtime hint; the Claim disappears from this unassigned filter.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/staff-actions`
 
@@ -4536,6 +4576,8 @@ All errors use one envelope:
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `STAFF_NOT_AVAILABLE` | `409` | Staff presence is offline, unavailable, or its lease has expired |
+| `CLAIM_ALREADY_ASSIGNED` | `409` | Claim or active handoff already has a staff owner; refresh ownership |
+| `CLAIM_NOT_READY_FOR_ACCEPTANCE` | `409` | Claim has not completed FNOL creation or already has a final decision |
 | `STAFF_PRESENCE_UNAVAILABLE` | `503` | Staff presence could not be persisted; retry after the dependency recovers |
 | `RESOURCE_CONFLICT` | `409` | A unique account or resource already exists |
 | `PAYMENT_DESTINATION_STATE_CONFLICT` | `409` | Common designation targeted an inactive Payment Destination |

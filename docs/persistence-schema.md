@@ -1326,6 +1326,18 @@ Staff logout revokes the server-side auth session even when this best-effort pre
 cannot be persisted; presence failure must never leave the bearer session active.
 An acceptance using a stale presence revision is rejected before the Claim assignment is stored.
 
+Claim-level `ownership.accept_claim` uses the existing `save_staff_mutation` transaction with
+no child business record. Only this registered action permits an audit-only staff mutation.
+The repository verifies successful FNOL creation, no current Claim or active-handoff owner,
+no final decision, exact staff/presence identity and revision, and a matching internal
+`action.completed` audit. Only `assignee_id`, `revision`, and `updated_at` may change.
+Claim revision CAS, the guarded presence revision, actor-scoped idempotency response, audit,
+and realtime event commit or roll back together. Handoff records remain unchanged.
+Mongo validates current Claim and handoff records inside its transaction; Fixture uses its
+existing material-mutation lock and rollback boundary. No collection, field, index, backfill,
+or migration is added. Workbench's `ownership=unassigned` filter uses the existing staff-list
+read/projection path; `ownership.accept_claim` is derived, never persisted as another authority.
+
 The development/test validation seed uses the provider-neutral `ValidationSeedGraph` boundary.
 It writes three Claim graphs, their active Sessions, Messages, Evidence metadata, the current
 staff presence lease, and one Idempotency record as one operation. Fixture persistence snapshots

@@ -208,6 +208,7 @@ from backend.repositories.assets import (
     asset_matches_snapshot,
     asset_selection_audit_matches,
 )
+from backend.repositories.claim_acceptance import validate_claim_acceptance
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
@@ -9149,6 +9150,9 @@ class MongoDBRepository:
             handoff,
             message,
         )
+        accepting_claim = idempotency.action_code == 'ownership.accept_claim'
+        if accepting_claim and any(item is not None for item in supplied):
+            raise KeyError(claim.claim_id)
         try:
             validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
             validate_claim_decision_mutation_audit(claim, claim_decision, idempotency, audit_event)
@@ -9156,7 +9160,7 @@ class MongoDBRepository:
             raise KeyError(claim.claim_id) from error
         if (
             claim.revision != expected_revision + 1
-            or not any(item is not None for item in supplied)
+            or (not accepting_claim and not any(item is not None for item in supplied))
             or any(item is not None and item.claim_id != claim.claim_id for item in supplied)
             or idempotency.claim_id != claim.claim_id
             or (
@@ -9202,6 +9206,28 @@ class MongoDBRepository:
                 if audit_event is not None
                 else ()
             )
+            if accepting_claim:
+                self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+                stored = self._get('claim', claim.claim_id, WorkingClaim, session=mongo_session)
+                if stored is None:
+                    raise KeyError(claim.claim_id)
+                if stored.revision != expected_revision:
+                    raise RevisionConflict(stored.revision)
+                validate_claim_acceptance(
+                    stored,
+                    claim,
+                    self._list(
+                        'handoff',
+                        HandoffRecord,
+                        {'claim_id': claim.claim_id, 'customer_id': claim.customer_id},
+                        'created_at',
+                        session=mongo_session,
+                    ),
+                    idempotency,
+                    audit_event,
+                    required_staff_id,
+                    required_staff_revision,
+                )
             self._save_child_mutation(
                 claim,
                 expected_revision,

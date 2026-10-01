@@ -2,7 +2,7 @@ import base64
 import logging
 import re
 from datetime import datetime
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
@@ -18,6 +18,7 @@ from backend.core.errors import ApiError
 from backend.domain.assets import ClaimAssetSnapshotListResponse, project_snapshot
 from backend.domain.models import (
     AbandonClaimRequest,
+    AcceptClaimRequest,
     AcceptHandoffRequest,
     AgentAction,
     ClaimDecisionRecord,
@@ -70,6 +71,7 @@ from backend.domain.workbench import (
 )
 from backend.repositories.assets import AssetRepository
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.claim_acceptance import accept_claim
 from backend.services.ownership import (
     create_cowork_request,
     create_transfer_request,
@@ -204,6 +206,7 @@ def read_workbench_claims(
     updated_after: datetime | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
+    ownership: Literal['unassigned'] | None = Query(default=None),
 ) -> WorkbenchClaimListResponse:
     return list_workbench_claims(
         repository_for(request),
@@ -219,7 +222,20 @@ def read_workbench_claims(
         updated_after=updated_after,
         limit=limit,
         cursor=cursor,
+        ownership=ownership,
     )
+
+
+@router.post('/{claim_id}/accept', response_model=WorkbenchClaimDetail)
+def take_claim(
+    claim_id: str,
+    payload: AcceptClaimRequest,
+    request: Request,
+    principal: Principal = Depends(require_workbench_write),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> WorkbenchClaimDetail:
+    return accept_claim(repository_for(request), principal, claim_id, idempotency_key, if_match)
 
 
 @router.get('/filter-metadata', response_model=WorkbenchClaimFilterMetadata)

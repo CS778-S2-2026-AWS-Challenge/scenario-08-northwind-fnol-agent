@@ -2311,6 +2311,10 @@ class WorkbenchHandoff(ContractModel):
     resume_next_action: AgentAction | None = None
 
 
+class AcceptClaimRequest(ContractModel):
+    """Self-assignment has no client-authored authority fields."""
+
+
 class AcceptHandoffRequest(ContractModel):
     assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
 

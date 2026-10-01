@@ -180,6 +180,7 @@ from backend.repositories.assets import (
     asset_matches_snapshot,
     asset_selection_audit_matches,
 )
+from backend.repositories.claim_acceptance import validate_claim_acceptance
 from backend.repositories.protocols import (
     DemoSeedConflict,
     IdempotencyConflict,
@@ -7012,7 +7013,22 @@ class FixtureRepository(PersistenceRepository):
                 )
             ):
                 raise KeyError('staff_not_available')
-        if not any(
+        accepting_claim = idempotency.action_code == 'ownership.accept_claim'
+        if accepting_claim:
+            validate_claim_acceptance(
+                stored_claim,
+                claim,
+                self.list_handoffs(claim.claim_id, claim.customer_id),
+                idempotency,
+                audit_event,
+                required_staff_id,
+                required_staff_revision,
+            )
+            if any(
+                (staff_action, customer_update, signal_decision, claim_decision, handoff, message)
+            ):
+                raise KeyError(claim.claim_id)
+        if not accepting_claim and not any(
             (staff_action, customer_update, signal_decision, claim_decision, handoff, message)
         ):
             raise KeyError(claim.claim_id)

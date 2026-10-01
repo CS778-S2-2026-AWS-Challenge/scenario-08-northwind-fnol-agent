@@ -1866,7 +1866,12 @@ class PersistenceRepository(ClaimRepository, Protocol):
         audit_event: AuditEventEnvelope | None = None,
         staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
-        """Atomically persist a staff write-back and any linked handoff audit fact."""
+        """Atomically persist staff write-back, guarded presence, audit, and replay.
+
+        The registered ownership.accept_claim action alone may omit child business
+        records; it requires a matching audit and presence guard and may change only
+        the unassigned, created Claim's owner, revision, and update timestamp.
+        """
         raise NotImplementedError
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
