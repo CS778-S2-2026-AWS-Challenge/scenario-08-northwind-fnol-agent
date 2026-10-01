@@ -1793,6 +1793,8 @@ describe('WorkbenchPage queue routing', () => {
         data: { event_id: 'evt-own-accept', claim_id: 'clm_route_1', claim_revision: 2, resources: ['claim'] },
       })
     })
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2')
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
     await act(async () => {
       resolveAccept({ claim_id: 'clm_route_1', revision: 2 })
     })
@@ -1805,6 +1807,52 @@ describe('WorkbenchPage queue routing', () => {
         cursor: 'evt-other-session',
         data: { event_id: 'evt-other-session', claim_id: 'clm_route_1', claim_revision: 3, resources: ['claim'] },
       })
+    })
+    expect(await screen.findByText('This Claim changed in another session (revision 3).')).toBeInTheDocument()
+  })
+
+  it('reports a newer foreign revision held while the staff member own mutation was in flight', async () => {
+    const user = userEvent.setup()
+    let pushRealtime
+    let resolveAccept
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+    const acceptAction = {
+      action_code: 'human.accept_handoff', target_type: 'handoff', target_ref: 'hnd_1', availability: 'confirmation_required', based_on_revision: 1,
+    }
+    const actionable = {
+      ...claim,
+      work_summary: { ...claim.work_summary, primary_action_code: acceptAction.action_code, primary_action_target_ref: acceptAction.target_ref },
+      allowed_actions: [acceptAction],
+    }
+    const changedElsewhere = { ...actionable, revision: 3, allowed_actions: [] }
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockResolvedValue(changedElsewhere)
+    api.acceptHandoff.mockReturnValue(new Promise((resolve) => {
+      resolveAccept = resolve
+    }))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await screen.findByRole('button', { name: 'Test projected accept' })
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    await user.click(screen.getByRole('button', { name: 'Test projected accept' }))
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-foreign-during-own',
+        data: { event_id: 'evt-foreign-during-own', claim_id: 'clm_route_1', claim_revision: 3, resources: ['claim'] },
+      })
+    })
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveAccept({ claim_id: 'clm_route_1', revision: 2 })
     })
     expect(await screen.findByText('This Claim changed in another session (revision 3).')).toBeInTheDocument()
   })

@@ -54,6 +54,8 @@ export default function WorkbenchPage() {
   const [detail, setDetail] = useState(null)
   const detailRef = useRef(null)
   const ownRevisionsRef = useRef(new Map())
+  const pendingOwnMutationsRef = useRef(new Map())
+  const heldRevisionNoticesRef = useRef(new Map())
   const rootRestoreAttemptedRef = useRef(false)
   const currentClaimIdRef = useRef(null)
   const detailRequestId = useRef(0)
@@ -226,7 +228,13 @@ export default function WorkbenchPage() {
           response,
           ownRevisionsRef.current.get(response.claim_id),
         )
-        if (notice) setRevisionNotice(notice)
+        if (notice && pendingOwnMutationsRef.current.has(notice.claimId)) {
+          // An own mutation is in flight; classify this revision when its response arrives.
+          const held = heldRevisionNoticesRef.current.get(notice.claimId)
+          if (!held || held.revision < notice.revision) heldRevisionNoticesRef.current.set(notice.claimId, notice)
+        } else if (notice) {
+          setRevisionNotice(notice)
+        }
       }
       return response
     })
@@ -1302,13 +1310,12 @@ export default function WorkbenchPage() {
       throw new Error(request.blockedReason || 'This assistance request cannot be taken over from the current projection. Review the latest Claim state and try again.')
     }
     try {
-      const result = await workbenchApi.acceptHandoff(
+      await trackOwnMutation(request.claim_id, () => workbenchApi.acceptHandoff(
         token,
         request.claim_id,
         request.handoff.handoff_id,
         request.detail.revision,
-      )
-      rememberOwnRevision(request.claim_id, mutationResultRevision(result))
+      ))
     } catch (error) {
       let latest = null
       try {
@@ -1422,13 +1429,34 @@ export default function WorkbenchPage() {
     ))
   }
 
+  async function trackOwnMutation(claimId, run) {
+    const pending = pendingOwnMutationsRef.current
+    pending.set(claimId, (pending.get(claimId) || 0) + 1)
+    try {
+      const result = await run()
+      rememberOwnRevision(claimId, mutationResultRevision(result))
+      return result
+    } finally {
+      const remaining = (pending.get(claimId) || 1) - 1
+      if (remaining > 0) {
+        pending.set(claimId, remaining)
+      } else {
+        pending.delete(claimId)
+        const held = heldRevisionNoticesRef.current.get(claimId)
+        heldRevisionNoticesRef.current.delete(claimId)
+        const own = ownRevisionsRef.current.get(claimId)
+        if (held && !(Number.isInteger(own) && held.revision <= own)) setRevisionNotice(held)
+      }
+    }
+  }
+
   async function runClaimMutation(label, operation, { strictReadback = false, backgroundDetailRefresh = false } = {}) {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
     const mutationRequestId = ++detailRequestId.current
     let mutationResult
     try {
-      mutationResult = await operation(previous)
+      mutationResult = await trackOwnMutation(previous.claim_id, () => operation(previous))
     } catch (error) {
       let latest = null
       const refreshGeneration = backgroundRefreshId.current
@@ -1465,7 +1493,6 @@ export default function WorkbenchPage() {
       error.message = actionFailureMessage(label, error, latest)
       throw error
     }
-    rememberOwnRevision(previous.claim_id, mutationResultRevision(mutationResult))
     let claimReadback = null
     if (currentClaimIdRef.current === previous.claim_id) {
       if (strictReadback) {
@@ -1880,15 +1907,14 @@ export default function WorkbenchPage() {
     const mutationRequestId = ++detailRequestId.current
     let accepted = false
     try {
-      const result = await workbenchApi.reopenClaim(
+      await trackOwnMutation(current.claim_id, () => workbenchApi.reopenClaim(
         token,
         current.claim_id,
         action.based_on_revision,
         payload,
         idempotencyKey,
-      )
+      ))
       accepted = true
-      rememberOwnRevision(current.claim_id, mutationResultRevision(result))
       const latest = await workbenchApi.claim(token, current.claim_id)
       applyReopenProjection(latest, true, null, mutationRequestId, current.claim_id)
     } catch (error) {
