@@ -649,6 +649,14 @@ Each self-test copies the fetched 0.2 samples, plants one error per case and con
 checker reports it. They need the fetched packs, so pytest does not collect them; the fetch script
 has its own pytest tests (`tests/corpus/tools/test_fetch_corpus.py`).
 
+- **Manifest.** The corpus folder holds exactly what its committed `manifest.json` lists: every
+  listed pack and file is present with its SHA-256, and no other pack or file is. A missing
+  manifest fails the whole corpus, so the pack results cover every listed pack and nothing else.
+- **Distribution.** When the corpus version has a plan (`tests/corpus/controlled/plan/` holds
+  `corpus-plan-v1.json` for `v1`), the packs are the planned case IDs, and each pack's family,
+  scenario category and condition are the planned ones.
+- **Case IDs.** The folder name is `CTL-<M|H|C>-<three digits>`, its letter matches the family,
+  and every file of the pack names that case ID.
 - **Schema.** All four parts, `setup.json` and `provenance.json` are present and valid.
 - **Labels follow the rules.**
   - The triage class equals the highest class among the required reasons.
@@ -680,8 +688,10 @@ has its own pytest tests (`tests/corpus/tools/test_fetch_corpus.py`).
     only.
 - **Consistency.** Fields that appear in both the fact sheet and a document match, unless the
   mismatch is listed in `intended_conflicts`.
-- **Format.** Normal files open and match their declared type; only a `corrupt_file` or
-  `unsupported_format` file may fail this.
+- **Format.** Every file opens and matches its declared type, except the one material a boundary
+  condition was made from: the truncated file of a `corrupt_file` pack may fail to open, and the
+  converted file of an `unsupported_format` pack may be TIFF. Every other material in the same pack
+  is checked in full.
 - **Review.** For freeze, every image hash has exactly one accepted human sign-off on its current
   hash, with method `per_image`, or `model_check_with_sampling` where the release still meets rule 2:
   - the model check is clean;
