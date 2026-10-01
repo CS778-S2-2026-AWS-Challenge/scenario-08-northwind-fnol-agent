@@ -12,10 +12,12 @@ export default function ConfirmDialog({
   open,
   title,
   description,
+  children = null,
   cancelLabel = null,
   confirmLabel = null,
   busyLabel = null,
   busy = false,
+  confirmDisabled = false,
   danger = false,
   error = null,
   returnFocusRef = null,
@@ -38,7 +40,10 @@ export default function ConfirmDialog({
 
   useEffect(() => {
     if (!open) return undefined
+    const root = document.getElementById('root')
+    const previouslyInert = root?.inert || false
     triggerRef.current = returnFocusRef?.current || document.activeElement
+    if (root) root.inert = true
     cancelRef.current?.focus()
 
     function onKeyDown(event) {
@@ -68,6 +73,7 @@ export default function ConfirmDialog({
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('keydown', onKeyDown)
+      if (root) root.inert = previouslyInert
       if (triggerRef.current && document.contains(triggerRef.current)) {
         triggerRef.current.focus()
       }
@@ -93,6 +99,7 @@ export default function ConfirmDialog({
           <h2 id={titleId}>{title}</h2>
           <p id={descriptionId}>{description}</p>
         </header>
+        {children}
         {error && <p className="settings-feedback settings-feedback--error" role="alert">{error}</p>}
         <div className="confirmation-dialog__actions">
           <button ref={cancelRef} className="button button--secondary" type="button" disabled={busy} onClick={onCancel}>
@@ -101,7 +108,7 @@ export default function ConfirmDialog({
           <button
             className={`button ${danger ? 'button--danger' : 'button--primary'}`}
             type="button"
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={onConfirm}
           >
             {busy ? busyLabel || t('Working...') : confirmLabel || t('Confirm')}

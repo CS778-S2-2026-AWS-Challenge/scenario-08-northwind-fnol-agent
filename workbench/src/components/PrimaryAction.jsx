@@ -5,8 +5,9 @@ import { translate as t } from '../i18n.js'
 import { ActionDetails } from './ProjectedAction.jsx'
 import { ProjectedOwnershipAction } from './OwnershipActions.jsx'
 import ReopenClaimDialog from './ReopenClaimDialog.jsx'
+import { ClaimDecisionControls } from './ClaimDecision.jsx'
 
-export default function PrimaryAction({ action, handoff, request, onAccept, onOwnershipAction, onReopen, onSection }) {
+export default function PrimaryAction({ action, handoff, request, onAccept, onOwnershipAction, onReopen, onClaimDecision, onSection }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -46,6 +47,9 @@ export default function PrimaryAction({ action, handoff, request, onAccept, onOw
       )}
       {action?.action_code === 'claim.reopen' && action.availability === 'confirmation_required' && (
         <ReopenClaimDialog key={action.target_ref} action={action} onReopen={onReopen} />
+      )}
+      {action?.action_code === 'claim.record_decision' && (
+        <ClaimDecisionControls action={action} onDecision={onClaimDecision} />
       )}
       {action && executable && section && action.action_code !== 'human.accept_handoff' && (
         <button className="button button--primary" type="button" onClick={() => onSection(section)}>{t('Open {section}', { section: t(sectionLabel(section)) })}</button>

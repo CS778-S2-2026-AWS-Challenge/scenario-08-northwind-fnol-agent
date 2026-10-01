@@ -273,6 +273,12 @@ p { line-height: 1.55; }
 .primary-action__confirm, .primary-action__form { grid-column: 1 / -1; }
 .primary-action__confirm p { max-width: 65ch; color: var(--color-text-secondary); }
 .primary-action__form .ownership-action { background: var(--color-surface); }
+.claim-decision-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.claim-decision-retry { margin: var(--space-3) 0 0; color: var(--color-warning); font-size: var(--workbench-font-meta); }
+.claim-decision-summary { display: grid; align-items: flex-start; gap: var(--space-3); padding: var(--space-4) var(--space-5); border: var(--border-action); border-radius: var(--radius-lg); background: var(--color-accent-soft); color: var(--color-accent-strong); grid-template-columns: auto minmax(0, 1fr); }
+.claim-decision-summary--rejected { border: var(--border-danger); background: var(--color-danger-soft); color: var(--color-danger); }
+.claim-decision-summary h2, .claim-decision-summary p { margin-bottom: var(--space-1); }
+.claim-decision-summary > div > p:not(.eyebrow), .claim-decision-summary small { color: var(--color-text-secondary); }
 .confirmation-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; padding: var(--space-4); place-items: center; background: var(--color-overlay); }
 .confirmation-dialog { width: min(100%, var(--workbench-agent-width)); max-height: calc(100vh - var(--space-8)); padding: var(--space-5); overflow: auto; border: var(--border-component); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-modal); }
 .confirmation-dialog header > p:last-child { max-width: var(--measure-reading); margin-bottom: var(--space-4); color: var(--color-text-secondary); }
@@ -951,7 +957,9 @@ p { line-height: 1.55; }
   .detail-columns, .tag-groups { grid-template-columns: 1fr; }
   .section-summary-grid { grid-template-columns: 1fr; }
   .primary-action { grid-template-columns: 36px minmax(0, 1fr); }
-  .primary-action .button, .primary-action .assigned-chip { grid-column: 1 / -1; }
+  .primary-action > .button, .primary-action .assigned-chip, .claim-decision-actions { grid-column: 1 / -1; }
+  .claim-decision-actions { justify-content: stretch; }
+  .claim-decision-actions .button { flex: 1; }
   .message { max-width: 88%; }
   .assistance-status { align-items: start; grid-template-columns: var(--space-8) minmax(0, 1fr); }
   .assistance-status > .button, .assistance-status__confirm, .assistance-status > .record-note, .assistance-status > .form-error, .handoff-resolution-inline > .button, .handoff-resolution-inline > .record-note, .handoff-resolution-inline > .action-form { justify-self: stretch; grid-column: 1 / -1; }
