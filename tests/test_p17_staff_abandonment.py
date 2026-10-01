@@ -4,6 +4,7 @@ import mongomock
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.audit import AuditSubject, AuditSubjectType
@@ -31,6 +32,7 @@ from backend.domain.recovery_policy_registry import (
     INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION,
     INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE,
 )
+from backend.domain.retention import RetentionOperationStatus
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import (
@@ -41,6 +43,7 @@ from backend.repositories.protocols import (
 )
 from backend.services.claims import start_session
 from backend.services.follow_up_recovery import process_expiring_follow_up
+from backend.services.recovery_worker import run_recovery_cycle
 from backend.services.terminal_claims import abandon_incomplete_claim
 
 
@@ -523,3 +526,34 @@ def test_abandonment_commit_race_maps_to_a_safe_api_error(
     assert refused.value.code == code
     stored = repository.get_claim_internal(claim.claim_id)
     assert stored is not None and stored.terminal_disposition is None
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongo'])
+def test_staff_abandoned_claim_is_handed_to_retention_by_the_worker(kind: str) -> None:
+    """Staff abandonment is retention-eligible, so the worker reserves and cleans it
+    just as it does an expired Claim."""
+
+    repository = _repository(kind)
+    claim, _, _ = _checkpoint(repository, claim_id=f'clm_abandon_retention_{kind}')
+    abandon_incomplete_claim(
+        repository,
+        _staff(),
+        claim.claim_id,
+        AbandonClaimRequest(reason='Authorised staff abandonment before retention.'),
+        f'abandon-retention-{kind}',
+        str(claim.revision),
+    )
+    assert repository.list_retention_handoff_candidates(limit=10) == [claim.claim_id]
+
+    cycle = run_recovery_cycle(
+        repository,
+        MockEvidenceStorage(),
+        now=datetime.now(UTC) + timedelta(minutes=1),
+        limit=10,
+    )
+
+    retention = repository.get_retention_operation_for_claim(claim.claim_id)
+    assert (cycle.retention_progressed, cycle.failed_candidates) == (1, 0)
+    assert retention is not None
+    assert retention.status is RetentionOperationStatus.COMPLETED
+    assert repository.list_retention_handoff_candidates(limit=10) == []
