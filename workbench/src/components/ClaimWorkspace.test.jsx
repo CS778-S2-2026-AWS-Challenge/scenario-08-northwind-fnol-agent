@@ -33,6 +33,7 @@ const props = {
   onSection: vi.fn(),
   onDraft: vi.fn(),
   onAccept: vi.fn(),
+  onAcceptClaim: vi.fn(),
   onResolve: vi.fn(),
   onSignalDecision: vi.fn(),
   onCreateAction: vi.fn(),
@@ -218,6 +219,178 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByRole('heading', { name: 'Available staff actions' })).not.toBeInTheDocument()
     expect(screen.queryByText('Accept Claim')).not.toBeInTheDocument()
     expect(screen.queryByText('This work is assigned to another staff member.')).not.toBeInTheDocument()
+  })
+
+  it('offers the exact projected Claim ownership action and prevents duplicate submission while loading', async () => {
+    const user = userEvent.setup()
+    let finishAcceptance
+    const pendingAcceptance = new Promise((resolve) => { finishAcceptance = resolve })
+    const onAcceptClaim = vi.fn(() => pendingAcceptance)
+    const acceptClaimAction = {
+      action_code: 'ownership.accept_claim',
+      target_type: 'claim',
+      target_ref: 'clm_1',
+      label: 'Take Claim',
+      purpose: 'Take responsibility for this Claim.',
+      availability: 'confirmation_required',
+      confirmation: { message: 'Take this Claim as its primary owner?' },
+      inputs: [],
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      onAcceptClaim={onAcceptClaim}
+      detail={{
+        ...detail,
+        workflow_state: 'created',
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: acceptClaimAction.action_code,
+          primary_action_target_ref: acceptClaimAction.target_ref,
+        },
+        allowed_actions: [acceptClaimAction],
+      }}
+    />)
+
+    expect(screen.getByText('Unassigned')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Ready for staff review' })).toBeVisible()
+    expect(screen.getByText('Take ownership of this claim to begin the intake review. The claim will be assigned to you.')).toBeVisible()
+    const reviewButton = screen.getByRole('button', { name: 'Review ownership' })
+
+    await user.click(reviewButton)
+    expect(onAcceptClaim).not.toHaveBeenCalled()
+    expect(screen.getByRole('alertdialog', { name: 'Take ownership of this Claim?' })).toBeVisible()
+
+    const confirmButton = screen.getByRole('button', { name: 'Take Claim' })
+    await user.click(confirmButton)
+    expect(onAcceptClaim).toHaveBeenCalledOnce()
+    expect(onAcceptClaim).toHaveBeenCalledWith(acceptClaimAction)
+    expect(confirmButton).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Taking ownership...' })).toBeVisible()
+
+    await user.click(confirmButton)
+    expect(onAcceptClaim).toHaveBeenCalledOnce()
+
+    finishAcceptance()
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+  })
+
+  it('shows review progress for the current owner and continues into the projected review step', async () => {
+    const user = userEvent.setup()
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_1',
+      label: 'Record Claim decision',
+      purpose: 'Approve or reject this externally created Claim once.',
+      availability: 'confirmation_required',
+      confirmation: { level: 'high_impact', message: 'This final Claim decision cannot be changed in this version.' },
+      inputs: [],
+      based_on_revision: 5,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        revision: 5,
+        workflow_state: 'created',
+        ownership: {
+          state: 'assigned',
+          current_staff_access: 'primary',
+          primary_assignee: { staff_id: 'stf_1', display_name: 'Current Staff' },
+        },
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: decisionAction.action_code,
+          primary_action_target_ref: decisionAction.target_ref,
+        },
+        allowed_actions: [decisionAction],
+      }}
+    />)
+
+    expect(screen.getByText('Assigned to you')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Review in progress' })).toBeVisible()
+    expect(screen.getByText('You now own this claim. Continue reviewing the claim information and evidence.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Approve Claim' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Continue review' }))
+
+    expect(screen.getByRole('heading', { name: 'Record Claim decision' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Approve Claim' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Reject Claim' })).toBeVisible()
+  })
+
+  it('restores the ownership button after a readable failure and allows a retry', async () => {
+    const user = userEvent.setup()
+    const onAcceptClaim = vi.fn()
+      .mockRejectedValueOnce(new Error('The service could not assign this Claim. Review the current owner and try again.'))
+      .mockResolvedValueOnce(undefined)
+    const acceptClaimAction = {
+      action_code: 'ownership.accept_claim',
+      target_type: 'claim',
+      target_ref: 'clm_1',
+      label: 'Take Claim',
+      purpose: 'Take responsibility for this Claim.',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      onAcceptClaim={onAcceptClaim}
+      detail={{
+        ...detail,
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: acceptClaimAction.action_code,
+          primary_action_target_ref: acceptClaimAction.target_ref,
+        },
+        allowed_actions: [acceptClaimAction],
+      }}
+    />)
+
+    const reviewButton = screen.getByRole('button', { name: 'Review ownership' })
+    await user.click(reviewButton)
+    const confirmButton = screen.getByRole('button', { name: 'Take Claim' })
+    await user.click(confirmButton)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Review the current owner and try again')
+    expect(confirmButton).toBeEnabled()
+
+    await user.click(confirmButton)
+    expect(onAcceptClaim).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows another owner without exposing a takeover control', () => {
+    const acceptClaimAction = {
+      action_code: 'ownership.accept_claim',
+      target_type: 'claim',
+      target_ref: 'clm_1',
+      label: 'Take Claim',
+      purpose: 'Take responsibility for this Claim.',
+      availability: 'confirmation_required',
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        ownership: {
+          state: 'assigned',
+          current_staff_access: 'read_only',
+          primary_assignee: { staff_id: 'stf_other', display_name: 'Morgan Lee' },
+        },
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: acceptClaimAction.action_code,
+          primary_action_target_ref: acceptClaimAction.target_ref,
+        },
+        allowed_actions: [acceptClaimAction],
+      }}
+    />)
+
+    expect(screen.getByText('Morgan Lee')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Review ownership' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue review' })).not.toBeInTheDocument()
   })
 
   it('shows approval controls only for the exact confirmation-required Claim decision action', () => {

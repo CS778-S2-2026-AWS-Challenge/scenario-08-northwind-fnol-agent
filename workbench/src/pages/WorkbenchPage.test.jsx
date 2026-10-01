@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
   evidence: vi.fn(),
   workItems: vi.fn(),
   realtimeEvents: vi.fn(),
+  acceptClaim: vi.fn(),
   acceptHandoff: vi.fn(),
   resolveHandoff: vi.fn(),
   decideSignal: vi.fn(),
@@ -68,8 +69,8 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
-    const mutationCallbacks = [onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction].filter(Boolean)
+  default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onAcceptClaim, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
+    const mutationCallbacks = [onAccept, onAcceptClaim, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction].filter(Boolean)
     return <div>
       <output data-testid="workspace-mode">{readOnly ? 'read-only' : 'interactive'}</output>
       <output data-testid="mutation-callback-count">{mutationCallbacks.length}</output>
@@ -88,6 +89,7 @@ vi.mock('../components/ClaimWorkspace.jsx', () => ({
       <button type="button" onClick={onRetry}>Test claim refresh</button>
       {!readOnly && detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
       {!readOnly && detail?.work_summary?.primary_action_code === 'claim.record_decision' && <button type="button" onClick={() => onClaimDecision(detail.allowed_actions[0], { decision: 'approved' }, 'decision-route-key', detail.claim_id).catch(() => {})}>Test projected Claim decision</button>}
+      {!readOnly && detail?.work_summary?.primary_action_code === 'ownership.accept_claim' && <button type="button" onClick={() => onAcceptClaim(detail.allowed_actions[0]).catch(() => {})}>Test projected Claim ownership</button>}
       {!readOnly && detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
       {!readOnly && detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
         const promise = onExternalTaskAction(detail.allowed_actions[0], {})
@@ -383,7 +385,7 @@ describe('WorkbenchPage queue routing', () => {
     renderPage('/workbench/claims/clm_route_1')
 
     expect(await screen.findByTestId('workspace-mode')).toHaveTextContent('interactive')
-    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('10')
+    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('11')
     expect(screen.getByRole('button', { name: 'Test projected accept' })).toBeVisible()
   })
 
@@ -1046,6 +1048,172 @@ describe('WorkbenchPage queue routing', () => {
     ))
     await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
     expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('accepts an exact projected Claim ownership action and reads back the current employee as owner', async () => {
+    const user = userEvent.setup()
+    const acceptClaimAction = {
+      action_code: 'ownership.accept_claim',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 1,
+    }
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 2,
+    }
+    const actionable = {
+      ...claim,
+      workflow_state: 'created',
+      ownership: { state: 'unassigned', current_staff_access: 'read_only' },
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: acceptClaimAction.action_code,
+        primary_action_target_ref: acceptClaimAction.target_ref,
+      },
+      allowed_actions: [acceptClaimAction],
+    }
+    const accepted = {
+      ...actionable,
+      revision: 2,
+      ownership: {
+        state: 'assigned',
+        current_staff_access: 'primary',
+        primary_assignee: { staff_id: 'stf_demo', display_name: 'Demo Staff' },
+      },
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: decisionAction.action_code,
+        primary_action_target_ref: decisionAction.target_ref,
+      },
+      allowed_actions: [decisionAction],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(accepted)
+    api.acceptClaim.mockResolvedValue(accepted)
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected Claim ownership' }))
+
+    await waitFor(() => expect(api.acceptClaim).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      1,
+    ))
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
+    expect(await screen.findByText('Claim assigned to you. Review started.')).toBeVisible()
+    expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes an ownership conflict and reports that another staff member took the Claim', async () => {
+    const user = userEvent.setup()
+    const acceptClaimAction = {
+      action_code: 'ownership.accept_claim',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 1,
+    }
+    const actionable = {
+      ...claim,
+      workflow_state: 'created',
+      ownership: { state: 'unassigned', current_staff_access: 'read_only' },
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: acceptClaimAction.action_code,
+        primary_action_target_ref: acceptClaimAction.target_ref,
+      },
+      allowed_actions: [acceptClaimAction],
+    }
+    const assignedElsewhere = {
+      ...actionable,
+      revision: 2,
+      ownership: {
+        state: 'assigned',
+        current_staff_access: 'read_only',
+        primary_assignee: { staff_id: 'stf_other', display_name: 'Morgan Lee' },
+      },
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(assignedElsewhere)
+    api.acceptClaim.mockRejectedValue(Object.assign(
+      new Error('This Claim has already been taken.'),
+      { status: 409, code: 'CLAIM_ALREADY_ASSIGNED', requestId: 'req_claim_owner_1' },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected Claim ownership' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This claim has already been assigned to another staff member.')
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2')
+    expect(screen.queryByRole('button', { name: 'Test projected Claim ownership' })).not.toBeInTheDocument()
+    expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a failed ownership action retryable and settles a later successful retry from readback', async () => {
+    const user = userEvent.setup()
+    const acceptClaimAction = {
+      action_code: 'ownership.accept_claim',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 1,
+    }
+    const actionable = {
+      ...claim,
+      workflow_state: 'created',
+      ownership: { state: 'unassigned', current_staff_access: 'read_only' },
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: acceptClaimAction.action_code,
+        primary_action_target_ref: acceptClaimAction.target_ref,
+      },
+      allowed_actions: [acceptClaimAction],
+    }
+    const accepted = {
+      ...actionable,
+      revision: 2,
+      ownership: {
+        state: 'assigned',
+        current_staff_access: 'primary',
+        primary_assignee: { staff_id: 'stf_demo' },
+      },
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockResolvedValueOnce(actionable)
+      .mockResolvedValue(accepted)
+    api.acceptClaim
+      .mockRejectedValueOnce(Object.assign(
+        new Error('The Workbench service could not be reached.'),
+        { code: 'NETWORK_ERROR', retryable: true },
+      ))
+      .mockResolvedValueOnce(accepted)
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected Claim ownership' }))
+
+    await waitFor(() => expect(api.acceptClaim).toHaveBeenCalledTimes(1))
+    const retryButton = await screen.findByRole('button', { name: 'Test projected Claim ownership' })
+    await user.click(retryButton)
+
+    await waitFor(() => expect(api.acceptClaim).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('Claim assigned to you. Review started.')).toBeVisible()
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2')
   })
 
   it('executes an exact projected external review and reads back Claim and external-service state before settling', async () => {

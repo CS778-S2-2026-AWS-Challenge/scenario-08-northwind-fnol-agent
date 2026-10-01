@@ -232,6 +232,21 @@ export const workbenchApi = {
   profile(token) {
     return request('/api/v1/staff/me', { token })
   },
+  updatePresence(token, {
+    online = true,
+    available = true,
+    leaseSeconds = 300,
+  } = {}) {
+    return request('/api/v1/workbench/staff/presence', {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({
+        online,
+        available,
+        lease_seconds: leaseSeconds,
+      }),
+    })
+  },
   submitFeedback(token, message) {
     return mutationRequest('/api/v1/staff/feedback', {
       method: 'POST',
@@ -395,6 +410,19 @@ export const workbenchApi = {
   acceptHandoff(token, claimId, handoffId, revision) {
     return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/handoffs/${encodeURIComponent(handoffId)}/accept`,
+      {
+        method: 'POST',
+        token,
+        headers: {
+          'If-Match': String(revision),
+        },
+        body: JSON.stringify({}),
+      },
+    )
+  },
+  acceptClaim(token, claimId, revision) {
+    return mutationRequest(
+      `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/accept`,
       {
         method: 'POST',
         token,

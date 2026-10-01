@@ -38,7 +38,8 @@ describe('ClaimDecisionControls', () => {
 
     const trigger = screen.getByRole('button', { name: 'Approve Claim' })
     await user.click(trigger)
-    expect(screen.getByRole('alertdialog')).toBeVisible()
+    expect(screen.getByRole('alertdialog')).toHaveClass('claim-decision-dialog')
+    expect(screen.getByLabelText('Public approval explanation (optional)')).toHaveAttribute('rows', '8')
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
     await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Approve Claim' }))
 
