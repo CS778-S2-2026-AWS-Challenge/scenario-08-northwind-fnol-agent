@@ -51,6 +51,11 @@ import ClaimReviewPanel, {
 import { claimReviewRequirements } from './claimReviewProjection.js'
 import AgreementConfirmationPanel from './components/AgreementConfirmationPanel.jsx'
 import PayoutContactPanel from './components/PayoutContactPanel.jsx'
+import {
+  isDefinitiveSubmissionRefusal,
+  submissionFailure,
+  submissionReconciliationFailure,
+} from './claimSubmissionFeedback.js'
 import ClaimAutoFillPanel from './components/ClaimAutoFillPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
@@ -554,51 +559,6 @@ function protectedAccountPageForPath(pathname) {
   if (/^\/account\/claims\/[^/]+$/.test(pathname)) return 'claim-features'
   if (pathname === '/files') return 'files'
   return null
-}
-
-function isDefinitiveAgreementSubmissionRefusal(requestError) {
-  return requestError instanceof ApiRequestError
-    && (requestError.status === 409 || requestError.status === 422)
-}
-
-function agreementSubmissionFailure(requestError, stage) {
-  const action = stage === 'acceptance'
-    ? 'recording your agreement'
-    : 'submitting your Claim'
-
-  if (requestError instanceof ApiRequestError && requestError.code === 'NETWORK_ERROR') {
-    return {
-      kind: 'network',
-      title: 'Submission interrupted',
-      message: `Northwind could not be reached while ${action}, so no result was received. Check your connection and try again. This screen does not show your Claim as created.`,
-    }
-  }
-
-  if (isDefinitiveAgreementSubmissionRefusal(requestError)) {
-    const reason = requestError.message || 'Northwind refused this request.'
-    return {
-      kind: 'refused',
-      title: 'Submission was not accepted',
-      message: `${reason} Review the latest claim information and try again. This screen does not show your Claim as created.`,
-    }
-  }
-
-  return {
-    kind: 'unknown',
-    title: 'Submission result is unclear',
-    message: `Northwind returned a result that does not confirm whether ${action} completed. Do not assume your Claim was created. Try again; the same submission identity will be reused so Northwind can reconcile the attempt without creating a duplicate.`,
-  }
-}
-
-function agreementSubmissionReconciliationFailure(stage) {
-  const action = stage === 'acceptance'
-    ? 'recording your agreement'
-    : 'submitting your Claim'
-  return {
-    kind: 'unknown',
-    title: 'Submission result is unclear',
-    message: `Northwind did not confirm whether ${action} completed, and the current Claim status could not confirm the result. Do not assume your Claim was created. Try again; the same submission identity will be reused so Northwind can reconcile the attempt without creating a duplicate.`,
-  }
 }
 
 function App() {
@@ -2916,9 +2876,9 @@ function App() {
       setAgreementSubmissionError(null)
       setStatus('idle')
     } catch (requestError) {
-      let visibleFailure = agreementSubmissionFailure(requestError, submissionStage)
+      let visibleFailure = submissionFailure(requestError)
 
-      if (!isDefinitiveAgreementSubmissionRefusal(requestError)) {
+      if (!isDefinitiveSubmissionRefusal(requestError)) {
         try {
           const currentClaim = await getClaim(claim.claim_id)
           const snapshotApplied = applyClaimSnapshot(currentClaim, {
@@ -2926,7 +2886,7 @@ function App() {
           })
 
           if (!snapshotApplied) {
-            visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+            visibleFailure = submissionReconciliationFailure()
           } else if (currentClaim.external_claim?.creation_status === 'created') {
             pendingClaimCreation.current = null
             pendingAgreementAcceptance.current = null
@@ -2948,11 +2908,11 @@ function App() {
               ? 'claimant.review_agreement'
               : 'claimant.create_claim'
             if (currentClaim.primary_action?.action_code !== expectedPendingAction) {
-              visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+              visibleFailure = submissionReconciliationFailure()
             }
           }
         } catch {
-          visibleFailure = agreementSubmissionReconciliationFailure(submissionStage)
+          visibleFailure = submissionReconciliationFailure()
         }
       }
 
