@@ -254,6 +254,8 @@
 .token-select-option:hover:not(:disabled), .token-select-option.is-selected { color: var(--color-text-primary); background: var(--color-accent-soft); }
 .token-select-option:disabled { color: var(--color-text-muted); opacity: var(--opacity-disabled); cursor: not-allowed; }
 .token-select-option small { color: var(--color-text-muted); font-size: var(--font-size-caption); }
+/* Option descriptions stay short: at most three lines. */
+.token-select-option small { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }
 .token-select-check { color: var(--color-accent-strong); font-weight: var(--font-weight-semibold); }
 .workspace-composer .model-select .token-select-trigger { max-width: var(--size-model-trigger-max); }
 .model-control { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
@@ -1050,7 +1052,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .conversation-heading-main { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
 .claim-status, .transfer-label { color: var(--color-accent-strong); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); text-transform: uppercase; letter-spacing: .08em; }
 .claim-heading-identity { display: flex; min-width: 0; align-items: baseline; gap: var(--space-2); color: var(--color-text-primary); }
-.claim-heading-identity > span { flex: 0 0 auto; font-size: var(--font-size-section); font-weight: var(--font-weight-semibold); }
 .conversation-heading .claim-status {
   flex: 0 0 auto;
   margin-left: auto;
@@ -1393,6 +1394,14 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
   font-weight: var(--font-weight-semibold);
 }
 .claimant-message-avatar { background: var(--color-accent-strong); }
+.claimant-avatar-icon {
+  width: var(--space-5);
+  height: var(--space-5);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: calc(var(--space-1) / 2);
+  stroke-linecap: round;
+}
 .user-message-body, .agent-body, .staff-message-body {
   min-width: 0;
   max-width: min(var(--measure-reading), calc(100% - var(--size-control-touch) - var(--space-3)));
@@ -2078,3 +2087,18 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .auth-page .login-form { gap: var(--space-2); }
 .auth-page .login-form input:not([type='checkbox']) { min-height: var(--size-control-touch); }
 .auth-page .employee-access { margin-top: var(--space-4); padding-top: var(--space-3); }
+
+/* Start page to conversation: the composer settles at the bottom while the
+   conversation rises in behind it. */
+.workspace-composer.is-arriving { transition: transform var(--duration-layout) var(--ease-standard); }
+.intake-page.is-arriving .message-list { animation: workspace-rise-in var(--duration-layout) var(--ease-standard) both; }
+.intake-page.is-arriving .conversation-heading,
+.intake-page.is-arriving .intake-history { animation: workspace-fade-in var(--duration-layout) var(--ease-standard) both; }
+@keyframes workspace-rise-in { from { opacity: 0; transform: translateY(var(--space-6)); } }
+@keyframes workspace-fade-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-composer.is-arriving { transition: none; }
+  .intake-page.is-arriving .message-list,
+  .intake-page.is-arriving .conversation-heading,
+  .intake-page.is-arriving .intake-history { animation: none; }
+}

@@ -9,6 +9,9 @@ backend's own login/session routes.
 the client uses the deployment-safe same-origin path `/workbench/`; `scripts/start-dev.ps1` sets
 the local URL automatically from its `-WorkbenchPort` value.
 
+`VITE_NORTHWIND_DEVELOPER_MODE=true` shows diagnostics claimants do not need, such as the
+"Reviewed information for this request" note above each assistant reply. It is off by default.
+
 Run claimant checks with:
 
 ```powershell

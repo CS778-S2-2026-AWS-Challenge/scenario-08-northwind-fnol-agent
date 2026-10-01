@@ -17,3 +17,9 @@ export function resolveWorkbenchUrl(configuredUrl = '') {
 }
 
 export const WORKBENCH_URL = resolveWorkbenchUrl(import.meta.env.VITE_NORTHWIND_WORKBENCH_URL)
+
+// Developer mode shows diagnostics claimants do not need, such as which
+// information the assistant reviewed for each reply. Off unless explicitly set.
+export function developerModeEnabled() {
+  return import.meta.env.VITE_NORTHWIND_DEVELOPER_MODE === 'true'
+}
