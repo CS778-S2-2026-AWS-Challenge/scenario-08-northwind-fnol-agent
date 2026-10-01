@@ -26,7 +26,7 @@ export default function WorkbenchPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const tabs = usePersistentTabs()
+  const tabs = usePersistentTabs(profile?.staff_id)
   const openTab = tabs.open
   const syncTabIdentities = tabs.syncIdentities
   const [claims, setClaims] = useState([])
