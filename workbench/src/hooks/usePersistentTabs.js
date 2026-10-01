@@ -3,9 +3,16 @@ import { claimIdentity } from '../claim-identity.js'
 
 const STORAGE_KEY = 'northwind.workbench.tabs.v1'
 
-function initialState() {
+// Open tabs carry Claim summaries, so each staff identity keeps its own record.
+function storageKeyFor(staffId) {
+  return staffId ? `${STORAGE_KEY}:${staffId}` : null
+}
+
+function initialState(storageKey) {
   try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
+    // Remove the former browser-wide record, which any later account could read.
+    localStorage.removeItem(STORAGE_KEY)
+    const value = storageKey ? JSON.parse(localStorage.getItem(storageKey) || 'null') : null
     if (Array.isArray(value?.tabs)) {
       const tabs = value.tabs.map(normalizePersistedTab)
       return { tabs, activeId: value.activeId || tabs[0]?.claimId || null }
@@ -16,12 +23,18 @@ function initialState() {
   return { tabs: [], activeId: null }
 }
 
-export function usePersistentTabs() {
-  const [state, setState] = useState(initialState)
+export function usePersistentTabs(staffId) {
+  const storageKey = storageKeyFor(staffId)
+  const [loadedKey, setLoadedKey] = useState(storageKey)
+  const [state, setState] = useState(() => initialState(storageKey))
+  if (loadedKey !== storageKey) {
+    setLoadedKey(storageKey)
+    setState(initialState(storageKey))
+  }
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }, [state])
+    if (storageKey) localStorage.setItem(storageKey, JSON.stringify(state))
+  }, [state, storageKey])
 
   const open = useCallback((claim) => {
     setState((current) => {
