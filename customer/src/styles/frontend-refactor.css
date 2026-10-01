@@ -254,6 +254,8 @@
 .token-select-option:hover:not(:disabled), .token-select-option.is-selected { color: var(--color-text-primary); background: var(--color-accent-soft); }
 .token-select-option:disabled { color: var(--color-text-muted); opacity: var(--opacity-disabled); cursor: not-allowed; }
 .token-select-option small { color: var(--color-text-muted); font-size: var(--font-size-caption); }
+/* Option descriptions stay short: at most three lines. */
+.token-select-option small { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }
 .token-select-check { color: var(--color-accent-strong); font-weight: var(--font-weight-semibold); }
 .workspace-composer .model-select .token-select-trigger { max-width: var(--size-model-trigger-max); }
 .model-control { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }

@@ -322,10 +322,11 @@ export default function MessageComposer({
     return {
       value: model.id,
       label: modelDisplayName(model),
+      // Status first so the three-line clamp never hides it.
       meta: [
-        model.description,
         model.availability === 'unavailable' ? 'Unavailable' : null,
         compatibility.hasRequirements ? compatibility.statusLabel : null,
+        model.description,
       ].filter(Boolean).join(' · ') || undefined,
       disabled: model.availability === 'unavailable' || !compatibility.compatible,
     }

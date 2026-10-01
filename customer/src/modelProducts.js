@@ -8,11 +8,11 @@ export const PRIVATE_MODEL_PROFILE_ID = 'qwen-local'
 export const MODEL_PRODUCTS = {
   assist: {
     label: 'Northwind Assist',
-    description: 'Fast, and reads your photos and documents.',
+    description: 'Fast. Reads your photos and documents.',
   },
   private: {
     label: 'Northwind Private',
-    description: "Runs on Northwind's own servers. Your details never go to an outside AI provider. Text only — photos are saved for our team.",
+    description: "Text only. Your details stay on Northwind's own servers.",
   },
 }
 
