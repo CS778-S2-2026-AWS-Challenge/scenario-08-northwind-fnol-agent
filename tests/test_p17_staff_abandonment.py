@@ -33,7 +33,12 @@ from backend.domain.recovery_policy_registry import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    IdempotencyRecord,
+    PersistenceRepository,
+    RevisionConflict,
+)
 from backend.services.claims import start_session
 from backend.services.follow_up_recovery import process_expiring_follow_up
 from backend.services.terminal_claims import abandon_incomplete_claim
@@ -460,3 +465,61 @@ def test_claimant_resume_before_staff_abandonment_wins_without_partial_write() -
     assert stored_follow_up is not None
     assert stored_follow_up.status is FollowUpStatus.RESOLVED
     assert stored_follow_up.reason_code is not FollowUpReasonCode.STAFF_ABANDONED
+
+
+def test_blank_abandonment_reason_is_refused_before_any_write() -> None:
+    repository = _repository('fixture')
+    claim, _, _ = _checkpoint(repository, claim_id='clm_blank_abandon')
+
+    with pytest.raises(ApiError) as refused:
+        abandon_incomplete_claim(
+            repository,
+            _staff(),
+            claim.claim_id,
+            AbandonClaimRequest(reason='   '),
+            'abandon-blank',
+            str(claim.revision),
+        )
+
+    assert refused.value.status_code == 422
+    stored = repository.get_claim_internal(claim.claim_id)
+    assert stored is not None and stored.terminal_disposition is None
+
+
+@pytest.mark.parametrize(
+    ('conflict', 'status_code', 'code'),
+    [
+        (RevisionConflict(99), 409, 'REVISION_CONFLICT'),
+        (IdempotencyConflict('abandon-race'), 409, 'IDEMPOTENCY_CONFLICT'),
+        (KeyError('fup_removed'), 404, 'RESOURCE_NOT_FOUND'),
+    ],
+    ids=['stale-revision', 'idempotency', 'obligation-removed'],
+)
+def test_abandonment_commit_race_maps_to_a_safe_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+    conflict: Exception,
+    status_code: int,
+    code: str,
+) -> None:
+    repository = _repository('fixture')
+    claim, _, _ = _checkpoint(repository, claim_id=f'clm_abandon_race_{code.lower()}')
+
+    def lose_race(*_args: object, **_kwargs: object) -> None:
+        raise conflict
+
+    monkeypatch.setattr(repository, 'commit_recovery_staff_abandonment', lose_race)
+
+    with pytest.raises(ApiError) as refused:
+        abandon_incomplete_claim(
+            repository,
+            _staff(),
+            claim.claim_id,
+            AbandonClaimRequest(reason='Authorised staff abandonment that loses a race.'),
+            f'abandon-race-{code.lower()}',
+            str(claim.revision),
+        )
+
+    assert refused.value.status_code == status_code
+    assert refused.value.code == code
+    stored = repository.get_claim_internal(claim.claim_id)
+    assert stored is not None and stored.terminal_disposition is None

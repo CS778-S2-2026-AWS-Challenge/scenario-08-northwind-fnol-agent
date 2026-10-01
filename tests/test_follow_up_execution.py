@@ -39,7 +39,11 @@ from backend.domain.recovery_policy_registry import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    IdempotencyRecord,
+    PersistenceRepository,
+)
 from backend.services.follow_up_recovery import (
     _in_app_follow_up_message,
     process_due_follow_up,
@@ -919,3 +923,76 @@ def test_expiry_committed_mid_resume_rejects_the_stale_resume(
     stored = repository.get_follow_up(claim.claim_id, follow_up.follow_up_id, claim.customer_id)
     assert stored is not None
     assert stored.resolution_code is FollowUpResolutionCode.RECOVERY_EXPIRED
+
+
+_PROCESSES = {
+    'due': (process_due_follow_up, 'commit_due_follow_up_attempt', timedelta(0)),
+    'expiry': (
+        process_expiring_follow_up,
+        'commit_recovery_expiry',
+        INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE,
+    ),
+    'withdrawal': (
+        process_follow_up_contact_withdrawal,
+        'commit_follow_up_contact_withdrawal',
+        timedelta(minutes=1),
+    ),
+}
+
+
+def _lose_race(*_args: object, **_kwargs: object) -> None:
+    # Another worker already committed this logical operation.
+    raise IdempotencyConflict('fuo_raced')
+
+
+@pytest.mark.parametrize(
+    'stale',
+    ['claim-gone', 'follow-up-gone', 'session-gone', 'lost-commit-race'],
+)
+def test_stale_discovery_hint_is_a_safe_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+    stale: str,
+) -> None:
+    """A discovery hint that no longer matches authority commits nothing, for every
+    worker process."""
+
+    for process, commit_method, offset in _PROCESSES.values():
+        repository = FixtureRepository()
+        claim, _, follow_up, interrupted_at = _checkpoint(repository)
+
+        with monkeypatch.context() as patch:
+            if stale == 'claim-gone':
+                patch.setattr(repository, 'get_claim_internal', lambda *_a, **_k: None)
+            elif stale == 'follow-up-gone':
+                patch.setattr(repository, 'get_follow_up', lambda *_a, **_k: None)
+            elif stale == 'session-gone':
+                patch.setattr(repository, 'get_session', lambda *_a, **_k: None)
+            else:
+                patch.setattr(repository, commit_method, _lose_race)
+
+            assert process(repository, follow_up, interrupted_at + offset) is None
+
+        stored = repository.get_follow_up(claim.claim_id, follow_up.follow_up_id, claim.customer_id)
+        assert stored == follow_up
+        assert (
+            repository.list_follow_up_operations(
+                claim.claim_id, follow_up.follow_up_id, claim.customer_id
+            )
+            == []
+        )
+
+
+def test_withdrawal_after_the_deadline_is_refused_as_a_no_op() -> None:
+    repository = FixtureRepository()
+    claim, _, follow_up, interrupted_at = _checkpoint(repository)
+
+    assert (
+        process_follow_up_contact_withdrawal(
+            repository,
+            follow_up,
+            interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE,
+        )
+        is None
+    )
+    stored = repository.get_follow_up(claim.claim_id, follow_up.follow_up_id, claim.customer_id)
+    assert stored == follow_up
