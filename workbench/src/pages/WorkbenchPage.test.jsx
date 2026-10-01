@@ -36,6 +36,7 @@ const api = vi.hoisted(() => ({
   acceptExternalTaskReview: vi.fn(),
   reconcileExternalTaskResponse: vi.fn(),
   reopenClaim: vi.fn(),
+  recordClaimDecision: vi.fn(),
 }))
 
 const tabs = vi.hoisted(() => ({
@@ -67,8 +68,8 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
-    const mutationCallbacks = [onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onExternalTaskAction].filter(Boolean)
+  default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
+    const mutationCallbacks = [onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction].filter(Boolean)
     return <div>
       <output data-testid="workspace-mode">{readOnly ? 'read-only' : 'interactive'}</output>
       <output data-testid="mutation-callback-count">{mutationCallbacks.length}</output>
@@ -86,6 +87,7 @@ vi.mock('../components/ClaimWorkspace.jsx', () => ({
       ))}
       <button type="button" onClick={onRetry}>Test claim refresh</button>
       {!readOnly && detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
+      {!readOnly && detail?.work_summary?.primary_action_code === 'claim.record_decision' && <button type="button" onClick={() => onClaimDecision(detail.allowed_actions[0], { decision: 'approved' }, 'decision-route-key', detail.claim_id).catch(() => {})}>Test projected Claim decision</button>}
       {!readOnly && detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
       {!readOnly && detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
         const promise = onExternalTaskAction(detail.allowed_actions[0], {})
@@ -357,6 +359,7 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.acceptExternalTaskReview).not.toHaveBeenCalled()
     expect(api.reconcileExternalTaskResponse).not.toHaveBeenCalled()
     expect(api.reopenClaim).not.toHaveBeenCalled()
+    expect(api.recordClaimDecision).not.toHaveBeenCalled()
   })
 
   it('keeps the submitted Claim workspace interactive for projected actions', async () => {
@@ -380,7 +383,7 @@ describe('WorkbenchPage queue routing', () => {
     renderPage('/workbench/claims/clm_route_1')
 
     expect(await screen.findByTestId('workspace-mode')).toHaveTextContent('interactive')
-    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('9')
+    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('10')
     expect(screen.getByRole('button', { name: 'Test projected accept' })).toBeVisible()
   })
 
@@ -529,6 +532,201 @@ describe('WorkbenchPage queue routing', () => {
     expect(alert).toHaveTextContent(/was not reopened.*loaded revision was stale/i)
     expect(alert).toHaveTextContent(/revision 8.*review it and try again/i)
     expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('records a Claim decision with the projected revision and replaces detail from the authoritative readback', async () => {
+    const user = userEvent.setup()
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 7,
+    }
+    const actionable = {
+      ...claim,
+      revision: 7,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: decisionAction.action_code,
+        primary_action_target_ref: decisionAction.target_ref,
+      },
+      allowed_actions: [decisionAction],
+    }
+    const record = {
+      decision_id: 'cdec_1234567890abcdef1234',
+      claim_id: 'clm_route_1',
+      decision: 'approved',
+      claimant_explanation: 'Your claim has been approved.',
+      decided_by: 'stf_demo',
+      decided_at: '2026-10-01T01:00:00Z',
+      source_claim_revision: 7,
+    }
+    const decided = {
+      ...actionable,
+      revision: 8,
+      claim_decision: record,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValueOnce(decided)
+    api.recordClaimDecision.mockResolvedValue(record)
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected Claim decision' }))
+
+    await waitFor(() => expect(api.recordClaimDecision).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      7,
+      { decision: 'approved' },
+      'decision-route-key',
+    ))
+    expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 8')
+    expect(screen.getByText(/was approved.*authoritative projection.*revision 8/i)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Test projected Claim decision' })).not.toBeInTheDocument()
+  })
+
+  it('reconciles an ambiguous decision result before allowing any further submission', async () => {
+    const user = userEvent.setup()
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 7,
+    }
+    const actionable = {
+      ...claim,
+      revision: 7,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: decisionAction.action_code,
+        primary_action_target_ref: decisionAction.target_ref,
+      },
+      allowed_actions: [decisionAction],
+    }
+    const record = {
+      decision_id: 'cdec_1234567890abcdef1234',
+      claim_id: 'clm_route_1',
+      decision: 'approved',
+      claimant_explanation: 'Your claim has been approved.',
+      decided_by: 'stf_demo',
+      decided_at: '2026-10-01T01:00:00Z',
+      source_claim_revision: 7,
+    }
+    const decided = {
+      ...actionable,
+      revision: 8,
+      claim_decision: record,
+      work_summary: { ...actionable.work_summary, primary_action_code: null, primary_action_target_ref: null },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValueOnce(decided)
+    api.recordClaimDecision.mockRejectedValueOnce(Object.assign(
+      new Error('The Workbench service could not be reached.'),
+      { status: 0, code: 'NETWORK_ERROR', retryable: true },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected Claim decision' }))
+
+    expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 8')
+    expect(api.recordClaimDecision).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(/refreshed server projection.*approved.*No duplicate decision was submitted/i)).toBeVisible()
+  })
+
+  it('reloads a revision conflict and requires a new confirmation instead of resubmitting', async () => {
+    const user = userEvent.setup()
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 7,
+    }
+    const actionable = {
+      ...claim,
+      revision: 7,
+      work_summary: { ...claim.work_summary, primary_action_code: decisionAction.action_code, primary_action_target_ref: decisionAction.target_ref },
+      allowed_actions: [decisionAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 8,
+      allowed_actions: [{ ...decisionAction, based_on_revision: 8 }],
+    }
+    api.claim.mockResolvedValueOnce(actionable).mockResolvedValueOnce(latest)
+    api.recordClaimDecision.mockRejectedValueOnce(Object.assign(
+      new Error('Revision mismatch.'),
+      { status: 409, code: 'REVISION_CONFLICT', requestId: 'req_decision_revision' },
+    ))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected Claim decision' }))
+
+    expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 8')
+    expect(api.recordClaimDecision).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('alert')).toHaveTextContent(/changed after the confirmation.*revision 8.*explicitly confirm a new attempt/i)
+  })
+
+  it('does not let a late decision response from the previous route overwrite the new Claim', async () => {
+    const user = userEvent.setup()
+    let resolveDecision
+    const delayedDecision = new Promise((resolve) => { resolveDecision = resolve })
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 7,
+    }
+    const actionable = {
+      ...claim,
+      revision: 7,
+      work_summary: { ...claim.work_summary, primary_action_code: decisionAction.action_code, primary_action_target_ref: decisionAction.target_ref },
+      allowed_actions: [decisionAction],
+    }
+    const record = {
+      decision_id: 'cdec_1234567890abcdef1234',
+      claim_id: 'clm_route_1',
+      decision: 'approved',
+      claimant_explanation: 'Your claim has been approved.',
+      decided_by: 'stf_demo',
+      decided_at: '2026-10-01T01:00:00Z',
+      source_claim_revision: 7,
+    }
+    const decidedA = { ...actionable, revision: 8, claim_decision: record, allowed_actions: [] }
+    const claimB = {
+      ...claim,
+      claim_id: 'clm_route_2',
+      display_reference: 'NW-901',
+      revision: 11,
+      allowed_actions: [],
+    }
+    let claimALoads = 0
+    api.claim.mockImplementation((_token, id) => {
+      if (id === 'clm_route_2') return Promise.resolve(claimB)
+      claimALoads += 1
+      return Promise.resolve(claimALoads === 1 ? actionable : decidedA)
+    })
+    api.recordClaimDecision.mockReturnValue(delayedDecision)
+
+    renderPage('/workbench/claims/clm_route_1')
+    await user.click(await screen.findByRole('button', { name: 'Test projected Claim decision' }))
+    await user.click(screen.getByRole('button', { name: 'Navigate Claim B' }))
+    expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 11')
+
+    resolveDecision(record)
+    await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+    await waitFor(() => expect(claimALoads).toBe(2))
+
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 11')
+    expect(screen.queryByText(/Claim NW-900 was approved/)).not.toBeInTheDocument()
   })
 
   it('keeps the core Claim readable when optional action context is unavailable', async () => {

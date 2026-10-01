@@ -75,6 +75,7 @@ export default function WorkbenchPage() {
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentSessionId, setAgentSessionId] = useState(null)
   const [revisionNotice, setRevisionNotice] = useState(null)
+  const [decisionNotice, setDecisionNotice] = useState(null)
   const [externalActionRecoveries, setExternalActionRecoveries] = useState({})
   const externalRecoveryInFlight = useRef(new Set())
   const isAgentRoute = Boolean(routeAgentSessionId)
@@ -921,6 +922,7 @@ export default function WorkbenchPage() {
     }
   }, [])
   useEffect(() => {
+    setDecisionNotice(null)
     if (activeClaimId) {
       loadDetail(activeClaimId)
     } else {
@@ -1878,6 +1880,156 @@ export default function WorkbenchPage() {
     }
   }
 
+  async function recordClaimDecision(action, payload, idempotencyKey, attemptClaimId) {
+    const current = detailRef.current
+    const projectedAction = findProjectedAction(
+      current?.allowed_actions,
+      'claim.record_decision',
+      current?.claim_id,
+    )
+    if (
+      !current
+      || currentClaimIdRef.current !== attemptClaimId
+      || current.claim_id !== attemptClaimId
+      || action?.action_code !== 'claim.record_decision'
+      || action?.target_type !== 'claim'
+      || action?.target_ref !== attemptClaimId
+      || action?.availability !== 'confirmation_required'
+      || action?.based_on_revision !== current.revision
+      || projectedAction?.availability !== 'confirmation_required'
+      || projectedAction?.based_on_revision !== current.revision
+    ) {
+      const error = new Error('The projected Claim decision no longer matches the Claim shown on this route. Review the latest Claim and confirm again.')
+      error.code = 'STALE_PROJECTED_ACTION'
+      error.decisionRequiresNewConfirmation = true
+      if (currentClaimIdRef.current === attemptClaimId) {
+        setDecisionNotice({ claimId: attemptClaimId, kind: 'error', message: error.message })
+      }
+      throw error
+    }
+
+    const mutationRequestId = ++detailRequestId.current
+    let record
+    try {
+      record = await workbenchApi.recordClaimDecision(
+        token,
+        attemptClaimId,
+        action.based_on_revision,
+        payload,
+        idempotencyKey,
+      )
+    } catch (error) {
+      let latest = null
+      let reloadError = null
+      try {
+        const response = await workbenchApi.claim(token, attemptClaimId)
+        latest = applyDetailProjection(response, {
+          expectedClaimId: attemptClaimId,
+          requestId: mutationRequestId,
+        })
+        error.projectionReloaded = Boolean(latest)
+        error.projectionChanged = latest ? latest.revision !== current.revision : false
+        error.latestRevision = latest?.revision
+        await loadClaims()
+      } catch (nextReloadError) {
+        reloadError = nextReloadError
+        if (
+          currentClaimIdRef.current === attemptClaimId
+          && detailRequestId.current === mutationRequestId
+        ) {
+          if (isInaccessibleError(nextReloadError)) {
+            detailRef.current = null
+            setDetail(null)
+            setResources({})
+          } else {
+            setDetailStale(true)
+          }
+          setDetailError(nextReloadError)
+        }
+      }
+
+      if (latest?.claim_decision) {
+        announceDecision(latest, latest.claim_decision, true)
+        return latest.claim_decision
+      }
+
+      const ambiguous = ambiguousDecisionFailure(error)
+      const retryAction = latest && findProjectedAction(
+        latest.allowed_actions,
+        'claim.record_decision',
+        latest.claim_id,
+      )
+      if (
+        ambiguous
+        && retryAction?.availability === 'confirmation_required'
+        && retryAction.based_on_revision === action.based_on_revision
+        && latest.revision === current.revision
+      ) {
+        error.decisionRetryAllowed = true
+      } else if (ambiguous && !latest) {
+        error.decisionRetryBlocked = true
+        if (reloadError) error.readbackRequestId = reloadError.requestId
+      } else if (error.code === 'IDEMPOTENCY_CONFLICT') {
+        error.decisionRetryBlocked = true
+      } else if (error.code !== 'VALIDATION_ERROR') {
+        error.decisionRequiresNewConfirmation = true
+      }
+
+      error.message = claimDecisionFailureMessage(error)
+      if (error.code === 'ACCESS_DENIED' && currentClaimIdRef.current === attemptClaimId) {
+        setDetailError(error)
+      }
+      if (error.decisionRequiresNewConfirmation && currentClaimIdRef.current === attemptClaimId) {
+        setDecisionNotice({ claimId: attemptClaimId, kind: 'error', message: error.message })
+      }
+      throw error
+    }
+
+    try {
+      const response = await workbenchApi.claim(token, attemptClaimId)
+      const latest = applyDetailProjection(response, {
+        expectedClaimId: attemptClaimId,
+        requestId: mutationRequestId,
+        rejectOlder: true,
+      })
+      if (
+        !latest
+        || latest.revision <= current.revision
+        || !latest.claim_decision
+        || latest.claim_decision.decision_id !== record.decision_id
+      ) {
+        throw decisionReadbackError()
+      }
+      await loadClaims()
+      announceDecision(latest, record, false)
+      return record
+    } catch (readbackError) {
+      if (currentClaimIdRef.current === attemptClaimId) {
+        setDetailStale(true)
+        setDetailError(readbackError)
+        setDecisionNotice({
+          claimId: attemptClaimId,
+          kind: 'error',
+          message: `The ${payload.decision} decision was recorded, but the latest Claim projection could not be confirmed. Refresh this Claim before taking another action.${failureReference(readbackError) ? ` ${failureReference(readbackError)}` : ''}`,
+        })
+      }
+      return record
+    }
+  }
+
+  function announceDecision(latest, decision, reconciled) {
+    if (currentClaimIdRef.current !== latest.claim_id) return
+    const identity = latest.display_reference || latest.claim_id
+    const outcome = decision.decision === 'approved' ? 'approved' : 'rejected'
+    setDecisionNotice({
+      claimId: latest.claim_id,
+      kind: 'status',
+      message: reconciled
+        ? `The refreshed server projection shows Claim ${identity} was ${outcome} at revision ${latest.revision}. No duplicate decision was submitted.`
+        : `Claim ${identity} was ${outcome} and the authoritative projection is now shown at revision ${latest.revision}.`,
+    })
+  }
+
   function applyReopenProjection(response, accepted, error, requestId, expectedClaimId) {
     const latest = applyDetailProjection(response, { expectedClaimId, requestId })
     if (!latest) return null
@@ -1998,6 +2150,12 @@ export default function WorkbenchPage() {
             <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss Claim movement notice')} onClick={() => setMovementNotice(null)}>×</button>
           </div>
         )}
+        {decisionNotice && decisionNotice.claimId === activeClaimId && (
+          <div className={`movement-notice${decisionNotice.kind === 'error' ? ' movement-notice--error' : ''}`} role={decisionNotice.kind === 'error' ? 'alert' : 'status'} aria-live={decisionNotice.kind === 'error' ? 'assertive' : 'polite'}>
+            <span>{decisionNotice.message}</span>
+            <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss Claim decision notice')} onClick={() => setDecisionNotice(null)}>×</button>
+          </div>
+        )}
         {revisionNotice && revisionNotice.claimId === activeClaimId && (
           <div className="revision-notice" role="status">
             <span>{t('This Claim changed in another session (revision {revision}).', { revision: revisionNotice.revision })}</span>
@@ -2090,6 +2248,7 @@ export default function WorkbenchPage() {
                   onSend={isDraftQueue ? undefined : sendMessage}
                   onOwnershipAction={isDraftQueue ? undefined : performOwnershipAction}
                   onReopen={isDraftQueue ? undefined : reopenClaim}
+                  onClaimDecision={isDraftQueue ? undefined : recordClaimDecision}
                   onExternalTaskAction={isDraftQueue ? undefined : performExternalTaskAction}
                 />
               </div>
@@ -2118,6 +2277,40 @@ function reopenFailureNotice(error, latest, queueLabel) {
   else if (error?.code === 'IDEMPOTENCY_CONFLICT') message = `Claim ${identity} was not reopened because this request no longer matches the original attempt. The latest server projection is in ${location}; review it before retrying.`
   else message = `The reopen outcome for Claim ${identity} was unclear. The latest server projection is in ${location}; review it before trying again.`
   return [message, reference].filter(Boolean).join(' ')
+}
+
+function ambiguousDecisionFailure(error) {
+  return Boolean(
+    error?.retryable
+    || error?.status === 0
+    || error?.status >= 500
+    || error?.code === 'NETWORK_ERROR'
+  )
+}
+
+function claimDecisionFailureMessage(error) {
+  const latest = error?.projectionReloaded
+    ? ` The latest server projection${error.latestRevision ? ` at revision ${error.latestRevision}` : ''} is now shown.`
+    : ''
+  const reference = failureReference(error)
+  const suffix = reference ? ` ${reference}` : ''
+  if (error?.code === 'ACCESS_DENIED') return `You are not authorised to decide this Claim.${latest} Ask the primary owner or an authorised colleague to continue.${suffix}`
+  if (error?.code === 'CLAIM_NOT_READY_FOR_DECISION') return `This Claim is not ready for a final decision.${latest} Review the current server status before continuing.${suffix}`
+  if (error?.code === 'CLAIM_ALREADY_DECIDED') return `This Claim already has a final decision.${latest} The server result is authoritative.${suffix}`
+  if (error?.code === 'REVISION_CONFLICT') return `This Claim changed after the confirmation was opened.${latest} Review the latest revision and explicitly confirm a new attempt.${suffix}`
+  if (error?.code === 'IDEMPOTENCY_CONFLICT') return `This request key no longer matches the original decision.${latest} Cancel and start a new approval or rejection after reviewing the Claim.${suffix}`
+  if (error?.code === 'VALIDATION_ERROR') return `${error.message || 'The decision input was not accepted.'}${suffix}`
+  if (error?.code === 'RESOURCE_NOT_FOUND') return `This Claim is no longer available to this staff account. Return to the queue and refresh current work.${suffix}`
+  if (error?.decisionRetryAllowed) return `The decision outcome was unclear, so the Claim was refreshed first. No decision is recorded and the same revision remains eligible; an explicit retry will reuse the original request key.${suffix}`
+  if (error?.decisionRetryBlocked) return `The decision outcome is unclear and the authoritative Claim could not be confirmed. Do not submit another decision until the Claim can be refreshed.${suffix}`
+  return `The decision could not be recorded.${latest} Review the current Claim before trying again.${suffix}`
+}
+
+function decisionReadbackError() {
+  const error = new Error('The decision was accepted, but its authoritative Claim projection was not available.')
+  error.code = 'DECISION_READBACK_UNCONFIRMED'
+  error.retryable = true
+  return error
 }
 
 function QueueViewUnavailable({ queueKind, view, onRetry }) {

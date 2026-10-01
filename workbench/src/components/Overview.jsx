@@ -10,8 +10,9 @@ import PrimaryAction from './PrimaryAction.jsx'
 import SignalsSummary from './SignalsSummary.jsx'
 import SourceSummary from './SourceSummary.jsx'
 import { TagList } from './TagList.jsx'
+import { ClaimDecisionSummary } from './ClaimDecision.jsx'
 
-export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, readOnly = false, onAccept, onResolve, onOwnershipAction, onReopen, onSection, onRetry }) {
+export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, readOnly = false, onAccept, onResolve, onOwnershipAction, onReopen, onClaimDecision, onSection, onRetry }) {
   const [handoffState, collaborationState] = supportingState
   const allowedActions = (detail.allowed_actions || []).filter((action) => {
     if (action.target_type === 'handoff' && actionContextUnavailable(handoffState)) return false
@@ -38,7 +39,8 @@ export default function Overview({ detail, handoffs, collaborationRequests, supp
           {!supportingLoading && <button className="button button--quiet" type="button" onClick={onRetry}>{t('Refresh Claim')}</button>}
         </div>
       )}
-      {!readOnly && <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />}
+      <ClaimDecisionSummary decision={detail.claim_decision} />
+      {!readOnly && <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onClaimDecision={onClaimDecision} onSection={onSection} />}
       <RecoverySummary context={detail.work_summary?.incomplete_context} />
       <IntegrationSummary summary={detail.integration_summary} />
       <SourceSummary summary={detail.source_summary} />
