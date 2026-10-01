@@ -1,5 +1,6 @@
 """Mutate copies of the 0.2 samples and confirm the checker catches each planted error."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -335,6 +336,62 @@ def main() -> None:
     caught = code == 1 and "'Monday 1 October 2026' falls on a Thursday" in out
     failures += not caught
     print(('CAUGHT ' if caught else 'MISSED ') + 'weekday that does not match its date')
+
+    # The corpus is exactly its committed manifest, every file names its pack, and only the
+    # material a boundary condition was made from may fail its format check (review, 2026-10-01).
+    def corpus_case(name: str, change: Callable[[str], object], expect: str) -> int:
+        fresh()
+        change(cast(str, WORK))
+        code, out = run()
+        caught = code == 1 and expect in out
+        print(('CAUGHT ' if caught else 'MISSED ') + name)
+        if not caught:
+            print(out)
+        return int(not caught)
+
+    def pack(work: str, *parts: str) -> str:
+        return os.path.join(work, 'cases', *parts)
+
+    def broken_quote_in_a_corrupt_file_pack(work: str) -> None:
+        edit(
+            pack(work, 'CTL-M-001', 'oracle', 'labels.json'),
+            lambda o: o.update(condition='corrupt_file'),
+        )
+        path = pack(work, 'CTL-M-001', 'input', 'materials', 'repair-quote.pdf')
+        with open(path, 'rb') as f:
+            cut = f.read()[:400]
+        with open(path, 'wb') as f:
+            f.write(cut)
+        digest = hashlib.sha256(cut).hexdigest()
+        edit(
+            pack(work, 'CTL-M-001', 'provenance.json'),
+            lambda d: next(m for m in d['materials'] if m['id'] == 'repair-quote').update(
+                sha256=digest
+            ),
+        )
+
+    failures += corpus_case(
+        'pack removed from the corpus',
+        lambda work: shutil.rmtree(pack(work, 'CTL-C-002')),
+        'listed pack(s) missing: CTL-C-002',
+    )
+    failures += corpus_case(
+        'manifest removed',
+        lambda work: os.remove(os.path.join(work, 'manifest.json')),
+        'manifest.json is missing or unreadable',
+    )
+    failures += corpus_case(
+        'a pack file that names another case',
+        lambda work: edit(
+            pack(work, 'CTL-M-001', 'setup.json'), lambda s: s.update(case_id='CTL-M-002')
+        ),
+        "case ID: setup.json names 'CTL-M-002'",
+    )
+    failures += corpus_case(
+        'an unrelated document that does not open, in a corrupt_file pack',
+        broken_quote_in_a_corrupt_file_pack,
+        'format: repair-quote.pdf does not open',
+    )
     # Unchanged copy passes.
     fresh()
     code, out = run()

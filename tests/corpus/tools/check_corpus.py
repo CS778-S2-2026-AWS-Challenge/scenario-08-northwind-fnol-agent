@@ -22,7 +22,7 @@ from typing import Any, cast
 import pdfplumber
 from PIL import Image
 
-from tests.corpus.tools import image_review, rules
+from tests.corpus.tools import corpus_integrity, image_review, rules
 from tests.corpus.tools.corpus_lists import (
     BLOCKED_BRANDS,
     BUSINESSES,
@@ -348,6 +348,7 @@ def check_pack(
         )
     except (OSError, ValueError) as error:
         return [f'schema: cannot read a required part ({error})'], warnings
+    problems.extend(corpus_integrity.case_id_problems(case_dir))
     facts = facts_doc.get('facts', {})
     materials = provenance.get('materials', [])
     visible = materials_doc.get('materials', [])
@@ -511,8 +512,9 @@ def check_pack(
             continue
         if hashlib.sha256(Path(path).read_bytes()).hexdigest() != entry.get('sha256'):
             problems.append(f'provenance: hash mismatch for {entry["file"]}')
-        # 3. Format.
-        broken_allowed = boundary & {'corrupt_file', 'unsupported_format'}
+        # 3. Format. Only the material a boundary condition was made from is exempt; every other
+        # material in the same pack must open as its type.
+        may_not_open, may_be_other_format = corpus_integrity.format_exemption(entry, boundary)
         if entry['file'].lower().endswith('.pdf'):
             try:
                 pages = pdf_text(path)
@@ -523,7 +525,7 @@ def check_pack(
                         )
                 texts.extend(pages)
             except Exception as error:  # any parse failure is a format finding
-                if not broken_allowed:
+                if not may_not_open:
                     problems.append(
                         f'format: {entry["file"]} does not open ({error.__class__.__name__})'
                     )
@@ -532,10 +534,10 @@ def check_pack(
                 with Image.open(path) as img:
                     img.verify()
                     fmt = img.format
-                if fmt != 'JPEG' and 'unsupported_format' not in boundary:
+                if fmt != 'JPEG' and not may_be_other_format:
                     problems.append(f'format: {entry["file"]} is {fmt}, expected JPEG')
             except Exception as error:
-                if not broken_allowed:
+                if not may_not_open:
                     problems.append(
                         f'format: {entry["file"]} does not open ({error.__class__.__name__})'
                     )
@@ -771,6 +773,23 @@ def main() -> None:
     for w in global_warnings:
         print('   ! ' + w)
     failed += bool(global_problems)
+    # The corpus must be exactly what its committed manifest lists, so the pack lines below cover
+    # every listed pack and nothing else; and it must match its version's plan, when one exists.
+    manifest_issues = corpus_integrity.manifest_problems(corpus)
+    manifest = corpus_integrity.load_manifest(corpus)
+    listed = len(manifest.get('packs', [])) if manifest else 0
+    print(('FAIL' if manifest_issues else 'PASS') + f' manifest ({listed} packs listed)')
+    for p in manifest_issues:
+        print('   x ' + p)
+    failed += bool(manifest_issues)
+    plan_issues, plan = corpus_integrity.plan_problems(corpus)
+    if plan is None:
+        print('   ! plan: no distribution plan for this corpus version; distribution not checked')
+    else:
+        print(('FAIL' if plan_issues else 'PASS') + f' distribution against {plan}')
+        for p in plan_issues:
+            print('   x ' + p)
+        failed += bool(plan_issues)
     try:
         images = image_review.corpus_images(corpus)
         sampling = image_review.load_sampling(corpus)
