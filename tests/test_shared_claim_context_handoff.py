@@ -1,16 +1,57 @@
+from collections.abc import Iterator
 from typing import Any, cast
 
+import mongomock
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.app import create_app
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import PersistenceRepository
 
 
+@pytest.fixture(params=['fixture', 'mongodb'])
+def shared_context_repository(
+    request: pytest.FixtureRequest,
+) -> FixtureRepository | MongoDBRepository:
+    if request.param == 'fixture':
+        return FixtureRepository()
+    repository = MongoDBRepository(mongomock.MongoClient(), 'shared_claim_context_handoff')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    return repository
+
+
+@pytest.fixture
+def shared_context_client(
+    shared_context_repository: FixtureRepository | MongoDBRepository,
+) -> Iterator[TestClient]:
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        shared_context_repository,
+    )
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.mark.parametrize(
+    ('support_need', 'expected_action'),
+    [
+        ('human_requested', 'HANDOFF'),
+        ('urgent', 'URGENT_HANDOFF'),
+    ],
+)
 def test_evidence_handoff_and_next_action_share_one_claim_context(
-    client: TestClient,
+    shared_context_client: TestClient,
     auth_headers: dict[str, str],
     staff_auth_headers: dict[str, str],
-    repository: FixtureRepository,
+    shared_context_repository: PersistenceRepository,
+    support_need: str,
+    expected_action: str,
 ) -> None:
+    client = shared_context_client
+    repository = shared_context_repository
     created = client.post(
         '/api/v1/claims',
         headers={**auth_headers, 'Idempotency-Key': 'shared-context-claim'},
@@ -54,7 +95,7 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
         },
         json={
             'reason': 'I want a person to continue with this report.',
-            'support_need': 'human_requested',
+            'support_need': support_need,
             'preferred_channel': 'phone',
         },
     )
@@ -72,7 +113,7 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
     handoff = handoffs[0]
 
     assert stored_claim.revision == support_body['revision']
-    assert stored_claim.claim_state.next_action.value == 'HANDOFF'
+    assert stored_claim.claim_state.next_action.value == expected_action
     assert stored_claim.customer_next_step.status == next_step['status']
     assert stored_claim.customer_next_step.summary == next_step['summary']
     assert handoff.handoff_id == handoff_id
@@ -80,6 +121,32 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
     assert [item.evidence_id for item in handoff.packet.evidence] == [evidence_id]
     assert evidence_id in handoff.packet.pending_items
     assert handoff.packet.promised_next_step == next_step['summary']
+    assert support_body['handoff']['summary'] == next_step['summary']
+
+    replay = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'shared-context-support',
+            'If-Match': str(evidence_revision),
+        },
+        json={
+            'reason': 'I want a person to continue with this report.',
+            'support_need': support_need,
+            'preferred_channel': 'phone',
+        },
+    )
+    assert replay.status_code == 201
+    replay_body = cast(dict[str, Any], replay.json())
+    assert replay_body['revision'] == support_body['revision']
+    assert replay_body['handoff'] == support_body['handoff']
+    assert replay_body['customer_next_step'] == next_step
+    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+
+    claimant_detail = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+    assert claimant_detail.status_code == 200
+    claimant_detail_body = cast(dict[str, Any], claimant_detail.json())
+    assert claimant_detail_body['customer_next_step'] == next_step
 
     workbench = client.get(
         f'/api/v1/workbench/claims/{claim_id}',
@@ -89,7 +156,7 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
     detail = cast(dict[str, Any], workbench.json())
     assert detail['claim_id'] == claim_id
     assert detail['revision'] == stored_claim.revision
-    assert detail['claim_state']['next_action'] == 'HANDOFF'
+    assert detail['claim_state']['next_action'] == expected_action
     assert detail['customer_next_step']['status'] == next_step['status']
     assert detail['customer_next_step']['summary'] == next_step['summary']
     evidence_items = client.get(
@@ -104,6 +171,7 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
     assert packet['evidence_refs'] == [evidence_id]
     assert [item['evidence_id'] for item in packet['evidence']] == [evidence_id]
     assert evidence_id in packet['pending_items']
+    assert packet['promised_next_step'] == next_step['summary']
 
     claimant_evidence = client.get(
         f'/api/v1/claims/{claim_id}/evidence',

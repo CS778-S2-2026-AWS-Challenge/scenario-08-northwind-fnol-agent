@@ -291,10 +291,18 @@ def recompute_progress(
         # The controlled PRES-02 policy-review contract remains an explicit
         # compatibility path; v8 does not propose this legacy status.
         return claim.claim_state.workflow_state, proposed_next_step
-    if any(item.status.value not in {'resolved', 'cancelled'} for item in open_handoffs):
+    active_handoff = next(
+        (
+            item
+            for item in reversed(open_handoffs)
+            if item.status.value not in {'resolved', 'cancelled'}
+        ),
+        None,
+    )
+    if active_handoff is not None:
         return claim.claim_state.workflow_state, CustomerNextStep(
             status='awaiting_staff',
-            summary='Northwind support will contact you. You can keep adding details.',
+            summary=active_handoff.packet.promised_next_step,
             responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
             required_items=list(proposed_next_step.required_items) if proposed_next_step else [],
         )
