@@ -1,0 +1,325 @@
+{
+ "case_id": "CTL-M-004",
+ "message_style": "plain",
+ "persona": "Precise and calm; reads figures straight from the documents. Has one earlier windscreen claim and an older home claim, and mentions them only if asked.",
+ "initial_message": "Hi, I would like to lodge a claim for my car. On Monday 21 September at about quarter past six in the evening I reversed out of my garage with the driver's door partly open and it caught on the garage door frame. The door was bent forward at the hinges and has a crease in it. It still shuts and I can drive the car. Nobody was hurt.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I had the driver's door partly open to check the gap while reversing out of my garage. The open door caught on the timber garage door frame and was pushed forward past its stop.",
+  "incident.occurred_at": "Monday 21 September 2026, about 6:15pm",
+  "incident.location": "4 Kiln Test Crescent, Otumoetai, Tauranga (my own garage)",
+  "incident.cause": "Reversing with the driver's door open; the door caught on the garage door frame",
+  "loss.description": "Driver's door bent forward at the hinges with a crease near the upper hinge",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "no",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "phone",
+  "claimant.email": "priya.karakaworth@example.invalid",
+  "claimant.phone": "+64 00 000 1004",
+  "claimant.home_address": "4 Kiln Test Crescent, Otumoetai, Tauranga",
+  "policyholder.name": "Priya Karakaworth",
+  "policy.policy_number": "NW-SYN-MTR-100004",
+  "vehicle.registration": "TST-004",
+  "vehicle.make": "Kia",
+  "vehicle.model": "Sportage",
+  "vehicle.year": 2020,
+  "vehicle.colour": "grey",
+  "vehicle.use": "private",
+  "vehicle.damage_description": "Front right (driver's) door bent forward past its stop, with a sharp crease across the front edge near the upper hinge and cracked paint. The door still closes and latches but the gap is uneven. Small scuff on the rear edge of the front right guard.",
+  "vehicle.drivable": true,
+  "vehicle.towing_required": "not_required",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "Priya Karakaworth",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10004",
+  "driver.owner_permission": "not_applicable",
+  "evidence.photos": "One photo of the open door and the hinge area, taken in the garage. Available now.",
+  "evidence.repair_quote": "Quote from Ridgeway Collision Repairs dated 24 September 2026, total $5,000.00 including GST. Available now.",
+  "garage.damage": "Only a scuff on the garage door frame; I am not claiming for it.",
+  "if_asked_about_previous_claims": "I made a windscreen claim in November last year after a stone cracked the windscreen, and a home claim in July last year for a burst pipe. Nothing else."
+ },
+ "materials": [
+  {
+   "id": "photo-door",
+   "file": "photo-driver-door.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo inside a residential garage in the evening under a fluorescent tube light, taken from just in front of the open front right door of a grey SUV, looking back at the front edge of the door and its two hinges. The door is bent forward past its normal stop, with a sharp crease across the front edge of the door skin near the upper hinge and cracked paint along the crease. The painted timber garage door frame is beside it with a scuff mark. The frame shows only the outer skin and front edge of the open door, the hinges and the rear edge of the front guard. No people, no text, no logos.",
+   "seed": 100401,
+   "size": [
+    912,
+    1216
+   ],
+   "purpose": "Shows the bent driver's door described by the claimant",
+   "expect_object": [
+    "door",
+    "car door",
+    "driver door",
+    "driver's door",
+    "front door",
+    "hinge",
+    "door hinge"
+   ]
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Ridgeway Collision Repairs (Synthetic)",
+    "issuer_address": "27 Seaview Test Terrace, Mount Maunganui, Tauranga",
+    "quote_number": "Q-2026-1004",
+    "quote_date": "24 September 2026",
+    "valid_until": "23 December 2026",
+    "customer": "Priya Karakaworth",
+    "subject": "Kia Sportage 2020, grey, TST-004 - front right door and hinges",
+    "items": [
+     {
+      "description": "Supply new front right door shell",
+      "amount": 1685.0
+     },
+     {
+      "description": "Supply upper and lower door hinges",
+      "amount": 312.83
+     },
+     {
+      "description": "Transfer door trim, glass, lock and mirror to new shell",
+      "amount": 540.0
+     },
+     {
+      "description": "Paint new door and blend front right guard",
+      "amount": 1260.0
+     },
+     {
+      "description": "Realign door and check front guard mounting",
+      "amount": 420.0
+     },
+     {
+      "description": "Paint materials and consumables",
+      "amount": 130.0
+     }
+    ],
+    "prepared_by": "Henry Kilnhurst, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   },
+   "purpose": "Repair estimate required for motor damage"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100004",
+    "policyholder": "Priya Karakaworth",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "15 January 2026 to 14 January 2027",
+    "insured": {
+     "Vehicle": "Kia Sportage 2020, grey",
+     "Registration": "TST-004",
+     "Agreed value": "$27,500"
+    },
+    "excess": "$750 base excess for each event",
+    "extra": {
+     "Named drivers": "Priya Karakaworth"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100004",
+    "family": "motor",
+    "effective_from": "2026-01-15",
+    "effective_to": "2027-01-14",
+    "excess_nzd": 750,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": [
+   {
+    "family": "motor",
+    "incident_date": "2025-11-14",
+    "submitted_date": "2025-11-15"
+   },
+   {
+    "family": "home",
+    "incident_date": "2025-06-28",
+    "submitted_date": "2025-07-02"
+   }
+  ]
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M1",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-21",
+    "last_day": "2026-09-21"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [
+    "one_prior_claim"
+   ],
+   "notes": "Innocent control: two earlier submitted claims exist, but only the motor claim (submitted 15 November 2025) is in the past year; the home claim was submitted on 2 July 2025, more than a year before the incident. The quote total is exactly NZD 5,000.00 including GST, which is not over the threshold.",
+   "policy_inception_date": "2016-01-15"
+  },
+  "triage": {
+   "expected_class": "fast_track",
+   "required_reasons": [],
+   "allowed_reasons": [],
+   "rationale": "Single vehicle in the claimant's own garage, nobody hurt, car drivable, a photo and a complete quote at exactly NZD 5,000.00 including GST, which is not over the NZD 5,000 threshold, policy on file. Only one earlier claim falls in the past year. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 24 September 2026; incident 21 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "One other submitted claim in the past year (motor, incident 14 November 2025, submitted 15 November 2025). The home claim submitted 2 July 2025 is more than a year before the incident and does not count; two are needed"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (15 January 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2016-01-15, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "The earlier claims are from November 2025 (motor) and June 2025 (home), not within 3 days of 21 September 2026"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-21",
+   "parties.other_parties": false,
+   "vehicle.drivable": true
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-driver-door.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent raises the claimant's earlier claims as a concern, or suggests that earlier claims may affect this claim."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-CLM-01",
+   "MTR-EXC-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks about earlier claims",
+   "Wording of the Agent's replies"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "vehicle.registration": "TST-004",
+   "policy.policy_number": "NW-SYN-MTR-100004",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "vehicle.towing_required": "not_required",
+   "driver.relationship_to_policyholder": "policyholder",
+   "driver.licence_status": "valid",
+   "vehicle.use": "private",
+   "witness.present": "no"
+  }
+ }
+}

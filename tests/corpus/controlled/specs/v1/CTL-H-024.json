@@ -1,0 +1,369 @@
+{
+ "case_id": "CTL-H-024",
+ "message_style": "plain",
+ "persona": "Calm and organised, writes in full sentences. Was at work when the hot water cylinder split and found the water when he got home; has a photo, the plumber's attendance note and a restoration quote.",
+ "initial_message": "Hi, I'd like to make a claim for water damage at my house. When I got home from work on Thursday 10 September, the hot water cylinder in the hallway cupboard had split and water had soaked the hallway carpet and part of the main bedroom carpet. A plumber replaced the cylinder the next day, but the carpet and the bottom of the walls are damaged.",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.type": "water",
+  "incident.description": "While I was at work the hot water cylinder in the hallway cupboard split near its base. When I got home the cupboard floor was flooded and water had spread along the hallway carpet and into the main bedroom. I turned the water off at the toby and the cylinder off at the switchboard and called an emergency plumber.",
+  "incident.occurred_at": "Thursday 10 September 2026, between 7:45am and 5:40pm",
+  "incident.discovered_at": "Thursday 10 September 2026, about 5:40pm",
+  "incident.location": "24 Pinecrest Test Avenue, Papanui, Christchurch",
+  "incident.cause": "The hot water cylinder in the hallway cupboard split at a seam near its base",
+  "loss.description": "Hallway carpet and about a third of the main bedroom carpet soaked; the bottom 30 cm of the plasterboard in the hallway and cupboard swollen; the particle-board floor of the cylinder cupboard swollen",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "property.address": "24 Pinecrest Test Avenue, Papanui, Christchurch",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "property.affected_areas": [
+   "hallway cupboard",
+   "hallway carpet and walls",
+   "main bedroom carpet"
+  ],
+  "property.ongoing_risk": "none",
+  "property.habitable": true,
+  "mitigation.emergency_action": "Turned the water off at the toby and the cylinder off at the switchboard, soaked up water with towels, and called an emergency plumber",
+  "mitigation.temporary_repair": "The plumber drained the old cylinder on Thursday night and installed a new cylinder on Friday 11 September 2026",
+  "mitigation.contractor": "Flax Mere Plumbing & Gas",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "rawiri.mataishaw@example.invalid",
+  "claimant.phone": "+64 00 000 2024",
+  "policyholder.name": "Rawiri Mataishaw",
+  "policy.policy_number": "NW-SYN-HOM-200024",
+  "evidence.photos": "One photo of the wet hallway carpet and the swollen wall, taken on Thursday evening. Available now.",
+  "evidence.attendance_note": "The plumber's attendance note. Available now.",
+  "evidence.repair_quote": "Quote from Tide Well Drying & Restoration dated 18 September 2026, total $6,980.50 including GST. Available now.",
+  "if_asked_about_cylinder_age": "About 14 years old. It came with the house when we bought it.",
+  "if_asked_about_plumber_cost": "I paid the plumber $2,460 including GST for the call-out and the new cylinder. The invoice is in my email and I can send it later."
+ },
+ "materials": [
+  {
+   "id": "photo-hallway",
+   "file": "photo-hallway-carpet.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo taken in a narrow house hallway, crouching beside an open hallway cupboard and looking along the wall. In the foreground, just inside the open cupboard door, the particle-board cupboard floor is dark, soaked and swollen, with a puddle around the base of a white hot water cylinder. The hallway wall runs away from the camera on the right: its bottom 30 cm of white plasterboard is clearly swollen and bulging outward, the paint is blistered and peeling, and a dark brown water line runs along the wall about 30 cm above the skirting board, which is pushed away from the wall. The beige hallway carpet along the wall is dark and soaked. Warm ceiling light, evening. No people, no text.",
+   "seed": 212406,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the water damage to the hallway carpet, wall and cupboard floor",
+   "expect_object": [
+    "carpet",
+    "hallway carpet",
+    "floor",
+    "wall",
+    "skirting board",
+    "plasterboard"
+   ],
+   "seed_history": [
+    {
+     "seed": 202401,
+     "reasons": [
+      "CTL-H-024/photo-hallway-carpet.jpg: with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 203401,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 204401,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 205401,
+     "reasons": []
+    }
+   ],
+   "redo_history": [
+    {
+     "date": "2026-10-01",
+     "rejected_by": "@bdfa123",
+     "rejection": "The cupboard floor named in the purpose is not visible; then (redo round 1) the swollen bottom of the wall is not clear",
+     "old_prompt": "Realistic smartphone photo looking down a narrow house hallway with beige carpet that is dark and soaked with water along its whole length, a shallow puddle shining near an open cupboard door at the side. The bottom of the white painted plasterboard wall is swollen and the paint is bubbling just above the white skirting board. Just inside the open cupboard doorway at the edge of the frame, the edge of the particle-board cupboard floor is dark, wet and swollen. Warm ceiling light, evening.",
+     "old_seed": 205401,
+     "candidates": [
+      212405,
+      212406,
+      212407
+     ],
+     "picked": 212406,
+     "picked_by": "@bdfa123"
+    }
+   ]
+  },
+  {
+   "id": "attendance-note",
+   "file": "plumber-attendance-note.pdf",
+   "evidence_kind": "other_document",
+   "method": "template",
+   "template": "attendance_note",
+   "data": {
+    "issuer": "Flax Mere Plumbing & Gas (Synthetic)",
+    "issuer_address": "9 Awa Test Parade, Northcote, Christchurch",
+    "job_number": "J-2026-2024",
+    "attended": "Thursday 10 September 2026, 7:20pm",
+    "address": "24 Pinecrest Test Avenue, Papanui, Christchurch",
+    "customer": "Rawiri Mataishaw",
+    "found": "180 L mains-pressure hot water cylinder in the hallway cupboard split at a seam near the base. Water had spread across the cupboard floor into the hallway and main bedroom carpets.",
+    "work_done": "Isolated water and power to the cylinder and drained it on 10 September. Returned on Friday 11 September 2026 and installed a new 180 L mains-pressure cylinder; pressure-tested, no leaks.",
+    "follow_up": "Carpets, cupboard floor and the bottom of the wall linings need drying and repair by a restoration company."
+   },
+   "fact_links": {
+    "address": "property.address",
+    "customer": "policyholder.name"
+   },
+   "purpose": "Contractor record of the emergency work"
+  },
+  {
+   "id": "repair-quote",
+   "file": "restoration-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Tide Well Drying & Restoration (Synthetic)",
+    "issuer_address": "3 Totara Test Rise, Addington, Christchurch",
+    "quote_number": "Q-2026-2024",
+    "quote_date": "18 September 2026",
+    "valid_until": "17 December 2026",
+    "customer": "Rawiri Mataishaw",
+    "subject": "24 Pinecrest Test Avenue, Papanui, Christchurch - hallway, cylinder cupboard and main bedroom water damage",
+    "items": [
+     {
+      "description": "Moisture mapping and drying equipment, 4 days",
+      "amount": 780.0
+     },
+     {
+      "description": "Uplift and dispose of wet carpet and underlay, hallway and main bedroom",
+      "amount": 420.0
+     },
+     {
+      "description": "Supply and lay carpet and underlay, hallway and main bedroom, 26 m2",
+      "amount": 3380.0
+     },
+     {
+      "description": "Cut out and replace bottom 300 mm of plasterboard, hallway and cupboard, stop and paint",
+      "amount": 1150.0
+     },
+     {
+      "description": "Replace swollen particle-board floor in the cylinder cupboard",
+      "amount": 340.0
+     }
+    ],
+    "prepared_by": "Grace Awafield, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote required for home damage"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200024",
+    "policyholder": "Rawiri Mataishaw",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "15 January 2026 to 14 January 2027",
+    "insured": {
+     "Insured address": "24 Pinecrest Test Avenue, Papanui, Christchurch",
+     "Sum insured": "$840,000"
+    },
+    "excess": "$750 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "anonymous_then_sign_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200024",
+    "family": "home",
+    "effective_from": "2026-01-15",
+    "effective_to": "2027-01-14",
+    "excess_nzd": 750,
+    "uncertainty": [
+     "COVERAGE_SECTION_INCOMPLETE"
+    ]
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H3",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-10",
+    "last_day": "2026-09-10"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "Planted feature coverage_uncertainty_marker: the pack policy is in the lookup with the uncertainty marker COVERAGE_SECTION_INCOMPLETE, which requires coverage_unclear. It is not a review indicator, so planted_indicators stays empty. The claimant starts anonymous and signs in before the first upload. The failed cylinder is about 14 years old, so a person also has to consider the wear-and-tear wording (HOM-EXC-02); the Agent must not decide it.",
+   "policy_inception_date": "2021-01-15"
+  },
+  "triage": {
+   "expected_class": "complex",
+   "required_reasons": [
+    "coverage_unclear",
+    "amount_over_threshold_or_unknown"
+   ],
+   "allowed_reasons": [
+    "evidence_outstanding"
+   ],
+   "rationale": "The policy lookup returns the pack policy with the uncertainty marker COVERAGE_SECTION_INCOMPLETE, so coverage is unclear and a person must look (complex). The restoration quote totals NZD 6,980.50 including GST, over 5,000. Allowed but not required: if the Agent asks for the plumber's invoice, the claimant can only send it later (evidence_outstanding); it is not a required family material. Nobody is hurt, the leak is stopped and the home is habitable. The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 18 September 2026; incident 10 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Starts anonymous, signs in before upload; the account has no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (15 January 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2021-01-15, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-10",
+   "property.address": "24 Pinecrest Test Avenue, Papanui, Christchurch",
+   "property.habitable": true,
+   "property.ongoing_risk": "none"
+  },
+  "optional_facts": {
+   "incident.type": "water",
+   "parties.other_parties": false,
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "policy.policy_number": "NW-SYN-HOM-200024"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-hallway-carpet.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=restoration-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the damage is not covered, or only partly covered, because the cylinder was old, worn out or failed gradually."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-EXC-02",
+   "HOM-BEN-01",
+   "HOM-CLM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "When in the conversation the claimant signs in, as long as it is before the first upload",
+   "Whether the Agent asks about the age of the cylinder"
+  ],
+  "intended_conflicts": []
+ }
+}

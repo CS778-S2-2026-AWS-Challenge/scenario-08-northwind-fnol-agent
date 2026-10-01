@@ -230,3 +230,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Controlled test corpus: pack files come from the release, fetched by
+# tests/corpus/tools/fetch_corpus.py; working files and the image cache stay local.
+tests/corpus/controlled/*/cases/
+tests/corpus/controlled/*/sampling.json
+tests/corpus/controlled/.*.incoming/
+tests/corpus/controlled/.*.previous/
+tests/corpus/work/
+tests/corpus/tools/.image-cache/

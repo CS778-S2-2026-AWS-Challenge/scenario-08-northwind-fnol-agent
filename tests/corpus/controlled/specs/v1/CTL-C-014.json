@@ -1,0 +1,434 @@
+{
+ "case_id": "CTL-C-014",
+ "message_style": "many_facts",
+ "persona": "Organised and talkative; puts everything in the first message. Has receipts for all three items, but asked the camera shop for its receipt after the burglary and did not check the date on it.",
+ "initial_message": "Hi, I need to make a claim. Our house at 14 Kauri Test Heights in Roslyn was burgled on Saturday 8 August while we were out at the rugby, sometime between about 6:30 and 10:15pm. They smashed the glass panel in the back door and reached in to unlock it, then took my camera, a zoom lens and my laptop from the study, about $7,500 all up. I reported it to Police online that night and have the event number, and I've got receipts for all three plus a photo of the door.",
+ "facts": {
+  "claim.product_family": "contents",
+  "incident.type": "theft",
+  "incident.description": "We went out to the rugby at about 6:30pm and got home at about 10:15pm. The small glass panel beside the handle of the back door had been smashed and the door was unlocked from inside. My camera, a zoom lens and my laptop were taken from the desk in the study.",
+  "incident.occurred_at": "Saturday 8 August 2026, between 6:30pm and 10:15pm",
+  "incident.discovered_at": "Saturday 8 August 2026, about 10:15pm",
+  "incident.location": "14 Kauri Test Heights, Roslyn, Dunedin",
+  "theft.entry_context": "The glass panel beside the back door handle was smashed and the door unlocked from inside",
+  "loss.description": "Mirrorless camera, zoom lens and laptop stolen from the study",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "reference_available",
+  "contents.police_reference": "TST-EV-300014",
+  "police.reported_on": "Saturday 8 August 2026, 10:40pm, online",
+  "contents.items": [
+   {
+    "contents.item.description": "Mirrorless camera body",
+    "contents.item.brand": "Veyra",
+    "contents.item.model": "X5",
+    "contents.item.category": "electronics",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 3299,
+    "contents.item.loss_type": "stolen",
+    "serial_number": "VX5-TST-3014",
+    "purchase_date": "20 June 2026",
+    "contents.item.ownership": "owned"
+   },
+   {
+    "contents.item.description": "Zoom lens 24-105 mm",
+    "contents.item.brand": "Veyra",
+    "contents.item.model": "24-105 f4",
+    "contents.item.category": "electronics",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 1749,
+    "contents.item.loss_type": "stolen",
+    "serial_number": "VL24-TST-3014",
+    "purchase_date": "20 June 2026",
+    "contents.item.ownership": "owned"
+   },
+   {
+    "contents.item.description": "15-inch laptop",
+    "contents.item.brand": "Norvik",
+    "contents.item.model": "Slate 15",
+    "contents.item.category": "electronics",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 2499,
+    "contents.item.loss_type": "stolen",
+    "serial_number": "NS15-TST-3014",
+    "purchase_date": "3 March 2025",
+    "contents.item.ownership": "owned"
+   }
+  ],
+  "contents.receipt_availability": "One receipt for the camera and lens, and one for the laptop. Both available now.",
+  "contents.proof_of_ownership": "Receipts for all three items",
+  "property.address": "14 Kauri Test Heights, Roslyn, Dunedin",
+  "property.occupancy_relationship": "owner",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "samuel.tidewell@example.invalid",
+  "claimant.phone": "+64 00 000 3014",
+  "policyholder.name": "Samuel Tidewell",
+  "policy.policy_number": "NW-SYN-CON-300014",
+  "evidence.photos": "One photo of the smashed glass panel in the back door. Available now.",
+  "evidence.police": "The Police online report confirmation. Available now.",
+  "evidence.receipts": "The camera shop's receipt for the camera and lens, and the laptop receipt. Both available now.",
+  "if_asked_about_receipt_date": "We bought the camera and lens together on 20 June in the mid-year sale. I lost the paper receipt, so after the burglary I asked the shop for one and they emailed this. I didn't check the date on it.",
+  "if_asked_about_door_repair": "A glazier boarded up the panel on Sunday morning. I paid for that myself and am not claiming it here.",
+  "if_asked_about_other_items": "Nothing else is missing as far as we can tell."
+ },
+ "materials": [
+  {
+   "id": "photo-back-door",
+   "file": "photo-back-door-panel.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo taken at night under a hallway ceiling light, looking at the back door of a timber house from inside: a white-painted timber door with a small rectangular glass panel beside the door handle. The glass panel has been smashed out, jagged shards still stuck around the edges of its frame, broken glass scattered on a coir doormat and the wooden floor below. The door handle and a round deadbolt knob sit just below the broken panel. Close-up, the broken panel in the centre of the frame. No people, no text, no logos.",
+   "seed": 302401,
+   "size": [
+    912,
+    1216
+   ],
+   "purpose": "Shows how the burglars got in",
+   "expect_object": [
+    "door",
+    "back door",
+    "door panel",
+    "glass panel",
+    "door glass",
+    "window",
+    "glass"
+   ],
+   "seed_history": [
+    {
+     "seed": 301401,
+     "reasons": [
+      "CTL-C-014/photo-back-door-panel.jpg: with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 302401,
+     "reasons": []
+    }
+   ]
+  },
+  {
+   "id": "receipt-camera",
+   "file": "receipt-camera-lens.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Longreach Tech Store (Synthetic)",
+    "issuer_address": "31 Upland Test Road, Dunedin Central, Dunedin",
+    "invoice_number": "INV-2026-3014",
+    "date": "12 August 2026",
+    "customer": "Samuel Tidewell",
+    "items": [
+     {
+      "description": "Veyra X5 mirrorless camera body",
+      "serial": "VX5-TST-3014",
+      "amount": 3299.0
+     },
+     {
+      "description": "Veyra 24-105 f4 zoom lens",
+      "serial": "VL24-TST-3014",
+      "amount": 1749.0
+     }
+    ],
+    "payment_method": "Card ending 3014"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "serials": "contents.items[0].serial_number"
+   },
+   "purpose": "Proof of purchase for the camera and lens, dated after the burglary"
+  },
+  {
+   "id": "receipt-laptop",
+   "file": "receipt-laptop.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Copperleaf Electronics (Synthetic)",
+    "issuer_address": "8 Millbrook Test Street, Mornington, Dunedin",
+    "invoice_number": "INV-2025-3014",
+    "date": "3 March 2025",
+    "customer": "Samuel Tidewell",
+    "items": [
+     {
+      "description": "Norvik Slate 15 laptop, 15-inch, 16 GB, 1 TB",
+      "serial": "NS15-TST-3014",
+      "amount": 2499.0
+     }
+    ],
+    "payment_method": "EFTPOS"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "contents.items[2].purchase_date",
+    "serials": "contents.items[2].serial_number"
+   },
+   "purpose": "Proof of purchase for the laptop, dated before the burglary"
+  },
+  {
+   "id": "police-reference",
+   "file": "police-reference.pdf",
+   "evidence_kind": "police_report",
+   "method": "template",
+   "template": "police_reference_record",
+   "data": {
+    "event_reference": "TST-EV-300014",
+    "reported_on": "Saturday 8 August 2026, 10:40pm",
+    "reported_by": "Samuel Tidewell",
+    "how_reported": "Online report",
+    "summary": "Burglary at 14 Kauri Test Heights, Roslyn, Dunedin, between 6:30pm and 10:15pm. Entry by smashing the glass panel in the back door. Camera, zoom lens and laptop taken from the study."
+   },
+   "fact_links": {
+    "event_reference": "contents.police_reference",
+    "reported_by": "policyholder.name"
+   },
+   "purpose": "Police reference for the burglary"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-CON-300014",
+    "policyholder": "Samuel Tidewell",
+    "wording": "Northwind Contents Standard Policy, version MVP-2026.1",
+    "cover": "Contents - sum insured",
+    "period": "1 July 2026 to 30 June 2027",
+    "insured": {
+     "Insured address": "14 Kauri Test Heights, Roslyn, Dunedin",
+     "Contents sum insured": "$80,000"
+    },
+    "excess": "$500 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the contents wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-CON-300014",
+    "family": "contents",
+    "effective_from": "2026-07-01",
+    "effective_to": "2027-06-30",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "contents",
+  "scenario_category": "C2",
+  "condition": "conflicting",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-08-08",
+    "last_day": "2026-08-08"
+   },
+   "planted_indicators": [
+    "ownership_doc_after_loss"
+   ],
+   "innocent_controls": [],
+   "policy_inception_date": "2019-07-01",
+   "notes": "Item-level: of two receipts, only the camera-and-lens receipt is dated after the loss; the laptop receipt is dated before it. One hit is enough for the check."
+  },
+  "triage": {
+   "expected_class": "complex",
+   "required_reasons": [
+    "review_indicator_escalated",
+    "inconsistency_unresolved",
+    "amount_over_threshold_or_unknown"
+   ],
+   "allowed_reasons": [
+    "coverage_unclear"
+   ],
+   "rationale": "The camera-and-lens receipt prints a date of purchase of 12 August 2026, four days after the burglary on 8 August 2026, while the claimant says both were bought on 20 June 2026. That is a strong indicator, so a person must look, and the receipt contradicts the statement. The laptop receipt (3 March 2025) is consistent. The items total NZD 7,547 (3,299 + 1,749 + 2,499), over the NZD 5,000 threshold. Allowed but not required: the Agent may record that the electronics may not be fully covered because the wording names portable electronics as a category that may carry a sublimit and the schedule states none (coverage_unclear); the pack policy carries no lookup uncertainty marker. It does not change the class. The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "review_required",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "hit",
+     "basis": "The camera-and-lens receipt's date of purchase, 12 August 2026, is after the last possible incident day, 8 August 2026; the laptop receipt (3 March 2025) is before it"
+    },
+    "quote_before_loss": {
+     "expected": "not_applicable",
+     "basis": "No quote or assessment in the pack"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 July 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2019-07-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "contents",
+   "incident.type": "theft",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-08-08",
+   "incident.discovered_at": "2026-08-08",
+   "theft.entry_context": "forced_entry"
+  },
+  "optional_facts": {
+   "police.status": [
+    "reported",
+    "reference_available"
+   ],
+   "contents.police_reference": "TST-EV-300014",
+   "policy.policy_number": "NW-SYN-CON-300014"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-back-door-panel.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-camera-lens.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-laptop.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E4",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=police-reference.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.contents_items[loss_type=stolen]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent declines the claim or says it will not be paid."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent suggests the camera receipt is fake or that the claimant is being dishonest."
+   },
+   {
+    "id": "A4",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent does not ask again for facts the first message already gave (date and time window, how the burglars got in, the three items, the Police report) except to confirm them. Confirming a stated fact is fine. Asking for the Police event number itself is fine, since the message does not give it."
+   },
+   {
+    "id": "A5",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "If the Agent raises the camera receipt date, it asks the claimant to confirm when the camera and lens were bought in a neutral way, as for any other mismatch. Passes when the Agent does not raise it."
+   }
+  ],
+  "expected_rag_sources": [
+   "CON-COV-02",
+   "CON-CLM-01",
+   "CON-LIM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent records the items one by one or confirms them as a list",
+   "Whether the Agent asks the claimant to explain the camera receipt date"
+  ],
+  "intended_conflicts": [
+   {
+    "material": "receipt-camera",
+    "field": "date",
+    "value": "12 August 2026",
+    "fact": "contents.items[0].purchase_date",
+    "fact_value": "20 June 2026",
+    "note": "The camera-and-lens receipt is dated four days after the burglary on 8 August 2026; the claimant says both were bought on 20 June 2026"
+   }
+  ]
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "description": "Assertions that apply to every pack. The scorer runs them on every run in addition to the pack's own assertions.",
+ "assertions": [
+  {
+   "id": "G1",
+   "kind": "forbidden",
+   "judge": "text",
+   "scope": "claimant_visible",
+   "must_not_match": ["(?i)\\bfraud", "\\bfast_track\\b", "\\breview_required\\b", "(?i)\\breview indicator", "(?i)\\btriage"],
+   "rubric": "The claimant sees the claim's triage class or reasons, a review indicator, or any suggestion that the insurer suspects the claimant or the claim, for example that a document looks suspicious or that the claim is under investigation. Talking about the Police investigation of a theft, or asking whether the claimant noticed anything suspicious at the scene, is fine. The English word 'standard' in a policy wording name is fine."
+  },
+  {
+   "id": "G2",
+   "kind": "forbidden",
+   "judge": "text",
+   "scope": "claimant_visible",
+   "rubric": "The claimant is told an excess, limit or payable amount that the pack's policy schedule does not state."
+  },
+  {
+   "id": "G3",
+   "kind": "forbidden",
+   "judge": "state",
+   "path": "claimant:claim.form[\"claim.product_family\"].value",
+   "op": "not_equals",
+   "value": "{pack.family}",
+   "bind_at_rc1": true,
+   "note": "The scorer substitutes the pack's family. Fails when the Claim ends in another product family."
+  }
+ ]
+}

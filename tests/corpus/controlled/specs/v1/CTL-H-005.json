@@ -1,0 +1,386 @@
+{
+ "case_id": "CTL-H-005",
+ "message_style": "wrong_product_term",
+ "persona": "Friendly and chatty; calls her home policy \"contents insurance\" by mistake and corrects herself if asked. Has two photos, the locksmith's note, the builder's quote and the Police page saying the reference is pending.",
+ "initial_message": "Hi, I want to make a claim on my contents insurance. Somebody broke in through the front door of my house on Wednesday 23 September - they smashed the glass panel beside the door, snapped the lock and the door is split. I've reported it online, but the event number is still pending with Police.",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.type": "Break-in through the front door of my house. Nothing was taken.",
+  "incident.description": "While I was out in the morning someone smashed the glass sidelight beside my front door, snapped the lock and forced the door, which split near the lock. My neighbour's car pulled into her driveway and I think that scared them off. Nothing was taken.",
+  "incident.occurred_at": "Wednesday 23 September 2026, between 8:00am and 1:15pm",
+  "incident.discovered_at": "Wednesday 23 September 2026, about 1:15pm, when I came home for lunch",
+  "incident.location": "5 Puriri Test Mews, Mornington, Dunedin",
+  "incident.cause": "Forced entry by a burglar through the front door",
+  "theft.entry_context": "Forced entry: the sidelight glass was smashed, the lock snapped and the door forced",
+  "loss.description": "Front door split vertically near the lock, lock cylinder snapped, patterned glass sidelight beside the door smashed",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "reference_pending",
+  "police.reported_on": "Wednesday 23 September 2026, 2:10pm, online",
+  "police.event_reference": "Not issued yet. I reported it online and the event number is still pending; Police said they will email it later.",
+  "property.address": "5 Puriri Test Mews, Mornington, Dunedin",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "property.affected_areas": [
+   "front door",
+   "glass sidelight beside the front door"
+  ],
+  "property.ongoing_risk": "none; the locksmith secured the door and covered the sidelight the same afternoon",
+  "property.habitable": true,
+  "mitigation.emergency_action": "Called a locksmith to secure the front door",
+  "mitigation.temporary_repair": "Locksmith fitted a new lock cylinder and screwed a plywood panel over the sidelight on Wednesday 23 September 2026 at about 3:30pm",
+  "mitigation.contractor": "Tarata Holm Locksmiths",
+  "if_asked_about_stolen_items": "Nothing was taken, so there is nothing to claim for my belongings.",
+  "if_asked_about_policy_type": "Oh, sorry - it's my house policy, the number starts with NW-SYN-HOM. I always mix up house and contents.",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "anahera.kererumont@example.invalid",
+  "claimant.phone": "+64 00 000 2005",
+  "policyholder.name": "Anahera Kererumont",
+  "policy.policy_number": "NW-SYN-HOM-200005",
+  "evidence.photos": "Two photos: the smashed sidelight and the snapped lock. Available now.",
+  "evidence.attendance_note": "The locksmith's note. Available now.",
+  "evidence.police": "The Police event reference is not issued yet. It is pending and Police will email it later; I have the page that says so.",
+  "evidence.repair_quote": "Quote from Fernbank Interior Repairs dated 25 September 2026, total $6,072.00 including GST. Available now."
+ },
+ "materials": [
+  {
+   "id": "photo-sidelight",
+   "file": "photo-front-door-sidelight.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo from outside, a close crop of the lock side of a stained timber front door and the tall narrow patterned glass sidelight panel beside it. The sidelight glass is smashed, with jagged pieces left in the frame and shards on the tiled porch floor. The timber door is split vertically near the lock. Midday daylight. The frame shows only the lock side of the door and the sidelight, from waist to shoulder height. No people, no text, no logos.",
+   "seed": 200501,
+   "size": [
+    912,
+    1216
+   ],
+   "purpose": "Shows the smashed sidelight and the split front door",
+   "expect_object": [
+    "sidelight",
+    "glass panel",
+    "panel",
+    "window",
+    "door",
+    "front door"
+   ]
+  },
+  {
+   "id": "photo-lock",
+   "file": "photo-front-door-lock.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo, extreme close-up of a brass euro lock cylinder snapped off flush in a stained timber door, the broken cylinder end showing bright metal, a split in the timber running up from the lock, wood splinters around the escutcheon. Daylight. The frame shows only about 30 cm of the door around the lock. No people, no text, no logos.",
+   "seed": 200502,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the snapped lock cylinder",
+   "expect_object": [
+    "lock",
+    "lock cylinder",
+    "cylinder",
+    "door lock",
+    "door"
+   ]
+  },
+  {
+   "id": "attendance-note",
+   "file": "locksmith-attendance-note.pdf",
+   "evidence_kind": "other_document",
+   "method": "template",
+   "template": "attendance_note",
+   "data": {
+    "issuer": "Tarata Holm Locksmiths (Synthetic)",
+    "issuer_address": "11 Tussock Test Way, South Dunedin, Dunedin",
+    "job_number": "J-2026-2005",
+    "attended": "Wednesday 23 September 2026, 3:30pm",
+    "address": "5 Puriri Test Mews, Mornington, Dunedin",
+    "customer": "Anahera Kererumont",
+    "found": "Front door lock cylinder snapped; door split near the lock; patterned glass sidelight smashed from outside.",
+    "work_done": "Fitted a new euro cylinder so the door locks, screwed a plywood panel over the sidelight. Technician: Tomas Bellmoor.",
+    "follow_up": "Door and sidelight glass need replacing by a builder."
+   },
+   "fact_links": {
+    "address": "property.address",
+    "customer": "policyholder.name"
+   },
+   "purpose": "Contractor record of the emergency securing work"
+  },
+  {
+   "id": "builder-quote",
+   "file": "builder-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Fernbank Interior Repairs (Synthetic)",
+    "issuer_address": "60 Pinecrest Test Avenue, Caversham, Dunedin",
+    "quote_number": "Q-2026-2005",
+    "quote_date": "25 September 2026",
+    "valid_until": "24 December 2026",
+    "customer": "Anahera Kererumont",
+    "subject": "5 Puriri Test Mews, Mornington, Dunedin - front door and sidelight after forced entry",
+    "items": [
+     {
+      "description": "Supply and hang new solid timber entrance door, pre-finished, 2040 x 860 mm",
+      "amount": 2450.0
+     },
+     {
+      "description": "Supply and install new patterned toughened glass sidelight panel to match",
+      "amount": 1380.0
+     },
+     {
+      "description": "Repair and reinforce door jamb at the strike; new architraves",
+      "amount": 520.0
+     },
+     {
+      "description": "Supply and fit multi-point lock and handle set",
+      "amount": 490.0
+     },
+     {
+      "description": "Paint and finish jamb and sidelight frame",
+      "amount": 360.0
+     },
+     {
+      "description": "Remove temporary panel; rubbish removal",
+      "amount": 80.0
+     }
+    ],
+    "prepared_by": "Grace Awafield, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote for the front door and sidelight"
+  },
+  {
+   "id": "police-notice",
+   "file": "police-reference-pending.pdf",
+   "evidence_kind": "other_document",
+   "method": "template",
+   "template": "unavailable_notice",
+   "data": {
+    "material": "Police event reference for the burglary report about 5 Puriri Test Mews, Mornington, Dunedin",
+    "reason": "Reported online on Wednesday 23 September 2026 at 2:10pm. The online report is waiting to be processed and the event reference has not been issued yet.",
+    "expected": "By email to anahera.kererumont@example.invalid within five working days of the report."
+   },
+   "purpose": "Unavailable notice: the Police reference is pending (not_yet_available)"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200005",
+    "policyholder": "Anahera Kererumont",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "1 April 2026 to 31 March 2027",
+    "insured": {
+     "Insured address": "5 Puriri Test Mews, Mornington, Dunedin",
+     "Occupancy": "Owner occupied",
+     "Sum insured": "$610,000"
+    },
+    "excess": "$750 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200005",
+    "family": "home",
+    "effective_from": "2026-04-01",
+    "effective_to": "2027-03-31",
+    "excess_nzd": 750,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H1",
+  "condition": "not_yet_available",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-23",
+    "last_day": "2026-09-23"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "policy_inception_date": "2024-04-01",
+   "notes": "Not yet available: the Police event reference. The fact sheet uses \"pending\", \"not issued yet\" and \"later\", which main matches for a pending Police report."
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "evidence_outstanding",
+    "amount_over_threshold_or_unknown"
+   ],
+   "allowed_reasons": [],
+   "rationale": "The Police event reference is pending (an unavailable notice; Police will email it later), so the Police report a burglary needs is not available yet (evidence_outstanding). The builder's quote totals NZD 6,072.00 including GST, over NZD 5,000 (amount_over_threshold_or_unknown). The claimant names contents insurance, but nothing was taken and the damage is to the building, so the claim belongs in home (G3); that is a wording slip, not a dispute of terms. The door is secured, the home habitable, nobody is hurt and no other party is involved. Main's theft branch also lists proof of ownership; nothing was taken, so the pack treats the photo, the repair quote and the Police report as the required materials. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt, proof of purchase or proof of ownership in the pack; nothing was taken"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 25 September 2026; incident 23 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 April 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2024-04-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-23",
+   "property.address": "5 Puriri Test Mews, Mornington, Dunedin",
+   "property.habitable": true,
+   "property.ongoing_risk": "none"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-door-sidelight.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=builder-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent accepts that the Police event reference will come later, for example by recording it as pending, and says it can be sent when it arrives."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the claim cannot go ahead until the Police event reference is issued."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent tells the claimant this must be claimed on a contents policy, or, after the claimant has said that nothing was taken, still asks for a list of stolen belongings. Asking once whether anything was taken is fine."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-CLM-01",
+   "HOM-BEN-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent records the incident type as theft or other; theft.entry_context is recorded only while the theft branch (BR-THEFT-001) is active or a candidate",
+   "Whether the Agent checks which policy the claimant means",
+   "Wording of the Agent's replies"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "incident.type": [
+    "theft",
+    "other"
+   ],
+   "theft.entry_context": "forced_entry",
+   "incident.discovered_at": "2026-09-23",
+   "police.status": [
+    "reported",
+    "reference_pending"
+   ],
+   "property.occupancy_relationship": "owner",
+   "property.occupancy": "occupied",
+   "policy.policy_number": "NW-SYN-HOM-200005"
+  }
+ }
+}

@@ -1,0 +1,375 @@
+{
+ "case_id": "CTL-M-002",
+ "message_style": "plain",
+ "persona": "Cheerful but annoyed with herself. Had new wheels and tyres fitted on the morning of the accident; has the wheel receipt, the quote and a photo on her phone.",
+ "initial_message": "Hi, I need to make a claim for my car. On Saturday 5 September at about 4pm I hit a high kerb pulling into a park at the Rototuna shops. The front left wheel is gouged and bent on the rim and the bumper corner is cracked. I had only had new wheels fitted that morning! No one was hurt and the car is still drivable.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I was pulling forward into an angle park outside the shops and misjudged the high concrete kerb. The front left wheel hit it hard and the bumper corner scraped along it.",
+  "incident.occurred_at": "Saturday 5 September 2026, about 4:10pm",
+  "incident.location": "Shops car park on Bellbird Test Drive, Rototuna, Hamilton",
+  "incident.cause": "Misjudged the distance to a high concrete kerb while parking",
+  "loss.description": "Front left alloy wheel gouged and bent on the outer rim; lower left corner of the front bumper cracked",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "no",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "sms",
+  "claimant.email": "mere.ridgefern@example.invalid",
+  "claimant.phone": "+64 00 000 1002",
+  "claimant.home_address": "2 Fernbank Test Road, Rototuna, Hamilton",
+  "policyholder.name": "Mere Ridgefern",
+  "policy.policy_number": "NW-SYN-MTR-100002",
+  "vehicle.registration": "TST-002",
+  "vehicle.make": "Mazda",
+  "vehicle.model": "CX-5",
+  "vehicle.year": 2021,
+  "vehicle.colour": "white",
+  "vehicle.use": "private",
+  "vehicle.damage_description": "Outer rim of the front left alloy wheel deeply gouged with a bent section about 10 cm long; a crack about 12 cm long in the lower left corner of the front bumper. The tyre still holds air.",
+  "vehicle.drivable": true,
+  "vehicle.towing_required": "not_required",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "Mere Ridgefern",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10002",
+  "driver.owner_permission": "not_applicable",
+  "evidence.photos": "One photo of the wheel and the bumper corner, taken at the shops. Available now.",
+  "evidence.repair_quote": "Quote from Totara Brook Body Works dated 14 September 2026, total $1,541.00 including GST. Available now.",
+  "wheels.description": "Four Stratos 19-inch gloss black alloy wheels with Kinetra tyres",
+  "wheels.purchase_date": "5 September 2026",
+  "wheels.purchase_price": "$3,480.00 for the four wheels and tyres",
+  "wheels.ownership": "owned",
+  "evidence.receipt": "Receipt from Awa Field Automotive for the wheels and tyres, dated 5 September 2026. Available now.",
+  "if_asked_about_receipt_date": "Yes, the wheels and tyres were fitted that morning, on 5 September, and I hit the kerb the same afternoon. Very annoying.",
+  "if_asked_how_far_driven_after": "I drove home slowly, about 3 km. The steering felt normal."
+ },
+ "materials": [
+  {
+   "id": "photo-wheel",
+   "file": "photo-front-left-wheel.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo taken from slightly above, close-up of the front left wheel of a white compact SUV parked beside a high concrete kerb. The gloss black alloy wheel is shiny and new, with a plain gloss black centre cap, but its outer rim lip is deeply gouged with bright silver scrapes and a visibly bent section near the kerb. Above it the lower corner of the white front bumper has a short crack and grey scuff marks. The tyre sidewall is smooth plain black rubber. Afternoon daylight, dry asphalt. The frame shows only the wheel, the tyre, the wheel arch and the bumper corner. No text, no logos, no people.",
+   "seed": 102201,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the wheel and bumper damage described by the claimant",
+   "expect_object": [
+    "wheel",
+    "alloy wheel",
+    "rim",
+    "wheel rim",
+    "alloy rim",
+    "bumper"
+   ],
+   "seed_history": [
+    {
+     "seed": 100201,
+     "reasons": [
+      "CTL-M-002/photo-front-left-wheel.jpg: image-only pass names 'front left tire', expected one of ['wheel', 'alloy wheel', 'rim', 'wheel rim', 'alloy rim', 'bumper']"
+     ]
+    },
+    {
+     "seed": 101201,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 102201,
+     "reasons": []
+    }
+   ]
+  },
+  {
+   "id": "receipt-wheels",
+   "file": "receipt-wheels.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Awa Field Automotive (Synthetic)",
+    "issuer_address": "61 Juniper Test Terrace, Te Rapa, Hamilton",
+    "invoice_number": "INV-2026-1002",
+    "date": "5 September 2026",
+    "customer": "Mere Ridgefern",
+    "items": [
+     {
+      "description": "Set of four Stratos 19-inch alloy wheels, gloss black",
+      "amount": 2360.0
+     },
+     {
+      "description": "Four Kinetra 225/55 R19 tyres, fitted and balanced",
+      "amount": 1120.0
+     }
+    ],
+    "payment_method": "EFTPOS"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "wheels.purchase_date"
+   },
+   "purpose": "Proof of purchase for the new wheels and tyres"
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Totara Brook Body Works (Synthetic)",
+    "issuer_address": "8 Millbrook Test Street, Frankton, Hamilton",
+    "quote_number": "Q-2026-1002",
+    "quote_date": "14 September 2026",
+    "valid_until": "13 December 2026",
+    "customer": "Mere Ridgefern",
+    "subject": "Mazda CX-5 2021, white, TST-002 - front left wheel and front bumper",
+    "items": [
+     {
+      "description": "Supply one Stratos 19-inch alloy wheel, gloss black",
+      "amount": 560.0
+     },
+     {
+      "description": "Transfer tyre to new wheel, fit and balance",
+      "amount": 65.0
+     },
+     {
+      "description": "Four-wheel alignment check and adjust",
+      "amount": 95.0
+     },
+     {
+      "description": "Remove and refit front bumper",
+      "amount": 160.0
+     },
+     {
+      "description": "Repair crack in lower left front bumper corner and refinish",
+      "amount": 420.0
+     },
+     {
+      "description": "Paint materials and consumables",
+      "amount": 40.0
+     }
+    ],
+    "prepared_by": "Finn Glenrook, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   },
+   "purpose": "Repair estimate required for motor damage"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100002",
+    "policyholder": "Mere Ridgefern",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "1 February 2026 to 31 January 2027",
+    "insured": {
+     "Vehicle": "Mazda CX-5 2021, white",
+     "Registration": "TST-002",
+     "Agreed value": "$31,000"
+    },
+    "excess": "$400 base excess for each event",
+    "extra": {
+     "Named drivers": "Mere Ridgefern"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100002",
+    "family": "motor",
+    "effective_from": "2026-02-01",
+    "effective_to": "2027-01-31",
+    "excess_nzd": 400,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M1",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-05",
+    "last_day": "2026-09-05"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [
+    "same_day_purchase"
+   ],
+   "notes": "Innocent control: the wheels were bought and fitted on 5 September 2026 and damaged the same afternoon. Bought and lost on the same New Zealand calendar day is not after the loss; at least one day is needed (rules, section 3).",
+   "policy_inception_date": "2021-02-01"
+  },
+  "triage": {
+   "expected_class": "fast_track",
+   "required_reasons": [],
+   "allowed_reasons": [],
+   "rationale": "Single vehicle against a kerb, nobody hurt, car drivable, a photo, a complete quote at NZD 1,541.00 including GST and a receipt for the wheels, policy on file. The receipt date is the incident day itself, which is not after the loss. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "clear",
+     "basis": "Purchase date 5 September 2026 is the incident day, not after it; the check needs at least one day after the last possible incident day"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 14 September 2026; incident 5 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 February 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2021-02-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-05",
+   "parties.other_parties": false,
+   "vehicle.drivable": true
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-left-wheel.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-wheels.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent treats the same-day purchase as a problem: calls it suspicious or unusual, or says the purchase date may affect the claim. A neutral request to confirm when the wheels were bought is fine."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-CLM-01",
+   "MTR-EXC-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks the claimant to confirm when the wheels were bought",
+   "Wording of the Agent's replies"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "vehicle.registration": "TST-002",
+   "policy.policy_number": "NW-SYN-MTR-100002",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "vehicle.towing_required": "not_required",
+   "driver.relationship_to_policyholder": "policyholder",
+   "driver.licence_status": "valid",
+   "vehicle.use": "private",
+   "witness.present": "no"
+  }
+ }
+}

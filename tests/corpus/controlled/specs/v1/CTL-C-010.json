@@ -1,0 +1,462 @@
+{
+ "case_id": "CTL-C-010",
+ "message_style": "wrong_product_term",
+ "persona": "Easy-going. Calls the policy 'house insurance'. Bought the record player with a whole record set-up before Christmas, so the tax invoice runs to two pages; only scanned the first page and can send the second page later.",
+ "initial_message": "Hi, I need to make a claim on my house insurance. On Wednesday 9 September I was vacuuming and the vacuum cord caught the leg of the sideboard, and my record player fell off onto the floor. The tone arm is bent and the lid is cracked. I've got a photo and the invoice from the shop.",
+ "facts": {
+  "claim.product_family": "contents",
+  "incident.type": "accidental_damage",
+  "incident.description": "I was vacuuming the lounge and pulled the vacuum along by its cord. The cord snagged on the leg of the sideboard and jerked it, and my record player slid off the top onto the carpet.",
+  "incident.occurred_at": "Wednesday 9 September 2026, about 2pm",
+  "incident.discovered_at": "Wednesday 9 September 2026, about 2pm",
+  "incident.location": "10 Rimu Test Terrace, Kensington, Whangarei",
+  "incident.cause": "Knocked off the sideboard by accident while vacuuming",
+  "loss.description": "Tone arm bent, clear dust cover cracked, and the platter now wobbles when it spins",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "contents.items": [
+   {
+    "contents.item.description": "Belt-drive record turntable with dust cover, walnut",
+    "contents.item.brand": "Sonnhaven",
+    "contents.item.model": "TT-3",
+    "contents.item.category": "electronics",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 1690,
+    "contents.item.loss_type": "damaged",
+    "serial_number": "ST3-TST-3010",
+    "purchase_date": "20 December 2025",
+    "contents.item.ownership": "owned"
+   }
+  ],
+  "contents.receipt_availability": "Tax invoice from the shop. It is two pages; I have only scanned the first page so far and can send the second page later.",
+  "contents.proof_of_ownership": "Tax invoice",
+  "property.address": "10 Rimu Test Terrace, Kensington, Whangarei",
+  "property.occupancy_relationship": "owner",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "phone",
+  "claimant.email": "manaia.pohutuwick@example.invalid",
+  "claimant.phone": "+64 00 000 3010",
+  "policyholder.name": "Manaia Pohutuwick",
+  "policy.policy_number": "NW-SYN-CON-300010",
+  "evidence.photos": "One photo of the record player on the floor. Available now.",
+  "evidence.receipt": "Tax invoice from Copperleaf Electronics dated 20 December 2025, two pages. I only scanned page 1; page 2 is in my filing box at home and I can send it later.",
+  "if_asked_about_the_second_page": "It is in my filing box at home. I can scan it and send it later.",
+  "if_asked_about_the_other_items_on_the_invoice": "I bought the whole record set-up at the same time. Only the record player was damaged; the speakers and everything else are fine.",
+  "if_asked_about_a_repair_quote": "I have not got a repair quote yet.",
+  "if_asked_whether_the_damaged_item_is_kept": "Yes, the record player is back on the sideboard, unplugged."
+ },
+ "materials": [
+  {
+   "id": "photo-turntable",
+   "file": "photo-turntable.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo, close-up from above of a walnut-veneer record turntable lying on a grey carpet, with its clear plastic dust cover lifted fully open. The thin silver tone arm is clearly bent sideways in a sharp kink halfway along its length and points off the edge of the empty platter instead of resting on its stand. The open dust cover has a crack across one corner. The frame shows the platter, the bent tone arm and its base, and the cracked corner of the cover. Afternoon window light. Plain turntable with no badges. No people, no text.",
+   "seed": 308002,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the damaged turntable",
+   "expect_object": [
+    "turntable",
+    "record player",
+    "tone arm",
+    "tonearm"
+   ],
+   "seed_history": [
+    {
+     "seed": 301001,
+     "reasons": [
+      "CTL-C-010/photo-turntable.jpg: image-only pass names 'plastic cover', expected one of ['turntable', 'record player', 'tone arm', 'tonearm']"
+     ]
+    },
+    {
+     "seed": 302001,
+     "reasons": [
+      "CTL-C-010/photo-turntable.jpg: image-only pass names 'dust cover', expected one of ['turntable', 'record player', 'tone arm', 'tonearm']",
+      "CTL-C-010/photo-turntable.jpg: with-facts pass: brand_logo ['Sonnhaven']",
+      "CTL-C-010/photo-turntable.jpg: with-facts pass: readable_text ['Sonnhaven', 'TT-3']"
+     ]
+    },
+    {
+     "seed": 303001,
+     "reasons": [
+      "CTL-C-010/photo-turntable.jpg: image-only pass names 'dust cover', expected one of ['turntable', 'record player', 'tone arm', 'tonearm']"
+     ]
+    },
+    {
+     "seed": 304001,
+     "reasons": [
+      "CTL-C-010/photo-turntable.jpg: image-only pass names 'dust cover', expected one of ['turntable', 'record player', 'tone arm', 'tonearm']"
+     ]
+    }
+   ],
+   "redo_history": [
+    {
+     "date": "2026-10-01",
+     "rejected_by": "@bdfa123",
+     "rejection": "Only the plastic lid is broken; no damage to the turntable itself is visible",
+     "old_prompt": "Realistic smartphone photo of a walnut-veneer record turntable lying at an angle on a grey carpet in front of a low wooden sideboard. The clear plastic dust cover is cracked across one corner and the thin metal tone arm is visibly bent sideways away from its rest. The platter is empty with no record on it. Plain turntable with no badges. Afternoon daylight from a window. No people, no text, no logos.",
+     "old_seed": 301001,
+     "candidates": [
+      308002,
+      308003,
+      308004
+     ],
+     "picked": 308002,
+     "picked_by": "@bdfa123"
+    }
+   ]
+  },
+  {
+   "id": "receipt-full",
+   "include": false,
+   "file": "receipt-turntable-full.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Copperleaf Electronics (Synthetic)",
+    "issuer_address": "44 Upland Test Road, Whangarei Central, Whangarei",
+    "invoice_number": "INV-2025-3010",
+    "date": "20 December 2025",
+    "customer": "Manaia Pohutuwick",
+    "payment_method": "Card ending 3010",
+    "items": [
+     {
+      "description": "Sonnhaven TT-3 belt-drive turntable with hinged dust cover, walnut veneer plinth",
+      "amount": 1690.0,
+      "serial": "ST3-TST-3010"
+     },
+     {
+      "description": "Sonnhaven PP-1 phono preamplifier for moving-magnet cartridges, black",
+      "amount": 249.0,
+      "serial": "SP1-TST-3010"
+     },
+     {
+      "description": "Arlow Studio 5 powered bookshelf speakers, pair, walnut veneer cabinets",
+      "amount": 899.0,
+      "serial": "AS5-TST-3010"
+     },
+     {
+      "description": "Arlow SS-60 speaker stands, pair, black powder-coated steel",
+      "amount": 229.0
+     },
+     {
+      "description": "Spare elliptical stylus for the Sonnhaven TT-3 cartridge",
+      "amount": 119.0
+     },
+     {
+      "description": "Speaker cable, 2 x 5 m, oxygen-free copper, with banana plugs",
+      "amount": 49.0
+     },
+     {
+      "description": "RCA interconnect cable, 1 m, stereo pair",
+      "amount": 29.0
+     },
+     {
+      "description": "Turntable isolation feet, set of four, sorbothane",
+      "amount": 59.0
+     },
+     {
+      "description": "Record cleaning kit: cleaning fluid, velvet brush and microfibre cloth",
+      "amount": 39.0
+     },
+     {
+      "description": "Carbon-fibre anti-static record brush",
+      "amount": 24.0
+     },
+     {
+      "description": "Anti-static inner record sleeves, pack of 50",
+      "amount": 19.0
+     },
+     {
+      "description": "Clear outer record sleeves, pack of 50",
+      "amount": 19.0
+     },
+     {
+      "description": "Timber record storage crate, holds about 80 LPs",
+      "amount": 79.0
+     },
+     {
+      "description": "Digital stylus pressure gauge",
+      "amount": 35.0
+     },
+     {
+      "description": "Aluminium record weight",
+      "amount": 45.0
+     },
+     {
+      "description": "Vinyl LP, new pressing, catalogue CL-2291",
+      "amount": 49.0
+     },
+     {
+      "description": "Vinyl LP, new pressing, catalogue CL-3107",
+      "amount": 52.0
+     },
+     {
+      "description": "Vinyl LP, new pressing, catalogue CL-3380",
+      "amount": 45.0
+     },
+     {
+      "description": "Vinyl LP, double album, catalogue CL-4012",
+      "amount": 69.0
+     },
+     {
+      "description": "Vinyl LP, new pressing, catalogue CL-4455",
+      "amount": 49.0
+     },
+     {
+      "description": "Vinyl LP, new pressing, catalogue CL-5120",
+      "amount": 52.0
+     },
+     {
+      "description": "Vinyl LP, new pressing, catalogue CL-5236",
+      "amount": 45.0
+     },
+     {
+      "description": "Extended warranty, 3 years: Sonnhaven TT-3 turntable",
+      "amount": 149.0
+     },
+     {
+      "description": "Extended warranty, 3 years: Arlow Studio 5 speakers",
+      "amount": 99.0
+     },
+     {
+      "description": "Delivery and set-up, Whangarei urban area",
+      "amount": 60.0
+     }
+    ]
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "contents.items[0].purchase_date",
+    "serials": "contents.items[0].serial_number"
+   },
+   "purpose": "Source for the incomplete tax invoice: two pages, with the last line, the total paid and the payment method on page 2"
+  },
+  {
+   "id": "receipt-page1",
+   "file": "receipt-turntable-page1.pdf",
+   "evidence_kind": "receipt",
+   "method": "transform",
+   "source": "receipt-full",
+   "transform": "keep_pages",
+   "params": {
+    "pages": [
+     0
+    ]
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "contents.items[0].purchase_date",
+    "serials": "contents.items[0].serial_number"
+   },
+   "purpose": "Proof of purchase for the turntable with page 2 of 2 missing: the purchase date, customer and turntable line are on page 1; the total paid and payment method are not"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-CON-300010",
+    "policyholder": "Manaia Pohutuwick",
+    "wording": "Northwind Contents Standard Policy, version MVP-2026.1",
+    "cover": "Contents - sum insured",
+    "period": "1 August 2026 to 31 July 2027",
+    "insured": {
+     "Insured address": "10 Rimu Test Terrace, Kensington, Whangarei",
+     "Contents sum insured": "$60,000"
+    },
+    "excess": "$400 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the contents wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-CON-300010",
+    "family": "contents",
+    "effective_from": "2026-08-01",
+    "effective_to": "2027-07-31",
+    "excess_nzd": 400,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "contents",
+  "scenario_category": "C1",
+  "condition": "missing_page",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-09",
+    "last_day": "2026-09-09"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "Plan feature none with condition missing_page. The tax invoice is the only proof of ownership, a required material for contents on main (incident_image and proof_of_ownership). It prints \"Page 1 of 2\"; page 2, with the last line, the total paid and the payment method, is missing. The purchase date, customer and the turntable line with its serial number are on page 1. The missing page is on the invoice rather than a repair quote because main does not require a repair quote for contents. The claimant names the wrong product (house insurance) for a contents item.",
+   "policy_inception_date": "2021-08-01"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "evidence_outstanding"
+   ],
+   "allowed_reasons": [],
+   "rationale": "Accidental damage to one turntable at the insured address, nobody hurt, photo supplied, policy on file. The only proof of ownership, the tax invoice, is missing its second page (total paid and payment method), so required material is incomplete and someone must chase page 2. The largest known amount is the item value, NZD 1,690, under the threshold; the other lines on the invoice are items that were not damaged. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "clear",
+     "basis": "Purchase date 20 December 2025, printed on the retained page 1, is before the incident on 9 September 2026"
+    },
+    "quote_before_loss": {
+     "expected": "not_applicable",
+     "basis": "No quote or assessment in the pack"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 August 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2021-08-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "contents",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-09"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-turntable.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-turntable-page1.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.contents_items[loss_type=damaged]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "A4",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent asks for the missing second page of the tax invoice, or records that it will be sent later."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states the total paid or the payment method on the invoice as if it had read them; both are on the missing page 2. Restating the turntable line on page 1 is fine."
+   }
+  ],
+  "expected_rag_sources": [
+   "CON-COV-01",
+   "CON-CLM-01",
+   "CON-SET-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks for the second page of the invoice now or accepts that it will come later",
+   "Whether the Agent asks about the other items on the invoice"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "incident.type": "other",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "parties.other_parties": false,
+   "policy.policy_number": "NW-SYN-CON-300010"
+  }
+ }
+}

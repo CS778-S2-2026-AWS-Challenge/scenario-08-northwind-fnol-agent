@@ -1,0 +1,388 @@
+{
+ "case_id": "CTL-M-005",
+ "message_style": "many_facts",
+ "persona": "Talkative and organised; gives a lot of detail at once. Has two photos, the quote and the policy number ready. His wife was in the passenger seat.",
+ "initial_message": "Hi there, I need to claim for my car - it's a white 2023 Hyundai Tucson hybrid, rego TST-005, policy NW-SYN-MTR-100005. On Friday 11 September around 12:30pm I was turning into a tight park at the gym car park on Ashbourne Test Avenue in Albany and clipped the concrete base of a lamp post with the front left corner. The headlight lens is cracked, the bumper is split and the parking sensor on that corner has stopped working. My wife was with me, nobody got hurt, no other cars were involved and it's still drivable. I already have a quote from Harbourside Panel & Paint for $5,681.00 and a couple of photos.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I was turning into a tight parking space and cut the corner too early. The front left corner of the car hit the round concrete base of a lamp post.",
+  "incident.occurred_at": "Friday 11 September 2026, about 12:30pm",
+  "incident.location": "Gym car park on Ashbourne Test Avenue, Albany, Auckland",
+  "incident.cause": "Turned into a parking space too early and misjudged the lamp post base",
+  "loss.description": "Left headlight lens cracked, front bumper split, front left parking sensor broken",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "yes",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "sione.flaxmere@example.invalid",
+  "claimant.phone": "+64 00 000 1005",
+  "claimant.home_address": "5 Ridgefern Test Avenue, Albany, Auckland",
+  "policyholder.name": "Sione Flaxmere",
+  "policy.policy_number": "NW-SYN-MTR-100005",
+  "vehicle.registration": "TST-005",
+  "vehicle.make": "Hyundai",
+  "vehicle.model": "Tucson",
+  "vehicle.year": 2023,
+  "vehicle.colour": "white",
+  "vehicle.use": "private",
+  "vehicle.damage_description": "Left LED headlight lens cracked with a chip missing and the housing cracked, though the light still works; front bumper split at the left corner and pushed in; front left parking sensor hanging loose and not working. The car drives normally.",
+  "vehicle.drivable": true,
+  "vehicle.towing_required": "not_required",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "Sione Flaxmere",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10005",
+  "driver.owner_permission": "not_applicable",
+  "evidence.photos": "Two photos: the front left corner of the car and the lamp post base. Available now.",
+  "evidence.repair_quote": "Quote from Harbourside Panel & Paint dated 14 September 2026, total $5,681.00 including GST. Available now.",
+  "witness.name": "Leilani Longreach",
+  "witness.relationship": "My wife, who was in the passenger seat",
+  "lamp_post.damage": "Only white paint scuffs on the concrete base; the post itself is fine.",
+  "if_asked_about_previous_claims": "Yes, two in the last twelve months: last December someone reversed into my parked car at the supermarket, and in May a storm blew down part of our back fence. Both were claimed."
+ },
+ "materials": [
+  {
+   "id": "photo-corner",
+   "file": "photo-front-left-corner.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo, close-up of the front left corner of a white mid-size SUV in an outdoor car park at midday. The headlight lens is cracked across with a chip missing and the housing cracked, the plastic bumper corner below it is split and pushed in, and a small round parking sensor hangs loose from the bumper on its wire. The frame shows only the headlight, the bumper corner and the top of the front left wheel. Bright daylight. No text, no logos, no people.",
+   "seed": 100501,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the headlight, bumper and sensor damage described by the claimant",
+   "expect_object": [
+    "headlight",
+    "headlamp",
+    "headlight assembly",
+    "bumper",
+    "front bumper",
+    "bumper cover"
+   ]
+  },
+  {
+   "id": "photo-lamp-post",
+   "file": "photo-lamp-post-base.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo of the base of a street lamp post at the edge of an outdoor car park: a round concrete plinth about 60 cm high with fresh white paint scuffs and small chips at bumper height, and a few fragments of clear plastic on the asphalt beside it. Midday daylight, painted parking lines. No vehicles, no signs, no text, no people.",
+   "seed": 100502,
+   "size": [
+    912,
+    1216
+   ],
+   "purpose": "Shows the lamp post base that was hit",
+   "expect_object": [
+    "lamp post",
+    "lamppost",
+    "light pole",
+    "lamp pole",
+    "post",
+    "plinth",
+    "lamp post base"
+   ],
+   "seed_history": [
+    {
+     "seed": 100502,
+     "reasons": [
+      "CTL-M-005/photo-lamp-post-base.jpg: image-only pass names 'concrete base', expected one of ['lamp post', 'lamppost', 'light pole', 'lamp pole', 'post', 'plinth', 'lamp post base']"
+     ]
+    },
+    {
+     "seed": 101502,
+     "reasons": [
+      "image-only pass names 'concrete base of lamp post', expected one of ['lamp post', 'lamppost', 'light pole', 'lamp pole', 'post', 'plinth', 'lamp post base']"
+     ]
+    },
+    {
+     "seed": 102502,
+     "reasons": [
+      "image-only pass names 'concrete base', expected one of ['lamp post', 'lamppost', 'light pole', 'lamp pole', 'post', 'plinth', 'lamp post base']",
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 103502,
+     "reasons": [
+      "image-only pass names 'concrete base', expected one of ['lamp post', 'lamppost', 'light pole', 'lamp pole', 'post', 'plinth', 'lamp post base']",
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Harbourside Panel & Paint (Synthetic)",
+    "issuer_address": "33 Driftwood Test Crescent, Rosedale, Auckland",
+    "quote_number": "Q-2026-1005",
+    "quote_date": "14 September 2026",
+    "valid_until": "13 December 2026",
+    "customer": "Sione Flaxmere",
+    "subject": "Hyundai Tucson 2023 hybrid, white, TST-005 - front left headlight, bumper and sensor",
+    "items": [
+     {
+      "description": "Supply left LED headlight assembly",
+      "amount": 2180.0
+     },
+     {
+      "description": "Supply front bumper cover, primed",
+      "amount": 890.0
+     },
+     {
+      "description": "Supply front left parking sensor and bracket",
+      "amount": 265.0
+     },
+     {
+      "description": "Remove and refit front bumper; fit headlight and sensor",
+      "amount": 420.0
+     },
+     {
+      "description": "Paint front bumper",
+      "amount": 610.0
+     },
+     {
+      "description": "Front radar and camera calibration",
+      "amount": 480.0
+     },
+     {
+      "description": "Headlight aim and parking sensor system check",
+      "amount": 95.0
+     }
+    ],
+    "prepared_by": "Lucy Totarabrook, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   },
+   "purpose": "Repair estimate required for motor damage"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100005",
+    "policyholder": "Sione Flaxmere",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "1 March 2026 to 28 February 2027",
+    "insured": {
+     "Vehicle": "Hyundai Tucson 2023 hybrid, white",
+     "Registration": "TST-005",
+     "Agreed value": "$44,000"
+    },
+    "excess": "$1,000 base excess for each event",
+    "extra": {
+     "Named drivers": "Sione Flaxmere, Leilani Longreach"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100005",
+    "family": "motor",
+    "effective_from": "2026-03-01",
+    "effective_to": "2027-02-28",
+    "excess_nzd": 1000,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": [
+   {
+    "family": "motor",
+    "incident_date": "2025-12-02",
+    "submitted_date": "2025-12-04"
+   },
+   {
+    "family": "home",
+    "incident_date": "2026-05-19",
+    "submitted_date": "2026-05-20"
+   }
+  ]
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M1",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-11",
+    "last_day": "2026-09-11"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "Hint only: two other submitted claims in the past year is one weak indicator, a hint that does not change the fraud signal. The quote is over NZD 5,000.",
+   "policy_inception_date": "2022-03-01"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "review_hint",
+    "amount_over_threshold_or_unknown"
+   ],
+   "allowed_reasons": [],
+   "rationale": "Single vehicle against a lamp post base, nobody hurt, car drivable, photos and a complete quote. The quote total, NZD 5,681.00 including GST, is over NZD 5,000. Two other submitted claims in the past year (motor, December 2025; home, May 2026) are one weak indicator: a hint for staff, not a flag. Neither is within 3 days of this incident. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 14 September 2026; incident 11 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "hit",
+     "basis": "Two other submitted claims in the past year: motor (incident 2 December 2025, submitted 4 December 2025) and home (incident 19 May 2026, submitted 20 May 2026)"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 March 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2022-03-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "The earlier claims are 2 December 2025 (motor) and 19 May 2026 (home), not within 3 days of 11 September 2026"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-11",
+   "parties.other_parties": false,
+   "vehicle.drivable": true,
+   "vehicle.registration": "TST-005",
+   "policy.policy_number": "NW-SYN-MTR-100005"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-left-corner.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent raises the claimant's earlier claims as a concern, or suggests that the number of claims may affect this claim."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent asks again for a fact the first message already gave (the registration, the policy number, the date, or whether anyone was hurt) without saying it is confirming it."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-CLM-01",
+   "MTR-EXC-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent confirms the facts from the first message one by one or together",
+   "Whether the Agent asks about earlier claims"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "vehicle.towing_required": "not_required",
+   "driver.relationship_to_policyholder": "policyholder",
+   "driver.licence_status": "valid",
+   "vehicle.use": "private",
+   "witness.present": "yes"
+  }
+ }
+}

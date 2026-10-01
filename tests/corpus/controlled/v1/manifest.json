@@ -1,0 +1,5860 @@
+{
+ "corpus": "controlled",
+ "corpus_version": "v1",
+ "schema_version": "0.2",
+ "generator_version": "tools-sha256:13a80f51975a3505",
+ "written_utc": "2026-10-01T07:51:19+00:00",
+ "corpus_files": [
+  {
+   "path": "sampling.json",
+   "sha256": "bb2a18940fef228f224e7aed06e2c804805c28e8387ce2a0934162a605e1adc5"
+  }
+ ],
+ "packs": [
+  {
+   "case_id": "CTL-C-001",
+   "files": [
+    {
+     "path": "cases/CTL-C-001/input/facts.json",
+     "sha256": "f8dedd178f6d9c40e0c389b7a31c8c5a1bbb50f99fa30dc5bb6e7a9a4ec77cb0",
+     "bytes": 3014
+    },
+    {
+     "path": "cases/CTL-C-001/input/initial_message.txt",
+     "sha256": "aac5ee9a61c9c3a874ca0ecde11f2ca92f66d55550e6aeadac2dfd1463f71180",
+     "bytes": 309
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials.json",
+     "sha256": "ef6804ea0c2759bc391c5d9f7713cff439b3d8446032205fb1a34db288806efe",
+     "bytes": 382
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials/photo-watch.jpg",
+     "sha256": "f0774beb181ae8594473916779950190e94c0391927d63a561180220f1d0b4ed",
+     "bytes": 45880
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials/policy-schedule.pdf",
+     "sha256": "79a491393890eea2d3be20c59f10be1a6d58dc7ff121cef7c02a1fc8c7faa515",
+     "bytes": 2359
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials/receipt-watch-reprint.pdf",
+     "sha256": "bc9695e6dc10010fbc4fc60d51e335dab216d9143bdeb8bf5d02f2f1d8b10cf2",
+     "bytes": 2409
+    },
+    {
+     "path": "cases/CTL-C-001/oracle/labels.json",
+     "sha256": "da0f1fa26342bc8d301972e3849115916be7b8b923350f5fb932facc660d7fe8",
+     "bytes": 6865
+    },
+    {
+     "path": "cases/CTL-C-001/provenance.json",
+     "sha256": "40f3f3c8b84fe308a1aa9e8855af59d07047e3af6589faca59de2080475f8d6e",
+     "bytes": 4348
+    },
+    {
+     "path": "cases/CTL-C-001/review.json",
+     "sha256": "8d73ca70772d84466cb68fe35409e36406d7098e626f454e131c54ffcd3918ad",
+     "bytes": 2453
+    },
+    {
+     "path": "cases/CTL-C-001/setup.json",
+     "sha256": "53bfdbc83085b6d4b67582aa98a5239bc1205b20d8c590b246ac12ab410f1849",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-002",
+   "files": [
+    {
+     "path": "cases/CTL-C-002/input/facts.json",
+     "sha256": "1078b1c0864ff56721a52f660146d25c0739d94e66cf1ad864ffa2e161de934b",
+     "bytes": 2947
+    },
+    {
+     "path": "cases/CTL-C-002/input/initial_message.txt",
+     "sha256": "a91ba76cc8479a0b3e5d1a7132f736b1b52bfb4f0be1e76bb0efa3c276f0cede",
+     "bytes": 260
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials.json",
+     "sha256": "662062fe207e87cbbbad8e4a9e48262be675080a44cbffa8507dedd9d655348c",
+     "bytes": 400
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials/photo-coffee-machine.tif",
+     "sha256": "342ea3e59c853f40a0b45db0b5ad4a6ecc17ae3486e4af4471458189c8d2f471",
+     "bytes": 3327116
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials/policy-schedule.pdf",
+     "sha256": "ac55092b9122b6dae4c4452265854e65a256b73d32e8f16967eb0448352bc995",
+     "bytes": 2357
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials/receipt-coffee-machine-reprint.pdf",
+     "sha256": "bdbca62cb253903d963c82b635dd1866a87ee19f1301690d073664e700fefdbc",
+     "bytes": 2430
+    },
+    {
+     "path": "cases/CTL-C-002/oracle/labels.json",
+     "sha256": "9cd5b3e189326cb2768fd7d469b4264ea2f1297fcdacc0065924de5fd5350e2d",
+     "bytes": 6169
+    },
+    {
+     "path": "cases/CTL-C-002/provenance.json",
+     "sha256": "af6d78ee85dff7c077b8ff0d4049d5208ae064e5adfc02b4e0c1df9207a631ad",
+     "bytes": 4385
+    },
+    {
+     "path": "cases/CTL-C-002/review.json",
+     "sha256": "3e84ebaea46da7451aa452ac48b92a2b818faae128e26d5a48c890aebd0c0984",
+     "bytes": 843
+    },
+    {
+     "path": "cases/CTL-C-002/setup.json",
+     "sha256": "512593ce37e5f45bf9d35ba5429cb711956d72ada41e4cea57198eca55c61639",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-003",
+   "files": [
+    {
+     "path": "cases/CTL-C-003/input/facts.json",
+     "sha256": "ce06c6ac84cc2b0b9040dccfc5f211bb5a39bd4eb1ac81914a7e6ccfab11c700",
+     "bytes": 2702
+    },
+    {
+     "path": "cases/CTL-C-003/input/initial_message.txt",
+     "sha256": "2f83506a1fe7b59b94209ae64c6d086a627fc7a2fc2ab6c3f70bb2af647ae682",
+     "bytes": 211
+    },
+    {
+     "path": "cases/CTL-C-003/input/materials.json",
+     "sha256": "c1bd36005c3c723ce62f158fd611a9c31c89bc4f18d10b56852a834c2ee7f565",
+     "bytes": 376
+    },
+    {
+     "path": "cases/CTL-C-003/input/materials/photo-rug-stain.jpg",
+     "sha256": "c6aa6fc46fcf695f376d8b9ad02216101c7df3121222ced6d60979575280ac15",
+     "bytes": 349652
+    },
+    {
+     "path": "cases/CTL-C-003/input/materials/policy-schedule.pdf",
+     "sha256": "d6e18d671766c4f67768f892b68774b31c43f4a5dd8ef506826f6ffdf92b44b4",
+     "bytes": 2369
+    },
+    {
+     "path": "cases/CTL-C-003/input/materials/receipt-rug.pdf",
+     "sha256": "d64047bfd53867d3bf6de18fcfb5cafc0d9fef1d2ab8b8edf0b840cdc0c0491e",
+     "bytes": 2368
+    },
+    {
+     "path": "cases/CTL-C-003/oracle/labels.json",
+     "sha256": "ef6c3503ee36ac4114413566f2b6b396ef7fe94f6a458ad58f7d05194d4fc609",
+     "bytes": 5393
+    },
+    {
+     "path": "cases/CTL-C-003/provenance.json",
+     "sha256": "81f41b8738b82a2606b142435b9182a4a3c11fd05c4919ed3f9772f6aa940a29",
+     "bytes": 3477
+    },
+    {
+     "path": "cases/CTL-C-003/review.json",
+     "sha256": "1cf6b7712a50432c0958f3a180a0798b1161e11ae113740e759a4b35c31c9050",
+     "bytes": 2545
+    },
+    {
+     "path": "cases/CTL-C-003/setup.json",
+     "sha256": "2034ce7ec9106dfc81a6679514d504dd5807bbf7f60f5255649bcf6fd3f17904",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-004",
+   "files": [
+    {
+     "path": "cases/CTL-C-004/input/facts.json",
+     "sha256": "e61595b3787925d742d362ad4ad34c5538a264e1955e84e37614a803b225a446",
+     "bytes": 2724
+    },
+    {
+     "path": "cases/CTL-C-004/input/initial_message.txt",
+     "sha256": "118a1d83896486bbe7174e5f0f7aa5b396751cb1080883904bb120d3060b8093",
+     "bytes": 236
+    },
+    {
+     "path": "cases/CTL-C-004/input/materials.json",
+     "sha256": "5576bfd64caad15b7411f52aa8cf946ae5007bf197b11527749c4c1d23ca45f4",
+     "bytes": 502
+    },
+    {
+     "path": "cases/CTL-C-004/input/materials/photo-bike-derailleur.jpg",
+     "sha256": "ca94d21406dd81f85ef101f5e908f89c507a7c1ad77d756edf6fc39a6046f9d9",
+     "bytes": 308462
+    },
+    {
+     "path": "cases/CTL-C-004/input/materials/photo-bike-display.jpg",
+     "sha256": "2ed156004ba2ded5068a0f561dbd90947b15970821cbd55251a598052a8cddaa",
+     "bytes": 111038
+    },
+    {
+     "path": "cases/CTL-C-004/input/materials/policy-schedule.pdf",
+     "sha256": "93c77296a6f19360ba792ebb7d89076b7aaef4628d6f1afdec44f58a2fb8b919",
+     "bytes": 2356
+    },
+    {
+     "path": "cases/CTL-C-004/input/materials/receipt-ebike.pdf",
+     "sha256": "55a16cb675fdeea8ac540a869022381eeb6f2755bfb1fca57d35bff3fe9d9558",
+     "bytes": 2362
+    },
+    {
+     "path": "cases/CTL-C-004/oracle/labels.json",
+     "sha256": "3a4a07b743b8df6b9294be5c641742456bd84272ee4716ed805a4648e6e81f4b",
+     "bytes": 5887
+    },
+    {
+     "path": "cases/CTL-C-004/provenance.json",
+     "sha256": "d4077f45b494a13f93cea0a3cdeb8dda8f85e15d80b5cffae8c1c8db819ddadb",
+     "bytes": 4929
+    },
+    {
+     "path": "cases/CTL-C-004/review.json",
+     "sha256": "77114945826ade823ee7a868f404aacfc3e0705afb92df6709cce36ae46cd93c",
+     "bytes": 4900
+    },
+    {
+     "path": "cases/CTL-C-004/setup.json",
+     "sha256": "fb10243930b079cd7011b876a6be8f17b7fa84c77a27cf5956c11c5fd530b295",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-005",
+   "files": [
+    {
+     "path": "cases/CTL-C-005/input/facts.json",
+     "sha256": "10ed65c62adefbe4e7a594fbd52955fb5767997c006b228ee80d97406cfd5df8",
+     "bytes": 2629
+    },
+    {
+     "path": "cases/CTL-C-005/input/initial_message.txt",
+     "sha256": "31b76df1213c57320f2ae28d584c977d6e394883be5a527973033d7ef8690f1e",
+     "bytes": 165
+    },
+    {
+     "path": "cases/CTL-C-005/input/materials.json",
+     "sha256": "c89e557c434ea8f4c63a2e9340749f2326d7a9a4560b822dfff71aa94e1ceb78",
+     "bytes": 383
+    },
+    {
+     "path": "cases/CTL-C-005/input/materials/photo-tablet-screen.jpg",
+     "sha256": "5f3002ba25ecbee94b439b2d0f60135368536f736858bce0932a7875f008e400",
+     "bytes": 225253
+    },
+    {
+     "path": "cases/CTL-C-005/input/materials/policy-schedule.pdf",
+     "sha256": "d2d4754dc6bc214f31742780b437da8d7d512c3f232416dc77330c8c70a3c7d7",
+     "bytes": 2348
+    },
+    {
+     "path": "cases/CTL-C-005/input/materials/receipt-tablet.pdf",
+     "sha256": "fc80760341e10575b52933cb55b077b0e122542a3f9dc7689cf79fe6fd75ba56",
+     "bytes": 2343
+    },
+    {
+     "path": "cases/CTL-C-005/oracle/labels.json",
+     "sha256": "e31056351437663212b0a69ae6126a6e1395f0aa9489e85ea7b8f33d2206a7bd",
+     "bytes": 6197
+    },
+    {
+     "path": "cases/CTL-C-005/provenance.json",
+     "sha256": "48853b3d78d2a50ce0407b4e1c883215dda4029f04d88a82d6ac834bb8b66492",
+     "bytes": 3609
+    },
+    {
+     "path": "cases/CTL-C-005/review.json",
+     "sha256": "8495f8240c9230de02f9d860f5f181f64ccd6737a7be84270c345d28954b9499",
+     "bytes": 2505
+    },
+    {
+     "path": "cases/CTL-C-005/setup.json",
+     "sha256": "6f732d48b3699104ef018d7ebfdd8acce65fd18a3c98f0ed0ea848bd7800839b",
+     "bytes": 366
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-006",
+   "files": [
+    {
+     "path": "cases/CTL-C-006/input/facts.json",
+     "sha256": "07c7576131f169980becddc9b019c4504c1842387b1ef0191051fc4b157d614f",
+     "bytes": 3339
+    },
+    {
+     "path": "cases/CTL-C-006/input/initial_message.txt",
+     "sha256": "8b0f149e63c2a28c7d992f81c4f2a53be600e2f64db51f7bcb69d9f778111c7b",
+     "bytes": 469
+    },
+    {
+     "path": "cases/CTL-C-006/input/materials.json",
+     "sha256": "41d82dbc2e7f7c7687cefc496fef8b06394b6ebc6bc4d4976b7c22d30718e6c8",
+     "bytes": 508
+    },
+    {
+     "path": "cases/CTL-C-006/input/materials/photo-barbecue.jpg",
+     "sha256": "c69cf9c3d5161416a9973a42a78d95e392790c926838bef69d6b8852bb6cf7c7",
+     "bytes": 266932
+    },
+    {
+     "path": "cases/CTL-C-006/input/materials/photo-outdoor-table.jpg",
+     "sha256": "c8cd177d67c721079cea9ecd791f5bf2023f365a1636e4dc22dd301f43ab2cb7",
+     "bytes": 378059
+    },
+    {
+     "path": "cases/CTL-C-006/input/materials/policy-schedule.pdf",
+     "sha256": "050ac77355605e70de586dc10fdc00bf0c08be978154befe4f7ae0ee5216e8e5",
+     "bytes": 2364
+    },
+    {
+     "path": "cases/CTL-C-006/input/materials/receipt-outdoor-furniture.pdf",
+     "sha256": "097ca890b439684483385506eccb840086abdbb4f4cfd471740cd334da1314a7",
+     "bytes": 2479
+    },
+    {
+     "path": "cases/CTL-C-006/oracle/labels.json",
+     "sha256": "504e2449822eae6a5d53a170142977432b2a7ccf5db0bf9ce7bf6c5da98dd32b",
+     "bytes": 6195
+    },
+    {
+     "path": "cases/CTL-C-006/provenance.json",
+     "sha256": "e19e8d7662252a0f5152af1a1ada6a45024678839411126490fbe3a879ea151e",
+     "bytes": 4927
+    },
+    {
+     "path": "cases/CTL-C-006/review.json",
+     "sha256": "444b0ae452c5b3996c7d4f31cb741e9fdb97dcb071ccf68bd67f07ebb06cb5d2",
+     "bytes": 4848
+    },
+    {
+     "path": "cases/CTL-C-006/setup.json",
+     "sha256": "143d7a5558db9734726940181eb9e5dcd3d8b4c646581e5dbedcdba832857963",
+     "bytes": 462
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-007",
+   "files": [
+    {
+     "path": "cases/CTL-C-007/input/facts.json",
+     "sha256": "9ffe22b88b554a00fb5baf52b529e4679a56540b611846a93988cb7f66b089c9",
+     "bytes": 2567
+    },
+    {
+     "path": "cases/CTL-C-007/input/initial_message.txt",
+     "sha256": "cd446358d3d351bd9b86d940d80ad96b52135517d5cc825845d2aefffbe4fbce",
+     "bytes": 265
+    },
+    {
+     "path": "cases/CTL-C-007/input/materials.json",
+     "sha256": "d9f31235e7046eedcfe7dc91f83ea9096972e6cc8105acbeb4095e0b4f0bd7f8",
+     "bytes": 374
+    },
+    {
+     "path": "cases/CTL-C-007/input/materials/photo-phone.jpg",
+     "sha256": "4fee8527de339ac732f13c81a5c8d2ba6e7d3c866411a4513368182189cc7ff4",
+     "bytes": 338297
+    },
+    {
+     "path": "cases/CTL-C-007/input/materials/policy-schedule.pdf",
+     "sha256": "23759fdb869e71b9ddf8c50149113c030ade4f9129e670398612ed26d16932b5",
+     "bytes": 2361
+    },
+    {
+     "path": "cases/CTL-C-007/input/materials/receipt-phone.pdf",
+     "sha256": "e30985bd841fc9702be55bfffe803928d0974e8b48c4778fcf0773bfce0f0ac9",
+     "bytes": 2341
+    },
+    {
+     "path": "cases/CTL-C-007/oracle/labels.json",
+     "sha256": "a5df663750b39e6677d452950ef6ea009bc7401b976e0840f8403272466a08f8",
+     "bytes": 5296
+    },
+    {
+     "path": "cases/CTL-C-007/provenance.json",
+     "sha256": "3e16067bc83626bbd75ff8704804093894e8abf8d4e8741f187455932c76d3db",
+     "bytes": 3450
+    },
+    {
+     "path": "cases/CTL-C-007/review.json",
+     "sha256": "f9156308d663d3c4d5374765c345015d9a06598e4e2f52a373520bff4e2d339e",
+     "bytes": 2576
+    },
+    {
+     "path": "cases/CTL-C-007/setup.json",
+     "sha256": "3c23c45354efd97d82027d9bb28c3f37ff84cbfded6e61705844831fcfa92bc0",
+     "bytes": 157
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-008",
+   "files": [
+    {
+     "path": "cases/CTL-C-008/input/facts.json",
+     "sha256": "5a01ad2ddb8cf36818c48ce745161da1e9fcf61cdbe3ea2c0ce8b482ab6f33db",
+     "bytes": 2662
+    },
+    {
+     "path": "cases/CTL-C-008/input/initial_message.txt",
+     "sha256": "438dbd74469d3eb22034525824a2273da4f4e071619439e1d64246af2e516156",
+     "bytes": 226
+    },
+    {
+     "path": "cases/CTL-C-008/input/materials.json",
+     "sha256": "3651b4ac9fbab03ba6fbc3cc9955f1796efbb75eedcedf7bc5d4cd6f247bebca",
+     "bytes": 372
+    },
+    {
+     "path": "cases/CTL-C-008/input/materials/photo-ring.jpg",
+     "sha256": "0b76261fcb6f599994f4a8557797eda8cde3b635658bca9c834ac6252a6bc5fe",
+     "bytes": 168402
+    },
+    {
+     "path": "cases/CTL-C-008/input/materials/policy-schedule.pdf",
+     "sha256": "0ce35aaee8796aaa4c6002ca7ff0bb769831d7d66b0baf8327b9264b733dbd55",
+     "bytes": 2363
+    },
+    {
+     "path": "cases/CTL-C-008/input/materials/receipt-ring.pdf",
+     "sha256": "9eaa4eb356df6d922c487b47702ac3e1dbbf25e856a8a5b8bf7cc8ec753c7246",
+     "bytes": 2389
+    },
+    {
+     "path": "cases/CTL-C-008/oracle/labels.json",
+     "sha256": "fb2397f790200baffd1a2bb3dff99c8c5c60624957f308352fcfe0d2a76b47da",
+     "bytes": 5281
+    },
+    {
+     "path": "cases/CTL-C-008/provenance.json",
+     "sha256": "d9f5f46cac31801d73c2e49875869fe8286a42c6c63f5651f167b612f71ba41d",
+     "bytes": 3512
+    },
+    {
+     "path": "cases/CTL-C-008/review.json",
+     "sha256": "0fbb0ecdafe30be54094601b9d0029cdefd492f2eeef7b7f0c7b49729aca8762",
+     "bytes": 2611
+    },
+    {
+     "path": "cases/CTL-C-008/setup.json",
+     "sha256": "19f0d4229739ac19a85d9e2e7f043ea939d539fb40d75dc51ce380e924b690e3",
+     "bytes": 393
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-009",
+   "files": [
+    {
+     "path": "cases/CTL-C-009/input/facts.json",
+     "sha256": "81be217104decfce7fefed167dd16c6dda74bf3c572a6c0f7ff33f3d84ff34bc",
+     "bytes": 2589
+    },
+    {
+     "path": "cases/CTL-C-009/input/initial_message.txt",
+     "sha256": "d50e22ab56d454a4de8492bcb88196406943af61a56da54f1158e4d04bbc7531",
+     "bytes": 309
+    },
+    {
+     "path": "cases/CTL-C-009/input/materials.json",
+     "sha256": "6095f0a9b34127ee5ab2d5d2c7b16aa569f4788b25b7a74555ab0a703ae569df",
+     "bytes": 388
+    },
+    {
+     "path": "cases/CTL-C-009/input/materials/photo-canvas-print.jpg",
+     "sha256": "84e69c23c14fe9b5583bbfe3c2a0d377432214a592be748afaf2be6d976c13e7",
+     "bytes": 22465
+    },
+    {
+     "path": "cases/CTL-C-009/input/materials/policy-schedule.pdf",
+     "sha256": "303b8f21f7b517f0cc52cffe75a6a308a1ccdb0b58a9fee505692ebf9798217c",
+     "bytes": 2353
+    },
+    {
+     "path": "cases/CTL-C-009/input/materials/receipt-canvas-print.pdf",
+     "sha256": "2f565fb42541346755136cea033d2ad435f2b38e1e42f5ab1249e150d746f22d",
+     "bytes": 2388
+    },
+    {
+     "path": "cases/CTL-C-009/oracle/labels.json",
+     "sha256": "10349fb713d68481a9b939bbaa93b49760411a23bd6411589e4a1748ee441c51",
+     "bytes": 5399
+    },
+    {
+     "path": "cases/CTL-C-009/provenance.json",
+     "sha256": "5dc5cfd5215b73d7d6b43d81383628c22af9b6ef514bd2f1d810dfb88065c623",
+     "bytes": 4175
+    },
+    {
+     "path": "cases/CTL-C-009/review.json",
+     "sha256": "dca58e80e57e5fa1b65ba7da4a4f7b95574da61958da138bba699bbee6d780cb",
+     "bytes": 2488
+    },
+    {
+     "path": "cases/CTL-C-009/setup.json",
+     "sha256": "4a5687db75246cca3f18680ebffd5d378065eb1858d624266231e09a7c3e838d",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-010",
+   "files": [
+    {
+     "path": "cases/CTL-C-010/input/facts.json",
+     "sha256": "ec3eae0d09b1df9ac78cf011c0142449913a48b20053f8530e8e3b78eea58a48",
+     "bytes": 3023
+    },
+    {
+     "path": "cases/CTL-C-010/input/initial_message.txt",
+     "sha256": "a95b534ada2a5eeecc4e4b80d0eefda09fdaff4aa591a30cf879888d2307a7e4",
+     "bytes": 284
+    },
+    {
+     "path": "cases/CTL-C-010/input/materials.json",
+     "sha256": "5b6b60c8b88e307629891f823a47ecec46c3773a83cd42e6d6be5bd95a461937",
+     "bytes": 388
+    },
+    {
+     "path": "cases/CTL-C-010/input/materials/photo-turntable.jpg",
+     "sha256": "b2a7779943109d4e186d821c430404f970d2a7d7b95ed523df79c252e46ea420",
+     "bytes": 347263
+    },
+    {
+     "path": "cases/CTL-C-010/input/materials/policy-schedule.pdf",
+     "sha256": "38d64c3715eedb3735bfa98020381ea156303111759d53dbbefd1367232e5b31",
+     "bytes": 2363
+    },
+    {
+     "path": "cases/CTL-C-010/input/materials/receipt-turntable-page1.pdf",
+     "sha256": "a7edc228671c608ff0e57c1f2539b4805fb9e0d6e861d76465323f6872bed902",
+     "bytes": 3126
+    },
+    {
+     "path": "cases/CTL-C-010/oracle/labels.json",
+     "sha256": "2150900390600e3b7b15b0e8479ace4ec06e2ecb06b9b785e12ffda60ef7ebcd",
+     "bytes": 6143
+    },
+    {
+     "path": "cases/CTL-C-010/provenance.json",
+     "sha256": "eee0f8e7b6e75422fac109e772ddf52c7d1f9fe3a6ecd35b7caf4674f102f4bd",
+     "bytes": 8374
+    },
+    {
+     "path": "cases/CTL-C-010/review.json",
+     "sha256": "b184891eaa95b40fdfa9cf4060ca9b94ff35d81f72b3e1cce9fe6fa01b89d728",
+     "bytes": 3107
+    },
+    {
+     "path": "cases/CTL-C-010/setup.json",
+     "sha256": "97a0369334951f0ab7a2e08134144d916bc5e67baf39cd5df8418640f91048a2",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-011",
+   "files": [
+    {
+     "path": "cases/CTL-C-011/input/facts.json",
+     "sha256": "b876a81f31aafb914cef0a9c5a0635f8d85e947d41df447c181e5baf54ae14ff",
+     "bytes": 2816
+    },
+    {
+     "path": "cases/CTL-C-011/input/initial_message.txt",
+     "sha256": "8e2c06e13eb4e09ef9225af222fecaa55cda67f4400826a27a45d94bdc720d20",
+     "bytes": 221
+    },
+    {
+     "path": "cases/CTL-C-011/input/materials.json",
+     "sha256": "a3e07ff10fcf54eba02c6474ad99fa4fc531900d79703e34f70d9362ee8098c3",
+     "bytes": 505
+    },
+    {
+     "path": "cases/CTL-C-011/input/materials/photo-dishwasher.jpg",
+     "sha256": "db2d2afbaa8bb65ea034ccca0d26ae19e5c907d0c0e6fdc4471697ee6633d42e",
+     "bytes": 118920
+    },
+    {
+     "path": "cases/CTL-C-011/input/materials/policy-schedule.pdf",
+     "sha256": "05fda5167cc59b7a2626003ca1516c2f18d27f1a7f2c7ca745bcaa48cf5fad4c",
+     "bytes": 2354
+    },
+    {
+     "path": "cases/CTL-C-011/input/materials/receipt-dishwasher.pdf",
+     "sha256": "ab7f24b40ce2deff0e8f942919197198cbcb53bbd6f7987e7dcdac8e20d1b0e6",
+     "bytes": 2379
+    },
+    {
+     "path": "cases/CTL-C-011/input/materials/repair-quote-dishwasher.pdf",
+     "sha256": "f088870dd48bb3aa6d1b7c9dfd5e4a67c884f9c595cc87b57371af4ba5413887",
+     "bytes": 3489
+    },
+    {
+     "path": "cases/CTL-C-011/oracle/labels.json",
+     "sha256": "91b9581f67cdd26d69a0a6499d77ff3298b20707e540601f444844694574ab74",
+     "bytes": 6284
+    },
+    {
+     "path": "cases/CTL-C-011/provenance.json",
+     "sha256": "624bb82aeaa6352cdf4265f6fc8881ba48327761a6fb0bdc3d4139ae5d9f9676",
+     "bytes": 4606
+    },
+    {
+     "path": "cases/CTL-C-011/review.json",
+     "sha256": "bcd593a15433cc77286c2d5f6b4e4e5cd10a2d7af2eaa9cb8dbc57251f7251cd",
+     "bytes": 2537
+    },
+    {
+     "path": "cases/CTL-C-011/setup.json",
+     "sha256": "4e1a1eb9bf3b2497ac7fbe37d8a6a1800aa8230ec96aaf33fa875358ab7877b5",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-012",
+   "files": [
+    {
+     "path": "cases/CTL-C-012/input/facts.json",
+     "sha256": "1497c3bc3afde7e4c7d90f07b7d38b23bb22b1c5dea20ce71e5e278c739d6837",
+     "bytes": 2698
+    },
+    {
+     "path": "cases/CTL-C-012/input/initial_message.txt",
+     "sha256": "53cb4d4a29dff7238a40eb04b88714d35d74451eea10e94fbde496cdeed59f50",
+     "bytes": 201
+    },
+    {
+     "path": "cases/CTL-C-012/input/materials.json",
+     "sha256": "f8d52d50d838d41087f1f1169b4af5ff689bbd518b7244293ab178690f95b5c7",
+     "bytes": 376
+    },
+    {
+     "path": "cases/CTL-C-012/input/materials/photo-laptop.jpg",
+     "sha256": "f00dfbe077de344c620e90969c2c032d02d1a1b80669497917a923e384a5a21a",
+     "bytes": 128519
+    },
+    {
+     "path": "cases/CTL-C-012/input/materials/policy-schedule.pdf",
+     "sha256": "5e5772440ea85b64d5dae9319e1fbbf06d558d7528430f6751c16a6ce0e602d7",
+     "bytes": 2359
+    },
+    {
+     "path": "cases/CTL-C-012/input/materials/receipt-laptop.pdf",
+     "sha256": "f493a60cbc4be3bb102bab85f8d0574c60ed392112659f0170ebc9c8f7af0740",
+     "bytes": 2311
+    },
+    {
+     "path": "cases/CTL-C-012/oracle/labels.json",
+     "sha256": "c335d188d626ee5cf1f11f9667a49a19e0e7b5b5dcb53754a7682d22a2772d79",
+     "bytes": 5579
+    },
+    {
+     "path": "cases/CTL-C-012/provenance.json",
+     "sha256": "92bf3f3cba739ec36f4500ed6a91b5d5806a1947c23ebbb452a2deba3472bc8d",
+     "bytes": 3564
+    },
+    {
+     "path": "cases/CTL-C-012/review.json",
+     "sha256": "1310af193310d422f8e51bc38045bc14532d945a9c026358d6a56c14ed5c6f96",
+     "bytes": 2462
+    },
+    {
+     "path": "cases/CTL-C-012/setup.json",
+     "sha256": "bdbaad1f384b5b97e894c2b0651a1a81195a34c325dad557bd201c722dfd09f7",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-013",
+   "files": [
+    {
+     "path": "cases/CTL-C-013/input/facts.json",
+     "sha256": "bda0f0806047a78fc27012999b3aad451b5abc48ec51b8da551b9d665864d26d",
+     "bytes": 3010
+    },
+    {
+     "path": "cases/CTL-C-013/input/initial_message.txt",
+     "sha256": "a7fa90111e8b0421434436b625ff886c36a5dff490d6b18ef79aad200db4b7db",
+     "bytes": 252
+    },
+    {
+     "path": "cases/CTL-C-013/input/materials.json",
+     "sha256": "62b17211db3f9b3b96bff3851db1e41105527ad2d206650c63045fccb555fe86",
+     "bytes": 498
+    },
+    {
+     "path": "cases/CTL-C-013/input/materials/photo-cut-cable-lock.jpg",
+     "sha256": "153bc7a40c6a8b31d35c5f0ae5885d1ce0ac438e57ff29d1cd13493b162c61ee",
+     "bytes": 180231
+    },
+    {
+     "path": "cases/CTL-C-013/input/materials/police-reference.pdf",
+     "sha256": "7b5cd09d8f38cfbc5ee076f4ffd9d60b99854c95eb1bec36ef4f2a64e24a1fbf",
+     "bytes": 2282
+    },
+    {
+     "path": "cases/CTL-C-013/input/materials/policy-schedule.pdf",
+     "sha256": "e0af779cf56385fe022b8b974ee69500aa1762502b6049b4103bda6f1540e4e0",
+     "bytes": 2359
+    },
+    {
+     "path": "cases/CTL-C-013/input/materials/receipt-ebike.pdf",
+     "sha256": "aaa3e23fbdef5e53b55cad8a329d74c8187586a8604cd6ef4f2195a7d70cfca8",
+     "bytes": 2349
+    },
+    {
+     "path": "cases/CTL-C-013/oracle/labels.json",
+     "sha256": "9e8b0fe88daf7a7c2b7b10d70ca772517d7d50e5c59f320262cd3037dca4dd04",
+     "bytes": 6843
+    },
+    {
+     "path": "cases/CTL-C-013/provenance.json",
+     "sha256": "a9f8feb0b59a56ff2f253a2e157a9ec3e1608d967f41e18ed4e6db4dd86aba47",
+     "bytes": 4528
+    },
+    {
+     "path": "cases/CTL-C-013/review.json",
+     "sha256": "591452c4f8614e50eeb560e238ff44239cb6ee52e5feee21eae62df3f109644a",
+     "bytes": 2446
+    },
+    {
+     "path": "cases/CTL-C-013/setup.json",
+     "sha256": "782026e0518cbe5617728ba3e86770e5fc751ea0274bf47632d799f989ce7a1f",
+     "bytes": 366
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-014",
+   "files": [
+    {
+     "path": "cases/CTL-C-014/input/facts.json",
+     "sha256": "961f7ec4b62c2eb4c86aed6120073b198e70cc0af60031d4acbe50b6b5c1d9f0",
+     "bytes": 4006
+    },
+    {
+     "path": "cases/CTL-C-014/input/initial_message.txt",
+     "sha256": "4d1bbbd78845905de8251fada9501ee9cf8da9c1c3437f2e1e781031bc8e6095",
+     "bytes": 470
+    },
+    {
+     "path": "cases/CTL-C-014/input/materials.json",
+     "sha256": "f8087a90c09cc885232c78782440e811c855500ad5cbb26c8c8dfce9d9c07063",
+     "bytes": 612
+    },
+    {
+     "path": "cases/CTL-C-014/input/materials/photo-back-door-panel.jpg",
+     "sha256": "b7cb3c07d5146de9c140994a639d930fa7149d438ebdce6714203d2a20136be4",
+     "bytes": 171981
+    },
+    {
+     "path": "cases/CTL-C-014/input/materials/police-reference.pdf",
+     "sha256": "7503b29f5dafec4dec9028c4ac924a18724da941e4add5dd7470966c97e58ae8",
+     "bytes": 2317
+    },
+    {
+     "path": "cases/CTL-C-014/input/materials/policy-schedule.pdf",
+     "sha256": "d521e72da7d0e9ec17c4236cd532786295c38b9f1c25b003bbdacf1e6f38992d",
+     "bytes": 2353
+    },
+    {
+     "path": "cases/CTL-C-014/input/materials/receipt-camera-lens.pdf",
+     "sha256": "01a4155951229ac73bd5f0f66ac25068c66e796e5a33d03ed78580f20e9fa1aa",
+     "bytes": 2383
+    },
+    {
+     "path": "cases/CTL-C-014/input/materials/receipt-laptop.pdf",
+     "sha256": "c936e123aa01c212ce2f41a9f784f2830ad2cafd95767c01e6ed37338980e747",
+     "bytes": 2343
+    },
+    {
+     "path": "cases/CTL-C-014/oracle/labels.json",
+     "sha256": "756ff5b9184a64d1c8a1d3186023dae8910b42d09ae337ad1e277ce96002b149",
+     "bytes": 7633
+    },
+    {
+     "path": "cases/CTL-C-014/provenance.json",
+     "sha256": "895cbf8a9fd750d7697e2c2a37ee1c8bd5f3e508d9882cdd3c0c13d68e214728",
+     "bytes": 5687
+    },
+    {
+     "path": "cases/CTL-C-014/review.json",
+     "sha256": "043fa50a8011f79c67b48630d43ec58449e4c363c6d1a5b2e07ccf1c36ec161a",
+     "bytes": 2379
+    },
+    {
+     "path": "cases/CTL-C-014/setup.json",
+     "sha256": "632fe8e7a7dcf74da5c09395d97459256d58e7dadd506f3e69654ee382ff17a8",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-015",
+   "files": [
+    {
+     "path": "cases/CTL-C-015/input/facts.json",
+     "sha256": "61e1c005d25a324004f5ac4cc2ee118fe0349cecb95af7db4bc11fbe8189c88f",
+     "bytes": 2856
+    },
+    {
+     "path": "cases/CTL-C-015/input/initial_message.txt",
+     "sha256": "7909bcdf0b21c4222721484bb02e7fa5fc3258bcb387f9206e3c6b5c641fc8ed",
+     "bytes": 264
+    },
+    {
+     "path": "cases/CTL-C-015/input/materials.json",
+     "sha256": "2ce9f39f6c4042eb148c400b4e3a53d17b204481dcba9971f95bdf98e832b835",
+     "bytes": 382
+    },
+    {
+     "path": "cases/CTL-C-015/input/materials/photo-burnt-sofa-arm.jpg",
+     "sha256": "03f8182ecc2dd6bd4d5adda22923c15ff33f23ddeb39747e62bc23045364d264",
+     "bytes": 249558
+    },
+    {
+     "path": "cases/CTL-C-015/input/materials/policy-schedule.pdf",
+     "sha256": "610e57fe65f9bfedde5a240c4a0ec46fd4eada45eead075af051d6c744df8564",
+     "bytes": 2361
+    },
+    {
+     "path": "cases/CTL-C-015/input/materials/receipt-sofa.pdf",
+     "sha256": "7668bc49e4b84140ccd4b499c5afbe037bda42c0126481d8ce5345b630d09059",
+     "bytes": 2358
+    },
+    {
+     "path": "cases/CTL-C-015/oracle/labels.json",
+     "sha256": "a76f99e9a3a4edc3e1d3e80d68b8d14ed2821e3856f4a343d85d04580fdf044a",
+     "bytes": 6273
+    },
+    {
+     "path": "cases/CTL-C-015/provenance.json",
+     "sha256": "335a3316c8bbfd7637d01a54380cb044de42d920047cff4f63606e99eb7cf9c3",
+     "bytes": 3631
+    },
+    {
+     "path": "cases/CTL-C-015/review.json",
+     "sha256": "69130c0eb1315a8877a5636a4a737458349d4db94e79ad7608b270389e82d415",
+     "bytes": 2571
+    },
+    {
+     "path": "cases/CTL-C-015/setup.json",
+     "sha256": "a48beb63548ff289947e539b98795f86e0a814e10c86abd62f1967440fd99350",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-016",
+   "files": [
+    {
+     "path": "cases/CTL-C-016/input/facts.json",
+     "sha256": "66e9b9b9777ad18afd2c58113eb410fd294b275cc59b488b81b42302c057042a",
+     "bytes": 3710
+    },
+    {
+     "path": "cases/CTL-C-016/input/initial_message.txt",
+     "sha256": "af3e72ed2a3d96f9e00b9fecc63123b90aa57d3332701bae8614c7e30c711850",
+     "bytes": 295
+    },
+    {
+     "path": "cases/CTL-C-016/input/materials.json",
+     "sha256": "810965578f61bef4da934d869c0655b536e8cabee85746a695481652f5f0b7e9",
+     "bytes": 503
+    },
+    {
+     "path": "cases/CTL-C-016/input/materials/photo-forced-sliding-door.jpg",
+     "sha256": "8f222a00fdb42a4db1609066eb4febd918f56d07b163398d86c47b057318eda7",
+     "bytes": 144490
+    },
+    {
+     "path": "cases/CTL-C-016/input/materials/police-reference.pdf",
+     "sha256": "e64bedc9727495560cdf8e1e5a9018fe8a53a5a00186829d1aef5dcaba74598e",
+     "bytes": 2331
+    },
+    {
+     "path": "cases/CTL-C-016/input/materials/policy-schedule.pdf",
+     "sha256": "a3174a6ab902a6a6b47612e5f4e598a7d3e805b620698692871bd644d3c2c74a",
+     "bytes": 2362
+    },
+    {
+     "path": "cases/CTL-C-016/input/materials/receipt-watch.pdf",
+     "sha256": "3a16b0dab98134c54a1305621e467cb953aea4369a0ba32f0cb9179431edc4f3",
+     "bytes": 2378
+    },
+    {
+     "path": "cases/CTL-C-016/oracle/labels.json",
+     "sha256": "6b0b5a87f5fa57ad9b15622d8bd3a3c51f21dbddae19fb942b7cbf6cbf68e52d",
+     "bytes": 7992
+    },
+    {
+     "path": "cases/CTL-C-016/provenance.json",
+     "sha256": "bff0b1b53f64641ba333570e9572745cc30f25a71d54a1155d8bfdb895484236",
+     "bytes": 4599
+    },
+    {
+     "path": "cases/CTL-C-016/review.json",
+     "sha256": "cc806b36e49ac27f4795626afceb2dee73e48e4510858fa3c33da8e38b1f65b0",
+     "bytes": 2467
+    },
+    {
+     "path": "cases/CTL-C-016/setup.json",
+     "sha256": "1624285dc704f977077688413b92e425d9b882ac3c3d83c8435603bfb9ed35c4",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-017",
+   "files": [
+    {
+     "path": "cases/CTL-C-017/input/facts.json",
+     "sha256": "9394ebd333844fd5dd1bd7c3dee4e97aeb50e904793b098569305c75697ba959",
+     "bytes": 4156
+    },
+    {
+     "path": "cases/CTL-C-017/input/initial_message.txt",
+     "sha256": "4e76b1f8672ceb3061de6acac673cc987630cc2ff875e6c73a1eab168ce642e5",
+     "bytes": 320
+    },
+    {
+     "path": "cases/CTL-C-017/input/materials.json",
+     "sha256": "92d7555863d36b5e43463e08ab1293e59141599c9085b693ba5f8cc3e5e2264d",
+     "bytes": 507
+    },
+    {
+     "path": "cases/CTL-C-017/input/materials/photo-garage-side-door.jpg",
+     "sha256": "2a2ae1dd6307d1cd6835af2554d6969c13cf8b0840c5d93f2cae3afca86bf04b",
+     "bytes": 174999
+    },
+    {
+     "path": "cases/CTL-C-017/input/materials/police-reference.pdf",
+     "sha256": "8d2adb0bd34fde075076e6aded374e00b41a2ce86e503eea8c5e1df8dbda1822",
+     "bytes": 2331
+    },
+    {
+     "path": "cases/CTL-C-017/input/materials/policy-schedule.pdf",
+     "sha256": "de43ee9de61819fd82fc4647f1b5f5e78e7ba04467492b522aede7664b482294",
+     "bytes": 2347
+    },
+    {
+     "path": "cases/CTL-C-017/input/materials/receipt-kayak-paddle.pdf",
+     "sha256": "542448a412f9d72935c3ba5911e4bea8f58466c938381080f220f090b82dc02e",
+     "bytes": 2392
+    },
+    {
+     "path": "cases/CTL-C-017/oracle/labels.json",
+     "sha256": "0dd2ef16a9a2b52f0b6e965a5712d0d91663e1967598475b62f86331b65765f3",
+     "bytes": 7635
+    },
+    {
+     "path": "cases/CTL-C-017/provenance.json",
+     "sha256": "a2ae18116fd4a47a4fb25896c2a80ff3a25de65774f579a93748a5b9caee8b4e",
+     "bytes": 4665
+    },
+    {
+     "path": "cases/CTL-C-017/review.json",
+     "sha256": "fcfff6b3fff3b0b35e9cb71fbf3489daf8ac44eb55d972d917819916eceb5484",
+     "bytes": 2513
+    },
+    {
+     "path": "cases/CTL-C-017/setup.json",
+     "sha256": "d176cd36dbe2ceb8779f8c7e148a6d4739e74f755fb4d100ba8baa32e9f7f6a4",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-018",
+   "files": [
+    {
+     "path": "cases/CTL-C-018/input/facts.json",
+     "sha256": "790c6f1ca767b534eb7a9ddf4c8bae86f198f4ad4b0dda1a25b165226edf2151",
+     "bytes": 3142
+    },
+    {
+     "path": "cases/CTL-C-018/input/initial_message.txt",
+     "sha256": "17437f3bdacf7b1637ae7a51b5d8c0f45af7597b06f997c519bec8fde56f8821",
+     "bytes": 253
+    },
+    {
+     "path": "cases/CTL-C-018/input/materials.json",
+     "sha256": "59850f57b60b67e1f5a7f7a6c0a3caa76f3aceb85ca72df74b7144ee6430257d",
+     "bytes": 388
+    },
+    {
+     "path": "cases/CTL-C-018/input/materials/photo-dented-fridge-door.jpg",
+     "sha256": "08bbb69e4a79fd5a6519c2fc4709afcf28df2c227b9e5dd43fcdcc57cdbabc96",
+     "bytes": 115483
+    },
+    {
+     "path": "cases/CTL-C-018/input/materials/policy-schedule.pdf",
+     "sha256": "3ab28b649bcb09bfd670a32998873d23b3d0d8f314975bfb5f9cd28f33736682",
+     "bytes": 2364
+    },
+    {
+     "path": "cases/CTL-C-018/input/materials/receipt-fridge.pdf",
+     "sha256": "c56489e7c7f93bc8f6f4f70a1868cff8c504c5dcd927fd358adbb4fd60b899d6",
+     "bytes": 2394
+    },
+    {
+     "path": "cases/CTL-C-018/oracle/labels.json",
+     "sha256": "fb3e5025f31f91f7f578ca989ea69f0fe9158ee1d7a5c98a53ef8614d5cd4b5f",
+     "bytes": 6364
+    },
+    {
+     "path": "cases/CTL-C-018/provenance.json",
+     "sha256": "205b01ae6a41cf4b4d9994a77f194e95ecca1b7aa17c8354aeb7a77e5a6d19c2",
+     "bytes": 3898
+    },
+    {
+     "path": "cases/CTL-C-018/review.json",
+     "sha256": "a939df36f3f1ff41051b870ed4dd0c9631546ddd99f4c3580c3a95e63e6d15d6",
+     "bytes": 2533
+    },
+    {
+     "path": "cases/CTL-C-018/setup.json",
+     "sha256": "4a60bd1f2a0ca07a0f3da67c1f3cf8b153eece122b6609667815d7e9f3f26dea",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-019",
+   "files": [
+    {
+     "path": "cases/CTL-C-019/input/facts.json",
+     "sha256": "1ddd1f5d9c55a57fbd0b2d29762d348814f8cce1838758470d010272b30ffc5f",
+     "bytes": 3647
+    },
+    {
+     "path": "cases/CTL-C-019/input/initial_message.txt",
+     "sha256": "02bf4968c5d180828ce0db366524e23e66fa98ab4ed431eeda6b5d40d5808d6d",
+     "bytes": 201
+    },
+    {
+     "path": "cases/CTL-C-019/input/materials.json",
+     "sha256": "9a5f10f76359f3b32f4a795276d25ab4a539439875ecf6a87784ec47af651bbe",
+     "bytes": 620
+    },
+    {
+     "path": "cases/CTL-C-019/input/materials/photo-bedroom-window.jpg",
+     "sha256": "ca8e2cad8aa3729331737d81218c58c7f73b6e2db1a475b7edb63f0964284553",
+     "bytes": 185249
+    },
+    {
+     "path": "cases/CTL-C-019/input/materials/police-reference.pdf",
+     "sha256": "799715bbcf90fc1983d0468bf99384bfb447b8b1a598af1b94a5b1364f85e863",
+     "bytes": 2302
+    },
+    {
+     "path": "cases/CTL-C-019/input/materials/policy-schedule.pdf",
+     "sha256": "c08e7fc2c05de7b4114c58261211778da31c53d65c10047dc2ee10f3f58f94ad",
+     "bytes": 2363
+    },
+    {
+     "path": "cases/CTL-C-019/input/materials/receipt-laptop.pdf",
+     "sha256": "1d11f53ecf376cf8fc12c4a510c0b309f135e2554075cdcd8cc75fbceedde950",
+     "bytes": 2348
+    },
+    {
+     "path": "cases/CTL-C-019/input/materials/ring-valuation-notice.pdf",
+     "sha256": "5b6ef13a4639fe5cc06550acd5c5a2c86ea2e5491ce8c71385104e5e2686ad43",
+     "bytes": 2183
+    },
+    {
+     "path": "cases/CTL-C-019/oracle/labels.json",
+     "sha256": "1b335bd17b84266dea0c91cf07cbad784bfc6d9ab768da41dcb28f09f9c07ca3",
+     "bytes": 6293
+    },
+    {
+     "path": "cases/CTL-C-019/provenance.json",
+     "sha256": "69bfc460391120b719998adc64a6e684f318df2d24d9de3676dd14dcde1528d5",
+     "bytes": 5290
+    },
+    {
+     "path": "cases/CTL-C-019/review.json",
+     "sha256": "e9806a7886991ea7f34a1a3e4d425f59f56e9dbe73b7e62bbf0d13df293c4067",
+     "bytes": 2498
+    },
+    {
+     "path": "cases/CTL-C-019/setup.json",
+     "sha256": "111003edd763e13391f370500394f1e5d3175daffa885082c6135b6527b083cb",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-020",
+   "files": [
+    {
+     "path": "cases/CTL-C-020/input/facts.json",
+     "sha256": "480433e4015f2c9811bb5f88576200200deed2773d940543d7e87b078234acb5",
+     "bytes": 4153
+    },
+    {
+     "path": "cases/CTL-C-020/input/initial_message.txt",
+     "sha256": "bec176f501942199a7e7af430725b475389843ad720184c0b10f2598f5f999dd",
+     "bytes": 324
+    },
+    {
+     "path": "cases/CTL-C-020/input/materials.json",
+     "sha256": "43faa03037391574f91303d726eef7de7cb8a0909cf70b75ab55c97f7ed80b7b",
+     "bytes": 623
+    },
+    {
+     "path": "cases/CTL-C-020/input/materials/photo-water-damaged-computer.jpg",
+     "sha256": "c53c7a0eb2c23ac94bc8214f3938e92b158b43a9aa991fe48ca0bd490052388d",
+     "bytes": 163700
+    },
+    {
+     "path": "cases/CTL-C-020/input/materials/photo-water-damaged-desk.jpg",
+     "sha256": "7c2da6106c0da05c4247b3f71ff647200f72a87f96eb9ec844e3d97f655b11b9",
+     "bytes": 253129
+    },
+    {
+     "path": "cases/CTL-C-020/input/materials/policy-schedule.pdf",
+     "sha256": "0432b70b0c78b7f712d52d6f8e0a601b712ef395207e1cc502202d23a1161cd0",
+     "bytes": 2362
+    },
+    {
+     "path": "cases/CTL-C-020/input/materials/receipt-computer.pdf",
+     "sha256": "6a7b28d369bf76d2a34751fa6d073bdaf748251d0b06e271a660fbb94f9758f9",
+     "bytes": 2353
+    },
+    {
+     "path": "cases/CTL-C-020/input/materials/receipt-desk.pdf",
+     "sha256": "ef55b4ffec04e6601a3758e4ad00abd46c6d1637672b2267f3029fc868e9fd96",
+     "bytes": 2362
+    },
+    {
+     "path": "cases/CTL-C-020/oracle/labels.json",
+     "sha256": "23e3e24f735948ef941cd20d9c436013a38cfe7259af78746d613ba5e0d1bbb0",
+     "bytes": 6624
+    },
+    {
+     "path": "cases/CTL-C-020/provenance.json",
+     "sha256": "e9c6f3cfdb9f38d01cde1e285a9dd2961208f4b1836ce80ee3433208771a5818",
+     "bytes": 6123
+    },
+    {
+     "path": "cases/CTL-C-020/review.json",
+     "sha256": "1645f5862808989766b35d23c75867f55245cf9ee9349f0ce626bdc59275aedc",
+     "bytes": 5306
+    },
+    {
+     "path": "cases/CTL-C-020/setup.json",
+     "sha256": "15da09acaf3958247dbeaeec4de572d1c15dec0ad3ed3633eaa08956cfd7e7ce",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-001",
+   "files": [
+    {
+     "path": "cases/CTL-H-001/input/facts.json",
+     "sha256": "c55c68dd08c791ebd6e189e81705c173926df48e90c645c9cd7de1acec72bce9",
+     "bytes": 3399
+    },
+    {
+     "path": "cases/CTL-H-001/input/initial_message.txt",
+     "sha256": "adacadc6c7a8785adbe9ddd0f206076815002e6a94bcf35abbaaa54ea61a3bf6",
+     "bytes": 495
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials.json",
+     "sha256": "18e662e9740f54fed5027c469e1ea3127c939cfb20500ac4208f33ae861914d9",
+     "bytes": 758
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/builder-quote.pdf",
+     "sha256": "2f38af08a9836ac4cef5fda29e3b885f8a18d387d428707fbbb0468b5aabde22",
+     "bytes": 3761
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/locksmith-attendance-note.pdf",
+     "sha256": "8d133f18b7c4093d2c39b1faf775febea4b9c492ae8bf7274c151054e6992033",
+     "bytes": 2435
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/photo-back-door-jamb.jpg",
+     "sha256": "efd1489574dfb13ea8ce0c680960a453006c3e71178282723f680589f6c98617",
+     "bytes": 135618
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/photo-back-door-lock.jpg",
+     "sha256": "e2792f4468dd4346132fc4ad112de1ef2b761ec95aebe3cca54dbeed1c45a9d0",
+     "bytes": 196553
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/police-report-confirmation.pdf",
+     "sha256": "cb70d327f4727eb4e954884a6e8253137a63e5e91cb11bb79a23e2fd0eb565fa",
+     "bytes": 2289
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/policy-schedule.pdf",
+     "sha256": "32889ae36fa2f3aa9fd32811864e24111aa8745920609342d9213dd028965494",
+     "bytes": 2389
+    },
+    {
+     "path": "cases/CTL-H-001/oracle/labels.json",
+     "sha256": "c138849526de1c34e5a9eae9627c6969c1dd6fd71ebd223819809661f1dfe261",
+     "bytes": 6999
+    },
+    {
+     "path": "cases/CTL-H-001/provenance.json",
+     "sha256": "e8119e19908c0b6360857938e1acb1c9e14e3dbcf5d053e3a29f5d7d4f8c4f77",
+     "bytes": 6852
+    },
+    {
+     "path": "cases/CTL-H-001/review.json",
+     "sha256": "fe24f74c8f3ce01136ed7553eda54228251337db9d65e7fc1a56af6003b1f271",
+     "bytes": 4959
+    },
+    {
+     "path": "cases/CTL-H-001/setup.json",
+     "sha256": "02ae98498ad6223133c251c62e059ec616490e58c73527862e8f17f52869d884",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-002",
+   "files": [
+    {
+     "path": "cases/CTL-H-002/input/facts.json",
+     "sha256": "8b773d411dd8b82a36ebb7786c2bb2f374ce4e42596ab8e4bf5bb5aef6737833",
+     "bytes": 3076
+    },
+    {
+     "path": "cases/CTL-H-002/input/initial_message.txt",
+     "sha256": "48c0c4420dd1fc52404ebe2160dcf78c0f8b61f7af61fbbb401c540c56fbdbfc",
+     "bytes": 283
+    },
+    {
+     "path": "cases/CTL-H-002/input/materials.json",
+     "sha256": "678c93dbdd093ba478dc51b484f7408be402ed81137324fdb0d3737d68ad5f57",
+     "bytes": 634
+    },
+    {
+     "path": "cases/CTL-H-002/input/materials/glass-quote.pdf",
+     "sha256": "dd773e56502c43cce1c4e070be63e4076b71e5f65ee46600594725d5ba6696fa",
+     "bytes": 1444
+    },
+    {
+     "path": "cases/CTL-H-002/input/materials/glazier-attendance-note.pdf",
+     "sha256": "3361dc1d92f4fe8d019cd0478b54f7288c6c57d406a4fd49e6209bbfab2ac902",
+     "bytes": 2420
+    },
+    {
+     "path": "cases/CTL-H-002/input/materials/photo-laundry-window.jpg",
+     "sha256": "1527f12d4f51e964297e4780cbf5ce9241336bcbd0c26be87970dd9dfb24e2c4",
+     "bytes": 244174
+    },
+    {
+     "path": "cases/CTL-H-002/input/materials/police-report-confirmation.pdf",
+     "sha256": "15342bc4cb666c735e151a80191e388161ad3415d763372f96ec136dc06aa522",
+     "bytes": 2292
+    },
+    {
+     "path": "cases/CTL-H-002/input/materials/policy-schedule.pdf",
+     "sha256": "e19e21c2567903773b688063812b7cd883a99e3ad41254ff8209066d17e633cc",
+     "bytes": 2381
+    },
+    {
+     "path": "cases/CTL-H-002/oracle/labels.json",
+     "sha256": "81153359e14660d24f0aed4d8a7a5bb810d302da294b91b560fabef356439519",
+     "bytes": 6720
+    },
+    {
+     "path": "cases/CTL-H-002/provenance.json",
+     "sha256": "6d7e8dae7431371d479a0350dd9948e040da753c0cc72bb8cfc804d770086935",
+     "bytes": 6347
+    },
+    {
+     "path": "cases/CTL-H-002/review.json",
+     "sha256": "17a298e61eaa062b9630393ba2ec51d783e0657a2cd3b5b037eb3d4655cb2279",
+     "bytes": 2519
+    },
+    {
+     "path": "cases/CTL-H-002/setup.json",
+     "sha256": "a075eecf8cabd19aa327bfe1af6978ec109587e6871ae4bd185ad53c7457f15d",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-003",
+   "files": [
+    {
+     "path": "cases/CTL-H-003/input/facts.json",
+     "sha256": "de5dfc7d6d5081c9636679f0be9e8c72c4f06c0a4f4e0b5890e20043d1ae419d",
+     "bytes": 2740
+    },
+    {
+     "path": "cases/CTL-H-003/input/initial_message.txt",
+     "sha256": "4e8d0a2e8487bce383a1fb4867d079bec4f5af811e6707aa94356f6fecf96ee3",
+     "bytes": 278
+    },
+    {
+     "path": "cases/CTL-H-003/input/materials.json",
+     "sha256": "95323dd0fec3ec301271e4372c9d3ee6f5239ddff73bd49c8b7710cbc101ee67",
+     "bytes": 510
+    },
+    {
+     "path": "cases/CTL-H-003/input/materials/builder-quote.pdf",
+     "sha256": "26a9b15ff1bef1acb5b6052259086285cc23234f5fb582958aa08ef68c07bd71",
+     "bytes": 3593
+    },
+    {
+     "path": "cases/CTL-H-003/input/materials/photo-garage-door.tif",
+     "sha256": "4a0e2c9c4b38339c546f28e4132df2aeab4c668de5f129df48e974aea08b5060",
+     "bytes": 3327116
+    },
+    {
+     "path": "cases/CTL-H-003/input/materials/police-report-confirmation.pdf",
+     "sha256": "f416ab87cc1c9cb304cc89dd188a49a10ab33de8711b1f410a941e0519743bbb",
+     "bytes": 2256
+    },
+    {
+     "path": "cases/CTL-H-003/input/materials/policy-schedule.pdf",
+     "sha256": "c9fdace2fa31290d3c8c8c6d4c27eaf9315146d60cd23cac05002f1fecd9d714",
+     "bytes": 2387
+    },
+    {
+     "path": "cases/CTL-H-003/oracle/labels.json",
+     "sha256": "ee853e0f9b1a0a0159ad59ad6fcf2550506af212866358de5190d5c3ca7b9cf0",
+     "bytes": 6652
+    },
+    {
+     "path": "cases/CTL-H-003/provenance.json",
+     "sha256": "3ca926b108be7fc24f4ede296cf2303cd6fb4b3132a3b16ea24ca1ad3f26bd06",
+     "bytes": 5274
+    },
+    {
+     "path": "cases/CTL-H-003/review.json",
+     "sha256": "17472d0617f1e801a98c03a113fd9f3939e15c07a0e6334d1e007be213b067e5",
+     "bytes": 797
+    },
+    {
+     "path": "cases/CTL-H-003/setup.json",
+     "sha256": "3be0a7d87ea71b12b06778854f7e059b68993d79edf930c0c9c35c19105e6d8f",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-004",
+   "files": [
+    {
+     "path": "cases/CTL-H-004/input/facts.json",
+     "sha256": "47b4ce29fdadace1732acd8e19861e08695c347346773ade61384c4972d2b807",
+     "bytes": 3452
+    },
+    {
+     "path": "cases/CTL-H-004/input/initial_message.txt",
+     "sha256": "dbb55386bb002afde37752e9334ab0e6af4a5b0d607ee150fa537d86b9c37e99",
+     "bytes": 435
+    },
+    {
+     "path": "cases/CTL-H-004/input/materials.json",
+     "sha256": "fa21108df0f3ee3f2add39cec2c781fdc2568443f692bd0410d99bb8fa369b75",
+     "bytes": 646
+    },
+    {
+     "path": "cases/CTL-H-004/input/materials/glazier-attendance-note.pdf",
+     "sha256": "a93eaeb2ce954610db33cda4610db829299268d9d78fb84671b14359fc3d7025",
+     "bytes": 2524
+    },
+    {
+     "path": "cases/CTL-H-004/input/materials/photo-french-doors.jpg",
+     "sha256": "933f8b7d397555e0ff5d069aa193fd9a43d8fbe5c2292cc2513ba97da4dc2c87",
+     "bytes": 220172
+    },
+    {
+     "path": "cases/CTL-H-004/input/materials/police-report-confirmation.pdf",
+     "sha256": "bca4b9a86ed1e0c1ec0c9822c9968e7faea193673ac62d47d8c72a7856917f70",
+     "bytes": 2312
+    },
+    {
+     "path": "cases/CTL-H-004/input/materials/policy-schedule.pdf",
+     "sha256": "cb80cb4d032d2273ff6b92e28f6cd78e54d985b8c2a2a924d35edace890c0632",
+     "bytes": 2391
+    },
+    {
+     "path": "cases/CTL-H-004/input/materials/quote-not-yet-available.pdf",
+     "sha256": "9fc5b1497ea69f77d40949714da0f9d3428cb6e6acf4d17375c9ddb925199839",
+     "bytes": 2227
+    },
+    {
+     "path": "cases/CTL-H-004/oracle/labels.json",
+     "sha256": "2faa9f59da48cf752d004ed6dabb395f69e5701b892ddc0153cb741fdee8a596",
+     "bytes": 6949
+    },
+    {
+     "path": "cases/CTL-H-004/provenance.json",
+     "sha256": "5cf91987fa97a570dd7eccbaf023090ce7fdc4e7968b0b39167355cc090f4a93",
+     "bytes": 5400
+    },
+    {
+     "path": "cases/CTL-H-004/review.json",
+     "sha256": "883ef16a84015c788160e9cbb6b87d6030276090621cd04f143d0e0cb00bd261",
+     "bytes": 2650
+    },
+    {
+     "path": "cases/CTL-H-004/setup.json",
+     "sha256": "f113d504a8a4ddb2b274b0aa9747b12e73f121c9a32b4f8f6a285c908816595d",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-005",
+   "files": [
+    {
+     "path": "cases/CTL-H-005/input/facts.json",
+     "sha256": "6da3809dbd7212ae326c292cc009073b6ff7b86426317aa95e9554f7733ad41f",
+     "bytes": 3373
+    },
+    {
+     "path": "cases/CTL-H-005/input/initial_message.txt",
+     "sha256": "5d6bdf0fc9807baf3421b32f9669ddcc036e065851d89ade11ae3d82792b3e9c",
+     "bytes": 297
+    },
+    {
+     "path": "cases/CTL-H-005/input/materials.json",
+     "sha256": "0a4e88dc311cb2c0ebcf8df4d539e865c316148d53d15abbbbde2250bb5e39a1",
+     "bytes": 764
+    },
+    {
+     "path": "cases/CTL-H-005/input/materials/builder-quote.pdf",
+     "sha256": "420887881d4d7744fb8d8eaf4f1431d822b87718bf10f194f181644124973c0f",
+     "bytes": 3782
+    },
+    {
+     "path": "cases/CTL-H-005/input/materials/locksmith-attendance-note.pdf",
+     "sha256": "1c6acb7d2a4c5fe05ba109a5fafb695b2eebc50f96a38127f2071a8df950dc73",
+     "bytes": 2422
+    },
+    {
+     "path": "cases/CTL-H-005/input/materials/photo-front-door-lock.jpg",
+     "sha256": "19fc7d27ff5b5c36d15a3f0a2af0ee1473e5a59850cb700ee8abd0e5fa9e8aea",
+     "bytes": 263830
+    },
+    {
+     "path": "cases/CTL-H-005/input/materials/photo-front-door-sidelight.jpg",
+     "sha256": "acbdaaf5f3acb310891fa38d3ceb7b7d68ef4fd1572c69702ef23b2e5229afd8",
+     "bytes": 342806
+    },
+    {
+     "path": "cases/CTL-H-005/input/materials/police-reference-pending.pdf",
+     "sha256": "0ceb66bd8d204e782437dd1fa65e9f221a4efb24e4b0f21df1ddf6adf97f4fb2",
+     "bytes": 2174
+    },
+    {
+     "path": "cases/CTL-H-005/input/materials/policy-schedule.pdf",
+     "sha256": "433b244b2364499a9aefd79e82e70ee2d24c6b7641ebb9f4861ad0f2f466b3e0",
+     "bytes": 2388
+    },
+    {
+     "path": "cases/CTL-H-005/oracle/labels.json",
+     "sha256": "eaaf9ef51a54ae3eb4b8ea06b5a8f5591923d4d739027023c08406e803aba941",
+     "bytes": 6646
+    },
+    {
+     "path": "cases/CTL-H-005/provenance.json",
+     "sha256": "81a5f4fda78b427b81c4c5816f748aebc70edfe0869a090285c623a077546ae5",
+     "bytes": 6684
+    },
+    {
+     "path": "cases/CTL-H-005/review.json",
+     "sha256": "489bbdda7c88b520ca6dd7f9df5c899ca1fe12c1a1b23c54ea04e12c13d9ae56",
+     "bytes": 4895
+    },
+    {
+     "path": "cases/CTL-H-005/setup.json",
+     "sha256": "f4eebf6c11dd5f94bd124e96b66a65f5358e3f37fb16a30eb048bc1e0a6c9ad0",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-006",
+   "files": [
+    {
+     "path": "cases/CTL-H-006/input/facts.json",
+     "sha256": "bbed8c555b99e9bf0f62a1fa65d7eb1253a70b0a3ba01fff75f17c12da4d38b8",
+     "bytes": 3132
+    },
+    {
+     "path": "cases/CTL-H-006/input/initial_message.txt",
+     "sha256": "c06def7a36d73ff82477f815a72adc8e1324ac859531250b71c3bff3264b8e61",
+     "bytes": 354
+    },
+    {
+     "path": "cases/CTL-H-006/input/materials.json",
+     "sha256": "4ffa3d147127b464a9ac6efa533e1322e28f3f513db089e9a06d23375da8ff21",
+     "bytes": 634
+    },
+    {
+     "path": "cases/CTL-H-006/input/materials/glazier-attendance-note.pdf",
+     "sha256": "513a3ddf2ff7fdad4a219b333ca557360712da84c0c8bee25c2caedfbe85dbe1",
+     "bytes": 2427
+    },
+    {
+     "path": "cases/CTL-H-006/input/materials/glazier-quote.pdf",
+     "sha256": "2f02816bf96ae2712bdec10ab8d2ceae1c65a883e78cb5afd956d3c3c2a264c1",
+     "bytes": 3634
+    },
+    {
+     "path": "cases/CTL-H-006/input/materials/photo-ranch-slider.jpg",
+     "sha256": "0ece355dd1e74bc714a382e73f833f33ee7d4324334716a30e4f51ef9f7e77a9",
+     "bytes": 295779
+    },
+    {
+     "path": "cases/CTL-H-006/input/materials/police-report-confirmation.pdf",
+     "sha256": "8634bcacac1644722a913a33fb3110ee6b637052e3b78985eee2ed14efeb8c50",
+     "bytes": 2298
+    },
+    {
+     "path": "cases/CTL-H-006/input/materials/policy-schedule.pdf",
+     "sha256": "42cceb8b6d35147c22b71dc0776470562f7e46739c6e563c336f00a22e6e9118",
+     "bytes": 2388
+    },
+    {
+     "path": "cases/CTL-H-006/oracle/labels.json",
+     "sha256": "b16691d00e57c081aa504a3f4fb00da2463b2eda1d77d15f274894b7e58eab52",
+     "bytes": 6649
+    },
+    {
+     "path": "cases/CTL-H-006/provenance.json",
+     "sha256": "10297357e7541c872b53080a7ef9037b26b392c1a7dc332072bafccef91f4136",
+     "bytes": 5519
+    },
+    {
+     "path": "cases/CTL-H-006/review.json",
+     "sha256": "1f63ed49651ec7d36a47ecb7e97fd2e9d425ff661f5cb8dd17ba7b353f9512f2",
+     "bytes": 2559
+    },
+    {
+     "path": "cases/CTL-H-006/setup.json",
+     "sha256": "5dfb094d8f24b931855434aebea2c24800ca5950cd3980e13caac9d5aa260a3e",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-007",
+   "files": [
+    {
+     "path": "cases/CTL-H-007/input/facts.json",
+     "sha256": "74da4ff255f57786b1b0c34c534bda2bebb608cd37f5c0392d4d30040acb3d29",
+     "bytes": 2584
+    },
+    {
+     "path": "cases/CTL-H-007/input/initial_message.txt",
+     "sha256": "637a665d74d905f2270086046cc5a82f931923732e481aef21a275e328211389",
+     "bytes": 254
+    },
+    {
+     "path": "cases/CTL-H-007/input/materials.json",
+     "sha256": "bed9ddd7584bc3fea90e70c83835a08024d052748b48ca7437ff87e8aa67a8ab",
+     "bytes": 513
+    },
+    {
+     "path": "cases/CTL-H-007/input/materials/builder-quote.pdf",
+     "sha256": "3fc7baa005e7ef4e4053b1deefa3e4913af2911127ca661cd36182508d46d8ab",
+     "bytes": 3603
+    },
+    {
+     "path": "cases/CTL-H-007/input/materials/photo-bedroom-window.jpg",
+     "sha256": "ec77665422dbb37817db06c459f13ad2eee8cf159ed7bff66f8378e05bcd6195",
+     "bytes": 213682
+    },
+    {
+     "path": "cases/CTL-H-007/input/materials/police-report-confirmation.pdf",
+     "sha256": "f2827578749deb9751cb266db61a2da50724de91f18a2bc2171b2a0a45de33dd",
+     "bytes": 2276
+    },
+    {
+     "path": "cases/CTL-H-007/input/materials/policy-schedule.pdf",
+     "sha256": "4d0e74b95b88a1aa9d9b5ebe5f356eef8597fc2b087f58224dc0e4fc85e9f70d",
+     "bytes": 2393
+    },
+    {
+     "path": "cases/CTL-H-007/oracle/labels.json",
+     "sha256": "bd20ea3bd4659578c659fb3222e6ce212508ab45c1122deeb65c998c5f77df2b",
+     "bytes": 6269
+    },
+    {
+     "path": "cases/CTL-H-007/provenance.json",
+     "sha256": "a793cccf92502754c17746a80bdbe25a5ea6b7c5fbfbc1e408a0e7b5a46825e1",
+     "bytes": 4549
+    },
+    {
+     "path": "cases/CTL-H-007/review.json",
+     "sha256": "fe088ddf11f53e54174e94e99f6bc8137ec63a3d85b348851b4fbf089cbfea99",
+     "bytes": 2550
+    },
+    {
+     "path": "cases/CTL-H-007/setup.json",
+     "sha256": "a22c4c91ccdca7ffbf4238ff8869d6797bff4e9773341da913507e67fefb8178",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-008",
+   "files": [
+    {
+     "path": "cases/CTL-H-008/input/facts.json",
+     "sha256": "d9db003d3c08d51534fb78304a74e5392e984bafd10a52c9b98286922c5b1d2b",
+     "bytes": 2586
+    },
+    {
+     "path": "cases/CTL-H-008/input/initial_message.txt",
+     "sha256": "bc40c7fd007d4dcb3eed8b6ae0e81c34b65b55310104aa880f7f30f6b6f360cc",
+     "bytes": 263
+    },
+    {
+     "path": "cases/CTL-H-008/input/materials.json",
+     "sha256": "1129748ca46a5a2d97250cb34a1e0adf429445d7941e3f6579959185eb1cfe06",
+     "bytes": 630
+    },
+    {
+     "path": "cases/CTL-H-008/input/materials/glass-quote.pdf",
+     "sha256": "a93017a304fa7b40d38aaa655d9b305e7b3ee1e080113105748ab2d7aeb28752",
+     "bytes": 3562
+    },
+    {
+     "path": "cases/CTL-H-008/input/materials/photo-broken-louvres.jpg",
+     "sha256": "790155bb7e748f5a349b6cd21bcc59977925a3d5878c5d7130f3395e1a1acbfa",
+     "bytes": 383795
+    },
+    {
+     "path": "cases/CTL-H-008/input/materials/photo-louvre-window.jpg",
+     "sha256": "4630d36faac3324b024a49032851025f691925d1683f03f2d7f60b5a8293cbb9",
+     "bytes": 299473
+    },
+    {
+     "path": "cases/CTL-H-008/input/materials/police-report-confirmation.pdf",
+     "sha256": "26c14098a69d84bb28cc434e0c68ec679f4f873dfc85abde61efdef6d54d19a4",
+     "bytes": 2257
+    },
+    {
+     "path": "cases/CTL-H-008/input/materials/policy-schedule.pdf",
+     "sha256": "290b428886aa3fea5f6f1a8b9bbcc06faab8b15994f1f8a3f773fc09b364ab4d",
+     "bytes": 2372
+    },
+    {
+     "path": "cases/CTL-H-008/oracle/labels.json",
+     "sha256": "afe6d28bd8eb863ddf0fdf76c23f5c09e1c3c4e8a9024f21f6bada94d9890e33",
+     "bytes": 6607
+    },
+    {
+     "path": "cases/CTL-H-008/provenance.json",
+     "sha256": "da7bed224e759f907dcbb4eb7b37fac559e128981bc4856adfcd83fd8778bcb3",
+     "bytes": 5951
+    },
+    {
+     "path": "cases/CTL-H-008/review.json",
+     "sha256": "63ea8fef3ed9ab9377e7ac936a147f48e6d0ef374c9ae06b43e9f18cc97d6b9d",
+     "bytes": 5694
+    },
+    {
+     "path": "cases/CTL-H-008/setup.json",
+     "sha256": "b84c503520410aa66c36b4240306716262ec7d4eed720a334cbe11522e6129b2",
+     "bytes": 362
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-009",
+   "files": [
+    {
+     "path": "cases/CTL-H-009/input/facts.json",
+     "sha256": "85bef9136d399cdd29223ac0e90c39ef20bbaba11fdefa06ae8d556d52eec60b",
+     "bytes": 3157
+    },
+    {
+     "path": "cases/CTL-H-009/input/initial_message.txt",
+     "sha256": "6c2db7714b96985448d4668efd96214787b18d9c15741be9758277029a62e819",
+     "bytes": 569
+    },
+    {
+     "path": "cases/CTL-H-009/input/materials.json",
+     "sha256": "10be879fcbcb0d0be631add42b6daf96f94b17966eef4853f9ae92fee8e886e9",
+     "bytes": 497
+    },
+    {
+     "path": "cases/CTL-H-009/input/materials/attendance-note.pdf",
+     "sha256": "84e1138c21e1791519b8ac0ea095ef219978df6769169eac23c96ab92ad781b0",
+     "bytes": 2469
+    },
+    {
+     "path": "cases/CTL-H-009/input/materials/photo-roof.tif",
+     "sha256": "cd36bf70e8e6ec804202a947567c35da439840b1a71a2352fd52051622bff2df",
+     "bytes": 3327116
+    },
+    {
+     "path": "cases/CTL-H-009/input/materials/policy-schedule.pdf",
+     "sha256": "b565fe8210941c03b6d55696dcc0ed5e05d4300c89694aed82aeac4d74e75164",
+     "bytes": 2389
+    },
+    {
+     "path": "cases/CTL-H-009/input/materials/roof-repair-quote.pdf",
+     "sha256": "258fdfb8892b19f8a9558c9b1e493dba306fff1d22d0703c4569b46e2c4f974d",
+     "bytes": 3722
+    },
+    {
+     "path": "cases/CTL-H-009/oracle/labels.json",
+     "sha256": "efe6399072cf29f338092ba45882b57341d6467427b82a6505034ee6cafc964d",
+     "bytes": 6677
+    },
+    {
+     "path": "cases/CTL-H-009/provenance.json",
+     "sha256": "8dc0dbbe4297ed525a0eaacafc58c1e510acbf83b8fdf4092ba14c12fbbb0eaa",
+     "bytes": 5424
+    },
+    {
+     "path": "cases/CTL-H-009/review.json",
+     "sha256": "def6ada1d5412368aedfb61800c8e00bb8b2fa783f63fe929899b9e1d45282e3",
+     "bytes": 821
+    },
+    {
+     "path": "cases/CTL-H-009/setup.json",
+     "sha256": "84ae7924b63e8d2fb05fb57a3610345c72d0d654fdd45aa474dee93cd48151fa",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-010",
+   "files": [
+    {
+     "path": "cases/CTL-H-010/input/facts.json",
+     "sha256": "d5a48891bd84c8cedd1934808195ee0ea71e2c5f398ab444564bdd8cc06b2673",
+     "bytes": 2616
+    },
+    {
+     "path": "cases/CTL-H-010/input/initial_message.txt",
+     "sha256": "f6c2ec889bfd022c0c1c0d159504cd9208c530da3ba9255dadac11fa62ffe555",
+     "bytes": 290
+    },
+    {
+     "path": "cases/CTL-H-010/input/materials.json",
+     "sha256": "bb6c49630e3bd0625743e2c81cff6d07db9ff479df723f76083322cd91e6d22a",
+     "bytes": 388
+    },
+    {
+     "path": "cases/CTL-H-010/input/materials/builder-quote.pdf",
+     "sha256": "f815c20ac72425d18df4d140cad7c6f16cee8f4bae5feec07b9d85085535c2ec",
+     "bytes": 3640
+    },
+    {
+     "path": "cases/CTL-H-010/input/materials/photo-lounge-ceiling.jpg",
+     "sha256": "c154e1d666fa874ef66494caa6ef02ddf0edd61cd04620c9e99effcf1ed314e2",
+     "bytes": 125556
+    },
+    {
+     "path": "cases/CTL-H-010/input/materials/policy-schedule.pdf",
+     "sha256": "e6a1589a72b5fc6cae170d7b5545b37002f559f5eba607bb54e54eb2a6987069",
+     "bytes": 2388
+    },
+    {
+     "path": "cases/CTL-H-010/oracle/labels.json",
+     "sha256": "060aa03f1637bcbe48ab3b7f8fa1713afe448a1e6aceebf6382e7a23abe44995",
+     "bytes": 6449
+    },
+    {
+     "path": "cases/CTL-H-010/provenance.json",
+     "sha256": "e15638a660efca02fd84f136e770698d3632e1a63083ec1894573265a7fe3985",
+     "bytes": 3667
+    },
+    {
+     "path": "cases/CTL-H-010/review.json",
+     "sha256": "b82cfcc62a36df6364cf8bfb551230c796a774937c094c834038e4ad52a3e2ca",
+     "bytes": 2545
+    },
+    {
+     "path": "cases/CTL-H-010/setup.json",
+     "sha256": "c139ce499d77f0ff24559ca7d628912cbfbdc6dbeaa1b31dbc74621a6fd29912",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-011",
+   "files": [
+    {
+     "path": "cases/CTL-H-011/input/facts.json",
+     "sha256": "5282c0695208e687a9f12e5280e164e6ee1fb5e854d06c4885da1ad9bd2cecc9",
+     "bytes": 2261
+    },
+    {
+     "path": "cases/CTL-H-011/input/initial_message.txt",
+     "sha256": "a780580f80b74cfb5470307b4eb2eeee1ed1de76f02295dcc56416e7427df0a8",
+     "bytes": 221
+    },
+    {
+     "path": "cases/CTL-H-011/input/materials.json",
+     "sha256": "57f8af5c0c4cee2a6e949ecc635bf604d09321dc0a0f721d5986ba4edc9d776d",
+     "bytes": 389
+    },
+    {
+     "path": "cases/CTL-H-011/input/materials/garage-door-quote.pdf",
+     "sha256": "4501bf43e2c69093e645acb3905ee7f31a6045920112faced2546e2fa9d93fdf",
+     "bytes": 3528
+    },
+    {
+     "path": "cases/CTL-H-011/input/materials/photo-garage-door.jpg",
+     "sha256": "3b4b3afe17058d31c0716c442c46e5c9fa2d4bc4d33f1ddab63f4b9809d351ba",
+     "bytes": 119474
+    },
+    {
+     "path": "cases/CTL-H-011/input/materials/policy-schedule.pdf",
+     "sha256": "1ca0442416558c591f96ae6fe871ac260287e1c1436b79ed752e30a0454922db",
+     "bytes": 2393
+    },
+    {
+     "path": "cases/CTL-H-011/oracle/labels.json",
+     "sha256": "b8dcb152028a754be49d9475e44814c2b7e28a3f0f4f7fcf38bcb96e6d1aefc1",
+     "bytes": 6244
+    },
+    {
+     "path": "cases/CTL-H-011/provenance.json",
+     "sha256": "28cb5b23c64ec6923e4737735d24bce81945c282f16b5ed4175eda808cbab9f0",
+     "bytes": 3653
+    },
+    {
+     "path": "cases/CTL-H-011/review.json",
+     "sha256": "01f56742b646dc907a52b0f3ec6848b86bb596decccec0110bbe74ae73543dc8",
+     "bytes": 2571
+    },
+    {
+     "path": "cases/CTL-H-011/setup.json",
+     "sha256": "cecdcdf5be1fb6df61bebadd9467d3f306727ea5cd3ad97d6e2028ec8f9041d5",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-012",
+   "files": [
+    {
+     "path": "cases/CTL-H-012/input/facts.json",
+     "sha256": "50478966b2f24a7772b95bfda81c6b98493d2553ef286915db7339c415f2df3a",
+     "bytes": 2755
+    },
+    {
+     "path": "cases/CTL-H-012/input/initial_message.txt",
+     "sha256": "eb6b9f574228953d4062952f08dcc84ff70c7965d5076f5e596f61b65c7df1ac",
+     "bytes": 307
+    },
+    {
+     "path": "cases/CTL-H-012/input/materials.json",
+     "sha256": "bc786d1afa34dcfc2ec5346f6613adac56903a6aef2d0f06ee69bcfdbab0900d",
+     "bytes": 503
+    },
+    {
+     "path": "cases/CTL-H-012/input/materials/heat-pump-invoice-reprint.pdf",
+     "sha256": "82d4877da8c163f2a3bd76da341afaa072dd439254886d51fe8e6e529701dffb",
+     "bytes": 2499
+    },
+    {
+     "path": "cases/CTL-H-012/input/materials/heat-pump-quote.pdf",
+     "sha256": "3f9b4585ba72fcfc65e3d9d1b71adb25af883bbf5c35c9e11112a5fce82fa34d",
+     "bytes": 3540
+    },
+    {
+     "path": "cases/CTL-H-012/input/materials/photo-heat-pump.jpg",
+     "sha256": "0bce5ee5b16d73320af65528c3f02456d475e10bed09a81887dfaec231c48fe4",
+     "bytes": 288193
+    },
+    {
+     "path": "cases/CTL-H-012/input/materials/policy-schedule.pdf",
+     "sha256": "cede2d32a51984f5115f551457fee8a07aa682e03943971368800b64b260d4e3",
+     "bytes": 2387
+    },
+    {
+     "path": "cases/CTL-H-012/oracle/labels.json",
+     "sha256": "ebc5449d519e78cf8f9b0b51f9b4d4e2ae3e436342c6127329de9a7cba3540dc",
+     "bytes": 5963
+    },
+    {
+     "path": "cases/CTL-H-012/provenance.json",
+     "sha256": "8bff0bd74d8ad8c758dfe3bc2a551a7a85f6db65b8ab08e26a9faa37f80eb8c0",
+     "bytes": 4879
+    },
+    {
+     "path": "cases/CTL-H-012/review.json",
+     "sha256": "71260f873dc947d6831bc5eab9a6465748632b07ee5fd93829a4ced127a9e5a4",
+     "bytes": 2659
+    },
+    {
+     "path": "cases/CTL-H-012/setup.json",
+     "sha256": "b0a9b95352077b99d6b957fd00c3929c7871bac5d1e9d0af24d15effb95c6ece",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-013",
+   "files": [
+    {
+     "path": "cases/CTL-H-013/input/facts.json",
+     "sha256": "3983cb517460311b46ab1cdbe4a7f7d194d87ca1891567c677e15acd99325545",
+     "bytes": 2355
+    },
+    {
+     "path": "cases/CTL-H-013/input/initial_message.txt",
+     "sha256": "ac4cc7d8b1013eef6dfdf506166429c2a7d719aed709d6a91d9de5341542a3df",
+     "bytes": 188
+    },
+    {
+     "path": "cases/CTL-H-013/input/materials.json",
+     "sha256": "cb919a9ddd159a7f29ad5fe9cf4d55867a2a85472298143fe63f95100a61bcb2",
+     "bytes": 498
+    },
+    {
+     "path": "cases/CTL-H-013/input/materials/attendance-note.pdf",
+     "sha256": "eabeb99cf1c54c7becde33bd02e22301b480d7a28bd126902e5027313ea21041",
+     "bytes": 2394
+    },
+    {
+     "path": "cases/CTL-H-013/input/materials/photo-skylight.jpg",
+     "sha256": "8d04213ab552396938c1151020f2b37c656ad295ef871c972376e3bed3f76789",
+     "bytes": 91535
+    },
+    {
+     "path": "cases/CTL-H-013/input/materials/policy-schedule.pdf",
+     "sha256": "cd8ad406ac239372e8ffec2b11db47a0a92918cf4591e1b696724201dbaab749",
+     "bytes": 2391
+    },
+    {
+     "path": "cases/CTL-H-013/input/materials/skylight-quote.pdf",
+     "sha256": "d9f5bcdd5c1fc18505adae08a24a65904d31f48f65d0efdde01084eebf802dff",
+     "bytes": 3479
+    },
+    {
+     "path": "cases/CTL-H-013/oracle/labels.json",
+     "sha256": "ff88ed60d8de25e3d32d2efdf4fa47e1137e4a686eb257ab588f38c73faedc0b",
+     "bytes": 5696
+    },
+    {
+     "path": "cases/CTL-H-013/provenance.json",
+     "sha256": "f30010c051ff698ca4f10c78a9760f99ecce6d780d8622d8736a80ab77fe5f1d",
+     "bytes": 4506
+    },
+    {
+     "path": "cases/CTL-H-013/review.json",
+     "sha256": "2015c11b2fb60e78b300e947c7f910a3b05ab7d813925fd8ae84a47e40842240",
+     "bytes": 2570
+    },
+    {
+     "path": "cases/CTL-H-013/setup.json",
+     "sha256": "7f784b4739086f3289c0c59dd592bbcb10bfb1ac7d01720dfd52364c8b38dd97",
+     "bytes": 458
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-014",
+   "files": [
+    {
+     "path": "cases/CTL-H-014/input/facts.json",
+     "sha256": "3e0f4ac00f1cc72e223d4a53e7f943776a47289e83092e05f7fb069841953e56",
+     "bytes": 2600
+    },
+    {
+     "path": "cases/CTL-H-014/input/initial_message.txt",
+     "sha256": "c11127343f47aeb2dbd27e517c37ee62baf7acb4cfa027a02d9fa39363232c3a",
+     "bytes": 316
+    },
+    {
+     "path": "cases/CTL-H-014/input/materials.json",
+     "sha256": "d5fb44b69e3bebc3fe54a5cb3e0fe98b15713bfe1779023d9da672c1dc76ced8",
+     "bytes": 502
+    },
+    {
+     "path": "cases/CTL-H-014/input/materials/attendance-note.pdf",
+     "sha256": "f4cc06c8f6728e2ada264cf8a24529ed8e93d19328c91f434f5a2c9dc07afff7",
+     "bytes": 2378
+    },
+    {
+     "path": "cases/CTL-H-014/input/materials/builder-quote.pdf",
+     "sha256": "ab35af0443c26dad05e1d40060d88cc3be565b833984457bf39f9214a06e0139",
+     "bytes": 3640
+    },
+    {
+     "path": "cases/CTL-H-014/input/materials/photo-laundry-floor.jpg",
+     "sha256": "df6bee866a17398bffb70937fe26e738bf40246cec02d1fc1dfb766997feb7d1",
+     "bytes": 176194
+    },
+    {
+     "path": "cases/CTL-H-014/input/materials/policy-schedule.pdf",
+     "sha256": "fb341ae5f5b442ccfe452d12a4d8b521a94353d08e146abd9b92a49333595637",
+     "bytes": 2387
+    },
+    {
+     "path": "cases/CTL-H-014/oracle/labels.json",
+     "sha256": "e6488e97ef34ad7527ebcfa98c55f23254db43300059fcb5ce790dac02af0aff",
+     "bytes": 6101
+    },
+    {
+     "path": "cases/CTL-H-014/provenance.json",
+     "sha256": "bff265e52852b47430f9e50b9a79ddb59e363a6061eabe7aeed109cd844da17f",
+     "bytes": 4693
+    },
+    {
+     "path": "cases/CTL-H-014/review.json",
+     "sha256": "5d8d969ae383c5fa9b6fba1ba88d4a52c4b2c85e7e390c3665af2ffd9e85a85d",
+     "bytes": 2994
+    },
+    {
+     "path": "cases/CTL-H-014/setup.json",
+     "sha256": "0928e2a2d63e5a0d2cb968149eb9ba4c16b2eff7066c381a130f49ae37db17cf",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-015",
+   "files": [
+    {
+     "path": "cases/CTL-H-015/input/facts.json",
+     "sha256": "e814d5ec8fa59ebcfdc35233ac0a79694efb83ed7f4546f4c3f2cf8f82fca97f",
+     "bytes": 2676
+    },
+    {
+     "path": "cases/CTL-H-015/input/initial_message.txt",
+     "sha256": "628c5359fb63212b356766c5e59d939fe47a4d2e8bd33f64d3775663a3b57f52",
+     "bytes": 225
+    },
+    {
+     "path": "cases/CTL-H-015/input/materials.json",
+     "sha256": "3e0be0c06bdf4295ea1f86091ff56114097a72205493cedd04d855fb72d84f12",
+     "bytes": 500
+    },
+    {
+     "path": "cases/CTL-H-015/input/materials/attendance-note.pdf",
+     "sha256": "ba70dc4b55ff62b79e449f3a0b73fe6dacd8a740fd64ee3d4b2ec404a68b3c9e",
+     "bytes": 2442
+    },
+    {
+     "path": "cases/CTL-H-015/input/materials/photo-hallway.jpg",
+     "sha256": "b3cd96ef73aa9f7bba4daaf2dd113d36892a4118d459e87d2585ffe66563ec23",
+     "bytes": 320700
+    },
+    {
+     "path": "cases/CTL-H-015/input/materials/policy-schedule.pdf",
+     "sha256": "0712fdbc122c272a3e26ce870c0a2669258078b4aa2ab25eed5be6512e7d37da",
+     "bytes": 2389
+    },
+    {
+     "path": "cases/CTL-H-015/input/materials/restoration-quote.pdf",
+     "sha256": "ed720eb8441b44366e31ee9412528330a9100eef5aba617c7f9408a4e99ae069",
+     "bytes": 3609
+    },
+    {
+     "path": "cases/CTL-H-015/oracle/labels.json",
+     "sha256": "dd37cafc665d9bcc9181a33cce6bb663729291c51844ae3aa94c4e1cd9216bad",
+     "bytes": 5798
+    },
+    {
+     "path": "cases/CTL-H-015/provenance.json",
+     "sha256": "8ce4f5ed625479cd2e2def40d2cf70cd9b515b6196c01b7d0a377ceb1dd5d53b",
+     "bytes": 4586
+    },
+    {
+     "path": "cases/CTL-H-015/review.json",
+     "sha256": "ba71001fae5071f61ca59d8dbbddaed8a51e4dec3601ab375e632c028eaa2efb",
+     "bytes": 2562
+    },
+    {
+     "path": "cases/CTL-H-015/setup.json",
+     "sha256": "fe35de16b2285e41e160ee4cec305f9fb920ec15b2d6c415407041001f4625d4",
+     "bytes": 558
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-016",
+   "files": [
+    {
+     "path": "cases/CTL-H-016/input/facts.json",
+     "sha256": "7876ac82d0280909b100a954c8d81ad6ab44c6ccc518f92b1324f9f922436c14",
+     "bytes": 2574
+    },
+    {
+     "path": "cases/CTL-H-016/input/initial_message.txt",
+     "sha256": "3091f6873f173aafb247e8840442e5bc9b494fa9d3f8d6a00dfd167320555719",
+     "bytes": 281
+    },
+    {
+     "path": "cases/CTL-H-016/input/materials.json",
+     "sha256": "55d87082fdfa539502be28a81bee808446a482e17e40e4d6eec2424348270282",
+     "bytes": 383
+    },
+    {
+     "path": "cases/CTL-H-016/input/materials/builder-quote.pdf",
+     "sha256": "8155e7ac9f4864f29fbf1656b77d6d3165e66e24262bd8090456a77d11d86670",
+     "bytes": 3686
+    },
+    {
+     "path": "cases/CTL-H-016/input/materials/photo-rangehood.jpg",
+     "sha256": "6df3e86d42acc655742b95e81200c01a088d9d7c093b431e68e9e8244107f525",
+     "bytes": 149543
+    },
+    {
+     "path": "cases/CTL-H-016/input/materials/policy-schedule.pdf",
+     "sha256": "f11f9b4a94d6f9ff4f914571663d7ba30309396b5345b7d066b5478141c284b0",
+     "bytes": 2397
+    },
+    {
+     "path": "cases/CTL-H-016/oracle/labels.json",
+     "sha256": "99f8f1baf16599c3f304b33235741feae1b6bccd0ab4dd9f7d95795588ae2757",
+     "bytes": 5635
+    },
+    {
+     "path": "cases/CTL-H-016/provenance.json",
+     "sha256": "f48d88b1db492a4b0d878d33805c60f5b1c31d0319de9322e8cad4e5bc07d791",
+     "bytes": 3775
+    },
+    {
+     "path": "cases/CTL-H-016/review.json",
+     "sha256": "d097ccff6a6fd95c5955b7eb29a14766b49b59d9bbefa2655d6c2edeac63d7a8",
+     "bytes": 2631
+    },
+    {
+     "path": "cases/CTL-H-016/setup.json",
+     "sha256": "35df0687eeb36234106204d7a480162aee99dd7a0c2614770ae6bc75c6c45f83",
+     "bytes": 363
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-017",
+   "files": [
+    {
+     "path": "cases/CTL-H-017/input/facts.json",
+     "sha256": "ab341ec32304baa23d405df4bbd475310fef965c708eb313c3e49ee055e6684b",
+     "bytes": 2820
+    },
+    {
+     "path": "cases/CTL-H-017/input/initial_message.txt",
+     "sha256": "18e63c4239c0ec24e13e741655276c955b9c74e7733c166eaed0bc32be162a54",
+     "bytes": 583
+    },
+    {
+     "path": "cases/CTL-H-017/input/materials.json",
+     "sha256": "d4c8cf5332c8df6dbbce5fdf6aa1b575f2effcb2a7e802e71bb2c8951f6327ae",
+     "bytes": 508
+    },
+    {
+     "path": "cases/CTL-H-017/input/materials/attendance-note.pdf",
+     "sha256": "1874cb2c0fd6c09ca3e567e12c5140cffeaf8e94ae96c35f61cbb1afc69c1d95",
+     "bytes": 2440
+    },
+    {
+     "path": "cases/CTL-H-017/input/materials/photo-bedroom-ceiling.jpg",
+     "sha256": "4d90076b1462109687da5cf5304db99722bcae52383ad0a8510b50d8aea34c4f",
+     "bytes": 126184
+    },
+    {
+     "path": "cases/CTL-H-017/input/materials/policy-schedule.pdf",
+     "sha256": "0c005cddaa6c55b6be5273d7e1b500f92645351e594a3b74e91222ceb6ce0c93",
+     "bytes": 2393
+    },
+    {
+     "path": "cases/CTL-H-017/input/materials/restoration-quote.pdf",
+     "sha256": "9adf3541d943ec6f0061ffb17cedd6879d6ae1d5b8091e348e101f628ca0a57d",
+     "bytes": 3703
+    },
+    {
+     "path": "cases/CTL-H-017/oracle/labels.json",
+     "sha256": "ca416562dd50d8f879e1ebe284fa46ab5b7d7d4d32739306f9bb3ddb1035d8ed",
+     "bytes": 5408
+    },
+    {
+     "path": "cases/CTL-H-017/provenance.json",
+     "sha256": "1e53a1b5fdb22e2d05b6370dfa1056d989b9c38a1eb7c81653e6fd3dbf753879",
+     "bytes": 4496
+    },
+    {
+     "path": "cases/CTL-H-017/review.json",
+     "sha256": "abe648a64b38552f71d8130d2137338410ec58e8b6ab8f488e6ec03b8e8e118a",
+     "bytes": 2579
+    },
+    {
+     "path": "cases/CTL-H-017/setup.json",
+     "sha256": "95f9cab986cff7b9c0c64089b6ab9df58ec7820c5ab61c29f40d76ec781f5589",
+     "bytes": 157
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-018",
+   "files": [
+    {
+     "path": "cases/CTL-H-018/input/facts.json",
+     "sha256": "52111a3823093bb19994cde90225e61f1fbb3927b4158a801a527cda01fb3bf5",
+     "bytes": 2204
+    },
+    {
+     "path": "cases/CTL-H-018/input/initial_message.txt",
+     "sha256": "163aa4ea92e5c7874070344e44c964824537d53d04f95495010f9eb1131b5b54",
+     "bytes": 250
+    },
+    {
+     "path": "cases/CTL-H-018/input/materials.json",
+     "sha256": "ff1d77ae1092a63d9d21cfc667b28d8743a39b0180d1640a10ec92eb1212066b",
+     "bytes": 387
+    },
+    {
+     "path": "cases/CTL-H-018/input/materials/builder-quote.pdf",
+     "sha256": "df19063d379a6d740a7fdcbf68c3b0b582b84d3a5714595ea6e4d786f18b91a6",
+     "bytes": 3595
+    },
+    {
+     "path": "cases/CTL-H-018/input/materials/photo-kitchen-floor.jpg",
+     "sha256": "ed760ee692ea3553052fe845e4b2e928bca7c4eed20c3959b0ed3a26bb392214",
+     "bytes": 22182
+    },
+    {
+     "path": "cases/CTL-H-018/input/materials/policy-schedule.pdf",
+     "sha256": "55900e41f2be38c36433bd1c2840d0b93021f33916a124c55a0836a953c1b332",
+     "bytes": 2397
+    },
+    {
+     "path": "cases/CTL-H-018/oracle/labels.json",
+     "sha256": "9e0c5671acfb7c94061731a01cd130b4e0d66cbc876a9763d8ee70a684a20874",
+     "bytes": 5333
+    },
+    {
+     "path": "cases/CTL-H-018/provenance.json",
+     "sha256": "925ec3d3b98120a0df5a8cd9c388222e8fa32a7b8e049fcad503a4b41dda7ddf",
+     "bytes": 4196
+    },
+    {
+     "path": "cases/CTL-H-018/review.json",
+     "sha256": "ec138672120f278683395ad7ef661ba37e2f8902b42910f72d5787b7223ef0b8",
+     "bytes": 2654
+    },
+    {
+     "path": "cases/CTL-H-018/setup.json",
+     "sha256": "d9b6f27bb387e928019394f36ffdf4d23964ec48d224ccc43b11c0916f53b292",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-019",
+   "files": [
+    {
+     "path": "cases/CTL-H-019/input/facts.json",
+     "sha256": "63a582c94424fd9daabf29da9e15a055521ccebbb56b063379b1c7d14cc76954",
+     "bytes": 2426
+    },
+    {
+     "path": "cases/CTL-H-019/input/initial_message.txt",
+     "sha256": "6b167fe78bd29a1ad2cdb34fc798a6e651d223952e21886b8a3d6a2c844a6558",
+     "bytes": 224
+    },
+    {
+     "path": "cases/CTL-H-019/input/materials.json",
+     "sha256": "540330b28683ca704ef7ff636a676cc28102f03d7ab7827769adf4b9fbd400a8",
+     "bytes": 507
+    },
+    {
+     "path": "cases/CTL-H-019/input/materials/attendance-note.pdf",
+     "sha256": "5db66b4d1ad3021c213f8b37167be0ba6524a2d258fa53c5fc495e0044ea4907",
+     "bytes": 2420
+    },
+    {
+     "path": "cases/CTL-H-019/input/materials/glazier-quote-page1.pdf",
+     "sha256": "631b1ffd4be8ed1391805d3ecbc007560497f63493bbf2fff1ab437f340efa35",
+     "bytes": 2159
+    },
+    {
+     "path": "cases/CTL-H-019/input/materials/photo-sliding-door.jpg",
+     "sha256": "a94d6859b45729175e231ed0111b80ea9ee961f7e1182b853482e867243f46ab",
+     "bytes": 323661
+    },
+    {
+     "path": "cases/CTL-H-019/input/materials/policy-schedule.pdf",
+     "sha256": "dd9b5c2db8fffe2823f621970c5129b0c607bf8c3c6c69308622ac286ffe5635",
+     "bytes": 2392
+    },
+    {
+     "path": "cases/CTL-H-019/oracle/labels.json",
+     "sha256": "145dad364c2759b1bb873e81874c414efc3112dc5de960929d705581dba8c55a",
+     "bytes": 5552
+    },
+    {
+     "path": "cases/CTL-H-019/provenance.json",
+     "sha256": "b7131b6b1f5dcb4e5b60b5cde690c30fcc3c7654b5a2e8be079a5fe49d02bf4f",
+     "bytes": 5677
+    },
+    {
+     "path": "cases/CTL-H-019/review.json",
+     "sha256": "f90c509fc1aaa5e915484dcce512274c58efb2fa3606308cdcbca8239758ede6",
+     "bytes": 2530
+    },
+    {
+     "path": "cases/CTL-H-019/setup.json",
+     "sha256": "8e06901498a2fbb2ca7a769bfadc109fe9d347dcddf564668305bac4dbdc39ab",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-020",
+   "files": [
+    {
+     "path": "cases/CTL-H-020/input/facts.json",
+     "sha256": "67680e33641b69159ea8ffbfcf772cf40a88aa4b1d7a2e3fb7243940137c74c7",
+     "bytes": 2273
+    },
+    {
+     "path": "cases/CTL-H-020/input/initial_message.txt",
+     "sha256": "f2656c314e230900b3dd4c64ac48f0c570b6c942366074e0bdc41b32c8bbf367",
+     "bytes": 284
+    },
+    {
+     "path": "cases/CTL-H-020/input/materials.json",
+     "sha256": "d68bf32b8ce9173717566592f36367d535eecc1fa6d07b42d0da75ee38fa17c7",
+     "bytes": 381
+    },
+    {
+     "path": "cases/CTL-H-020/input/materials/photo-spouting.jpg",
+     "sha256": "85c6284bbcca9a7090e4c6d3c514561a62f385e9da59b040a99544bebb704420",
+     "bytes": 249627
+    },
+    {
+     "path": "cases/CTL-H-020/input/materials/policy-schedule.pdf",
+     "sha256": "c55d75138e76d7288154e692396c00954c9be7cb9710297b75de0ede99931ccd",
+     "bytes": 2393
+    },
+    {
+     "path": "cases/CTL-H-020/input/materials/roofer-quote.pdf",
+     "sha256": "1c73157be65958c07b6484bd7ad33c0fb0810c5cfc544ccf8474e46e74083f84",
+     "bytes": 3630
+    },
+    {
+     "path": "cases/CTL-H-020/oracle/labels.json",
+     "sha256": "12afd7a45beb0f4e03b138c1a0d2f2e829d01ae82cfdcd897a10fdd55621de23",
+     "bytes": 5600
+    },
+    {
+     "path": "cases/CTL-H-020/provenance.json",
+     "sha256": "97a03d100c840b6d761de3a34fdc52f15fd5ba049e2d5644a7a1819ac685d14a",
+     "bytes": 3722
+    },
+    {
+     "path": "cases/CTL-H-020/review.json",
+     "sha256": "257be6d586a46ab8ebed98126394eeff5318a0f0e3b088f43ca10b3dac839b27",
+     "bytes": 2678
+    },
+    {
+     "path": "cases/CTL-H-020/setup.json",
+     "sha256": "7ae8634358222fc16d42b6c2f34d6ddbb71a2866daf56fd89f7d1bb4eda6001b",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-021",
+   "files": [
+    {
+     "path": "cases/CTL-H-021/input/facts.json",
+     "sha256": "4559b3190dd287537f8ed799dba18530c1d59873f2b8f23e854a75dd54d81625",
+     "bytes": 2293
+    },
+    {
+     "path": "cases/CTL-H-021/input/initial_message.txt",
+     "sha256": "8b8e52371a1f3c9df0cb4a0af5b4eeed04267fe351e17344fa12c276aa0e2140",
+     "bytes": 253
+    },
+    {
+     "path": "cases/CTL-H-021/input/materials.json",
+     "sha256": "ff1972bce6cf3af9bf91fe212264eac6dc29d4581f7470b05e6826e709908228",
+     "bytes": 386
+    },
+    {
+     "path": "cases/CTL-H-021/input/materials/builder-quote.pdf",
+     "sha256": "32dc495f86ce86f7c362a5fa846f23d480a66bf5e0ab85ba5615674f4eac1dcf",
+     "bytes": 3511
+    },
+    {
+     "path": "cases/CTL-H-021/input/materials/photo-hallway-wall.jpg",
+     "sha256": "ebd8c09e48e0fd00e6faa9a87049efce39b1d29c0a01e6c06b3d25c887e597b0",
+     "bytes": 120786
+    },
+    {
+     "path": "cases/CTL-H-021/input/materials/policy-schedule.pdf",
+     "sha256": "0b58daf102da5d6daf06713b278e93b0f08da87ce81510bafbe50f0d3fe67ab8",
+     "bytes": 2384
+    },
+    {
+     "path": "cases/CTL-H-021/oracle/labels.json",
+     "sha256": "c7ffea4f4ca9d607c6459c121b60a8ddee47fd61e4220e1874952afb3b91ee04",
+     "bytes": 5683
+    },
+    {
+     "path": "cases/CTL-H-021/provenance.json",
+     "sha256": "39e444abb93f8c2cc563db299a899045c2cc0319cbada2c3b79f3bdcb3cc2290",
+     "bytes": 3507
+    },
+    {
+     "path": "cases/CTL-H-021/review.json",
+     "sha256": "c996fb3b0f344e6ce161ea98cd404858beedd955112ae9790dd02360184454b5",
+     "bytes": 2503
+    },
+    {
+     "path": "cases/CTL-H-021/setup.json",
+     "sha256": "bf86db4033531d2bc417ba7131756b453aefdddb98aa0e8b58adf18269270d6d",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-022",
+   "files": [
+    {
+     "path": "cases/CTL-H-022/input/facts.json",
+     "sha256": "00a8eff5888adf80cd7a0cf17db03f8a158e43edd5762a420f37f67d218265be",
+     "bytes": 2051
+    },
+    {
+     "path": "cases/CTL-H-022/input/initial_message.txt",
+     "sha256": "1b6a4001d28fb381da0a9380e48f54920f876a1b779f62f6726519314e82a149",
+     "bytes": 228
+    },
+    {
+     "path": "cases/CTL-H-022/input/materials.json",
+     "sha256": "1d7e0fafa444b4ece4e88c1306beb73400418d98910400071c24a4fab199fb95",
+     "bytes": 381
+    },
+    {
+     "path": "cases/CTL-H-022/input/materials/pergola-quote.pdf",
+     "sha256": "a4553c603bc33fe6d70646151bff29c923eb789199aa2cacf3b4ebfa55b16d22",
+     "bytes": 1406
+    },
+    {
+     "path": "cases/CTL-H-022/input/materials/photo-pergola.jpg",
+     "sha256": "ebd7fa130cedbf97e467b47825cc72709c946f3467edb26088fc674ec41e2e4a",
+     "bytes": 235142
+    },
+    {
+     "path": "cases/CTL-H-022/input/materials/policy-schedule.pdf",
+     "sha256": "b52910a05eeba94daf9427b60f515925089b7a40fa56a2e73047c05cef782df8",
+     "bytes": 2392
+    },
+    {
+     "path": "cases/CTL-H-022/oracle/labels.json",
+     "sha256": "fcc3efdfee5a651a9da8b10413575e3b7acc05496660697ec96abac42ed1b644",
+     "bytes": 5216
+    },
+    {
+     "path": "cases/CTL-H-022/provenance.json",
+     "sha256": "c26c437603e8d8e29362f63ae5e1777237b1d5136aaa3d4bebbc2f50b9a20d7d",
+     "bytes": 4673
+    },
+    {
+     "path": "cases/CTL-H-022/review.json",
+     "sha256": "0f74b4fa4447e273a50e42eaa7ef11034610fad72af192ef17373f2e82e5b470",
+     "bytes": 2535
+    },
+    {
+     "path": "cases/CTL-H-022/setup.json",
+     "sha256": "80553a7279d7dd6baf2858495fa183f6cbf343ceada38c339fc38a69b1290b97",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-023",
+   "files": [
+    {
+     "path": "cases/CTL-H-023/input/facts.json",
+     "sha256": "a58ee8092660528e45b18a8878e8b92eec7ac4b27b8454bf02d95c5aee5a87d6",
+     "bytes": 2859
+    },
+    {
+     "path": "cases/CTL-H-023/input/initial_message.txt",
+     "sha256": "b9d6428360932a567afaef54e5dc740c445ae1f496ff98ff71d466b058d82a00",
+     "bytes": 270
+    },
+    {
+     "path": "cases/CTL-H-023/input/materials.json",
+     "sha256": "ea9e8b5e210fe2a8d15b0c3c0073fc347170fd818f487b5f9e86011e86e31a0d",
+     "bytes": 507
+    },
+    {
+     "path": "cases/CTL-H-023/input/materials/invoice-heat-pump.pdf",
+     "sha256": "ff20cb78f2c0074f135a90e29878a9e1d424c80bde12691054b6e14f3e97e465",
+     "bytes": 2406
+    },
+    {
+     "path": "cases/CTL-H-023/input/materials/photo-heat-pump-unit.jpg",
+     "sha256": "9254e0fa6c35fefc71032489f213196217fd13466640176ab8b4fba3ea8fcf7d",
+     "bytes": 259131
+    },
+    {
+     "path": "cases/CTL-H-023/input/materials/policy-schedule.pdf",
+     "sha256": "baaf54b92c8ce3718a5ad6fa182fd811bd2ccf4c0256f5146609e4157ad0d37a",
+     "bytes": 2352
+    },
+    {
+     "path": "cases/CTL-H-023/input/materials/repair-quote-heat-pump.pdf",
+     "sha256": "631b3f267d48ee3d95bd9c768ae30202b45f8b4d24513118f2a7147abb28eda2",
+     "bytes": 3667
+    },
+    {
+     "path": "cases/CTL-H-023/oracle/labels.json",
+     "sha256": "f71185b9e673525d84afb1bc3f93ba520a9defd06bb81cdc1ed7956c075f1b07",
+     "bytes": 6806
+    },
+    {
+     "path": "cases/CTL-H-023/provenance.json",
+     "sha256": "b817ccca92757d0f62de50b93dd07a8bdab70da0f40b77ff5ef56e496bb9e3d1",
+     "bytes": 4960
+    },
+    {
+     "path": "cases/CTL-H-023/review.json",
+     "sha256": "943f56dd412b9ab4e48ebcdc8028c0e17a234eda336b801790019d7cd0bfcd54",
+     "bytes": 2582
+    },
+    {
+     "path": "cases/CTL-H-023/setup.json",
+     "sha256": "4826dc8d1854b8a8a9db08e1801a652229261f650d6e7e0f369e615757eb7278",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-024",
+   "files": [
+    {
+     "path": "cases/CTL-H-024/input/facts.json",
+     "sha256": "96d1c5fcc6872033d6c061fefe37288a227a2e2fb706967b40d15a7aa826b52a",
+     "bytes": 3052
+    },
+    {
+     "path": "cases/CTL-H-024/input/initial_message.txt",
+     "sha256": "2365af0aaf25277b21fa7c903679a143a48c94b8f008bb978693f2834ca06605",
+     "bytes": 348
+    },
+    {
+     "path": "cases/CTL-H-024/input/materials.json",
+     "sha256": "0847060e3cd5b53cb4274f35af15539ea25056ef25f2f680e4680d1b0780b837",
+     "bytes": 515
+    },
+    {
+     "path": "cases/CTL-H-024/input/materials/photo-hallway-carpet.jpg",
+     "sha256": "a1de2e7dd8f1598d8e9dc78b8cb37b78f0dc7065423b61d5727ec4ec857ab986",
+     "bytes": 129255
+    },
+    {
+     "path": "cases/CTL-H-024/input/materials/plumber-attendance-note.pdf",
+     "sha256": "0c97ceda33b74a6c631c194a0a1c6ff94d24adc3ea50cc15564a5aa8d9126883",
+     "bytes": 2575
+    },
+    {
+     "path": "cases/CTL-H-024/input/materials/policy-schedule.pdf",
+     "sha256": "7ec6856b654cf720d192881f364c4023afd7c7a66661f79ff98b490189e4540a",
+     "bytes": 2354
+    },
+    {
+     "path": "cases/CTL-H-024/input/materials/restoration-quote.pdf",
+     "sha256": "e9fae6f163870da51078ad834a0261d3adba6da7f924b3efe1cbedb329a4e976",
+     "bytes": 3699
+    },
+    {
+     "path": "cases/CTL-H-024/oracle/labels.json",
+     "sha256": "bf9a6233a8a7be1e09ab72a2a0386d8379143947d6a051f1d57eb31bbfa95f48",
+     "bytes": 5699
+    },
+    {
+     "path": "cases/CTL-H-024/provenance.json",
+     "sha256": "0606b6d4cedf9c884c41a6cfd4fe2e978a082465b029328c62851139362608fb",
+     "bytes": 4874
+    },
+    {
+     "path": "cases/CTL-H-024/review.json",
+     "sha256": "40ea2ab60d73c3f8e6dbcb16843734fc29b97dfba9467665496e01a7dd487c1d",
+     "bytes": 3187
+    },
+    {
+     "path": "cases/CTL-H-024/setup.json",
+     "sha256": "a2e627c8e316cd338e917ef96b5844d2cc6ab82ab85e36ead7796dad15c65193",
+     "bytes": 402
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-025",
+   "files": [
+    {
+     "path": "cases/CTL-H-025/input/facts.json",
+     "sha256": "c605a7c377622bf7c168a16ba57b3a9944665cf21016e6d069ce0af00c7b5cbb",
+     "bytes": 2938
+    },
+    {
+     "path": "cases/CTL-H-025/input/initial_message.txt",
+     "sha256": "30caa64a54639dc025be5f03d145251427fddf485f21e5eb1b94b17e90f28e4f",
+     "bytes": 373
+    },
+    {
+     "path": "cases/CTL-H-025/input/materials.json",
+     "sha256": "af5070a0633ebdf118ec685c68b1f8e5508cbf0772b1aa131c786da5cc763427",
+     "bytes": 505
+    },
+    {
+     "path": "cases/CTL-H-025/input/materials/glazier-attendance-note.pdf",
+     "sha256": "c90cc8e0fca1682072ad7faa3458ff2ec41e029dfd2c0a2c06291c546e99c7a5",
+     "bytes": 2505
+    },
+    {
+     "path": "cases/CTL-H-025/input/materials/glazier-quote.pdf",
+     "sha256": "03befd05fe7f5dcceb132205702386dea31df5d7c0a73580a589a173c135cc68",
+     "bytes": 3610
+    },
+    {
+     "path": "cases/CTL-H-025/input/materials/photo-skylight.jpg",
+     "sha256": "140eaab549473810b0bfcb0ed590ecd6c0423a2509496456dc17dcf889bbabbf",
+     "bytes": 24541
+    },
+    {
+     "path": "cases/CTL-H-025/input/materials/policy-schedule.pdf",
+     "sha256": "8ae9fed92934c533559e979179ea908d7eac37e3b1c7cef5b2616b17851cd4cd",
+     "bytes": 2348
+    },
+    {
+     "path": "cases/CTL-H-025/oracle/labels.json",
+     "sha256": "750905cf4c5f3827ec428095812219ebc4ead4c48bb3febf272113bc4a27b98a",
+     "bytes": 5635
+    },
+    {
+     "path": "cases/CTL-H-025/provenance.json",
+     "sha256": "f29d3fdbd8cf962548c480f11d219acee789af8f0f17c5fd4ded22feaa1fbbc2",
+     "bytes": 5294
+    },
+    {
+     "path": "cases/CTL-H-025/review.json",
+     "sha256": "6c32a375a42654cf2501583fd80a6ef8219de23d96fff403b6417ee041e198df",
+     "bytes": 2485
+    },
+    {
+     "path": "cases/CTL-H-025/setup.json",
+     "sha256": "d588be4d148abaa00c96417611989dfe39ae9a8daf8a7419f8b47ff757678926",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-026",
+   "files": [
+    {
+     "path": "cases/CTL-H-026/input/facts.json",
+     "sha256": "8dd30256c13237061c6f4d8f03f9ed27c4fa8bcfdfd3ffc1d11a7d4c05a35cde",
+     "bytes": 2359
+    },
+    {
+     "path": "cases/CTL-H-026/input/initial_message.txt",
+     "sha256": "9f24b52ff7e5823db5ec0ac4344c1af7a76d218c5037a1d375d0a2d30a50c5c6",
+     "bytes": 223
+    },
+    {
+     "path": "cases/CTL-H-026/input/materials.json",
+     "sha256": "d95c85a0f8c9a13935387d26c8d9c41e2b63318f5d061ac7e5bfad3836bc6cf3",
+     "bytes": 387
+    },
+    {
+     "path": "cases/CTL-H-026/input/materials/cooktop-quote-page1.pdf",
+     "sha256": "de9a90730e04dce895e2969b0e199b48a8ba5403a397f39e509e4ebf1ff253ec",
+     "bytes": 2163
+    },
+    {
+     "path": "cases/CTL-H-026/input/materials/photo-cooktop.jpg",
+     "sha256": "ef127dff781b1f8a004713fad2c67102f13f0e71e45c769d9fd5f1d1cc60e62e",
+     "bytes": 150385
+    },
+    {
+     "path": "cases/CTL-H-026/input/materials/policy-schedule.pdf",
+     "sha256": "209a110773525dabd96e03a227f4a08989228df67e5d4d93a5af7e045ad94a15",
+     "bytes": 2352
+    },
+    {
+     "path": "cases/CTL-H-026/oracle/labels.json",
+     "sha256": "9d87127b6b6e6463154d1d0d6cfc446d9798ed2a4a51475bbb1a60f3d9d06439",
+     "bytes": 5630
+    },
+    {
+     "path": "cases/CTL-H-026/provenance.json",
+     "sha256": "0c7efd24c7a5979e62fa266fef95fba6479eb007dc552fbe1b778180729e1683",
+     "bytes": 4701
+    },
+    {
+     "path": "cases/CTL-H-026/review.json",
+     "sha256": "109780febb478214d349ae2392efda2fc8196b80c5e85229bfb5b532fe7a4592",
+     "bytes": 2562
+    },
+    {
+     "path": "cases/CTL-H-026/setup.json",
+     "sha256": "ec13e98be82bc25e797bdff426bc2f7d899d8da5f9b300ca12e089c8a2951f47",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-027",
+   "files": [
+    {
+     "path": "cases/CTL-H-027/input/facts.json",
+     "sha256": "124ee03ce20c9e802bd70e33351b4fdb4039319daf6c4dab751dcd1d56a8ed36",
+     "bytes": 2449
+    },
+    {
+     "path": "cases/CTL-H-027/input/initial_message.txt",
+     "sha256": "e0700289ddaa50ce66dc22e68dfedeae470f0f157714608687ba943ec3d2b0e9",
+     "bytes": 309
+    },
+    {
+     "path": "cases/CTL-H-027/input/materials.json",
+     "sha256": "6979c92cfb3afac3be2ab673c06f8adaa00ae9e8145dfdb83d706d204515e0d6",
+     "bytes": 504
+    },
+    {
+     "path": "cases/CTL-H-027/input/materials/glazing-quote.pdf",
+     "sha256": "a8d4636e9e5090e83025482cdd86af24eafa123c3a47abfd3ca24f6d3aabb7dd",
+     "bytes": 3565
+    },
+    {
+     "path": "cases/CTL-H-027/input/materials/photo-impact-point.jpg",
+     "sha256": "4eacd7d1e99ef1d6708620e1b48dec68b4a0c52144027c30825ad2a13bdcb80a",
+     "bytes": 159208
+    },
+    {
+     "path": "cases/CTL-H-027/input/materials/photo-ranch-slider.jpg",
+     "sha256": "8bfdafbc9e421abf1bb6df63566afb744449b65d2710475b281b08375aa92a2f",
+     "bytes": 191339
+    },
+    {
+     "path": "cases/CTL-H-027/input/materials/policy-schedule.pdf",
+     "sha256": "31b0d09ccfbdaa47aea83613186f8974cca2171d3f5efa8208a09d67e23ac65e",
+     "bytes": 2349
+    },
+    {
+     "path": "cases/CTL-H-027/oracle/labels.json",
+     "sha256": "2c0948b6ab5520d900659a563de16bdb81242bad671bf001faa5610d609e798f",
+     "bytes": 5604
+    },
+    {
+     "path": "cases/CTL-H-027/provenance.json",
+     "sha256": "88243b711345461ba531c0eeccc414a3e60fd92bfe06d2ef0e70e67fa0ff0bc8",
+     "bytes": 4979
+    },
+    {
+     "path": "cases/CTL-H-027/review.json",
+     "sha256": "1f1dcc448aad43280816476a43877e9776f75c4d94d83da7b86460a186b770a6",
+     "bytes": 4979
+    },
+    {
+     "path": "cases/CTL-H-027/setup.json",
+     "sha256": "78de747a5f4494be19381fac10eaeb34b48786f84d770ab617b35df3ba7de2af",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-028",
+   "files": [
+    {
+     "path": "cases/CTL-H-028/input/facts.json",
+     "sha256": "6fee511f225027920aa3f68ac830ed5f4b54e3001d000e056b22116f00c699b1",
+     "bytes": 2875
+    },
+    {
+     "path": "cases/CTL-H-028/input/initial_message.txt",
+     "sha256": "906ae0b7503f21b9895850926f1e791b39cfaaa95704ab136981b87cdc79fac1",
+     "bytes": 660
+    },
+    {
+     "path": "cases/CTL-H-028/input/materials.json",
+     "sha256": "f1cd46dc0169722573c784dad9a445d3b909a3d075dcc22d88136b9895c3d309",
+     "bytes": 515
+    },
+    {
+     "path": "cases/CTL-H-028/input/materials/builder-quote.pdf",
+     "sha256": "51c2a43d75eb49f38d7cbe6c589b81e6ef1ea222f32e8eb26e3e903058a3a3df",
+     "bytes": 3749
+    },
+    {
+     "path": "cases/CTL-H-028/input/materials/electrician-attendance-note.pdf",
+     "sha256": "b34aa62debdf5c566eb47f1105405546b672efe4492fec9eaf2e8e2d1c2bf559",
+     "bytes": 2527
+    },
+    {
+     "path": "cases/CTL-H-028/input/materials/photo-dining-ceiling.jpg",
+     "sha256": "2b72d0c361ce2724f2d33282d2963d8308e7f655278ae1a053f0966fa7d03001",
+     "bytes": 85008
+    },
+    {
+     "path": "cases/CTL-H-028/input/materials/policy-schedule.pdf",
+     "sha256": "52780bac5024c77a0deb5d4d8690fa4153b9d80f6e5937a5137a60faff42069d",
+     "bytes": 2361
+    },
+    {
+     "path": "cases/CTL-H-028/oracle/labels.json",
+     "sha256": "e99b6bf892fd778adcc2a31262b0ad39d0dac5107e9887d78558362d0765bd8c",
+     "bytes": 6724
+    },
+    {
+     "path": "cases/CTL-H-028/provenance.json",
+     "sha256": "60f95625ce3157b9cce48753e0ed98a8b211153e6fbab9b8bceb1b1baf246ad9",
+     "bytes": 4526
+    },
+    {
+     "path": "cases/CTL-H-028/review.json",
+     "sha256": "2cc2800d9b2a5265fc4e2f1aad87e7ea1900f185200a6211b0ff74e450a1db20",
+     "bytes": 2709
+    },
+    {
+     "path": "cases/CTL-H-028/setup.json",
+     "sha256": "b85d412ac75b89418b58be3f3dd29caa415a2fb1b48ed0b09c510fd9cd9932d9",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-029",
+   "files": [
+    {
+     "path": "cases/CTL-H-029/input/facts.json",
+     "sha256": "f704e50d216f8a21d363bc7055e90c6f9ba2c6c25c1beef477b4ab9a98e2d9a5",
+     "bytes": 2962
+    },
+    {
+     "path": "cases/CTL-H-029/input/initial_message.txt",
+     "sha256": "227a4125938848d9f9731a670c18d11679d3ed74c23998e59a2867ba9c3ba591",
+     "bytes": 349
+    },
+    {
+     "path": "cases/CTL-H-029/input/materials.json",
+     "sha256": "6b1798b327ab7e01161258db490a05b00cd559469cae4e4135c26a4b84cfa978",
+     "bytes": 517
+    },
+    {
+     "path": "cases/CTL-H-029/input/materials/builder-quote-wall.pdf",
+     "sha256": "b025742ad451f1e3b52981599785dc5b69eaeab95d0b61e6695db2d3467e2bc2",
+     "bytes": 3521
+    },
+    {
+     "path": "cases/CTL-H-029/input/materials/electrician-attendance-note.pdf",
+     "sha256": "286076546eef222d9e2ddf04806baebe68e548622082498f2703b6037cb1dcb4",
+     "bytes": 2529
+    },
+    {
+     "path": "cases/CTL-H-029/input/materials/photo-lounge-wall.jpg",
+     "sha256": "052fad35b816ca121bdef42fccb6f13033b952965c7c4118d3ec39e1363fbb4a",
+     "bytes": 106285
+    },
+    {
+     "path": "cases/CTL-H-029/input/materials/policy-schedule.pdf",
+     "sha256": "76c5b853776f7885a4f8520f3868078e326afde06616c0476b73d9b7e00ab22c",
+     "bytes": 2343
+    },
+    {
+     "path": "cases/CTL-H-029/oracle/labels.json",
+     "sha256": "61d74446c687bfa9f493135fa4716fea3398f806767c53c5f6e158be8f586e18",
+     "bytes": 5626
+    },
+    {
+     "path": "cases/CTL-H-029/provenance.json",
+     "sha256": "25acbd325efb66a61a3374e3df3857c7af75e0ff8495e2644c16eb36713254df",
+     "bytes": 4599
+    },
+    {
+     "path": "cases/CTL-H-029/review.json",
+     "sha256": "54f8c81dfbdbedc99cdacf22e8385625e0a44925a5f557abb5f27a9dbe6cdcd3",
+     "bytes": 2532
+    },
+    {
+     "path": "cases/CTL-H-029/setup.json",
+     "sha256": "9eff1e0a7fae7282b2227c3eb3ce25742339cf2ef16b8b9f3c87ad659b365575",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-030",
+   "files": [
+    {
+     "path": "cases/CTL-H-030/input/facts.json",
+     "sha256": "0ebbdc67be19f02398952d4255cf62f731818dd5551ad4b911916ca7a6482410",
+     "bytes": 2558
+    },
+    {
+     "path": "cases/CTL-H-030/input/initial_message.txt",
+     "sha256": "42792bbf5530f82404440d784812fbe5c0b4ffc847385249f075cef5a8c2b695",
+     "bytes": 268
+    },
+    {
+     "path": "cases/CTL-H-030/input/materials.json",
+     "sha256": "912912e878db08f236840329a44c42ee157107ca9296224031a06ed2ca9e698a",
+     "bytes": 384
+    },
+    {
+     "path": "cases/CTL-H-030/input/materials/carpet-quote.pdf",
+     "sha256": "df95cee073cb299fb974ea8a454b675fb33efd4f7396a8a8fc8f045d01f36651",
+     "bytes": 3617
+    },
+    {
+     "path": "cases/CTL-H-030/input/materials/photo-paint-spill.jpg",
+     "sha256": "c0d9c2d8f1aaf1b8844d184a893a1de6356f7b8701c2e9a3666c99b10841bb71",
+     "bytes": 417333
+    },
+    {
+     "path": "cases/CTL-H-030/input/materials/policy-schedule.pdf",
+     "sha256": "cc1e27fbe0684aedd2da310dfbd42b76f6a8e79ad3905ca0e7916adc11eb9083",
+     "bytes": 2347
+    },
+    {
+     "path": "cases/CTL-H-030/oracle/labels.json",
+     "sha256": "922f928977748bdda6b096d0d2729f607390e934dfd5afb43ee21819b7da82fa",
+     "bytes": 5534
+    },
+    {
+     "path": "cases/CTL-H-030/provenance.json",
+     "sha256": "228b14ae5fa2b3b7073f8e367bd1c3bda4b039e30f5ac0df3cef7bb15ec9a5b3",
+     "bytes": 3455
+    },
+    {
+     "path": "cases/CTL-H-030/review.json",
+     "sha256": "71617e8affd37da27ddf710bbec1a58d14bc87fde8e3b4519dc611fe4013cd75",
+     "bytes": 2414
+    },
+    {
+     "path": "cases/CTL-H-030/setup.json",
+     "sha256": "4711f19da5e209d7eae2642f716563e3551efd264be5ec06412518b48c95549c",
+     "bytes": 349
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-001",
+   "files": [
+    {
+     "path": "cases/CTL-M-001/input/facts.json",
+     "sha256": "b69d45ccd7f8b5e23e48310c4ad331c63a0eeddc7b8769915944896b210f7172",
+     "bytes": 3469
+    },
+    {
+     "path": "cases/CTL-M-001/input/initial_message.txt",
+     "sha256": "123f352e9f9ffd9e2b9388aa623da7bf93f27d5232e7ac3b945422bd29131c00",
+     "bytes": 294
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials.json",
+     "sha256": "5ffbc8cf8db00d28e3268d4aef23bd5dceb5f6d966c87813f9cdddb51c7ed29a",
+     "bytes": 498
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/photo-roof-box.tif",
+     "sha256": "b42331561ec74ad444de7a1debf982bb51bb48f78a9b0f43521ae82f779fbf7a",
+     "bytes": 3327116
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/policy-schedule.pdf",
+     "sha256": "9f14b1783ed7176ed932e0398d8925b5b698bf18410484f0897ecd3f38158236",
+     "bytes": 2470
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/receipt-roof-box-reprint.pdf",
+     "sha256": "81c68d455e5b02ea752f0401cfe0ffe2cf9111038bd64a47cc5e3f095fa1e8fb",
+     "bytes": 2460
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/repair-quote.pdf",
+     "sha256": "0594f612b6cbfca76145cc0a54a21f8110b2b735d3bfcf64e4132e12fe00e4f7",
+     "bytes": 3635
+    },
+    {
+     "path": "cases/CTL-M-001/oracle/labels.json",
+     "sha256": "f95013fe3817379addc97db25d475bba68ea88edc22e550c8de179f44a07923a",
+     "bytes": 6255
+    },
+    {
+     "path": "cases/CTL-M-001/provenance.json",
+     "sha256": "46e733feaadf9a2849bfbbd7de7a4a012efadda5cc1179f8156a886370bccc6a",
+     "bytes": 5613
+    },
+    {
+     "path": "cases/CTL-M-001/review.json",
+     "sha256": "dd4e4f16abd05ce6be1618a12b0f925446753b5e4f2337e270269d6eb69b4c70",
+     "bytes": 792
+    },
+    {
+     "path": "cases/CTL-M-001/setup.json",
+     "sha256": "e4a24cc25d90e936dd8c7023cd3578e4349d20531cc8e9c914d0007ac8244b9e",
+     "bytes": 363
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-002",
+   "files": [
+    {
+     "path": "cases/CTL-M-002/input/facts.json",
+     "sha256": "8ae70d2d2afe27d82a4c33a52473b1c26d6070acfc5ff285455eac985a9e6577",
+     "bytes": 3002
+    },
+    {
+     "path": "cases/CTL-M-002/input/initial_message.txt",
+     "sha256": "44f1bbfb6e09a7c7927a07035f607af6fb63b083384c36e36c94fe01292d289a",
+     "bytes": 317
+    },
+    {
+     "path": "cases/CTL-M-002/input/materials.json",
+     "sha256": "d5253bf8755a7f2ece90e2b65abfbc3ba916c2c4aa08bbfd94b2d6d09cb29bdf",
+     "bytes": 496
+    },
+    {
+     "path": "cases/CTL-M-002/input/materials/photo-front-left-wheel.jpg",
+     "sha256": "7850bccc8d9facb16046101998f8dd599808d10196a050993f6fcb107e9ab8b3",
+     "bytes": 246979
+    },
+    {
+     "path": "cases/CTL-M-002/input/materials/policy-schedule.pdf",
+     "sha256": "31a57a9e415fa0d62e0c9a97a8e48e75095776e7607e4b758cd77febd4369654",
+     "bytes": 2424
+    },
+    {
+     "path": "cases/CTL-M-002/input/materials/receipt-wheels.pdf",
+     "sha256": "ed4b5c3b9b2bee9faf453fc55113809d6bb31c144380e5ca0561b17a6f2ff177",
+     "bytes": 2409
+    },
+    {
+     "path": "cases/CTL-M-002/input/materials/repair-quote.pdf",
+     "sha256": "b2861b8a0b3b255b582f273f7a3e7771c4ce0061791bd87f46f2de5bdbb9854c",
+     "bytes": 3643
+    },
+    {
+     "path": "cases/CTL-M-002/oracle/labels.json",
+     "sha256": "714029aafc39e05377c166964f3e6b137a865456c16961aa4e5c6c2f09315a52",
+     "bytes": 5903
+    },
+    {
+     "path": "cases/CTL-M-002/provenance.json",
+     "sha256": "5c44c1ffadd400501e63b82b21c7684d01d7df572e2083425038afdbb214b6d0",
+     "bytes": 4831
+    },
+    {
+     "path": "cases/CTL-M-002/review.json",
+     "sha256": "55e9e9a081ddade7fa03c0c49085c79aee52e9cae473c426c9358ae8bf8d78c1",
+     "bytes": 2817
+    },
+    {
+     "path": "cases/CTL-M-002/setup.json",
+     "sha256": "bc02bcac17c3c107d995a057c8102c0e94af856758e9b85cde2efac7ab98d0f4",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-003",
+   "files": [
+    {
+     "path": "cases/CTL-M-003/input/facts.json",
+     "sha256": "bbdd5f1851812d1f9d3f0e5d32e0be649da80a7622a9e1235276beb06d491bbb",
+     "bytes": 2605
+    },
+    {
+     "path": "cases/CTL-M-003/input/initial_message.txt",
+     "sha256": "4a1d1ddeea285636d10b2ac4eb3b351ee20848d9aa7b9520597ad8b0450b5b0e",
+     "bytes": 277
+    },
+    {
+     "path": "cases/CTL-M-003/input/materials.json",
+     "sha256": "8c91ea39240297520dece8efb643be0ad7bf6851fe53910cb05a67216a76cf95",
+     "bytes": 503
+    },
+    {
+     "path": "cases/CTL-M-003/input/materials/photo-gatepost.jpg",
+     "sha256": "2019dcce5e7bdf5dbf7e1fb1b5b77afbf974c1bfb75a447cd9058c4f55465574",
+     "bytes": 438021
+    },
+    {
+     "path": "cases/CTL-M-003/input/materials/photo-rear-door-scrape.jpg",
+     "sha256": "fc9ed6e5ccd83c95e7573fcf31d90cb3c38cd43ea8f8f2b96eecff90f7fe7fba",
+     "bytes": 224537
+    },
+    {
+     "path": "cases/CTL-M-003/input/materials/policy-schedule.pdf",
+     "sha256": "ec802cd2200001f7f8ccc887d7473ca8be2c21e8c9ae8cb18bbd4bbd85859d0d",
+     "bytes": 2435
+    },
+    {
+     "path": "cases/CTL-M-003/input/materials/repair-quote.pdf",
+     "sha256": "0941c6c48cf0aee23351641ff6809b788aec2570e714f046c5991a8363d197d8",
+     "bytes": 3546
+    },
+    {
+     "path": "cases/CTL-M-003/oracle/labels.json",
+     "sha256": "a8fc6a8a23322b10311fc0b2f8d56e82cbedd085d14b3ee3e6fb29befab25585",
+     "bytes": 5428
+    },
+    {
+     "path": "cases/CTL-M-003/provenance.json",
+     "sha256": "8bc7a46dcb7cb8b1939be9e9b45c4b5f63d188e919f350a777e175ad7f6e1099",
+     "bytes": 5171
+    },
+    {
+     "path": "cases/CTL-M-003/review.json",
+     "sha256": "8a7f241ca287e1e5b45b823d74bf340bfaac746833e703395d0958dc00c813c9",
+     "bytes": 5492
+    },
+    {
+     "path": "cases/CTL-M-003/setup.json",
+     "sha256": "bb269210c8709373b71e52e93b1c0b394e363fc6f707c3174ec95fcc76b498c1",
+     "bytes": 459
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-004",
+   "files": [
+    {
+     "path": "cases/CTL-M-004/input/facts.json",
+     "sha256": "b98eba6f4c2a6aa54c86526182e74dcca19a322839ea6aab6d64e772a3fbc056",
+     "bytes": 2730
+    },
+    {
+     "path": "cases/CTL-M-004/input/initial_message.txt",
+     "sha256": "5f3c15eca6b9b407b9e910227f3f079eef693447bc9620190fd58b46bb9dc2d7",
+     "bytes": 335
+    },
+    {
+     "path": "cases/CTL-M-004/input/materials.json",
+     "sha256": "48cd6e113724d924c4f0b4a027c05d0100b09378574434d46492eded09ca8dd3",
+     "bytes": 384
+    },
+    {
+     "path": "cases/CTL-M-004/input/materials/photo-driver-door.jpg",
+     "sha256": "a9f8432e4d71d1a24bdc64f069d3d4b0187ab15a26cb07899f8a3643efdc4cde",
+     "bytes": 159211
+    },
+    {
+     "path": "cases/CTL-M-004/input/materials/policy-schedule.pdf",
+     "sha256": "16e1d64e50cd338509136acca18ffe046d0a5c5d7199d389f69bf4770f3fb665",
+     "bytes": 2418
+    },
+    {
+     "path": "cases/CTL-M-004/input/materials/repair-quote.pdf",
+     "sha256": "5c29f0efad76a2cfc121fe09cc95cc051f3b35ec267cb4cf705edf8fbdcf6d48",
+     "bytes": 3620
+    },
+    {
+     "path": "cases/CTL-M-004/oracle/labels.json",
+     "sha256": "8e079feeca20d5247a7893d63c1e3f8baaba2dd065e49b3a31d9d90a16bfc404",
+     "bytes": 5705
+    },
+    {
+     "path": "cases/CTL-M-004/provenance.json",
+     "sha256": "3c17d30bf5f1b85420778ea93a5da58bccf35e02668c77fe0c261f5116d7d6de",
+     "bytes": 3783
+    },
+    {
+     "path": "cases/CTL-M-004/review.json",
+     "sha256": "7fdeda028228e55343ad60cc345598290336ec117fb241a8d7d1f6722c7ea1fb",
+     "bytes": 2580
+    },
+    {
+     "path": "cases/CTL-M-004/setup.json",
+     "sha256": "e03305eef9dbcea7a3fe143a91f1c9bd51e56b3134cde04398d97d587e1a5ae2",
+     "bytes": 559
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-005",
+   "files": [
+    {
+     "path": "cases/CTL-M-005/input/facts.json",
+     "sha256": "30c839df29b389caf65e1d08c85c2569858612b13056969403761956f345f3e5",
+     "bytes": 2821
+    },
+    {
+     "path": "cases/CTL-M-005/input/initial_message.txt",
+     "sha256": "7987e6da24965209c0233551a35be4638295f9cd48e6783cb1a490359a1cba4a",
+     "bytes": 612
+    },
+    {
+     "path": "cases/CTL-M-005/input/materials.json",
+     "sha256": "c4fea97e520253045042f02cf430c51b256aacfdbddda18503ff613aaacdb6ef",
+     "bytes": 510
+    },
+    {
+     "path": "cases/CTL-M-005/input/materials/photo-front-left-corner.jpg",
+     "sha256": "ae9bf652befde0286f7d43608d78e7658dcb426ecdda60b4c29f1b20336b7cdc",
+     "bytes": 185730
+    },
+    {
+     "path": "cases/CTL-M-005/input/materials/photo-lamp-post-base.jpg",
+     "sha256": "45e92fbc21dc3b58775ce4c90b53d38b5a7d1c7b25354128a7beaabb5e56dde8",
+     "bytes": 339347
+    },
+    {
+     "path": "cases/CTL-M-005/input/materials/policy-schedule.pdf",
+     "sha256": "2584d79afc961b4c9fe363ad2e132f0f8e437a4bf6677e1e0afdae115f7cbfe1",
+     "bytes": 2450
+    },
+    {
+     "path": "cases/CTL-M-005/input/materials/repair-quote.pdf",
+     "sha256": "9127482dc338535a7ab55d3b87ed0b5b64b21c15bbfc656f5a099178f2afd84e",
+     "bytes": 3710
+    },
+    {
+     "path": "cases/CTL-M-005/oracle/labels.json",
+     "sha256": "d22c18da842dcf4e018f29cf5df75a2be19b67979ca4df0f82b3557f89151281",
+     "bytes": 5989
+    },
+    {
+     "path": "cases/CTL-M-005/provenance.json",
+     "sha256": "4789a29b79d29d304d0af2224e3646a3584828eefafe066ec1414cdda6177c6b",
+     "bytes": 4984
+    },
+    {
+     "path": "cases/CTL-M-005/review.json",
+     "sha256": "f806b562e4b6afa546aedc4a27cc333bce2ea204e88b1976661a2d42e556cf6c",
+     "bytes": 5109
+    },
+    {
+     "path": "cases/CTL-M-005/setup.json",
+     "sha256": "67fb673d6f451786de5935f2ab50eecd6196c06784db97df1725b3ef4af3c388",
+     "bytes": 560
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-006",
+   "files": [
+    {
+     "path": "cases/CTL-M-006/input/facts.json",
+     "sha256": "9e7b79a7a8e63331602b5b1e7cb1d84f64aa19f0beeb630dae707baf9bc5ae66",
+     "bytes": 2668
+    },
+    {
+     "path": "cases/CTL-M-006/input/initial_message.txt",
+     "sha256": "4ac6e3da3e7f967c2f483a4ac5c3e36e1c46481d731f983161c55f050aa1fbe3",
+     "bytes": 346
+    },
+    {
+     "path": "cases/CTL-M-006/input/materials.json",
+     "sha256": "cac441bcc38eb5e7773a15c6a35454ff843b802ce1df5b269ecc896d37295484",
+     "bytes": 383
+    },
+    {
+     "path": "cases/CTL-M-006/input/materials/photo-left-doors.jpg",
+     "sha256": "f7907755da7f25b81f7894ef983174bb8ead62402b6c477dce81c913d7d6a051",
+     "bytes": 150524
+    },
+    {
+     "path": "cases/CTL-M-006/input/materials/policy-schedule.pdf",
+     "sha256": "f6bbdaf6b1ad774c3103541a7ce5ace061c631950fc47137ebee70c47040a453",
+     "bytes": 2429
+    },
+    {
+     "path": "cases/CTL-M-006/input/materials/repair-quote.pdf",
+     "sha256": "3e8b82b8f7775cc6b67c4e317127475ed09dde1da899fb09e764bbe230894e97",
+     "bytes": 3602
+    },
+    {
+     "path": "cases/CTL-M-006/oracle/labels.json",
+     "sha256": "4d2fcd703f400fd0769a11f7cbacd74d73af6f916f2be7c37555b8c3de6b8706",
+     "bytes": 5781
+    },
+    {
+     "path": "cases/CTL-M-006/provenance.json",
+     "sha256": "29a6dc3eb1285636d599034eea809918584c16b64c623475e93e6894c11ed41f",
+     "bytes": 3669
+    },
+    {
+     "path": "cases/CTL-M-006/review.json",
+     "sha256": "9db8811d5b69127fe16451e147af0e89b2f379c0f09be2b02e4d5334e8e602ca",
+     "bytes": 2658
+    },
+    {
+     "path": "cases/CTL-M-006/setup.json",
+     "sha256": "b631c3aa5d00426d4b315fa7cb266a8ba948799b61556c5c216a84d15b5aea45",
+     "bytes": 563
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-007",
+   "files": [
+    {
+     "path": "cases/CTL-M-007/input/facts.json",
+     "sha256": "70ff074d59463c2174fd23af8431d2708d59ddbb224424965723962de9a5339e",
+     "bytes": 2569
+    },
+    {
+     "path": "cases/CTL-M-007/input/initial_message.txt",
+     "sha256": "af84581134c2e70928dee3392d3f57aab1d36b55722eee593adfde715f67c316",
+     "bytes": 293
+    },
+    {
+     "path": "cases/CTL-M-007/input/materials.json",
+     "sha256": "be8722e54c8fcf367582277753c37dadcd2d22a29b204a8ee7ec47f17a480145",
+     "bytes": 390
+    },
+    {
+     "path": "cases/CTL-M-007/input/materials/photo-rear-right-bumper.jpg",
+     "sha256": "5c7b59e92a2fa687b8b2e4860b61e335bd6b76170c48d87177172b9b7b60cf1c",
+     "bytes": 216852
+    },
+    {
+     "path": "cases/CTL-M-007/input/materials/policy-schedule.pdf",
+     "sha256": "3d720f371975fca4954d9df4c2dc552bff1a03dcde1485bed168b13f0911b991",
+     "bytes": 2427
+    },
+    {
+     "path": "cases/CTL-M-007/input/materials/repair-quote.pdf",
+     "sha256": "c2ef36d5f0b0505fde0d6c62affb35d4fc04ee3990dfca73284b13f5a72f9c87",
+     "bytes": 3528
+    },
+    {
+     "path": "cases/CTL-M-007/oracle/labels.json",
+     "sha256": "3d3caea4a036be13f30abf582cd97b3b185edeff16147fb0fa32f8868a39c55f",
+     "bytes": 5779
+    },
+    {
+     "path": "cases/CTL-M-007/provenance.json",
+     "sha256": "3501b510dc4a1b118f01b8d51331e9e09822649716a0517137c47a7226744f7e",
+     "bytes": 3559
+    },
+    {
+     "path": "cases/CTL-M-007/review.json",
+     "sha256": "dd490592606913a9532b04d93e85baea3aeaf1636b91920986663772cff4d6d8",
+     "bytes": 2528
+    },
+    {
+     "path": "cases/CTL-M-007/setup.json",
+     "sha256": "e559c74c920891b7d3f746d820efcbaaf9f0cb74d403bc0cc0f0c09c8247fbf2",
+     "bytes": 456
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-008",
+   "files": [
+    {
+     "path": "cases/CTL-M-008/input/facts.json",
+     "sha256": "7c0001f4a997aed36a48ac5648a7f019add6e172b85fc3ada95f95942cfd92bd",
+     "bytes": 2650
+    },
+    {
+     "path": "cases/CTL-M-008/input/initial_message.txt",
+     "sha256": "318dcd337e87b471a76d813fa804ffc960a27abb93f8bae1dc7f9364b86866b2",
+     "bytes": 423
+    },
+    {
+     "path": "cases/CTL-M-008/input/materials.json",
+     "sha256": "ee195b66ef2eccae9642795e96ad214c48e19fb17dc9acc7b6f275e5ded473ca",
+     "bytes": 389
+    },
+    {
+     "path": "cases/CTL-M-008/input/materials/photo-rear-left-corner.jpg",
+     "sha256": "ef349f2addf6bb0865f2df86baa5979217a7cea33556740979df82ad641c9624",
+     "bytes": 218118
+    },
+    {
+     "path": "cases/CTL-M-008/input/materials/policy-schedule.pdf",
+     "sha256": "35fa13353a9848a73094d637845cbf9edfeeaaeabfa37f1b00f1bfedb54720e8",
+     "bytes": 2423
+    },
+    {
+     "path": "cases/CTL-M-008/input/materials/repair-quote.pdf",
+     "sha256": "8539fd04c58a56c0609d1b0ff0a40fb761afb31b3e900fbd2bf166c7aa8af3fa",
+     "bytes": 3701
+    },
+    {
+     "path": "cases/CTL-M-008/oracle/labels.json",
+     "sha256": "cf5cd27f4ee754be5238c08013031bb14e09da3806675902acbf83ebce7d4f76",
+     "bytes": 6132
+    },
+    {
+     "path": "cases/CTL-M-008/provenance.json",
+     "sha256": "d9a75604dc521f4a4bc89b6c967d67565b700f475246e599ca2e81343b88c2f6",
+     "bytes": 3700
+    },
+    {
+     "path": "cases/CTL-M-008/review.json",
+     "sha256": "caa4d13dfc5d120b0c6833a271139ce1633523c1f3f99297134ff0801cf44c7b",
+     "bytes": 2738
+    },
+    {
+     "path": "cases/CTL-M-008/setup.json",
+     "sha256": "a7c0651ac28daf6e3315369161e8369a1860c524404961eb72763fe2c94bacc5",
+     "bytes": 456
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-009",
+   "files": [
+    {
+     "path": "cases/CTL-M-009/input/facts.json",
+     "sha256": "7948b8c8e565bd85e7fd5088d839cc8aa080cf9ce6508777f60bcac81809a9e0",
+     "bytes": 2733
+    },
+    {
+     "path": "cases/CTL-M-009/input/initial_message.txt",
+     "sha256": "1813c39df8c8927f204aa15fafd079d75895b82aa098569abde2820a93682e64",
+     "bytes": 343
+    },
+    {
+     "path": "cases/CTL-M-009/input/materials.json",
+     "sha256": "0a29e70c606bb5b5f328de97f0fba363e18a09db800026807751478bda561c9c",
+     "bytes": 391
+    },
+    {
+     "path": "cases/CTL-M-009/input/materials/photo-front-right-corner.jpg",
+     "sha256": "54011f2f85b86bae093f193fe132522669b5100348a75429b7529ffa618c7477",
+     "bytes": 370845
+    },
+    {
+     "path": "cases/CTL-M-009/input/materials/policy-schedule.pdf",
+     "sha256": "7e1aa1d5ce315b7894a41f96d6426f0dc1fe75e937bf44918e4016f437740d57",
+     "bytes": 2435
+    },
+    {
+     "path": "cases/CTL-M-009/input/materials/repair-quote.pdf",
+     "sha256": "5910606d9841e8c1b72bf371850b95518f2635db68a06a2aaa24affe3bfa24ef",
+     "bytes": 3613
+    },
+    {
+     "path": "cases/CTL-M-009/oracle/labels.json",
+     "sha256": "71e56fdea760678b8072d8adc63c62326b01aabcab83dd63017d37f7027facbd",
+     "bytes": 5818
+    },
+    {
+     "path": "cases/CTL-M-009/provenance.json",
+     "sha256": "a9cfc85d3c308c7c3f5260724d6e248fa0e5e6f11e5fb5b658f3e885242fd28b",
+     "bytes": 3680
+    },
+    {
+     "path": "cases/CTL-M-009/review.json",
+     "sha256": "821021539d8c276f0e6fea3fa7090605dd2d214a51aefb44aff5ff5e92fbb9ad",
+     "bytes": 2619
+    },
+    {
+     "path": "cases/CTL-M-009/setup.json",
+     "sha256": "6920a066ab9b409dad14b18a8b6548ccf57c51a6f1c2b86123de53b15cab9ee1",
+     "bytes": 157
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-010",
+   "files": [
+    {
+     "path": "cases/CTL-M-010/input/facts.json",
+     "sha256": "48559c2085e726652f3b1856bbdf1562dd9d438edf0973b028cabd369e60ff9c",
+     "bytes": 2525
+    },
+    {
+     "path": "cases/CTL-M-010/input/initial_message.txt",
+     "sha256": "d5a78ffb31830b1863753ef2fab97a89f43c6d61c91b6568a72e65da2390b97a",
+     "bytes": 311
+    },
+    {
+     "path": "cases/CTL-M-010/input/materials.json",
+     "sha256": "4e40366dba8dc6a1fbc47e0ede814f05e054fb0df0fd52bc58c718fdc186e8ca",
+     "bytes": 388
+    },
+    {
+     "path": "cases/CTL-M-010/input/materials/photo-front-left-door.jpg",
+     "sha256": "72d9628ef838b98c213fe11f103f91260262ae37217ac4026f6b2ed77caa9fbf",
+     "bytes": 23434
+    },
+    {
+     "path": "cases/CTL-M-010/input/materials/policy-schedule.pdf",
+     "sha256": "9e6dcf42db0232ded4f7e0814cc3efea4194dbcf8f7bfa6fafcf4329e99a1d4f",
+     "bytes": 2445
+    },
+    {
+     "path": "cases/CTL-M-010/input/materials/repair-quote.pdf",
+     "sha256": "fb291707817995f9c0b0f818e7e03088ba5b0513e4232f0f3de14b7178793be3",
+     "bytes": 3605
+    },
+    {
+     "path": "cases/CTL-M-010/oracle/labels.json",
+     "sha256": "87876c3b91b9d2f3ffabb2b72e4d8a34f45c25084808bb4e0734ec2b99e3377f",
+     "bytes": 5736
+    },
+    {
+     "path": "cases/CTL-M-010/provenance.json",
+     "sha256": "14fef8f3b50b504d41b83fd9be96513b8a40773a2586140b860c7c030ef0e557",
+     "bytes": 4271
+    },
+    {
+     "path": "cases/CTL-M-010/review.json",
+     "sha256": "b3c8115610d56b6b692a79d277dbfce6d2836081cde17f3d07107fe4d075d95c",
+     "bytes": 2546
+    },
+    {
+     "path": "cases/CTL-M-010/setup.json",
+     "sha256": "6dd199072df350bd7d583f100aadc0f009c1e2fd2a20c3a2506358c4e867558f",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-011",
+   "files": [
+    {
+     "path": "cases/CTL-M-011/input/facts.json",
+     "sha256": "9fc681cdb3f4b26b4c804f3862585db4e715eb4b8512df7ff96726647f8a5862",
+     "bytes": 2603
+    },
+    {
+     "path": "cases/CTL-M-011/input/initial_message.txt",
+     "sha256": "567e5d31a4d036c9c98f19bafe1e699d05d45936ad66b55d1473df3521b23e0c",
+     "bytes": 333
+    },
+    {
+     "path": "cases/CTL-M-011/input/materials.json",
+     "sha256": "11a27d4f117bd54d972fbcd354689ccabc4cdbea10885e7c9caa12260d742e8f",
+     "bytes": 391
+    },
+    {
+     "path": "cases/CTL-M-011/input/materials/photo-front-right-bumper.jpg",
+     "sha256": "754cfcdd1683de9a11061bd228082f8ae889c405eb7478d365874015ae7e04e9",
+     "bytes": 351338
+    },
+    {
+     "path": "cases/CTL-M-011/input/materials/policy-schedule.pdf",
+     "sha256": "7d3ecef2435fd5ef331ddf060a50485a7fa72635ed9cfc5a123d1cf3d5103391",
+     "bytes": 2419
+    },
+    {
+     "path": "cases/CTL-M-011/input/materials/repair-quote.pdf",
+     "sha256": "af739dce0b6383d94fe7633f8bc1a87ead6c9d1ac95566c343fd2726da5ea9f0",
+     "bytes": 3538
+    },
+    {
+     "path": "cases/CTL-M-011/oracle/labels.json",
+     "sha256": "8ce9c82f8d413c194da824f481c0cedba98a1829374fb86f104d58fc280db035",
+     "bytes": 5703
+    },
+    {
+     "path": "cases/CTL-M-011/provenance.json",
+     "sha256": "3cf1ed2f464a0e4207ffea883e68ab5e56e9257989de6da61c999010da12948b",
+     "bytes": 3647
+    },
+    {
+     "path": "cases/CTL-M-011/review.json",
+     "sha256": "d32eada3020b2e61849221ecb41723a26caea65d4102708529364461cf942bbb",
+     "bytes": 2547
+    },
+    {
+     "path": "cases/CTL-M-011/setup.json",
+     "sha256": "c613a4165d4fb34801d7dffe72b608ffe2bcad899f989795a26962f35dbcd49d",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-012",
+   "files": [
+    {
+     "path": "cases/CTL-M-012/input/facts.json",
+     "sha256": "7389600d04db1037fb562f8b4ad51c6e58a38bc2de242800bfc85ffb5df8f5e2",
+     "bytes": 2620
+    },
+    {
+     "path": "cases/CTL-M-012/input/initial_message.txt",
+     "sha256": "0cd36ff316d7bd9d5222c0fd80632205c7170f0d0ca3ef390d9d6630e3a33e1f",
+     "bytes": 331
+    },
+    {
+     "path": "cases/CTL-M-012/input/materials.json",
+     "sha256": "62e2b602219322eb8e048da5a21ac90c2d1a488cb37dc5975bfd8286ca31f96d",
+     "bytes": 387
+    },
+    {
+     "path": "cases/CTL-M-012/input/materials/photo-windscreen.jpg",
+     "sha256": "c3dca82d1c850b614493c0bc230a58eb2cb2eb1e82cf44632eb428a0a7f53097",
+     "bytes": 330034
+    },
+    {
+     "path": "cases/CTL-M-012/input/materials/policy-schedule.pdf",
+     "sha256": "8ba4044007cd4b72d33c124f6f2cc28604c7389ec1adbc84d60f2dd94261a972",
+     "bytes": 2439
+    },
+    {
+     "path": "cases/CTL-M-012/input/materials/windscreen-quote.pdf",
+     "sha256": "272a16285d3591813a50f585573810d187cd12279aaa01a55a49e3bdbed9d124",
+     "bytes": 1403
+    },
+    {
+     "path": "cases/CTL-M-012/oracle/labels.json",
+     "sha256": "70afc9270f41af1b1241854e957f6a0a0dce699b95e17dc876ce1dd49eaeb4b4",
+     "bytes": 5560
+    },
+    {
+     "path": "cases/CTL-M-012/provenance.json",
+     "sha256": "0e1a0e0ce232b44da1b6a7d89de982e5d6495d91c8285ce37da4a5b7aaaac0d4",
+     "bytes": 4697
+    },
+    {
+     "path": "cases/CTL-M-012/review.json",
+     "sha256": "0cdcf89b438c88451597808a24b8d9c10c29f2dcb595d52fb15627c6172233bf",
+     "bytes": 2378
+    },
+    {
+     "path": "cases/CTL-M-012/setup.json",
+     "sha256": "a03a4124bb3754dd571ef89b5d18cf7fd7859c719b2601ba5b8e186c22f32cca",
+     "bytes": 363
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-013",
+   "files": [
+    {
+     "path": "cases/CTL-M-013/input/facts.json",
+     "sha256": "69125e201132a22537e3c8b13d92206fd22cec648e91044825255ca41fdcbd9b",
+     "bytes": 4088
+    },
+    {
+     "path": "cases/CTL-M-013/input/initial_message.txt",
+     "sha256": "c28b0d0a50bf5cde31bd62023638fca6015676a6b32c897ff8d55a03a58c3b5c",
+     "bytes": 716
+    },
+    {
+     "path": "cases/CTL-M-013/input/materials.json",
+     "sha256": "44237b0b5b6b50e7f2b73bab3a0d77294f6617b0e54e37831efae924d7635edb",
+     "bytes": 384
+    },
+    {
+     "path": "cases/CTL-M-013/input/materials/photo-rear-corner.jpg",
+     "sha256": "ef19ff83dc024fed56ae906d5ae6357f62cecd0e73a4b6063a2ea0190c5e3ccd",
+     "bytes": 161437
+    },
+    {
+     "path": "cases/CTL-M-013/input/materials/policy-schedule.pdf",
+     "sha256": "7f422f70277f09abb8a9665ce5138d4cf0896febb9d4b9c16c6b4e1d8dbf8148",
+     "bytes": 2423
+    },
+    {
+     "path": "cases/CTL-M-013/input/materials/repair-quote.pdf",
+     "sha256": "de8ef2e9c6324437bada1d9665c2d49a6de150ba2243a0d8082551cbb22d7b21",
+     "bytes": 3613
+    },
+    {
+     "path": "cases/CTL-M-013/oracle/labels.json",
+     "sha256": "0763f68b7b74254ab9c004579bd0e23e2aae388d88437ffdc79a58ae75ab5e6f",
+     "bytes": 6178
+    },
+    {
+     "path": "cases/CTL-M-013/provenance.json",
+     "sha256": "c3375810879bea8035f819269a6900d0bfcd9410c48d6f22d75bd01569067590",
+     "bytes": 3677
+    },
+    {
+     "path": "cases/CTL-M-013/review.json",
+     "sha256": "16ee0c254c64df3c57d45c820dc21748ffc7ea71c81fe6511ea6874f24482b38",
+     "bytes": 2617
+    },
+    {
+     "path": "cases/CTL-M-013/setup.json",
+     "sha256": "3f4eb55d06950b133bcafafbbda9a9b298b744b9bbed1cf7af9b6b3131b6f723",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-014",
+   "files": [
+    {
+     "path": "cases/CTL-M-014/input/facts.json",
+     "sha256": "e889d51bf98aeade13f3cea9d863d052b412869860fbeb2381137b80bf1d4a09",
+     "bytes": 3491
+    },
+    {
+     "path": "cases/CTL-M-014/input/initial_message.txt",
+     "sha256": "145045624bce7fbfdca47dfe2caf87b0030e2854c7ddc0ad60c1556c9031b73d",
+     "bytes": 381
+    },
+    {
+     "path": "cases/CTL-M-014/input/materials.json",
+     "sha256": "30b1f3dcf88953536169651e8508ba402d8be958829cae4d306fb0d6070dfbc1",
+     "bytes": 389
+    },
+    {
+     "path": "cases/CTL-M-014/input/materials/photo-front-left-wheel.jpg",
+     "sha256": "7e38a6807b32bc1441e7a7ddcffaffb5ced32f0e7aac0d1ab9f7648f0b24ed91",
+     "bytes": 374148
+    },
+    {
+     "path": "cases/CTL-M-014/input/materials/policy-schedule.pdf",
+     "sha256": "4a1b3a21e55fb31c92580269d99cccee893492e399be795ac86376ab9fe72ef0",
+     "bytes": 2424
+    },
+    {
+     "path": "cases/CTL-M-014/input/materials/repair-quote.pdf",
+     "sha256": "07984b5f107f2d80ac38a739e5bc81869e8f4ec05f8bcb199864125f2528655e",
+     "bytes": 3697
+    },
+    {
+     "path": "cases/CTL-M-014/oracle/labels.json",
+     "sha256": "639f630e120c04d65e17d89c600af241b43f69a302f82b438731d87a4b5b6b6d",
+     "bytes": 6144
+    },
+    {
+     "path": "cases/CTL-M-014/provenance.json",
+     "sha256": "fba6c38c205f8d0cf663d6942e7db3604c476f737c37cedcd2d936d8bd0d9eeb",
+     "bytes": 3764
+    },
+    {
+     "path": "cases/CTL-M-014/review.json",
+     "sha256": "2e31becfb68ae692c264fc263d4081c01f3c128724a8c20b78c6630115ed3586",
+     "bytes": 2573
+    },
+    {
+     "path": "cases/CTL-M-014/setup.json",
+     "sha256": "9e19c0ee2c718e57c13553f3beb0a9e318e90665977380a6ef7521fe686b8ade",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-015",
+   "files": [
+    {
+     "path": "cases/CTL-M-015/input/facts.json",
+     "sha256": "70204460fddc5e9b8a3efc5bce93643a25bacf8177516f2ae54d7fdad9cab33e",
+     "bytes": 3885
+    },
+    {
+     "path": "cases/CTL-M-015/input/initial_message.txt",
+     "sha256": "892ec798b834aa7dc35e9481f72b694f213c28051099b50e3502d4f4676ce812",
+     "bytes": 431
+    },
+    {
+     "path": "cases/CTL-M-015/input/materials.json",
+     "sha256": "58660743b4d2203aa73cadf9390f2f9050c3a7d841e5ad8db77ce56c092b90eb",
+     "bytes": 503
+    },
+    {
+     "path": "cases/CTL-M-015/input/materials/photo-front-corner.jpg",
+     "sha256": "a67b86bcdb96b93540193f7fee1712b9a28b90a111c20224dffa9af2284eb26d",
+     "bytes": 306461
+    },
+    {
+     "path": "cases/CTL-M-015/input/materials/photo-leaning-wall.jpg",
+     "sha256": "cbe060656707f0f9835d8674052aff3ad0d36b13a0f04ce26447aacc6170a6bb",
+     "bytes": 441861
+    },
+    {
+     "path": "cases/CTL-M-015/input/materials/policy-schedule.pdf",
+     "sha256": "7784aab50982231529e19d1158f2126a722fbb00a9431557be123ca0f0f0c73e",
+     "bytes": 2425
+    },
+    {
+     "path": "cases/CTL-M-015/input/materials/repair-quote.pdf",
+     "sha256": "4f51bd34adcd603904089d5f9cb51afd3e7ce8fa6be4ab3664527e0079c25b75",
+     "bytes": 3629
+    },
+    {
+     "path": "cases/CTL-M-015/oracle/labels.json",
+     "sha256": "762da2ab7b40988de0875749cd52a80e1ee5901d07b265d0a552c0108d8b7c3a",
+     "bytes": 6093
+    },
+    {
+     "path": "cases/CTL-M-015/provenance.json",
+     "sha256": "56791f6624905b5abbe2011198b3867cf11d30cfaceb7894116563f922918dd9",
+     "bytes": 5295
+    },
+    {
+     "path": "cases/CTL-M-015/review.json",
+     "sha256": "bdfef3a7885d336e137ef1071dbdd88b1a4279dc8abf65f0da3732ec376af415",
+     "bytes": 5139
+    },
+    {
+     "path": "cases/CTL-M-015/setup.json",
+     "sha256": "7021bc52fc6f354d7d6f55838ce509fc8bd8b5d304ccc00fe5fb7b380e7dd218",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-016",
+   "files": [
+    {
+     "path": "cases/CTL-M-016/input/facts.json",
+     "sha256": "0f7390752c214a8611711fdb4921ac7e181625dbf25f39ac479948e107afaf8d",
+     "bytes": 3582
+    },
+    {
+     "path": "cases/CTL-M-016/input/initial_message.txt",
+     "sha256": "8f6b3720d1577b4dc94a59fe9f870f6cbe0743fb29e56651923bf0c4213d544c",
+     "bytes": 406
+    },
+    {
+     "path": "cases/CTL-M-016/input/materials.json",
+     "sha256": "91d5f5e202f0a14270f0c7d9ceb2a41f8fa2a68016ad4ab1dc24e41f10ac5ce3",
+     "bytes": 498
+    },
+    {
+     "path": "cases/CTL-M-016/input/materials/photo-bike-wheel.jpg",
+     "sha256": "090935f30ae800256e6a6e86847ce268eea8372974f07b5bedbb02fe30ad919b",
+     "bytes": 377298
+    },
+    {
+     "path": "cases/CTL-M-016/input/materials/photo-rear-door.jpg",
+     "sha256": "c102c5c596cd3358a671855ddbc8da8c2a2b192c4d2e63daf5e34ccac36684c7",
+     "bytes": 205534
+    },
+    {
+     "path": "cases/CTL-M-016/input/materials/policy-schedule.pdf",
+     "sha256": "5f17d943f5f04b8921652cd54139b97f314d867da05c04a81d4efdb9b3bba4db",
+     "bytes": 2428
+    },
+    {
+     "path": "cases/CTL-M-016/input/materials/repair-quote.pdf",
+     "sha256": "aeccf6239d3c02c1192427670a9e2fc8ee7ac0c6d5819ff03a8d7d745b09dd25",
+     "bytes": 3522
+    },
+    {
+     "path": "cases/CTL-M-016/oracle/labels.json",
+     "sha256": "29265273c8756d980944f30a6439ca808110cdbb9e595e71bb3c8f786994a372",
+     "bytes": 6164
+    },
+    {
+     "path": "cases/CTL-M-016/provenance.json",
+     "sha256": "a055f3cc105ad41447c31ee3b7cd578b5e1e64581c77c45393ebb1c3ce07292e",
+     "bytes": 4868
+    },
+    {
+     "path": "cases/CTL-M-016/review.json",
+     "sha256": "beb87d58c2856d131c6c3aa4d028929716064777b144613947dd5cc3863c8eb8",
+     "bytes": 5034
+    },
+    {
+     "path": "cases/CTL-M-016/setup.json",
+     "sha256": "f89f9671c5f03e99dabda51d836745fde03ceed8185f99e506c45bea73cd1cac",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-017",
+   "files": [
+    {
+     "path": "cases/CTL-M-017/input/facts.json",
+     "sha256": "b9d3d18b49138da46a164e032c714ca8b7f7f0e76766c94a22fe4508d9f60a9c",
+     "bytes": 3488
+    },
+    {
+     "path": "cases/CTL-M-017/input/initial_message.txt",
+     "sha256": "ef0359bb39332b39739c4f6c94b90af707e712c8833fae02b23090211cfdd518",
+     "bytes": 395
+    },
+    {
+     "path": "cases/CTL-M-017/input/materials.json",
+     "sha256": "b282d8f20ff46e8175582c13eeca0580548cbbe63242fa6b228793def7a063f7",
+     "bytes": 502
+    },
+    {
+     "path": "cases/CTL-M-017/input/materials/photo-branch-on-roof.jpg",
+     "sha256": "7a75090e996e669def557102a1cc2dc620ccbaff33fd4056e0194ab3f6ccecd1",
+     "bytes": 265311
+    },
+    {
+     "path": "cases/CTL-M-017/input/materials/photo-roof-dent.jpg",
+     "sha256": "6a711dfe2349ae10ee7b16a70e19e4d92dd2544f76959fa06553299c603c76e4",
+     "bytes": 203256
+    },
+    {
+     "path": "cases/CTL-M-017/input/materials/policy-schedule.pdf",
+     "sha256": "af2e687fcf4b600a3685de4cf92a65b2888bfaf980d5a6a1b0017c0590d7379d",
+     "bytes": 2425
+    },
+    {
+     "path": "cases/CTL-M-017/input/materials/repair-quote.pdf",
+     "sha256": "7bd5c5a7e5f2f1977c14908761da58d1528f38d89cf9ba802d77dd17e205ff7a",
+     "bytes": 3585
+    },
+    {
+     "path": "cases/CTL-M-017/oracle/labels.json",
+     "sha256": "66eadc11a8d106240e294ac04a572da251c27873f1f6e50768afde621e11575b",
+     "bytes": 6201
+    },
+    {
+     "path": "cases/CTL-M-017/provenance.json",
+     "sha256": "51accea152b57cb6f946e2e4121997dc07ae279719b531864a0613e6b1fd7e45",
+     "bytes": 4918
+    },
+    {
+     "path": "cases/CTL-M-017/review.json",
+     "sha256": "4237853290e37a9300580e479ade403d614c903e86b50b84b22dcf17912baeee",
+     "bytes": 4778
+    },
+    {
+     "path": "cases/CTL-M-017/setup.json",
+     "sha256": "e91bf8536e0d9b80308b9a69a6e8ab029bf95152665ee4c987773768ef2dd450",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-018",
+   "files": [
+    {
+     "path": "cases/CTL-M-018/input/facts.json",
+     "sha256": "a0904301a9fa77d67b97c9b0bb91d65f4befbbd55fd2419234a38213bc507e4c",
+     "bytes": 4320
+    },
+    {
+     "path": "cases/CTL-M-018/input/initial_message.txt",
+     "sha256": "6dd5fd031b869650fd35a414bb2e5f4c1e8e19a44bbe4a6c888d332dec065a1c",
+     "bytes": 402
+    },
+    {
+     "path": "cases/CTL-M-018/input/materials.json",
+     "sha256": "b6cb0685c88d70a7af4c6e1aadf841678b419aa88463d42084816b3853fba696",
+     "bytes": 502
+    },
+    {
+     "path": "cases/CTL-M-018/input/materials/photo-passenger-side.jpg",
+     "sha256": "f6abf9b43d6008bf2a8c46932b174c726c931996c63b776d54e91580c0dcc407",
+     "bytes": 229978
+    },
+    {
+     "path": "cases/CTL-M-018/input/materials/police-reference.pdf",
+     "sha256": "62ee682c67ae0f6a418427b44e9310c2f2cc4f6e2907c6876476c6bed7253d5c",
+     "bytes": 2309
+    },
+    {
+     "path": "cases/CTL-M-018/input/materials/policy-schedule.pdf",
+     "sha256": "8189e5ba96aba74679d978bbcb7333173893ea3e9d0a816320441a464c7bef91",
+     "bytes": 2419
+    },
+    {
+     "path": "cases/CTL-M-018/input/materials/repair-quote.pdf",
+     "sha256": "2202ac0cfc1197c359d2cc8260ed6c1e53dbc04c3e6dbaf028c9b68a97e5c674",
+     "bytes": 3779
+    },
+    {
+     "path": "cases/CTL-M-018/oracle/labels.json",
+     "sha256": "b860468103d4d987962cba720e9eacca377aeeac702978eca079da3cbacd9ab7",
+     "bytes": 6277
+    },
+    {
+     "path": "cases/CTL-M-018/provenance.json",
+     "sha256": "1f73da900aeeeee0a698e219b51c444312e2d39e3def5dfec2a5f2ae34cf794d",
+     "bytes": 4692
+    },
+    {
+     "path": "cases/CTL-M-018/review.json",
+     "sha256": "970e2b20e92c0e918fbb03ce9fd9206685ddaad85560c5d7fc23205e451af15f",
+     "bytes": 2670
+    },
+    {
+     "path": "cases/CTL-M-018/setup.json",
+     "sha256": "4166a0c6eb93f54ff5ceff68c3d9dec50ee18e21e802c93915943e8d542a31af",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-019",
+   "files": [
+    {
+     "path": "cases/CTL-M-019/input/facts.json",
+     "sha256": "ffe64afe774c3a48ef8f7a3afbb947a37da78fda201ff1cb6cec8b193dbfad73",
+     "bytes": 2856
+    },
+    {
+     "path": "cases/CTL-M-019/input/initial_message.txt",
+     "sha256": "2c6276572f8e217a971bfb0b7aef57c9c7955d483455aa80b9d0d48e971168a4",
+     "bytes": 290
+    },
+    {
+     "path": "cases/CTL-M-019/input/materials.json",
+     "sha256": "83165db50ead90705df7e2efffc8218f778241d2a7d4cab4516bdb48471a9d93",
+     "bytes": 388
+    },
+    {
+     "path": "cases/CTL-M-019/input/materials/photo-front-left-door.jpg",
+     "sha256": "fb009c19cc1ee8c60eb01dd498d9e7b694e82a5c181d6fd3e373d7eb38708108",
+     "bytes": 240639
+    },
+    {
+     "path": "cases/CTL-M-019/input/materials/policy-schedule.pdf",
+     "sha256": "09e65598f9c8e14f4df55805eb968fdcfdee3e248b89cf65661df5bae695917a",
+     "bytes": 2483
+    },
+    {
+     "path": "cases/CTL-M-019/input/materials/repair-quote.pdf",
+     "sha256": "70d8e49b7c2abdc8c5c6bd0de2869ff59bedb51fc2d9d71daa8175ca66e8cd1e",
+     "bytes": 3589
+    },
+    {
+     "path": "cases/CTL-M-019/oracle/labels.json",
+     "sha256": "bc7ed5b19eff2b990c053b8a8fd25b0d5adfc4c87aa89b96dc5003a442ee95f6",
+     "bytes": 7226
+    },
+    {
+     "path": "cases/CTL-M-019/provenance.json",
+     "sha256": "248ed0ae2b4b68c305d71b47228912efbfab3fafea99b89f74e119802e6ddeda",
+     "bytes": 3724
+    },
+    {
+     "path": "cases/CTL-M-019/review.json",
+     "sha256": "b933e6119d33444f8f331208f194e10faf12e7b65226c64413ccaa9015f0c5dd",
+     "bytes": 2579
+    },
+    {
+     "path": "cases/CTL-M-019/setup.json",
+     "sha256": "7308d74fdf38c061e6afc4191ebbad5bd6d847f8f45ff02e615d79639792ca2c",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-020",
+   "files": [
+    {
+     "path": "cases/CTL-M-020/input/facts.json",
+     "sha256": "1ba795352c1f14ca699edf7d4fea1158f8db1746321e5454b44aecfedde0eec1",
+     "bytes": 2837
+    },
+    {
+     "path": "cases/CTL-M-020/input/initial_message.txt",
+     "sha256": "b5074d3a411c9339d3eeac495cc2ec821d92ac6617f540ca049d060b505b4c19",
+     "bytes": 312
+    },
+    {
+     "path": "cases/CTL-M-020/input/materials.json",
+     "sha256": "c8230d419fb9c9c7dba6a51c8fc4d68f286fdf4b838106ba63c2b55db34f51c2",
+     "bytes": 385
+    },
+    {
+     "path": "cases/CTL-M-020/input/materials/photo-front-bumper.jpg",
+     "sha256": "8854929a8333a7820f64dcc01a29010218c70f1cd94a99ed42cb24d8d854cde8",
+     "bytes": 255321
+    },
+    {
+     "path": "cases/CTL-M-020/input/materials/policy-schedule.pdf",
+     "sha256": "2a7c9437d2c02646b53ce1a73fbe50156df05c9b243631fbd4661e12554a8d0c",
+     "bytes": 2472
+    },
+    {
+     "path": "cases/CTL-M-020/input/materials/repair-quote.pdf",
+     "sha256": "c039f1b35cc60d74d675d5f848bebf8cc6c02829b0c3ac3f9881cfe682dbbe6d",
+     "bytes": 3516
+    },
+    {
+     "path": "cases/CTL-M-020/oracle/labels.json",
+     "sha256": "a25eca78c6a1321154257ed9b96c8be19ea0caace37691660e5355c05d8b3265",
+     "bytes": 6164
+    },
+    {
+     "path": "cases/CTL-M-020/provenance.json",
+     "sha256": "b1d74f87105e2af3690165da26a1da2facc26c52b1cf151be529b89fdbbf7652",
+     "bytes": 3478
+    },
+    {
+     "path": "cases/CTL-M-020/review.json",
+     "sha256": "6f8ef8a26756441cc7b713595cf370d12df49584bc425adc35923c6dfa2de0db",
+     "bytes": 2672
+    },
+    {
+     "path": "cases/CTL-M-020/setup.json",
+     "sha256": "1ebe5793c5a0a0ba9cb75bb49dc50a421236126ae08d0ec2e4d4aedc20ac8b17",
+     "bytes": 363
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-021",
+   "files": [
+    {
+     "path": "cases/CTL-M-021/input/facts.json",
+     "sha256": "338e1333997aff1594cf8d12711fd6d21aff72dd5afd75b4f1673d0eda95d841",
+     "bytes": 2981
+    },
+    {
+     "path": "cases/CTL-M-021/input/initial_message.txt",
+     "sha256": "6e137395e1b2a09f67a353a25ce5a867b2d23419c50900071574dff0eb46c75f",
+     "bytes": 642
+    },
+    {
+     "path": "cases/CTL-M-021/input/materials.json",
+     "sha256": "be86fa84106aa78d92ba97583b546f39a9ae325f49703f83fd133e3a8bf0dbaf",
+     "bytes": 391
+    },
+    {
+     "path": "cases/CTL-M-021/input/materials/photo-front-right-corner.jpg",
+     "sha256": "cce692d6a0866216165c6372f1aa8edfa1bf8f17edcb0585a7cba1d35bd96485",
+     "bytes": 250610
+    },
+    {
+     "path": "cases/CTL-M-021/input/materials/policy-schedule.pdf",
+     "sha256": "82c9107c44c07612c1302fe957c8de394c8b9c5aa63668ad3e242ec3d50e8862",
+     "bytes": 2492
+    },
+    {
+     "path": "cases/CTL-M-021/input/materials/repair-quote.pdf",
+     "sha256": "52cbed3831e19f0fabf0aa7ab81db78a11ebc0c484c6d3d3173f875098574bcc",
+     "bytes": 3734
+    },
+    {
+     "path": "cases/CTL-M-021/oracle/labels.json",
+     "sha256": "7235f02a81976026ccdb30ba09551d19b03cd3d531cfc0f7a2c2fecd2fb88ed8",
+     "bytes": 6892
+    },
+    {
+     "path": "cases/CTL-M-021/provenance.json",
+     "sha256": "90340b065971e0600a38e61e4ef391f522c990f7d05206e0b9b8b7bf921322b1",
+     "bytes": 3795
+    },
+    {
+     "path": "cases/CTL-M-021/review.json",
+     "sha256": "1f3250965ec22dbd6d27a7b56966bf3e8f7b1a02ce91725c0b4c81528dd3b397",
+     "bytes": 3262
+    },
+    {
+     "path": "cases/CTL-M-021/setup.json",
+     "sha256": "afb31ec62a633a665516ca5744c21fd2a499ae44405fabb08cc1cbb56900387c",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-022",
+   "files": [
+    {
+     "path": "cases/CTL-M-022/input/facts.json",
+     "sha256": "4af93127a2f34bac5f1fc173ec95f6641f7ff483677612159a2b5122b163cd17",
+     "bytes": 2756
+    },
+    {
+     "path": "cases/CTL-M-022/input/initial_message.txt",
+     "sha256": "b89a2fdd0de3c7b979eb1d45f3652fb09c4931ca748bd9a19e620e6ac711a63c",
+     "bytes": 280
+    },
+    {
+     "path": "cases/CTL-M-022/input/materials.json",
+     "sha256": "f5a0bfc9cc0d389d27d0c6dd91435ded4129daaf667bd085a2adac8d0fcf9fa8",
+     "bytes": 384
+    },
+    {
+     "path": "cases/CTL-M-022/input/materials/photo-rear-bumper.tif",
+     "sha256": "0ee25dfc46de8d9a56bcee7fc1d20c69a182ec79bce5ba52273acf83f297713c",
+     "bytes": 3327116
+    },
+    {
+     "path": "cases/CTL-M-022/input/materials/policy-schedule.pdf",
+     "sha256": "c500794a2301e5dfb01a2f9bd2d247981ce6fed30cacae543e8a3a56c9b90ffa",
+     "bytes": 2479
+    },
+    {
+     "path": "cases/CTL-M-022/input/materials/repair-quote.pdf",
+     "sha256": "5cbac74353e41cd11fbf1d9a5a729e24380427d13c70eb1ef5f5b4668b2f5bd2",
+     "bytes": 3539
+    },
+    {
+     "path": "cases/CTL-M-022/oracle/labels.json",
+     "sha256": "3bdc6eda2b08547c7b18a8688b917dd14e0af4d53092b90c4c532e0aa9c6bcd4",
+     "bytes": 6088
+    },
+    {
+     "path": "cases/CTL-M-022/provenance.json",
+     "sha256": "8585246097cf51a3f1ad6e73e3d34f616b66a802bdd5db40bec76548eb4fa8a3",
+     "bytes": 4144
+    },
+    {
+     "path": "cases/CTL-M-022/review.json",
+     "sha256": "ef8fdd2acc1790b304e82de8864542ee49a9bddf0e5dd36ddf18b734767151d2",
+     "bytes": 800
+    },
+    {
+     "path": "cases/CTL-M-022/setup.json",
+     "sha256": "bb6766ef7570224856419d0fb6c0af9d62e5d8583f1f16e24ee65590db2aab53",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-023",
+   "files": [
+    {
+     "path": "cases/CTL-M-023/input/facts.json",
+     "sha256": "41088798d7aeafc945ce967f955b6d972f36bedd744de5d8c78424fe793dd85e",
+     "bytes": 3023
+    },
+    {
+     "path": "cases/CTL-M-023/input/initial_message.txt",
+     "sha256": "a89c5104e7cd834665489db4da36377a2cee06fce0fe437b96e375348995f993",
+     "bytes": 335
+    },
+    {
+     "path": "cases/CTL-M-023/input/materials.json",
+     "sha256": "49df17a67da69e22013956838cf313e20481d42c07649555cbc62a9beb105ef3",
+     "bytes": 508
+    },
+    {
+     "path": "cases/CTL-M-023/input/materials/photo-left-rear-door.jpg",
+     "sha256": "b5a918efe8b22fbedeec9e4a1732456a2f7651bb78788009d9a10f76167eb4aa",
+     "bytes": 138111
+    },
+    {
+     "path": "cases/CTL-M-023/input/materials/police-report-pending.pdf",
+     "sha256": "f56be162565f04bbe7a05b845ccf4145a0dadbd6fe758dd282d55bc61aead4bd",
+     "bytes": 2066
+    },
+    {
+     "path": "cases/CTL-M-023/input/materials/policy-schedule.pdf",
+     "sha256": "791ad86bbe2663edee2e94c424e2f73c9c2dff3164f5cb4df602980c0c5b9f59",
+     "bytes": 2485
+    },
+    {
+     "path": "cases/CTL-M-023/input/materials/repair-quote.pdf",
+     "sha256": "c9b51ca5d4493ff272428df5017bff50c6a90f679507bf43618d972bdd9e18f6",
+     "bytes": 3637
+    },
+    {
+     "path": "cases/CTL-M-023/oracle/labels.json",
+     "sha256": "9cc0f182b6f31ce6b064cb9d23f162b564d19b95f973cc2c59ed56f8e0818fd2",
+     "bytes": 6163
+    },
+    {
+     "path": "cases/CTL-M-023/provenance.json",
+     "sha256": "00564036344e60f0127d72baa5f8f9e677a423666bb1ea45118c90c0f84ec22a",
+     "bytes": 4383
+    },
+    {
+     "path": "cases/CTL-M-023/review.json",
+     "sha256": "e4f13a6a4f65e5eca917590fc2678119016f22cbc1d32f0bfb27a01ffd75b49b",
+     "bytes": 3199
+    },
+    {
+     "path": "cases/CTL-M-023/setup.json",
+     "sha256": "608423d1f5f6f47648df801f75b88828a38cd1375a7d8ef68193549d60beead0",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-024",
+   "files": [
+    {
+     "path": "cases/CTL-M-024/input/facts.json",
+     "sha256": "39b04143be7c0f7621cdd9ca6acef1833f6d78760973edd45e2985efd1e364af",
+     "bytes": 2902
+    },
+    {
+     "path": "cases/CTL-M-024/input/initial_message.txt",
+     "sha256": "0e00c7af4410ab986bbb748636342bc02fbb55a31d7540e9109ea4149b1e8b96",
+     "bytes": 596
+    },
+    {
+     "path": "cases/CTL-M-024/input/materials.json",
+     "sha256": "3440b2050a348dbf03f0d2fb38e93ed4b63bf281c43c3c8f76d77cde063ebffc",
+     "bytes": 397
+    },
+    {
+     "path": "cases/CTL-M-024/input/materials/photo-rear-left-side.jpg",
+     "sha256": "2f7533fb3d81c6486df6c84880ea0b395b1599982565505343a29dbedfbab33e",
+     "bytes": 160573
+    },
+    {
+     "path": "cases/CTL-M-024/input/materials/policy-schedule.pdf",
+     "sha256": "0dbf90545125dac4a73e561f3a562e2a3f9a07d82972ca4a277bdd0600ba40fb",
+     "bytes": 2472
+    },
+    {
+     "path": "cases/CTL-M-024/input/materials/repair-quote-pending.pdf",
+     "sha256": "6fab4b49ccf5aeaef6a425c23bbd98a85f8abd65a1c484b74dc99ffe143d2cd2",
+     "bytes": 2037
+    },
+    {
+     "path": "cases/CTL-M-024/oracle/labels.json",
+     "sha256": "754619f8f5f7e80e9d5de0d6daaa4fa9ce56ec2f9e63294f20cae409ccac5788",
+     "bytes": 6053
+    },
+    {
+     "path": "cases/CTL-M-024/provenance.json",
+     "sha256": "3da237b31ba31b02fb1101036fef5114282a2fb78470bc07998019edc3b0aed0",
+     "bytes": 3381
+    },
+    {
+     "path": "cases/CTL-M-024/review.json",
+     "sha256": "37e7cb79bd23ecaa3326d7c9e1cdc6138cc1f1cf259b09e56600309568040040",
+     "bytes": 3113
+    },
+    {
+     "path": "cases/CTL-M-024/setup.json",
+     "sha256": "658c7a12311d800aa8f35f0cf70d8b703ab73b4d377f617e5a0ca2e83e3edaba",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-025",
+   "files": [
+    {
+     "path": "cases/CTL-M-025/input/facts.json",
+     "sha256": "bda2725ed44dfacef98dad1e2d16c731a6f378a0012afbaca3dc1848b5706587",
+     "bytes": 2772
+    },
+    {
+     "path": "cases/CTL-M-025/input/initial_message.txt",
+     "sha256": "844ded3170ebbb69d0d9eabc2a314a3122053c84df510af4f419f0b13c370d42",
+     "bytes": 277
+    },
+    {
+     "path": "cases/CTL-M-025/input/materials.json",
+     "sha256": "2927e93231c6ff90d80a884832ea5f56e2b56dd9b8bc507ecf56a1785146b891",
+     "bytes": 391
+    },
+    {
+     "path": "cases/CTL-M-025/input/materials/photo-front-right-corner.jpg",
+     "sha256": "f484e6b133a676378f31847c77a90a1a24e322ddd7724585ba543b242d4f6813",
+     "bytes": 181625
+    },
+    {
+     "path": "cases/CTL-M-025/input/materials/policy-schedule.pdf",
+     "sha256": "da610bdbc157b0017559010f736e37154bf1d977f8eb209adf905445366e898f",
+     "bytes": 2492
+    },
+    {
+     "path": "cases/CTL-M-025/input/materials/repair-quote.pdf",
+     "sha256": "622eb3cf587686bd56e58d6417cd7951284fb3c31ff37539621951c34f5fb5e5",
+     "bytes": 3567
+    },
+    {
+     "path": "cases/CTL-M-025/oracle/labels.json",
+     "sha256": "2a83e0cdc2360cfd59ee002afd04417d3b6e454a36cc8033d3a7860ba0ebf629",
+     "bytes": 6422
+    },
+    {
+     "path": "cases/CTL-M-025/provenance.json",
+     "sha256": "4f865a1499a277d544705aa832a3b931ab437c8870cd0bfdf73a640c7e845950",
+     "bytes": 3609
+    },
+    {
+     "path": "cases/CTL-M-025/review.json",
+     "sha256": "81042bb2fd9d8444dfa5cb9daaf2fd18402ae7ce5db792472ba8bf442869df26",
+     "bytes": 2606
+    },
+    {
+     "path": "cases/CTL-M-025/setup.json",
+     "sha256": "fdc6585cebd9fe2df633208e7dceebd616bdff37ba3ca04b9743ec065f27c1e4",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-026",
+   "files": [
+    {
+     "path": "cases/CTL-M-026/input/facts.json",
+     "sha256": "d78801a17e385d9bafa28fd20fe6818c975515802e19ea0d1eac86c426ce5e33",
+     "bytes": 2647
+    },
+    {
+     "path": "cases/CTL-M-026/input/initial_message.txt",
+     "sha256": "ced6acd68ed3f494cf579b95a1aa7ec13f2b0ac2eed6e9d8b59f506f3933f1d0",
+     "bytes": 339
+    },
+    {
+     "path": "cases/CTL-M-026/input/materials.json",
+     "sha256": "9b96545dc965b26c2ddf2c14fbc61e7ba9bcdb86516444691e9cefc371bd2d82",
+     "bytes": 505
+    },
+    {
+     "path": "cases/CTL-M-026/input/materials/photo-rear-bumper.jpg",
+     "sha256": "8220fd2c92d400d664401f90d1f54735f03f0ce913596685a57f52a0794ed98b",
+     "bytes": 172588
+    },
+    {
+     "path": "cases/CTL-M-026/input/materials/photo-tailgate-corner.jpg",
+     "sha256": "786458e86f43bb48da019f40d2aaa6e2da8aad774531e5bc29380e19a39dccb1",
+     "bytes": 138374
+    },
+    {
+     "path": "cases/CTL-M-026/input/materials/policy-schedule.pdf",
+     "sha256": "91d113169d87336a8b9ce32001990abb8d6ca35e8a4ea0e9c3c387391fddb4a4",
+     "bytes": 2479
+    },
+    {
+     "path": "cases/CTL-M-026/input/materials/repair-quote.pdf",
+     "sha256": "f007b2d4cf3be30f15425da9fffaf9ea2c70d84a854e48f6c91eb55fe4e70296",
+     "bytes": 3683
+    },
+    {
+     "path": "cases/CTL-M-026/oracle/labels.json",
+     "sha256": "33d6e360f186d0dc5e9d871aa5563e6ae62144543cd01bbf64c36c10ec573c56",
+     "bytes": 6227
+    },
+    {
+     "path": "cases/CTL-M-026/provenance.json",
+     "sha256": "1be58eba9940ef53e6bb24fd57afe7f164e3645c494fbafead6287f3e19cfe09",
+     "bytes": 5023
+    },
+    {
+     "path": "cases/CTL-M-026/review.json",
+     "sha256": "f7193ce53e61c32d6d2221f33964680672b9a6044e2603e42d1501e8d6ad8743",
+     "bytes": 5793
+    },
+    {
+     "path": "cases/CTL-M-026/setup.json",
+     "sha256": "9fff5017172177f561c03e3918658ea27edf24d7609cceca4201675378b2f296",
+     "bytes": 351
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-027",
+   "files": [
+    {
+     "path": "cases/CTL-M-027/input/facts.json",
+     "sha256": "eb48b0e7839ed014d7d7f5c43dca9202e219736a4129c22acf5f52362cae8579",
+     "bytes": 2817
+    },
+    {
+     "path": "cases/CTL-M-027/input/initial_message.txt",
+     "sha256": "98c4325a5b3f7f21166e719240aa64ca6a27d05a31782d2ff83fef7e574d022e",
+     "bytes": 385
+    },
+    {
+     "path": "cases/CTL-M-027/input/materials.json",
+     "sha256": "047220a3d1ec93ba1cc248013e918d34dac7812a5f4f9fb3e74f1c887266bf2e",
+     "bytes": 503
+    },
+    {
+     "path": "cases/CTL-M-027/input/materials/photo-right-rear-side.jpg",
+     "sha256": "16858f00d0009c581509f0cea535f41e98b38633c092d848a3fed75673126b22",
+     "bytes": 186990
+    },
+    {
+     "path": "cases/CTL-M-027/input/materials/police-reference.pdf",
+     "sha256": "2f09898a5c4c4743f7b1b520e5aa8993a66202e9fda38f6e5149e2b3ff9d0051",
+     "bytes": 2313
+    },
+    {
+     "path": "cases/CTL-M-027/input/materials/policy-schedule.pdf",
+     "sha256": "093fe6430d6fbba4147c46ce5828a094d0dce278767382ea80fbd92f46a9d74d",
+     "bytes": 2467
+    },
+    {
+     "path": "cases/CTL-M-027/input/materials/repair-quote.pdf",
+     "sha256": "e3b1003aca54ada460f7f6d99a352b562e0a30ca040b7ce34f958ca1a9758400",
+     "bytes": 3587
+    },
+    {
+     "path": "cases/CTL-M-027/oracle/labels.json",
+     "sha256": "1ca9e15bb880fd167bfa81b7cc05d04f8a6cb4b8ed30e713e5fafee9a9347049",
+     "bytes": 6508
+    },
+    {
+     "path": "cases/CTL-M-027/provenance.json",
+     "sha256": "0639b47acbd1031417bd9d085c363668d787ca9130d0d231453532066f430678",
+     "bytes": 4517
+    },
+    {
+     "path": "cases/CTL-M-027/review.json",
+     "sha256": "f0416d20d98eb11ee6c086de87b3d9445eca750a5917be04ed5c825045e4ac9f",
+     "bytes": 2652
+    },
+    {
+     "path": "cases/CTL-M-027/setup.json",
+     "sha256": "4b34e007e2f4c77b17fe4794a12bb74b9cc0b01df973979e0a6b4072f35f83d4",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-028",
+   "files": [
+    {
+     "path": "cases/CTL-M-028/input/facts.json",
+     "sha256": "2544fbb01bbf47e232265358f9fde118332c099fe1b206184c1e0af8f0aa177a",
+     "bytes": 2736
+    },
+    {
+     "path": "cases/CTL-M-028/input/initial_message.txt",
+     "sha256": "f774b70eaa1e5d68a4499d91ab21559d7e4e309ab0d4f86fe16d3b445f2a1921",
+     "bytes": 338
+    },
+    {
+     "path": "cases/CTL-M-028/input/materials.json",
+     "sha256": "ef3303ca593447d58016bc0e147cc186d1bb39b8e98bf3829a29c20d36175c0f",
+     "bytes": 387
+    },
+    {
+     "path": "cases/CTL-M-028/input/materials/photo-left-rear-door.jpg",
+     "sha256": "be42d22164bd5e2f8a5da5e95f9fe1c88ecba0d2e40a47e56b58a886a4e438d0",
+     "bytes": 218135
+    },
+    {
+     "path": "cases/CTL-M-028/input/materials/policy-schedule.pdf",
+     "sha256": "bed7f6d8ead6fb3b006c9a014c9dba1e48ee6e359b4ad5901e7f8be97ddb2dc2",
+     "bytes": 2472
+    },
+    {
+     "path": "cases/CTL-M-028/input/materials/repair-quote.pdf",
+     "sha256": "7aa588507f8891595563d30e2b17a819936d4be16e85773f8d335c677e563434",
+     "bytes": 3552
+    },
+    {
+     "path": "cases/CTL-M-028/oracle/labels.json",
+     "sha256": "b6407c466ff86c1b2b23aea4525445fbf9609260ef42697dc69f2556aebd7a3f",
+     "bytes": 6264
+    },
+    {
+     "path": "cases/CTL-M-028/provenance.json",
+     "sha256": "2c725d98924c0031970f01c0e8b438cac671f20e748a203e7031928e37326cc5",
+     "bytes": 3484
+    },
+    {
+     "path": "cases/CTL-M-028/review.json",
+     "sha256": "9e9c2d8c2c557463f50ecab580d33ef26c269aaf10ce7880008ca96dc787b0d4",
+     "bytes": 2368
+    },
+    {
+     "path": "cases/CTL-M-028/setup.json",
+     "sha256": "470686389b86aa404b439c39c17746feb13049fb09681f48baed98e14948583f",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-029",
+   "files": [
+    {
+     "path": "cases/CTL-M-029/input/facts.json",
+     "sha256": "8e4f55a6cdf60d4f00ace2bc6217a27ad03cc938b0b7d23f05a746be4455d1e5",
+     "bytes": 2976
+    },
+    {
+     "path": "cases/CTL-M-029/input/initial_message.txt",
+     "sha256": "de1f4bfc4d3069e75912c27dd2c22f835930452da2b87c76c415e49285d2ba1e",
+     "bytes": 262
+    },
+    {
+     "path": "cases/CTL-M-029/input/materials.json",
+     "sha256": "5bbe04b1e63b8675a0e2f9735773e7c616457339623832345b2e89f42abdde4b",
+     "bytes": 502
+    },
+    {
+     "path": "cases/CTL-M-029/input/materials/photo-front-left-wheel.jpg",
+     "sha256": "500eaaafc808df1acf61710c04e678277e2587750162f15b2d80818ddd8a09ff",
+     "bytes": 233752
+    },
+    {
+     "path": "cases/CTL-M-029/input/materials/photo-pothole.jpg",
+     "sha256": "c29089120d2b71b6c298f627ecb1c1ae350b323305799570346d24d192c70c49",
+     "bytes": 338748
+    },
+    {
+     "path": "cases/CTL-M-029/input/materials/policy-schedule.pdf",
+     "sha256": "4d49c8aa99803f051494a5efaaa6b4aca9367adcc160192e03ea91155a87aee6",
+     "bytes": 2424
+    },
+    {
+     "path": "cases/CTL-M-029/input/materials/repair-quote.pdf",
+     "sha256": "258b098641d5c660c4471975fbb4dd658cfb9a3411386c3aeeeee856dbfb4038",
+     "bytes": 3686
+    },
+    {
+     "path": "cases/CTL-M-029/oracle/labels.json",
+     "sha256": "3f3d43b77b047931c6b69ab876a02147dae966dafddf665160e2da203ea26910",
+     "bytes": 6642
+    },
+    {
+     "path": "cases/CTL-M-029/provenance.json",
+     "sha256": "4c6ad3c0b61eb22653a0acbbd43b59d2e92004c5a25e3e2ce3bd604666dc8daf",
+     "bytes": 4852
+    },
+    {
+     "path": "cases/CTL-M-029/review.json",
+     "sha256": "a49d5a2351c445d2859f8e1971a23883439b24098d82609fddee176e4ccadf96",
+     "bytes": 5012
+    },
+    {
+     "path": "cases/CTL-M-029/setup.json",
+     "sha256": "d70b4ba718dcf934018323c34a503c0eec9041df6257d153d96ed58a84b41909",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-030",
+   "files": [
+    {
+     "path": "cases/CTL-M-030/input/facts.json",
+     "sha256": "8c99c73628575ecee09ba4368918793c1b74392976a29cf0d9104a51c022553f",
+     "bytes": 3005
+    },
+    {
+     "path": "cases/CTL-M-030/input/initial_message.txt",
+     "sha256": "d16acf1d9681f519df002c29c8a6fb3a9dc8944936fff66a6ce3d081a582c344",
+     "bytes": 274
+    },
+    {
+     "path": "cases/CTL-M-030/input/materials.json",
+     "sha256": "34d427cd91835d38c5fc8d5b37a7a2c446b3623741c838afdc7a40d3f26e033f",
+     "bytes": 510
+    },
+    {
+     "path": "cases/CTL-M-030/input/materials/assessment-report.pdf",
+     "sha256": "afa54732aee2b778821ecab529bdbfab459588dc7f306b1615c45f165ba724dc",
+     "bytes": 2657
+    },
+    {
+     "path": "cases/CTL-M-030/input/materials/photo-rock-on-road.jpg",
+     "sha256": "61be5bbd8ecf5fcbeafeb87d1d31b39a44615d74537adc24bf2cb561022612ef",
+     "bytes": 287842
+    },
+    {
+     "path": "cases/CTL-M-030/input/materials/photo-undertray.jpg",
+     "sha256": "a783d330bf880c337502675a8d5fcc00df98bc5c10ad4900e5f3f260fea6afbe",
+     "bytes": 207076
+    },
+    {
+     "path": "cases/CTL-M-030/input/materials/policy-schedule.pdf",
+     "sha256": "ecfa18205b0b6603cd538649e22ea53bbfe1da4d0c072a7d57c9bf70f8207306",
+     "bytes": 2420
+    },
+    {
+     "path": "cases/CTL-M-030/oracle/labels.json",
+     "sha256": "021f4f92dd5965d8d4804117273595b480b3f4fca12c2147d7fb5ba7ff22d066",
+     "bytes": 6868
+    },
+    {
+     "path": "cases/CTL-M-030/provenance.json",
+     "sha256": "fbf0d5f77e125590f7b00b3d392412a94ced48f58de54a39de4578bc955c54aa",
+     "bytes": 4725
+    },
+    {
+     "path": "cases/CTL-M-030/review.json",
+     "sha256": "f8ee91509e973e2f2691e39914010020f6ee334c85bb5d1c273b094c4e22aa0f",
+     "bytes": 4932
+    },
+    {
+     "path": "cases/CTL-M-030/setup.json",
+     "sha256": "8b37d6b6b68a2acaec8bf81882631f144ee1cc2d225bcfab59304280842fd828",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-031",
+   "files": [
+    {
+     "path": "cases/CTL-M-031/input/facts.json",
+     "sha256": "ffa04b065de62d752f938b0d4ef12cec34056ef082c7b58faeeedcc57e6fea4c",
+     "bytes": 2888
+    },
+    {
+     "path": "cases/CTL-M-031/input/initial_message.txt",
+     "sha256": "8a2846814556a4869ef950b00d15d06e2244f26ed01014ce0821e68c2561a739",
+     "bytes": 286
+    },
+    {
+     "path": "cases/CTL-M-031/input/materials.json",
+     "sha256": "a25e41d043d425d99c6ed4e908a4f48d8fbf585e20324fe55ece1651123014bd",
+     "bytes": 494
+    },
+    {
+     "path": "cases/CTL-M-031/input/materials/photo-front-wheel.jpg",
+     "sha256": "a3172f9595fc0978c00c982f3661620f944ebfb0c42208e82b212b5267960b41",
+     "bytes": 292491
+    },
+    {
+     "path": "cases/CTL-M-031/input/materials/photo-kerb.jpg",
+     "sha256": "1d9d503eb14aa60ae3fdc177d12452e49f0b32aed2c3967a9b84e62c0a06752a",
+     "bytes": 400046
+    },
+    {
+     "path": "cases/CTL-M-031/input/materials/policy-schedule.pdf",
+     "sha256": "21f5279e6517b152641a32e681e1048c1ca6621abe93846244335fec6423d7db",
+     "bytes": 2423
+    },
+    {
+     "path": "cases/CTL-M-031/input/materials/repair-quote.pdf",
+     "sha256": "2d815e590e7dcd9760752a291f1ffecbb4db45d9ec3cf9645262a21a5f7a85bf",
+     "bytes": 3628
+    },
+    {
+     "path": "cases/CTL-M-031/oracle/labels.json",
+     "sha256": "dd884665788a402ea0425f21433fe219fa41893fcdcaf425e85f0af9bf529217",
+     "bytes": 7095
+    },
+    {
+     "path": "cases/CTL-M-031/provenance.json",
+     "sha256": "37b5e540b20e72d554aace6fbe88e87da0d8e911c0f986ee8933ef11885a78e7",
+     "bytes": 4757
+    },
+    {
+     "path": "cases/CTL-M-031/review.json",
+     "sha256": "f680128173312c76bb9f28dea805bbef587c8c05a4a0b07af8c1b25fb069ecf9",
+     "bytes": 4970
+    },
+    {
+     "path": "cases/CTL-M-031/setup.json",
+     "sha256": "b354dfe2c08a760039f666fcb1c1bbf773f42aaff592186763f030a582e33d55",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-032",
+   "files": [
+    {
+     "path": "cases/CTL-M-032/input/facts.json",
+     "sha256": "fe5d910d143cf511bd2c7c187f3cf0771180f494b26bb6f3844ed7299a40f682",
+     "bytes": 3187
+    },
+    {
+     "path": "cases/CTL-M-032/input/initial_message.txt",
+     "sha256": "aa479a2f989566e16cba3ec1f77e9fb89984c2806626221da5bcd9b943d538de",
+     "bytes": 647
+    },
+    {
+     "path": "cases/CTL-M-032/input/materials.json",
+     "sha256": "9b2d44dbae76e468ef7f76b3601abae54ba3a9fee9562272940569e989be1a44",
+     "bytes": 501
+    },
+    {
+     "path": "cases/CTL-M-032/input/materials/photo-rear-window.jpg",
+     "sha256": "c79fe8c3484060cd06c8cf120cc0f1aa3456b4e39b4be1d3bd53e26db693a936",
+     "bytes": 315417
+    },
+    {
+     "path": "cases/CTL-M-032/input/materials/photo-roof-branch.jpg",
+     "sha256": "22ea769814858078c33f3ca6768d282892100aa21d77f4c0cc0b24aa9b1aecca",
+     "bytes": 243071
+    },
+    {
+     "path": "cases/CTL-M-032/input/materials/policy-schedule.pdf",
+     "sha256": "1da4db66fd5f772664581f8428cadaba0909964acbd20140a39ed9293666b865",
+     "bytes": 2438
+    },
+    {
+     "path": "cases/CTL-M-032/input/materials/repair-quote.pdf",
+     "sha256": "f6625c774a19f3e621b9a80b31484349ac5a4976ea1570a65c67f2bb759ca11e",
+     "bytes": 3709
+    },
+    {
+     "path": "cases/CTL-M-032/oracle/labels.json",
+     "sha256": "af4769facd2111292f70a99d20b601271a6bc925b3e0f658fe501ecbae07ca8f",
+     "bytes": 7108
+    },
+    {
+     "path": "cases/CTL-M-032/provenance.json",
+     "sha256": "3a8d70d5e73b24e20b0c3dd2a6b1a3cc7165560d8eac118d9c7979a9df77c41f",
+     "bytes": 5123
+    },
+    {
+     "path": "cases/CTL-M-032/review.json",
+     "sha256": "021b7aa6bd809c4405f77476fb9e57ca1b7ebe097d3fd66dd98f90af50e1b38a",
+     "bytes": 5699
+    },
+    {
+     "path": "cases/CTL-M-032/setup.json",
+     "sha256": "ff3c177e9bbcfe93c5bd42221ceb1511d67f396c9a7c1f4977fdb934d5208431",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-033",
+   "files": [
+    {
+     "path": "cases/CTL-M-033/input/facts.json",
+     "sha256": "991ce28cec783bdc71843aaa2d0558db5f34e4bfbbd5085dd5b8222bcd746d49",
+     "bytes": 3010
+    },
+    {
+     "path": "cases/CTL-M-033/input/initial_message.txt",
+     "sha256": "669914215c93ddb6d6373311bfcb97f3e3e1d180f5045774ddd0b8985dd0e454",
+     "bytes": 258
+    },
+    {
+     "path": "cases/CTL-M-033/input/materials.json",
+     "sha256": "f632886a13812db1a73e7c80aaae52010713407187e85a0b7756570f6b6bbea7",
+     "bytes": 509
+    },
+    {
+     "path": "cases/CTL-M-033/input/materials/assessment-report.pdf",
+     "sha256": "53520f7abcebc2a4b6b93155086d1138acd11299c8438263ec63286bdda8c2d3",
+     "bytes": 2718
+    },
+    {
+     "path": "cases/CTL-M-033/input/materials/photo-engine-water.jpg",
+     "sha256": "6e5eab1529d95a7d3f82d6560eddfeb43112718e5aa8a93776b95537f1563ec4",
+     "bytes": 270230
+    },
+    {
+     "path": "cases/CTL-M-033/input/materials/photo-footwell.jpg",
+     "sha256": "3ba5c4158efc8c2a21df80ca35e1d9303a4aeb251bc25a65ff5528c94035c797",
+     "bytes": 327966
+    },
+    {
+     "path": "cases/CTL-M-033/input/materials/policy-schedule.pdf",
+     "sha256": "aa5bf87622700444871a618c564541e4d129550893908836e1526264616500b7",
+     "bytes": 2409
+    },
+    {
+     "path": "cases/CTL-M-033/oracle/labels.json",
+     "sha256": "28dc9020cf0dbd9274b79942139c170f3303896dfd88aa1cc4162c393b3ab095",
+     "bytes": 7449
+    },
+    {
+     "path": "cases/CTL-M-033/provenance.json",
+     "sha256": "6bf6fa4022aa07cd4cc8e31c35a93545830ba2c4364c53c53f2a653b0f85bdcf",
+     "bytes": 4788
+    },
+    {
+     "path": "cases/CTL-M-033/review.json",
+     "sha256": "61f4eae26f8360209432b37a7095034a6ea40af54be911cb572611cec9b88f15",
+     "bytes": 4815
+    },
+    {
+     "path": "cases/CTL-M-033/setup.json",
+     "sha256": "fdd6a1bfc171b9dc6a9a3680612ddac8c7a9ac78f7646a4e2d88f27311dbbbeb",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-034",
+   "files": [
+    {
+     "path": "cases/CTL-M-034/input/facts.json",
+     "sha256": "e8ef15917d217622949535002edb67bc0af0f5edbd9e1c557eff2fd95ace85ef",
+     "bytes": 2722
+    },
+    {
+     "path": "cases/CTL-M-034/input/initial_message.txt",
+     "sha256": "7aab2ecd6890f8275328b08ae63eda604d35381681e3b66cccd114764f71b268",
+     "bytes": 310
+    },
+    {
+     "path": "cases/CTL-M-034/input/materials.json",
+     "sha256": "d82dac366174615949d2734edf00770a140df9357afb1edef6095feb3f510f60",
+     "bytes": 607
+    },
+    {
+     "path": "cases/CTL-M-034/input/materials/photo-bonnet-slip.jpg",
+     "sha256": "1a4daf09d5f800d866cb80e0f59c0505205ff864005886fee6174753e893bab1",
+     "bytes": 331577
+    },
+    {
+     "path": "cases/CTL-M-034/input/materials/photo-slip.jpg",
+     "sha256": "b8acce35b02e3b304028b80adc70927b3bd04cf472fe954fd07f9115140988cb",
+     "bytes": 389397
+    },
+    {
+     "path": "cases/CTL-M-034/input/materials/policy-schedule.pdf",
+     "sha256": "bf26580d667c5183f8a857ae98cf981871e5341bc8be0007b040bd420bdd2f85",
+     "bytes": 2424
+    },
+    {
+     "path": "cases/CTL-M-034/input/materials/repair-quote.pdf",
+     "sha256": "1150df5dbd304a4a5bb52a511ee90c6450552d2a53399ac01ae3644a223e442c",
+     "bytes": 3687
+    },
+    {
+     "path": "cases/CTL-M-034/input/materials/tow-job-sheet.pdf",
+     "sha256": "a4feaf5581e040938beab5776d2acf429f449a769fce6d07cedfef1141446c0e",
+     "bytes": 2460
+    },
+    {
+     "path": "cases/CTL-M-034/oracle/labels.json",
+     "sha256": "9d30cae8a665dc3f76c1d80f8c060d9954ebac88029fdd0d1e5b83785c915742",
+     "bytes": 5665
+    },
+    {
+     "path": "cases/CTL-M-034/provenance.json",
+     "sha256": "0590beee7a2e1d7f9dad7b468c4f1b44dec6d26a0991a2b0bd849244757805ba",
+     "bytes": 5730
+    },
+    {
+     "path": "cases/CTL-M-034/review.json",
+     "sha256": "67d03da3598b62fe6001a24408c1d886cd8e306b9157381450d471cdc6f326a7",
+     "bytes": 5470
+    },
+    {
+     "path": "cases/CTL-M-034/setup.json",
+     "sha256": "ef7ce0e0723c98d0225fe6f161e4a5fe843ac3a1e0a4dd17854c128997490ef4",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-035",
+   "files": [
+    {
+     "path": "cases/CTL-M-035/input/facts.json",
+     "sha256": "5bb5abf31e79e953456e44fc4ae57e01d1d84f801ef32010ba75923377e33ca7",
+     "bytes": 2909
+    },
+    {
+     "path": "cases/CTL-M-035/input/initial_message.txt",
+     "sha256": "0dd06e18956282fc190ab88dd45944d208fe03e4536ed5db7fb6c06ac9b2946b",
+     "bytes": 364
+    },
+    {
+     "path": "cases/CTL-M-035/input/materials.json",
+     "sha256": "155e2d2f49f9e431bf1464079955139b2954bc6b2a7433562f66bf01d167d6b9",
+     "bytes": 391
+    },
+    {
+     "path": "cases/CTL-M-035/input/materials/photo-front-corner-night.jpg",
+     "sha256": "4c7f81dfb170ac20f53396477224a6dbd15c74c0073243cc8d612a1311ddc82e",
+     "bytes": 25137
+    },
+    {
+     "path": "cases/CTL-M-035/input/materials/policy-schedule.pdf",
+     "sha256": "9d3df4f1351f133724f470edb63455875c1e33ed3056e80f08bb3be74bdeb5c6",
+     "bytes": 2429
+    },
+    {
+     "path": "cases/CTL-M-035/input/materials/repair-quote.pdf",
+     "sha256": "699e0df0a74361dbe39b3aba82eda9ba15dab810131a022d41530813d24ef222",
+     "bytes": 3604
+    },
+    {
+     "path": "cases/CTL-M-035/oracle/labels.json",
+     "sha256": "5eba6f9b71a87505efdacdabb69bb5e92642c33a7dec0db811b457c6b285a6fd",
+     "bytes": 5862
+    },
+    {
+     "path": "cases/CTL-M-035/provenance.json",
+     "sha256": "22af573135e3ac9e10336e641a0c9f0087373b892f1485acf00f4e8bbbcb759b",
+     "bytes": 4207
+    },
+    {
+     "path": "cases/CTL-M-035/review.json",
+     "sha256": "54e047c8ef63739e933ab8ecd3d512b535aa2ca36e0b3299764c8d6d7e6817f5",
+     "bytes": 2766
+    },
+    {
+     "path": "cases/CTL-M-035/setup.json",
+     "sha256": "f88113dc82f47cc149816d06e749e6d40606e6ae20ced03b634e1edc9dcdd602",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-036",
+   "files": [
+    {
+     "path": "cases/CTL-M-036/input/facts.json",
+     "sha256": "91574c75ad42fef6482861248b9ad08f8f70a34f20476140b337809bf7b2b336",
+     "bytes": 3176
+    },
+    {
+     "path": "cases/CTL-M-036/input/initial_message.txt",
+     "sha256": "56ea230f26172c6be06c0e9f8dcebe428f6297c943f80435736099edeee707d1",
+     "bytes": 285
+    },
+    {
+     "path": "cases/CTL-M-036/input/materials.json",
+     "sha256": "aaadf2517166021713f84e722731ec4b1baa331a333ad3e4ee3ad517dc6307ae",
+     "bytes": 503
+    },
+    {
+     "path": "cases/CTL-M-036/input/materials/photo-driveway.jpg",
+     "sha256": "1b245dbf3c03df3b4152ccc6380746c546916944909c112079ecea80e202d465",
+     "bytes": 469343
+    },
+    {
+     "path": "cases/CTL-M-036/input/materials/photo-rear-ditch.jpg",
+     "sha256": "76d7af5e555c34690555e8a8c424db2c65fe80b33864095c5fd31c41cb39d43c",
+     "bytes": 291983
+    },
+    {
+     "path": "cases/CTL-M-036/input/materials/policy-schedule.pdf",
+     "sha256": "01447e2b4f3408ab4af4c7702eaa7c8641f1e5f2b908918055f8a4d1bcf4d814",
+     "bytes": 2429
+    },
+    {
+     "path": "cases/CTL-M-036/input/materials/repair-quote-page1.pdf",
+     "sha256": "107c1201aa52cf2af17502c939ee432ec28abc08481d45de4e8a809968fe9e4c",
+     "bytes": 2186
+    },
+    {
+     "path": "cases/CTL-M-036/oracle/labels.json",
+     "sha256": "5a6810a28eda492e535d8969cbd9f621c4bc120ecacffa9177e78424c0260eac",
+     "bytes": 6371
+    },
+    {
+     "path": "cases/CTL-M-036/provenance.json",
+     "sha256": "fbf492a965f8b45213503389049a8b74df0b071d9ecc9547a86f912b4fdd4f0a",
+     "bytes": 5962
+    },
+    {
+     "path": "cases/CTL-M-036/review.json",
+     "sha256": "ed0b955a61adce3562450a6faf06a908e79b57bc6b5aff715d2f361e3438dc00",
+     "bytes": 5569
+    },
+    {
+     "path": "cases/CTL-M-036/setup.json",
+     "sha256": "66feae24733b58cd35defb11e08cb38c7d7f55d8a07c892751268990dcc84847",
+     "bytes": 351
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-037",
+   "files": [
+    {
+     "path": "cases/CTL-M-037/input/facts.json",
+     "sha256": "5fe41f046e65e3e80ce0f2cb67c32da39efb2925fb029fa629f8dc8e1fed2120",
+     "bytes": 2893
+    },
+    {
+     "path": "cases/CTL-M-037/input/initial_message.txt",
+     "sha256": "015551b9967336767bf408e79154249f37c3e0b818db7bcb04249ea3fc1e04ce",
+     "bytes": 312
+    },
+    {
+     "path": "cases/CTL-M-037/input/materials.json",
+     "sha256": "d2aafc9a8b59b6c107eae0f428f3c3fb447f6b4b48c8096d37dc30c9abe01837",
+     "bytes": 386
+    },
+    {
+     "path": "cases/CTL-M-037/input/materials/photo-rear-footwell.jpg",
+     "sha256": "77402799d6db21656cadc7e5dda00898054351aea220aaa9107b03481521d527",
+     "bytes": 334672
+    },
+    {
+     "path": "cases/CTL-M-037/input/materials/policy-schedule.pdf",
+     "sha256": "1b5bb24aa55704bdaed0eccf9eb0d5d08a48b90cc54b89a29069fdfec2c7cf00",
+     "bytes": 2424
+    },
+    {
+     "path": "cases/CTL-M-037/input/materials/repair-quote.pdf",
+     "sha256": "176f13ca683b7bf4e200245d8856dece0b84c8ac8336400e4556595a6b17c026",
+     "bytes": 3689
+    },
+    {
+     "path": "cases/CTL-M-037/oracle/labels.json",
+     "sha256": "3c66632618cfb4c46e7d49b00f63f63f997f1902c8391f181597fb341a67ea1f",
+     "bytes": 5809
+    },
+    {
+     "path": "cases/CTL-M-037/provenance.json",
+     "sha256": "91e07b47ed5746c6b8fab0e45b17720d2de31732e7e150b62633ad5ff0b93727",
+     "bytes": 3453
+    },
+    {
+     "path": "cases/CTL-M-037/review.json",
+     "sha256": "10b2e2ef668bb96690cb6ab4f365a83f755fde5c5dfa171ad5329319b7cb09be",
+     "bytes": 2521
+    },
+    {
+     "path": "cases/CTL-M-037/setup.json",
+     "sha256": "c28985cdaf25e0233201700c93f31f52b85e4694ff15318a594c797f35e331dc",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-038",
+   "files": [
+    {
+     "path": "cases/CTL-M-038/input/facts.json",
+     "sha256": "3aecce55ebfbe84a5630b8559c78cc85aa383fc27aea9e83c3511790fd041e3f",
+     "bytes": 2861
+    },
+    {
+     "path": "cases/CTL-M-038/input/initial_message.txt",
+     "sha256": "6f99c99fc7a3ce38929c6e1c11e45d91a25a51b170ba23721976e415a2368e85",
+     "bytes": 218
+    },
+    {
+     "path": "cases/CTL-M-038/input/materials.json",
+     "sha256": "398ce47fd2c3eeb95b0140c726b12324350d628a177ff93bdac3a9f615e305b2",
+     "bytes": 384
+    },
+    {
+     "path": "cases/CTL-M-038/input/materials/photo-front-right.jpg",
+     "sha256": "9ca747d33eba7273725696c0ed938cb58fb909c9b5f3d1b8549c88cfaa96da51",
+     "bytes": 259990
+    },
+    {
+     "path": "cases/CTL-M-038/input/materials/policy-schedule.pdf",
+     "sha256": "a65dcaa9c34720b04390640003b4a7cbf299eaceda8aa1e0513ef0d2f7fe916e",
+     "bytes": 2424
+    },
+    {
+     "path": "cases/CTL-M-038/input/materials/repair-quote.pdf",
+     "sha256": "016fbed3cd44a363a6cce0731bcd4a31d4072782aab6048e54c7bff0c7490a27",
+     "bytes": 3569
+    },
+    {
+     "path": "cases/CTL-M-038/oracle/labels.json",
+     "sha256": "535648186d5b891a2f0e882cef012608cd0508843c7588d6e63d04306d2b2b2d",
+     "bytes": 5737
+    },
+    {
+     "path": "cases/CTL-M-038/provenance.json",
+     "sha256": "ad673f9d769420e50a2a50a9ac2237b3e827c07d0058bfdbf87257cf0472deb5",
+     "bytes": 3491
+    },
+    {
+     "path": "cases/CTL-M-038/review.json",
+     "sha256": "c0a1ca0e3b5816310dd118548a0f4c84746b7e48ef6f43a66e9efa3cd8a79376",
+     "bytes": 2741
+    },
+    {
+     "path": "cases/CTL-M-038/setup.json",
+     "sha256": "7244ac37515cb471fb1d3ecf5df3b124b908c3a54fdc827a05fffd1ce44c31b5",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-039",
+   "files": [
+    {
+     "path": "cases/CTL-M-039/input/facts.json",
+     "sha256": "a6ff95a130e796f52c74fd0f3b8425298e1024750bb099ceebed6d2f56efa3ac",
+     "bytes": 2752
+    },
+    {
+     "path": "cases/CTL-M-039/input/initial_message.txt",
+     "sha256": "084391af6d12aa0a13009e7f9ca9685f970c948a3359d529559f9f4bf457fb5d",
+     "bytes": 290
+    },
+    {
+     "path": "cases/CTL-M-039/input/materials.json",
+     "sha256": "372131670b5b8fd4812ef3641337f8d4d81f495e5727ae9e5253c2fe862ba270",
+     "bytes": 495
+    },
+    {
+     "path": "cases/CTL-M-039/input/materials/photo-carport.jpg",
+     "sha256": "e685f707d4f6a3bfbbc24a9c41c776db24686a7245c80e8b54615a21a4817f2b",
+     "bytes": 306659
+    },
+    {
+     "path": "cases/CTL-M-039/input/materials/photo-roof-snow.jpg",
+     "sha256": "8bde4b80295b4345919414a6a42361df8ef571373fd3a46071d1c88189ff6f4b",
+     "bytes": 232200
+    },
+    {
+     "path": "cases/CTL-M-039/input/materials/policy-schedule.pdf",
+     "sha256": "84ca32154d72144c63a88aabab8c2e7d5fedc3f7a81d928d429829ae09c9e93d",
+     "bytes": 2419
+    },
+    {
+     "path": "cases/CTL-M-039/input/materials/repair-quote.pdf",
+     "sha256": "bba06a4ee302d8a9a2f41f91b0d3219fc0ac0949226d16801a97c403c737a111",
+     "bytes": 1422
+    },
+    {
+     "path": "cases/CTL-M-039/oracle/labels.json",
+     "sha256": "4cc3a6713047cf072f9514a35cedc7ec3b443fa662f9edb236521f5704146f44",
+     "bytes": 5750
+    },
+    {
+     "path": "cases/CTL-M-039/provenance.json",
+     "sha256": "710de05e6c26929f841755121fa15c2876127861a9b75ebc51bf3cd2c6bde238",
+     "bytes": 5485
+    },
+    {
+     "path": "cases/CTL-M-039/review.json",
+     "sha256": "4d67f5d7be59eb1d482087912c0f214f5fd86046e3e249e340ec1d21738a74da",
+     "bytes": 5018
+    },
+    {
+     "path": "cases/CTL-M-039/setup.json",
+     "sha256": "0f9dbec72b79f346be3b3ed9825dbac6cb792aa709c7f2f81f57a889156fd25c",
+     "bytes": 363
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-040",
+   "files": [
+    {
+     "path": "cases/CTL-M-040/input/facts.json",
+     "sha256": "f3f6bf0eab753005620e9db57d45f7d031e8c9bdad306f6ebad3a8b0faae8551",
+     "bytes": 3123
+    },
+    {
+     "path": "cases/CTL-M-040/input/initial_message.txt",
+     "sha256": "a346704fa47da19f485f7d7a7f3e6b84f07a15e7cd7c45e56821db95b8c7b9d2",
+     "bytes": 666
+    },
+    {
+     "path": "cases/CTL-M-040/input/materials.json",
+     "sha256": "1522b58698b920ff388187470f6d902fc8cc35d9319df8b12203e503bfe29d79",
+     "bytes": 609
+    },
+    {
+     "path": "cases/CTL-M-040/input/materials/photo-airbags.jpg",
+     "sha256": "a71ffa34edc2e4d0c84df97d11c29a18f39c054d2247ff1caac68bb00919ed22",
+     "bytes": 206793
+    },
+    {
+     "path": "cases/CTL-M-040/input/materials/photo-front-tree.jpg",
+     "sha256": "52f6855f905785eb41804c3d1035393abf225712656d9ee0f85ac6b1bc3a0848",
+     "bytes": 268534
+    },
+    {
+     "path": "cases/CTL-M-040/input/materials/policy-schedule.pdf",
+     "sha256": "6906f837e1dab619c04624210fabaf41833d97b343e43b2201e97c1677ab5389",
+     "bytes": 2424
+    },
+    {
+     "path": "cases/CTL-M-040/input/materials/repair-quote.pdf",
+     "sha256": "2db88f7ebfbc20a9329589346687307f3fc6b49fd96c5a54bf144f05af98ccc1",
+     "bytes": 3778
+    },
+    {
+     "path": "cases/CTL-M-040/input/materials/tow-job-sheet.pdf",
+     "sha256": "5ac51de4255ad372c6dbe6f9de99b884d6ce814dec9226e9124f30c97cfaf1cb",
+     "bytes": 2503
+    },
+    {
+     "path": "cases/CTL-M-040/oracle/labels.json",
+     "sha256": "179930d4136da65f0283a34f2926f6663e709905bbb012a5fe91302d02917651",
+     "bytes": 5898
+    },
+    {
+     "path": "cases/CTL-M-040/provenance.json",
+     "sha256": "acf9a4791955dd9f66dba25aa0127ec040fa6413e4473e84897dda514c567c94",
+     "bytes": 5831
+    },
+    {
+     "path": "cases/CTL-M-040/review.json",
+     "sha256": "e22a3669122ee8fbcbdd96752ec2d30567bf0810d9e452f572bcb75f464cfa02",
+     "bytes": 5113
+    },
+    {
+     "path": "cases/CTL-M-040/setup.json",
+     "sha256": "0b461f0486cd443fb5d92a187f2233699ad254b34ad35b4924c34db65bd02504",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-041",
+   "files": [
+    {
+     "path": "cases/CTL-M-041/input/facts.json",
+     "sha256": "5ad129448943f682da01c3fefbac3c7cc6420d0c2fea379285fc2bf51d6a23fb",
+     "bytes": 2832
+    },
+    {
+     "path": "cases/CTL-M-041/input/initial_message.txt",
+     "sha256": "b6ec57c113d2444e4be723516b1f20068450b107f22462b48aef7d92f5f74adb",
+     "bytes": 255
+    },
+    {
+     "path": "cases/CTL-M-041/input/materials.json",
+     "sha256": "e73fbc6351a7c1677822ce9e0b3122c852d3e5e70109b8267d1de0c6c3518f7b",
+     "bytes": 632
+    },
+    {
+     "path": "cases/CTL-M-041/input/materials/photo-concrete-pillar.jpg",
+     "sha256": "f26eca5df650bc9e3e09a3eda020460a2e5ec7ca21808fbb9a6a5d3ee6dc36cb",
+     "bytes": 183800
+    },
+    {
+     "path": "cases/CTL-M-041/input/materials/photo-left-doors.jpg",
+     "sha256": "0e7eedb9a25d9b7a2ca64eca4b784247b831ff9eef29a3430d968b114a6f9260",
+     "bytes": 161936
+    },
+    {
+     "path": "cases/CTL-M-041/input/materials/policy-schedule.pdf",
+     "sha256": "025c4116f8d1f2b848e411b9861c4673e95bd1aa3ef32e690c832d0d3061d305",
+     "bytes": 2459
+    },
+    {
+     "path": "cases/CTL-M-041/input/materials/repair-quote.pdf",
+     "sha256": "475a7b81b7e3150ba6bfa0c3534fa72bb8cd48a82a1e75ce77a3c3550d6cb195",
+     "bytes": 3653
+    },
+    {
+     "path": "cases/CTL-M-041/input/materials/vehicle-purchase-invoice.pdf",
+     "sha256": "227e6746e36e34e56ede1c8d0f6acc56ef3af4d3b572a4c8e6d420208e7ac87d",
+     "bytes": 2369
+    },
+    {
+     "path": "cases/CTL-M-041/oracle/labels.json",
+     "sha256": "f4505de8b2961b1025b5b2973b59cb603a353179d802d3584afefa2116e1462c",
+     "bytes": 6713
+    },
+    {
+     "path": "cases/CTL-M-041/provenance.json",
+     "sha256": "0ec684deeb407fa2f28163da1a24e4fc08387aa44d5d6b8d337e47018e1882dc",
+     "bytes": 6092
+    },
+    {
+     "path": "cases/CTL-M-041/review.json",
+     "sha256": "c9772317c1e54e525d553d5d191a0969060103127bb56888481c7b269314c9a1",
+     "bytes": 4981
+    },
+    {
+     "path": "cases/CTL-M-041/setup.json",
+     "sha256": "73c8bfa2895c56d421a19244d1db4d22bc7bfcc69c10ecd8096a5f62bf39815c",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-042",
+   "files": [
+    {
+     "path": "cases/CTL-M-042/input/facts.json",
+     "sha256": "3009b19c8a9323668428ca778594d2d9be485d5b5b2655349f3dbaffc8943a53",
+     "bytes": 3026
+    },
+    {
+     "path": "cases/CTL-M-042/input/initial_message.txt",
+     "sha256": "501baa6b96adf7e58b9052cf48ff6dcc9445b30703689594989a42d4924587ee",
+     "bytes": 261
+    },
+    {
+     "path": "cases/CTL-M-042/input/materials.json",
+     "sha256": "7a2e39c24ab4be736763b3cc13e56b7b0325b620ecf63cef463701362a2aed79",
+     "bytes": 508
+    },
+    {
+     "path": "cases/CTL-M-042/input/materials/photo-front-left-wheel.jpg",
+     "sha256": "e4a24b92ea962e52e6665c925bdccbc8ee06fe42d39e2359f7a0d431e54a1f5d",
+     "bytes": 360924
+    },
+    {
+     "path": "cases/CTL-M-042/input/materials/policy-schedule.pdf",
+     "sha256": "f2149b35643bc339a37a7cf5aeca01d1e93acfc841eb1e17724f996fd1606c71",
+     "bytes": 2457
+    },
+    {
+     "path": "cases/CTL-M-042/input/materials/receipt-alloy-wheels.pdf",
+     "sha256": "51ae4fd0a8d11137bb6d66a04eb0122d07f4a9aab09833f92400f7d940b46a97",
+     "bytes": 2403
+    },
+    {
+     "path": "cases/CTL-M-042/input/materials/wheel-repair-quote.pdf",
+     "sha256": "ccf3313ec9b5b17196f3c22361c4cbf48d458ee99034053de52cf8d1eccb9815",
+     "bytes": 3641
+    },
+    {
+     "path": "cases/CTL-M-042/oracle/labels.json",
+     "sha256": "756cc8aa8bf965549dbd4a05efdc56c6f7b23f325f4e39d27450459bdc9ff8d0",
+     "bytes": 6672
+    },
+    {
+     "path": "cases/CTL-M-042/provenance.json",
+     "sha256": "036d8aa2992b2e6f258e2b17e59d778614e4f8bd9b6eb410c863b260d210704d",
+     "bytes": 4825
+    },
+    {
+     "path": "cases/CTL-M-042/review.json",
+     "sha256": "f69ae93c9369c05fb56a76105c640662044020e341bc0f7c0b75013905131926",
+     "bytes": 2478
+    },
+    {
+     "path": "cases/CTL-M-042/setup.json",
+     "sha256": "b3963eee5b55ade4ae364b978b7b3f0efc76e7f42c61e8bddce43fefb3f1a5a6",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-043",
+   "files": [
+    {
+     "path": "cases/CTL-M-043/input/facts.json",
+     "sha256": "ab3e80eb664db2f60452aa08e20560958e2434a46a536a5aef219f2c38da2032",
+     "bytes": 3390
+    },
+    {
+     "path": "cases/CTL-M-043/input/initial_message.txt",
+     "sha256": "263ef9a27c12437f357a3b3b8a24623d2cbf332cd4c6e527625f3e3cc839742d",
+     "bytes": 377
+    },
+    {
+     "path": "cases/CTL-M-043/input/materials.json",
+     "sha256": "73fe341f0240a129faf50152c056e7278dec2b70d53d2ffe6c7faf82e898fbbe",
+     "bytes": 624
+    },
+    {
+     "path": "cases/CTL-M-043/input/materials/photo-branch-on-roof.jpg",
+     "sha256": "77e4a48f49588708e741070729c79c59f210d58781cecc2823b0ff22fc870a51",
+     "bytes": 231576
+    },
+    {
+     "path": "cases/CTL-M-043/input/materials/photo-roof-damage.jpg",
+     "sha256": "104d2571e7111225bd8f28bff7e6271aea270778eae840beff90e894891e588d",
+     "bytes": 201539
+    },
+    {
+     "path": "cases/CTL-M-043/input/materials/policy-schedule.pdf",
+     "sha256": "1bb1091200f1140f0bdab08a85da9fb303ce9312b0841092a656f7d1126f0da2",
+     "bytes": 2454
+    },
+    {
+     "path": "cases/CTL-M-043/input/materials/receipt-roof-rack-cargo-box.pdf",
+     "sha256": "c958bc1f3570e42cc3eb60a364bc27f36b5cd6d44f341ed8f3a49d5e44693fc9",
+     "bytes": 2425
+    },
+    {
+     "path": "cases/CTL-M-043/input/materials/repair-quote.pdf",
+     "sha256": "df4b48c5a2ec4a03ea9a9c5528beacd21807467e721a018521fba626c03bc8e7",
+     "bytes": 3584
+    },
+    {
+     "path": "cases/CTL-M-043/oracle/labels.json",
+     "sha256": "4ab3c3c7ce19f1da973532ae86b2f1fad60b1f96f578566d8ba5f99bd5cef59c",
+     "bytes": 7667
+    },
+    {
+     "path": "cases/CTL-M-043/provenance.json",
+     "sha256": "68df0c961479d15eace32cbd05a16f509e78ee2a20a570020911e4d67968408e",
+     "bytes": 6240
+    },
+    {
+     "path": "cases/CTL-M-043/review.json",
+     "sha256": "218c52ef56c89174eb0dccc01ad8c7e6f336351e5ee2912a1289b181c5a731df",
+     "bytes": 4971
+    },
+    {
+     "path": "cases/CTL-M-043/setup.json",
+     "sha256": "c14c0ccf9b9f08b34226aa6c0a29067dc4b5f757426021cd195e17039a620495",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-044",
+   "files": [
+    {
+     "path": "cases/CTL-M-044/input/facts.json",
+     "sha256": "ec9a2da41419535eb8b1d78704e40cc8466bac11bf7eb007b4d5183e1013eb80",
+     "bytes": 2798
+    },
+    {
+     "path": "cases/CTL-M-044/input/initial_message.txt",
+     "sha256": "9ce26d1403ef71a80528f993999d0719898c8f17bebd99e67dadf0f4d6119958",
+     "bytes": 277
+    },
+    {
+     "path": "cases/CTL-M-044/input/materials.json",
+     "sha256": "549862ea723aa0346a23f98bfc1da932ec1cef998517b466d9e46891a2e3c030",
+     "bytes": 389
+    },
+    {
+     "path": "cases/CTL-M-044/input/materials/photo-tailgate-spoiler.jpg",
+     "sha256": "ea3b1448bec5aee8080860b3aac9a4a082d8f146c165ae07aab8d0b4622f4eec",
+     "bytes": 119099
+    },
+    {
+     "path": "cases/CTL-M-044/input/materials/policy-schedule.pdf",
+     "sha256": "315e4130b52f2b6d7552cee688b5c5e6fce36b2bc45922ea3017d6a2b98e3816",
+     "bytes": 2462
+    },
+    {
+     "path": "cases/CTL-M-044/input/materials/repair-quote.pdf",
+     "sha256": "038d8b409cb9b453d45bed44fc9b27ff3e0df0ab12179c6ff74a60e91c774358",
+     "bytes": 3601
+    },
+    {
+     "path": "cases/CTL-M-044/oracle/labels.json",
+     "sha256": "939184d047de45615f65f40ead107c98ad50ec83583609b233cddfd38efa3ea1",
+     "bytes": 5760
+    },
+    {
+     "path": "cases/CTL-M-044/provenance.json",
+     "sha256": "2fbd6436c5f776fcbe3eafa139efd592e76087038c124ca26f3e6c14ad200f5b",
+     "bytes": 3909
+    },
+    {
+     "path": "cases/CTL-M-044/review.json",
+     "sha256": "f816fde25338578bd2ab79138ef81944ae632485a3090d76b379075492b01e8a",
+     "bytes": 2612
+    },
+    {
+     "path": "cases/CTL-M-044/setup.json",
+     "sha256": "b2ae9e74276da5a0432a4d060cf7b3518e9b4a5d9a514449a27dcb3190833fbd",
+     "bytes": 390
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-045",
+   "files": [
+    {
+     "path": "cases/CTL-M-045/input/facts.json",
+     "sha256": "ef40f522e7d887d37c1dfa2c57ed1d98be000b4a45fa8c0330a26e7cc905e191",
+     "bytes": 2687
+    },
+    {
+     "path": "cases/CTL-M-045/input/initial_message.txt",
+     "sha256": "ae2f6140f617b48db60150dfd4c2ada3dd2c76f8c5c9c54288e1e5357f08187e",
+     "bytes": 258
+    },
+    {
+     "path": "cases/CTL-M-045/input/materials.json",
+     "sha256": "60513e0b34543256a8c101efd6817dd0e673b3b2d0e59549b44ba671d42a7477",
+     "bytes": 396
+    },
+    {
+     "path": "cases/CTL-M-045/input/materials/photo-front-left-corner.jpg",
+     "sha256": "d15adce428f50cb8e2492402d4d9b23d254c9b8e6ce2bc0bca06bff2faf7aeec",
+     "bytes": 262339
+    },
+    {
+     "path": "cases/CTL-M-045/input/materials/policy-schedule.pdf",
+     "sha256": "ebbc7bda5b122fb09559b6148c06d145bcea8dad90ad30f418827f139cbf39f0",
+     "bytes": 2473
+    },
+    {
+     "path": "cases/CTL-M-045/input/materials/repair-quote-page1.pdf",
+     "sha256": "62dbe8de67eb96688150de3f1769f5e3d7b122d53a844e9cfc51e35062cc75a2",
+     "bytes": 2144
+    },
+    {
+     "path": "cases/CTL-M-045/oracle/labels.json",
+     "sha256": "26ebcc7ef08486bb343626c4759f72f564dd1333b5cf6c9924de4ab955965f07",
+     "bytes": 6115
+    },
+    {
+     "path": "cases/CTL-M-045/provenance.json",
+     "sha256": "b28542378e414c293224fad6b67086674b1c0f91690681692aee2e842a12d46b",
+     "bytes": 4771
+    },
+    {
+     "path": "cases/CTL-M-045/review.json",
+     "sha256": "c177f8c081dc41655d2f8788fc9da116527fbe96358a7d7fa053cc8a35d0bff8",
+     "bytes": 2539
+    },
+    {
+     "path": "cases/CTL-M-045/setup.json",
+     "sha256": "c0175efb8f7f091b013f6a6170f5d493a93d220d9d1f81f22c7a0e3ad899b931",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-046",
+   "files": [
+    {
+     "path": "cases/CTL-M-046/input/facts.json",
+     "sha256": "954c35aa8d5f155d0b62ede953546b49d52f6be9c4d9665006b8f6d1a64732ae",
+     "bytes": 2615
+    },
+    {
+     "path": "cases/CTL-M-046/input/initial_message.txt",
+     "sha256": "38d10690d542b95e8b62b31160748433c6a5395b1497fb13ad870490b69b3c16",
+     "bytes": 201
+    },
+    {
+     "path": "cases/CTL-M-046/input/materials.json",
+     "sha256": "2cbaf832e5e46111f98c83fb06b93e8fb7ccb6b046a1353d281ae98b90c799d7",
+     "bytes": 382
+    },
+    {
+     "path": "cases/CTL-M-046/input/materials/photo-rear-door.jpg",
+     "sha256": "7f58bda7fdb46261d28ce5c0955e0d3c54679ea21b5ccd4267d91442bcbb77a6",
+     "bytes": 152810
+    },
+    {
+     "path": "cases/CTL-M-046/input/materials/policy-schedule.pdf",
+     "sha256": "2b4793bec4621a99815dde92a4cc81043b87327c9fb55e0b14cf0f419a9f7d0f",
+     "bytes": 2462
+    },
+    {
+     "path": "cases/CTL-M-046/input/materials/repair-quote.pdf",
+     "sha256": "7caa8bfdb7f820f5c09b0a8f32b930d1ee8e9e7ac5936fe0438ad96a5eb7432d",
+     "bytes": 3585
+    },
+    {
+     "path": "cases/CTL-M-046/oracle/labels.json",
+     "sha256": "bf95ae5cdba7890cedd2edd9e7fdd907d0fb6ec96800a0025a261e16ddd1bb7a",
+     "bytes": 6175
+    },
+    {
+     "path": "cases/CTL-M-046/provenance.json",
+     "sha256": "b7a068e49881466ddfd0e6042412c16d4c1cf265242047af9bc6e919df0732e4",
+     "bytes": 3882
+    },
+    {
+     "path": "cases/CTL-M-046/review.json",
+     "sha256": "23ec9d6dd444e709381348422a91d8d9472ba176019723451ae85137768212be",
+     "bytes": 2598
+    },
+    {
+     "path": "cases/CTL-M-046/setup.json",
+     "sha256": "b7ac6ec2bd56d94315f74efc4f965b1e923d4de8fa9334c232070815a007c85b",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-047",
+   "files": [
+    {
+     "path": "cases/CTL-M-047/input/facts.json",
+     "sha256": "c7af57faaba65edc8a2cd0b0865beff2a82df801e4eaad13239899d416b455c5",
+     "bytes": 2765
+    },
+    {
+     "path": "cases/CTL-M-047/input/initial_message.txt",
+     "sha256": "098a7731c35c01bd2c64c471a585211a79c0bbd77c0cb223d2cf1079a9d4391c",
+     "bytes": 276
+    },
+    {
+     "path": "cases/CTL-M-047/input/materials.json",
+     "sha256": "863d5752f30f519016c0c6ab343083bd2f8c7c8c55504b4b30bf08dcd5fa82d2",
+     "bytes": 385
+    },
+    {
+     "path": "cases/CTL-M-047/input/materials/photo-front-bumper.jpg",
+     "sha256": "90675142765ee99ab10fb47a242b1a6342fb3b39551f0779f0fb80dee64440f4",
+     "bytes": 258522
+    },
+    {
+     "path": "cases/CTL-M-047/input/materials/policy-schedule.pdf",
+     "sha256": "257f13ea83bf8ba825bd349542f0f4c54b2b4945d5ee02ce4eb10babaade356c",
+     "bytes": 2469
+    },
+    {
+     "path": "cases/CTL-M-047/input/materials/repair-quote.pdf",
+     "sha256": "1b2d0da484644284e461f89f1941fe14bdb874f1a2fd95acefb810a49199c7f1",
+     "bytes": 3623
+    },
+    {
+     "path": "cases/CTL-M-047/oracle/labels.json",
+     "sha256": "d597b4d39eedd429fe633c876d565279befac4a0ec02d2ea60775a29fc44573b",
+     "bytes": 6225
+    },
+    {
+     "path": "cases/CTL-M-047/provenance.json",
+     "sha256": "95cc59457ae2ed96e87ab8e389a50cba6b3af080b0f0f28fba1e794255790755",
+     "bytes": 3757
+    },
+    {
+     "path": "cases/CTL-M-047/review.json",
+     "sha256": "e14690a386729e49baaaebb8bf1bf62674fe22131cadbba5cba3111aad5781f7",
+     "bytes": 2684
+    },
+    {
+     "path": "cases/CTL-M-047/setup.json",
+     "sha256": "5f375fe3063384ba4a6db2c48b8d832460ead604d249b86c1ee51ec0a97b055c",
+     "bytes": 363
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-048",
+   "files": [
+    {
+     "path": "cases/CTL-M-048/input/facts.json",
+     "sha256": "35e15e2d8c5de8a22c607a4654055dbff3e7c6a0d4476d49e609cf76f4b87437",
+     "bytes": 2687
+    },
+    {
+     "path": "cases/CTL-M-048/input/initial_message.txt",
+     "sha256": "45bfd955a60be3f2c2dd07c6340da6a235169510aabcc1f2bb638ecf695aabfc",
+     "bytes": 400
+    },
+    {
+     "path": "cases/CTL-M-048/input/materials.json",
+     "sha256": "d4f873b94d360739f24c1171a65272cb18ca4600befd48ae2e5c2d3a46ffbdc9",
+     "bytes": 504
+    },
+    {
+     "path": "cases/CTL-M-048/input/materials/hail-repair-quote.pdf",
+     "sha256": "0e3b5c8411d8ae959b0cb51c8f1e9f8bb4a0834922cbfd85965c425e3b2bfa31",
+     "bytes": 3560
+    },
+    {
+     "path": "cases/CTL-M-048/input/materials/photo-hail-bonnet.jpg",
+     "sha256": "f12f9222182cf92471148a690e269aa6870781d28c7c9c9e35829bd4334b4360",
+     "bytes": 124910
+    },
+    {
+     "path": "cases/CTL-M-048/input/materials/photo-hail-roof.jpg",
+     "sha256": "50f37ab49875f952b4c64f310308af6c63e9b45f6492271c0e70343eee31bf77",
+     "bytes": 98567
+    },
+    {
+     "path": "cases/CTL-M-048/input/materials/policy-schedule.pdf",
+     "sha256": "7ccabec96dd63e4b20b7ccfc670905bff69dd6896649e99c12014863189f5c12",
+     "bytes": 2475
+    },
+    {
+     "path": "cases/CTL-M-048/oracle/labels.json",
+     "sha256": "7e2ea38529d1fbbe382fcc9b45b7f788c01a251ab24a90b116d88954f38611eb",
+     "bytes": 5904
+    },
+    {
+     "path": "cases/CTL-M-048/provenance.json",
+     "sha256": "f800eebb732d7a0b7bb456f6224c96d0113aa473e3ef771af34d0db956daaa56",
+     "bytes": 4910
+    },
+    {
+     "path": "cases/CTL-M-048/review.json",
+     "sha256": "532f01e07623ce513a49e88c2b916c178a83f6233b5c6a72723402351c004023",
+     "bytes": 4872
+    },
+    {
+     "path": "cases/CTL-M-048/setup.json",
+     "sha256": "dbc80534eab1a30740849e3315a70fce7fccb7dfb67dbb06b7fd396c8f1b980b",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-049",
+   "files": [
+    {
+     "path": "cases/CTL-M-049/input/facts.json",
+     "sha256": "b593cca7a0fa370af636771acb5f593478cc2584f7eaf45ab953ad3218473d66",
+     "bytes": 2760
+    },
+    {
+     "path": "cases/CTL-M-049/input/initial_message.txt",
+     "sha256": "59919e1db0d9cc97eb96002ac5ad112d2b86cd67434e0b8894283f21be0e7c59",
+     "bytes": 329
+    },
+    {
+     "path": "cases/CTL-M-049/input/materials.json",
+     "sha256": "be2a3a33d4f9a611e3bc663ab143e7f0c0f0c433021f7180fa6008b1a5c2a803",
+     "bytes": 382
+    },
+    {
+     "path": "cases/CTL-M-049/input/materials/photo-bent-door.jpg",
+     "sha256": "542d57951f386e1d0391b30971367cfae4df9929524f29c858face164b57d110",
+     "bytes": 193216
+    },
+    {
+     "path": "cases/CTL-M-049/input/materials/policy-schedule.pdf",
+     "sha256": "c1f1889b9fa858d8b30de91b1aee1b391fda7049b400c088da4152cad16af221",
+     "bytes": 2455
+    },
+    {
+     "path": "cases/CTL-M-049/input/materials/repair-quote.pdf",
+     "sha256": "4f0e06982d4598ca80d8c980aa0e90a8bc62ebf073dc76c8814bde8e513c5cc2",
+     "bytes": 3717
+    },
+    {
+     "path": "cases/CTL-M-049/oracle/labels.json",
+     "sha256": "0d02abc288fa02d0f945add78b8b8f04b16ecd091a17b7d66e14e25bdd00b549",
+     "bytes": 5513
+    },
+    {
+     "path": "cases/CTL-M-049/provenance.json",
+     "sha256": "b96f6bbfc6ec6a5d9bee5d3eb8b4e5406cea77f959039b88cffa90502d2ea622",
+     "bytes": 3959
+    },
+    {
+     "path": "cases/CTL-M-049/review.json",
+     "sha256": "477775f5f6d43ec08da0a07a28eb973a48106132f79dbc1e9da619eb1fdf7961",
+     "bytes": 2594
+    },
+    {
+     "path": "cases/CTL-M-049/setup.json",
+     "sha256": "d0b8dc835a03adb45233b28778d3a811e7d974d401da7002f5b627fbf39b2173",
+     "bytes": 350
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-050",
+   "files": [
+    {
+     "path": "cases/CTL-M-050/input/facts.json",
+     "sha256": "5d01e23aef38543bcb3963a1e5155bea5d39739a7b74ba6cf9ad94a8b5b30a44",
+     "bytes": 2605
+    },
+    {
+     "path": "cases/CTL-M-050/input/initial_message.txt",
+     "sha256": "651eae11cc6c1984be8df7df468d4fd51a07cc7aebddc6562c7aa76fa97d78f0",
+     "bytes": 264
+    },
+    {
+     "path": "cases/CTL-M-050/input/materials.json",
+     "sha256": "3c1efea9d2ce6ce1debf04281f113cb808e29f31745eee79fd3845b36b6700ef",
+     "bytes": 384
+    },
+    {
+     "path": "cases/CTL-M-050/input/materials/photo-rear-corner.jpg",
+     "sha256": "6b1218eed1bf3e6e8022875088bdfb137d5c2b41f1daf64f88afefb45f33eb23",
+     "bytes": 212107
+    },
+    {
+     "path": "cases/CTL-M-050/input/materials/policy-schedule.pdf",
+     "sha256": "53f1d30c95e70285ee26fc4b54834568c3ccc31fbed2c470b210a9185fd464d9",
+     "bytes": 2478
+    },
+    {
+     "path": "cases/CTL-M-050/input/materials/repair-quote.pdf",
+     "sha256": "7767a814065549beb9e1fdebb0952e40742e00bc7f9b8bd65d22180f32b6d468",
+     "bytes": 3646
+    },
+    {
+     "path": "cases/CTL-M-050/oracle/labels.json",
+     "sha256": "ee6b3b9fb6fb5d041b2300a675578c49baa04737ba35cff0e94b4bc3195cae24",
+     "bytes": 5782
+    },
+    {
+     "path": "cases/CTL-M-050/provenance.json",
+     "sha256": "10909d2bf1cc204720418f0ba5e40487535eb27610a4741d12dd618d391d212f",
+     "bytes": 3783
+    },
+    {
+     "path": "cases/CTL-M-050/review.json",
+     "sha256": "3adbc20c3c878dda83e38127c1c67d88b9cb16915e627c68c0c22ef3830a776a",
+     "bytes": 2588
+    },
+    {
+     "path": "cases/CTL-M-050/setup.json",
+     "sha256": "d28242201ed1f77f416b96109c2c6d3b8653411e3a360762732d2cdf1c3dbe8f",
+     "bytes": 350
+    }
+   ]
+  }
+ ]
+}

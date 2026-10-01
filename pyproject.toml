@@ -43,3 +43,10 @@ disallow_untyped_decorators = false
 [[tool.mypy.overrides]]
 module = ["boto3", "botocore.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Libraries used only by the controlled test corpus tools in tests/corpus/tools/. CI does
+# not install them, so mypy treats them as untyped everywhere, locally and in CI alike.
+module = ["reportlab.*", "pypdf.*", "pdfplumber.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

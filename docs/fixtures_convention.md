@@ -87,6 +87,7 @@ been agreed and the regression test has been updated deliberately.
 | `tests/fixtures/journeys/` | Inputs and expected observable outcomes | A transcript archive or model-training corpus |
 | `tests/fixtures/api/` | Public API response examples | A second private domain model |
 | `tests/fixtures/media/` | Synthetic image/document bytes and metadata | Real claimant uploads or provider payloads |
+| `tests/corpus/` | The controlled test corpus: its tools, the pack specs, the committed manifests, and the release that holds the pack files ([standard](controlled-test-corpus.md)) | A place for real claimant material, or pack files committed to the Git history |
 | `tests/` | Backend loaders, API tests, domain tests, and journey assertions | Hidden manual repair scripts |
 | `customer/src/*.test.*` | Claimant component and client behaviour tests | Internal signal assertions in claimant projections |
 | `scripts/run_scenarios.py` | Fixture loading and repeatability smoke checks | A substitute for multi-turn journey testing |
