@@ -150,7 +150,6 @@ const ZH_CN = {
   'This customer is still completing the Claim. Review the current information without accepting work or changing its state.': '客户仍在填写此案件。员工可以查看当前信息，但不能接单或更改其状态。',
   'Draft conversation is read only': '草稿会话 · 只读',
   'Customer messages remain available for context. Staff messaging starts after the Claim is submitted.': '客户消息仍可用于了解上下文；案件提交后，员工才可发送消息。',
-  'Open navigation': '打开导航',
   'Hide Claim queue': '隐藏案件队列',
   'Show Claim queue': '显示案件队列',
   'Hide conversation queue': '收起会话列表',

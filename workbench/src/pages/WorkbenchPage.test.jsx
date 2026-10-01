@@ -290,6 +290,31 @@ describe('WorkbenchPage queue routing', () => {
     ))
   })
 
+  it('returns from an open Claim to the queue at phone width and names the toggle by what is visible', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('matchMedia', (query) => ({
+      matches: query === '(max-width: 800px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    try {
+      const { container } = renderPage('/workbench/claims/clm_route_1')
+      await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+
+      expect(container.querySelector('.workbench-layout')).toHaveClass('has-open-claim')
+      const toggle = screen.getByRole('button', { name: 'Show Claim queue' })
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      await user.click(toggle)
+
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/workbench$/))
+      expect(container.querySelector('.workbench-layout')).not.toHaveClass('has-open-claim')
+      expect(screen.getByRole('button', { name: 'Hide Claim queue' })).toHaveAttribute('aria-expanded', 'true')
+      expect(await screen.findByText('NW-900')).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('keeps the bare Workbench queue when no persisted active Claim exists', async () => {
     renderPage('/workbench')
 
