@@ -1069,7 +1069,9 @@ def test_created_terminal_failure_is_discoverable_and_reviewable_by_staff(
             headers=STAFF_AUTH,
         ).json()['items'][0]['lifecycle']
         assert completed['work_summary']['queue_key'] == 'completed'
-        assert completed['work_summary']['primary_action_code'] is None
+        # The externally created Claim has no decision yet, so its claims-professional
+        # primary owner is offered the final decision (#1144 eligibility).
+        assert completed['work_summary']['primary_action_code'] == 'claim.record_decision'
         assert completed['terminal_disposition']['value'] == 'completed'
         assert repository.list_external_tasks_internal(claim_id)[0] == task
         assert external['status_label'] == 'Staff review recorded'
