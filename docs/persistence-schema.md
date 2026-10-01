@@ -1322,6 +1322,10 @@ contract. Claim acceptance continues to use the existing atomic Claim/handoff/id
 mutation, so presence does not introduce a second assignment or ownership truth. The acceptance
 guard advances the accepted staff presence revision in both Fixture and MongoDB adapters; this
 provider-neutral lease revision is the transaction conflict point.
+Lease-only presence renewal preserves `online` and `available` from the same record version used
+by the repository compare-and-set. A concurrent explicit presence change advances that revision,
+so the stale renewal fails instead of overwriting the newer availability state. When no stored
+presence exists, omitted state fields resolve to false.
 Staff logout revokes the server-side auth session even when this best-effort presence cleanup
 cannot be persisted; presence failure must never leave the bearer session active.
 An acceptance using a stale presence revision is rejected before the Claim assignment is stored.

@@ -232,20 +232,17 @@ export const workbenchApi = {
   profile(token) {
     return request('/api/v1/staff/me', { token })
   },
-  presence(token) {
-    return request('/api/v1/workbench/staff/presence', { token })
-  },
   updatePresence(token, {
-    online = true,
-    available = true,
+    online,
+    available,
     leaseSeconds = 300,
   } = {}) {
     return request('/api/v1/workbench/staff/presence', {
       method: 'PATCH',
       token,
       body: JSON.stringify({
-        online,
-        available,
+        ...(online === undefined ? {} : { online }),
+        ...(available === undefined ? {} : { available }),
         lease_seconds: leaseSeconds,
       }),
     })

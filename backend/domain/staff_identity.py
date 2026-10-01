@@ -50,8 +50,8 @@ class StaffPresenceRecord(BaseModel):
 class StaffPresenceUpdate(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    online: bool = True
-    available: bool = True
+    online: bool | None = None
+    available: bool | None = None
     lease_seconds: int = Field(default=60, ge=15, le=300)
 
 

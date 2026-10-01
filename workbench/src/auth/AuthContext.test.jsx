@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   storeSession: vi.fn(),
   session: vi.fn(),
   profile: vi.fn(),
-  presence: vi.fn(),
   updatePresence: vi.fn(),
   loadSettings: vi.fn(),
   applyAppearanceSettings: vi.fn(),
@@ -22,7 +21,6 @@ vi.mock('../api.js', () => ({
   workbenchApi: {
     session: mocks.session,
     profile: mocks.profile,
-    presence: mocks.presence,
     updatePresence: mocks.updatePresence,
     login: vi.fn(),
     logout: vi.fn(),
@@ -49,12 +47,6 @@ describe('AuthProvider staff presence', () => {
     mocks.readStoredSession.mockReturnValue({ access_token: 'staff-token', staff_id: 'stf_demo' })
     mocks.session.mockResolvedValue({ staff_id: 'stf_demo' })
     mocks.profile.mockResolvedValue({ staff_id: 'stf_demo', display_name: 'Demo Staff' })
-    mocks.presence.mockResolvedValue({
-      staff_id: 'stf_demo',
-      online: true,
-      available: true,
-      revision: 3,
-    })
     mocks.updatePresence.mockResolvedValue({ staff_id: 'stf_demo', revision: 4 })
     mocks.loadSettings.mockResolvedValue({ appearance: {} })
   })
@@ -67,10 +59,7 @@ describe('AuthProvider staff presence', () => {
     render(<AuthProvider><AuthState /></AuthProvider>)
 
     expect(await screen.findByText('Demo Staff · presence 4')).toBeVisible()
-    expect(mocks.presence).toHaveBeenCalledWith('staff-token')
     expect(mocks.updatePresence).toHaveBeenCalledWith('staff-token', {
-      online: true,
-      available: true,
       leaseSeconds: 300,
     })
     await waitFor(() => expect(mocks.loadSettings).toHaveBeenCalled())
@@ -81,13 +70,7 @@ describe('AuthProvider staff presence', () => {
     expect(await screen.findByText('Demo Staff · presence 5')).toBeVisible()
   })
 
-  it('preserves explicit unavailability during initial and focus-triggered renewal', async () => {
-    mocks.presence.mockResolvedValue({
-      staff_id: 'stf_demo',
-      online: true,
-      available: false,
-      revision: 8,
-    })
+  it('renews the lease without sending online or availability state', async () => {
     mocks.updatePresence
       .mockResolvedValueOnce({ staff_id: 'stf_demo', online: true, available: false, revision: 9 })
       .mockResolvedValueOnce({ staff_id: 'stf_demo', online: true, available: false, revision: 10 })
@@ -96,8 +79,6 @@ describe('AuthProvider staff presence', () => {
 
     expect(await screen.findByText('Demo Staff · presence 9')).toBeVisible()
     expect(mocks.updatePresence).toHaveBeenLastCalledWith('staff-token', {
-      online: true,
-      available: false,
       leaseSeconds: 300,
     })
     await waitFor(() => expect(mocks.loadSettings).toHaveBeenCalled())
@@ -105,10 +86,7 @@ describe('AuthProvider staff presence', () => {
     window.dispatchEvent(new Event('focus'))
 
     await waitFor(() => expect(mocks.updatePresence).toHaveBeenCalledTimes(2))
-    expect(mocks.presence).toHaveBeenCalledTimes(2)
     expect(mocks.updatePresence).toHaveBeenLastCalledWith('staff-token', {
-      online: true,
-      available: false,
       leaseSeconds: 300,
     })
     expect(await screen.findByText('Demo Staff · presence 10')).toBeVisible()

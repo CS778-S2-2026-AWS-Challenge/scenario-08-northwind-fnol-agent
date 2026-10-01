@@ -3421,11 +3421,16 @@ Response `200` returns the new claim revision and assignment. Assignment does no
 
 ### Staff presence and Claim acceptance
 
-`PATCH /api/v1/workbench/staff/presence` accepts `online`, `available`, and a bounded
-`lease_seconds` value (15-300). The server records `last_seen_at` and `expires_at`; an expired
-lease is not claimable even when `online` and `available` are true. A successful staff login also
-starts a five-minute online lease. `GET /api/v1/workbench/staff/online` returns only unexpired
-records that are both online and available.
+`PATCH /api/v1/workbench/staff/presence` accepts optional `online` and `available` fields plus a
+bounded `lease_seconds` value (15-300). Omitted state fields preserve the current stored values in
+the same revision-checked write, so a lease-only heartbeat cannot turn an explicitly unavailable
+staff member back into an available one. A concurrent explicit presence change wins: the stale
+heartbeat returns retryable `409 REVISION_CONFLICT` instead of overwriting that state. When no
+presence exists, omitted state fields fail closed to false. The server records `last_seen_at` and
+`expires_at`; an expired lease is not claimable even when `online` and `available` are true. A
+successful staff login also starts a five-minute online lease.
+`GET /api/v1/workbench/staff/online` returns only unexpired records that are both online and
+available.
 
 `POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` accepts an existing
 handoff. Before the existing revision-checked, idempotent mutation runs,
