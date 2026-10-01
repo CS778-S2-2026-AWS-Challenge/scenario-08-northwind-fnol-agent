@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, Literal, ParamSpec, TypeVar, cast
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
@@ -80,6 +80,7 @@ from backend.domain.retrieval import (
     RetrievalStatus,
 )
 from backend.domain.runtime import (
+    RuntimeTurnRecords,
     RuntimeWorkItemRecord,
     validate_runtime_turn_links,
 )
@@ -139,6 +140,12 @@ from backend.services.fact_resolution import (
 from backend.services.handoffs import (
     claimant_handoff,
     commit_detected_handoff,
+)
+from backend.services.recovery_decisions import (
+    build_recovery_work_item,
+    reduce_dependency_unavailable_recovery,
+    reduce_high_impact_review_recovery,
+    reduce_revision_conflict_recovery,
 )
 from backend.services.retrieval import search_claim_history, search_policy
 from backend.services.runtime_agent_policy import (
@@ -1830,6 +1837,201 @@ def _settle_accepted_error(function: Callable[_Params, _Result]) -> Callable[_Pa
     return call
 
 
+def _message_revision_conflict_error(
+    *,
+    claim_id: str,
+    expected_revision: int,
+    current_revision: int,
+    route: str,
+) -> ApiError:
+    transition = reduce_revision_conflict_recovery(
+        claim_id=claim_id,
+        expected_revision=expected_revision,
+        current_revision=current_revision,
+        event_id=(f'message-revision-conflict:{claim_id}:{expected_revision}:{current_revision}'),
+        source_refs=[f'message-route:{route}'],
+        now=now_utc(),
+    )
+
+    if (
+        transition.decision_code != 'reload_authoritative_state'
+        or transition.retry_mode != 'reload_authoritative'
+        or transition.expected_claim_revision != current_revision
+    ):
+        raise RuntimeError(
+            'Published revision-conflict recovery policy produced an invalid transition.'
+        )
+
+    return ApiError(
+        status_code=409,
+        code='REVISION_CONFLICT',
+        message='The claim changed after this page was loaded.',
+        retryable=True,
+        current_revision=current_revision,
+    )
+
+
+def _merge_dependency_recovery_work_items(
+    runtime_records: RuntimeTurnRecords,
+    recovery_work_items: list[RuntimeWorkItemRecord],
+) -> RuntimeTurnRecords:
+    """Attach Recovery responsibility to the Runtime turn that owns it.
+
+    Standalone Recovery WorkItems may use a synthetic recovery turn identity.
+    Once an item becomes part of RuntimeTurnRecords, the Runtime foreign-key
+    contract requires the real TurnPlan identity.
+    """
+
+    if not recovery_work_items:
+        return runtime_records
+
+    turn_id = runtime_records.turn_plan.turn_id
+
+    aligned = [
+        item.model_copy(
+            update={
+                'turn_id': turn_id,
+            }
+        )
+        for item in recovery_work_items
+    ]
+
+    merged = [
+        *runtime_records.work_items,
+        *aligned,
+    ]
+
+    return runtime_records.model_copy(
+        update={
+            'work_items': merged,
+            'result': runtime_records.result.model_copy(
+                update={'work_item_refs': [item.work_item_id for item in merged]}
+            ),
+        }
+    )
+
+
+def _validate_unavailable_context_recovery(
+    *,
+    claim_id: str,
+    claim_revision: int,
+    tool_results: list[dict[str, object]],
+) -> list[RuntimeWorkItemRecord]:
+    """Validate dependency recovery and return owed durable responsibility."""
+
+    recovery_work_items: list[RuntimeWorkItemRecord] = []
+
+    retrieval_tools = {
+        'knowledge_search',
+        'policy_history',
+        'claim_history',
+    }
+    runtime_tools = {
+        'evidence.history',
+    }
+
+    for index, result in enumerate(tool_results):
+        if result.get('status') != 'unavailable':
+            continue
+
+        tool_name = result.get('tool')
+
+        if not isinstance(tool_name, str):
+            continue
+
+        source: Literal['tool', 'retrieval']
+
+        if tool_name in retrieval_tools:
+            source = 'retrieval'
+        elif tool_name in runtime_tools:
+            source = 'tool'
+        else:
+            # External-service failures remain ExternalTask authority and
+            # must never be folded into generic tool recovery here.
+            continue
+
+        blocking = result.get('blocking') is True
+
+        raw_refs = result.get('source_refs')
+        source_refs = [str(item) for item in raw_refs] if isinstance(raw_refs, list) else []
+
+        transition = reduce_dependency_unavailable_recovery(
+            source=source,
+            blocking=blocking,
+            claim_id=claim_id,
+            claim_revision=claim_revision,
+            event_id=(f'context-unavailable:{tool_name}:{claim_revision}:{index}'),
+            source_refs=[
+                *source_refs,
+                f'context-tool:{tool_name}',
+            ],
+            now=now_utc(),
+        )
+
+        if blocking:
+            if (
+                transition.decision_code != 'fail_safe'
+                or transition.continuation != 'runtime.fail_safe'
+                or 'work_item.ensure' not in transition.required_actions
+            ):
+                raise RuntimeError(
+                    'Published blocking dependency Recovery policy produced an invalid transition.'
+                )
+
+            work_item = build_recovery_work_item(
+                transition,
+                claim_id=claim_id,
+                subject_ref=f'dependency:{tool_name}',
+                now=transition.decided_at,
+            )
+
+            if work_item is None:
+                raise RuntimeError(
+                    'Blocking dependency Recovery policy did not materialise its required WorkItem.'
+                )
+
+            recovery_work_items.append(work_item)
+
+        elif (
+            transition.decision_code != 'continue_with_limitation'
+            or transition.continuation != 'runtime.continue'
+            or 'work_item.ensure' in transition.required_actions
+        ):
+            raise RuntimeError(
+                'Published non-blocking dependency Recovery policy produced an invalid transition.'
+            )
+
+    return recovery_work_items
+
+
+def _validate_professional_review_recovery(
+    *,
+    claim_id: str,
+    claim_revision: int,
+    source_refs: list[str],
+) -> None:
+    """Require professional review to use existing staff authorities."""
+
+    transition = reduce_high_impact_review_recovery(
+        claim_id=claim_id,
+        claim_revision=claim_revision,
+        event_id=(f'high-impact-review:{claim_revision}:{len(source_refs)}'),
+        source_refs=source_refs,
+        now=now_utc(),
+    )
+
+    if (
+        transition.decision_code != 'pause_for_review'
+        or transition.continuation != 'runtime.pause_for_review'
+        or transition.responsibility != 'staff'
+        or 'work_item.ensure' in transition.required_actions
+        or 'handoff.ensure' not in transition.required_actions
+    ):
+        raise RuntimeError(
+            'Published high-impact Recovery policy produced an invalid staff-review transition.'
+        )
+
+
 @_settle_accepted_error
 def submit_message(
     repository: PersistenceRepository,
@@ -2114,21 +2316,19 @@ def submit_message(
                 updated_claim, expected_revision, updated_session, claimant_message, idempotency
             )
         except RevisionConflict as conflict:
-            raise ApiError(
-                status_code=409,
-                code='REVISION_CONFLICT',
-                message='The claim changed after this page was loaded.',
-                retryable=True,
+            raise _message_revision_conflict_error(
+                claim_id=claim_id,
+                expected_revision=expected_revision,
                 current_revision=conflict.current_revision,
+                route=route,
             ) from conflict
         return response
     if claim.revision != expected_revision:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_CONFLICT',
-            message='The claim changed after this page was loaded.',
-            retryable=True,
+        raise _message_revision_conflict_error(
+            claim_id=claim_id,
+            expected_revision=expected_revision,
             current_revision=claim.revision,
+            route=route,
         )
     selected_evidence: list[EvidenceRecord] = []
     invalid_evidence_refs: list[ErrorDetail] = []
@@ -2243,12 +2443,11 @@ def submit_message(
                 claim, expected_revision, session, claimant_message, checkpoint_idempotency
             )
         except RevisionConflict as conflict:
-            raise ApiError(
-                status_code=409,
-                code='REVISION_CONFLICT',
-                message='The claim changed after this page was loaded.',
-                retryable=True,
+            raise _message_revision_conflict_error(
+                claim_id=claim_id,
+                expected_revision=expected_revision,
                 current_revision=conflict.current_revision,
+                route=route,
             ) from conflict
         except IdempotencyConflict as conflict:
             raise ApiError(
@@ -2544,7 +2743,11 @@ def submit_message(
         # is introduced here.
         recovery_claim = repository.get_claim(claim_id, principal.subject) or claim
         recovery_rule = classify_recovery(
-            RecoveryTrigger(source='model', outcome_code=model_error.code.value)
+            RecoveryTrigger(
+                source='model',
+                outcome_code=model_error.code.value,
+                retryable=model_error.retryable,
+            )
         )
         claimant_message = claimant_message.model_copy(
             update={'recovery_rule_id': recovery_rule.rule_id}
@@ -2770,7 +2973,27 @@ def submit_message(
             proposal = replace(proposal, tool_results=context_tool_results)
     proposal = _validate_evidence_history_action(repository, claim, proposal)
     _validate_failed_retrieval_changes(proposal, message_text)
+
+    dependency_recovery_work_items = _validate_unavailable_context_recovery(
+        claim_id=claim_id,
+        claim_revision=claim.revision,
+        tool_results=list(proposal.tool_results),
+    )
+
     authority = validate_proposal(proposal)
+
+    if authority.outcome is AuthorityOutcome.AUTHORISED and _professional_review_requested(
+        proposal
+    ):
+        _validate_professional_review_recovery(
+            claim_id=claim_id,
+            claim_revision=claim.revision,
+            source_refs=[
+                claimant_message.message_id,
+                *sorted(_tool_source_refs(proposal.tool_results)),
+            ],
+        )
+
     runtime_trace = proposal.runtime_trace
     prepared_action_code: str | None = None
     if (
@@ -2876,6 +3099,12 @@ def submit_message(
     decision = outcome.records.decision
     evaluation_record = outcome.records.evaluation_record
     runtime_records = outcome.records.runtime_records
+
+    runtime_records = _merge_dependency_recovery_work_items(
+        runtime_records,
+        dependency_recovery_work_items,
+    )
+
     live_mutation_command = outcome.records.live_mutation_command
     idempotency = replace(
         outcome.records.idempotency, runtime_result_id=runtime_records.result.result_id
@@ -2933,12 +3162,11 @@ def submit_message(
                 review_signals=outcome.records.review_signals,
             )
         except RevisionConflict as conflict:
-            raise ApiError(
-                status_code=409,
-                code='REVISION_CONFLICT',
-                message='The claim changed after this page was loaded.',
-                retryable=True,
+            raise _message_revision_conflict_error(
+                claim_id=claim_id,
+                expected_revision=expected_revision,
                 current_revision=conflict.current_revision,
+                route=route,
             ) from conflict
         except IdempotencyConflict as conflict:
             raise ApiError(

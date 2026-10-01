@@ -230,6 +230,42 @@ stub. Both exist for CI and the test suite only and are not a way to run the app
 Deployment environments inject the same variable names through their secret and configuration
 mechanisms; they must not package a local `.env` file.
 
+### Run the P17 recovery worker
+
+P17 follow-up, expiry, and retention progression is owned by an explicit worker process rather
+than the FastAPI lifespan. The `vp` Docker Compose profile starts `recovery-worker` from the same
+packaged backend image and data-profile configuration as the API. A non-Compose deployment
+supervisor should run one long-lived process with the same configuration:
+
+```powershell
+py -3.12 -m backend.recovery_worker_main --limit 50 --interval-seconds 30
+```
+
+An external scheduler can instead own the cadence by invoking one bounded cycle at a time:
+
+```powershell
+py -3.12 -m backend.recovery_worker_main --once --limit 50
+```
+
+Each cycle examines at most `--limit` candidates in each bounded discovery class (deadline,
+retention handoff, retention operation, and due follow-up; valid limits are 1-100). Expiry is
+evaluated before contact so the persisted absolute deadline wins ties. Candidate reads are only
+hints: the existing repository/service CAS and authority checks are reloaded before mutation.
+
+Retention handoff and retention operation discovery are keyset sweeps: blocked retention work
+legitimately stays discoverable, so each cycle resumes after the previous page and wraps to the
+start when the sweep ends. The long-lived process carries the positions between cycles. With
+`--once`, pass back the `handoff_cursor` and `pending_retention_cursor` values printed by the
+previous cycle as `--handoff-cursor` and `--pending-retention-cursor`; omitting them restarts both
+sweeps from the beginning.
+
+The recovery cycle isolates candidate failures so one malformed or transiently failing Claim does
+not block later candidates in the same bounded page. A cycle-level infrastructure failure is logged;
+the long-lived process waits for the configured interval, reloads durable state, and tries again. `SIGINT` and `SIGTERM` request graceful
+shutdown; an in-flight bounded cycle is allowed to finish and the data runtime bundle is then
+closed. The worker does not own a second workflow state machine, notification platform, or
+retention authority.
+
 ### Configure protected account data
 
 The backend uses the maintained `cryptography` package's Fernet authenticated-encryption

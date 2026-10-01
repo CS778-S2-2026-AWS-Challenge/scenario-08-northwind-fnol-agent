@@ -3077,7 +3077,7 @@ def test_policy_lookup_replan_rejects_deprecated_legacy_action() -> None:
                 }
             ],
             200,
-            'claimant_turn.model_dependency_failure',
+            'claimant_turn.model_dependency_terminal',
         ),
     ],
 )
@@ -3146,7 +3146,7 @@ def test_failed_or_second_context_round_cannot_mutate_claim(
 
     assert response.status_code == expected_status
     if second_tools:
-        assert_saved_model_recovery(response)
+        assert_saved_model_recovery(response, expected_code)
         assert response.json()['claimant_message']['recovery']['rule_id'] == expected_code
     else:
         assert response.json()['error']['code'] == expected_code
@@ -3237,15 +3237,16 @@ def assert_model_message_failure_is_atomic(
     assert checkpoint.revision_before_message == before_claim.revision
 
 
-def assert_saved_model_recovery(response: httpx.Response) -> None:
+def assert_saved_model_recovery(
+    response: httpx.Response,
+    expected_rule_id: str,
+) -> None:
     assert response.status_code == 200, response.text
     body = response.json()
     assert body['agent_message'] is None
     assert body['decision'] is None
     assert body['form_changes'] == []
-    assert (
-        body['claimant_message']['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
-    )
+    assert body['claimant_message']['recovery']['rule_id'] == expected_rule_id
     assert body['claimant_message']['recovery']['resume_entrypoint'] == 'submit_message'
 
 
@@ -3258,7 +3259,7 @@ def test_incomplete_model_contents_proposal_is_rejected_before_runtime_mutation(
         protocol=protocol,
     )
 
-    assert_saved_model_recovery(response)
+    assert_saved_model_recovery(response, 'claimant_turn.model_invalid_response')
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -3359,7 +3360,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
     )
 
     assert observed_status == [expected_status]
-    assert_saved_model_recovery(response)
+    assert_saved_model_recovery(response, 'claimant_turn.model_invalid_response')
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -3972,7 +3973,7 @@ def test_model_signal_injection_is_rejected_before_workbench_persistence() -> No
         protocol=protocol,
     )
 
-    assert_saved_model_recovery(response)
+    assert_saved_model_recovery(response, 'claimant_turn.model_invalid_response')
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -4157,7 +4158,7 @@ def test_model_fact_metadata_rejection_is_bounded_and_atomic_at_message_api() ->
         protocol=protocol,
     )
 
-    assert_saved_model_recovery(response)
+    assert_saved_model_recovery(response, 'claimant_turn.model_invalid_response')
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,
@@ -4186,11 +4187,21 @@ def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
         protocol=protocol,
     )
 
-    assert_saved_model_recovery(response)
+    assert_saved_model_recovery(
+        response,
+        {
+            ModelGatewayErrorCode.TIMEOUT: 'claimant_turn.model_timeout',
+            ModelGatewayErrorCode.RATE_LIMIT: ('claimant_turn.model_rate_limited'),
+            ModelGatewayErrorCode.AUTHENTICATION: ('claimant_turn.model_dependency_terminal'),
+            ModelGatewayErrorCode.CONFIGURATION: ('claimant_turn.model_dependency_terminal'),
+        }[gateway_code],
+    )
     assert 'model.example.test' not in response.text
-    # The caller-chosen client_message_id includes the synthetic failure name;
-    # the server-owned claimant explanation must not expose provider diagnostics.
-    assert gateway_code.value not in json.dumps(response.json()['claimant_message']['recovery'])
+    # The immutable Recovery rule_id may intentionally encode the classified
+    # failure kind. The claimant-facing explanation must not expose provider
+    # diagnostics or raw provider failure codes.
+    recovery = response.json()['claimant_message']['recovery']
+    assert gateway_code.value not in recovery['claimant_projection']
     assert_model_message_failure_is_atomic(
         repository,
         before_claim,

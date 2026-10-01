@@ -45,7 +45,10 @@ def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None
             },
         )
         assert turn.status_code == 200
-        assert turn.json()['claim_revision'] == 2
+        # Claimant input is checkpointed first, then the reduced Agent result
+        # commits in a second CAS boundary.
+        turn_revision = int(turn.json()['claim_revision'])
+        assert turn_revision == 3
 
         decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
         requirements = decision.next_action_requirements
@@ -58,7 +61,7 @@ def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None
 
         source = repository.get_session(claim_id, session_id, 'cus_demo')
         assert source is not None
-        assert source.context_revision == 2
+        assert source.context_revision == turn_revision
         repository.save_session(
             source.model_copy(
                 update={
@@ -72,12 +75,12 @@ def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None
             headers={
                 **AUTH,
                 'Idempotency-Key': 'resume-confirm-question-confirmation',
-                'If-Match': '2',
+                'If-Match': str(turn_revision),
             },
             json={'field_codes': field_codes},
         )
         assert confirmed.status_code == 200
-        assert confirmed.json()['revision'] == 3
+        assert confirmed.json()['revision'] == turn_revision + 1
 
         claim = repository.get_claim(claim_id, 'cus_demo')
         source = repository.get_session(claim_id, session_id, 'cus_demo')

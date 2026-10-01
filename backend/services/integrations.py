@@ -111,6 +111,11 @@ from backend.services.external_service_entry import (
     ExternalServiceEntryDecision,
     assert_task_matches_entry,
 )
+from backend.services.recovery_decisions import (
+    build_recovery_work_item,
+    reduce_external_terminal_recovery,
+    reduce_external_unknown_recovery,
+)
 from backend.services.support import now_utc, request_fingerprint, require_idempotency_key
 
 # The Evidence kind the awaited assessment is recorded under. `tag_projection`
@@ -1030,6 +1035,136 @@ def _record_external_failure(
     return failed
 
 
+def _persist_external_recovery_work_item(
+    repository: PersistenceRepository,
+    *,
+    claim: WorkingClaim,
+    task: ExternalTaskRecord,
+    operation_id: str,
+) -> None:
+    if task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        transition = reduce_external_unknown_recovery(
+            claim_id=claim.claim_id,
+            claim_revision=claim.revision,
+            operation_id=operation_id,
+            delivery_state=(
+                'submitted' if task.delivery is ExternalTaskDelivery.SUBMITTED else 'unknown'
+            ),
+            event_id=(
+                f'external-recovery:{task.task_id}:{operation_id}:{task.updated_at.isoformat()}'
+            ),
+            source_refs=[
+                task.task_id,
+                operation_id,
+                *([task.delivery_evidence] if task.delivery_evidence is not None else []),
+            ],
+            now=task.updated_at,
+        )
+    elif task.status is ExternalTaskOperationStatus.TERMINAL_FAILURE:
+        transition = reduce_external_terminal_recovery(
+            claim_id=claim.claim_id,
+            claim_revision=claim.revision,
+            operation_id=operation_id,
+            event_id=(
+                f'external-terminal:{task.task_id}:{operation_id}:{task.updated_at.isoformat()}'
+            ),
+            source_refs=[
+                task.task_id,
+                operation_id,
+            ],
+            now=task.updated_at,
+        )
+    else:
+        return
+
+    work_item = build_recovery_work_item(
+        transition,
+        claim_id=claim.claim_id,
+        subject_ref=f'external-task:{task.task_id}',
+        now=task.updated_at,
+    )
+
+    if work_item is None:
+        raise RuntimeError('External Recovery policy did not materialise its required WorkItem.')
+
+    repository.save_runtime_work_item(
+        work_item,
+        claim.customer_id,
+    )
+
+
+def _complete_external_recovery_work_item(
+    repository: PersistenceRepository,
+    *,
+    claim: WorkingClaim,
+    task: ExternalTaskRecord,
+    operation_id: str,
+) -> None:
+    transition = reduce_external_unknown_recovery(
+        claim_id=claim.claim_id,
+        claim_revision=claim.revision,
+        operation_id=operation_id,
+        delivery_state='submitted',
+        event_id=(
+            f'external-recovery-complete:{task.task_id}:'
+            f'{operation_id}:{task.updated_at.isoformat()}'
+        ),
+        source_refs=[
+            task.task_id,
+            operation_id,
+            *([task.provider_reference] if task.provider_reference is not None else []),
+        ],
+        now=task.updated_at,
+    )
+
+    completion = build_recovery_work_item(
+        transition,
+        claim_id=claim.claim_id,
+        subject_ref=f'external-task:{task.task_id}',
+        now=task.updated_at,
+        status='completed',
+    )
+
+    if completion is None:
+        raise RuntimeError('External reconciliation did not materialise its completion WorkItem.')
+
+    existing = next(
+        (
+            item
+            for item in repository.list_runtime_work_items(
+                claim.claim_id,
+                claim.customer_id,
+            )
+            if item.work_item_id == completion.work_item_id
+        ),
+        None,
+    )
+    if existing is None:
+        raise RuntimeError('External reconciliation cannot settle a missing recovery WorkItem.')
+
+    settled = existing.model_copy(
+        update={
+            'status': 'completed',
+            'blocks_action': None,
+            'source_refs': list(
+                dict.fromkeys(
+                    [
+                        *existing.source_refs,
+                        *completion.source_refs,
+                    ]
+                )
+            ),
+            'updated_at': task.updated_at,
+            'completed_at': task.updated_at,
+        }
+    )
+
+    repository.save_runtime_work_item(
+        settled,
+        claim.customer_id,
+    )
+
+
 def unreconciled_assessor_task(
     repository: PersistenceRepository,
     claim_id: str,
@@ -1358,6 +1493,12 @@ def reconcile_assessor_routing(
             and stored_evidence == awaited
             and linked
         ):
+            _complete_external_recovery_work_item(
+                repository,
+                claim=claim,
+                task=task,
+                operation_id=operation.operation_id,
+            )
             return operation.result, True
         raise _idempotency_error()
     # Two shapes are unresolved. One settled into `unknown_outcome` because the adapter
@@ -1378,6 +1519,48 @@ def reconcile_assessor_routing(
         raise _authorisation_error(
             'Only a matching unresolved assessor task and operation can be reconciled.'
         )
+
+    recovery_transition = reduce_external_unknown_recovery(
+        claim_id=claim_id,
+        claim_revision=claim.revision,
+        operation_id=operation.operation_id,
+        delivery_state=('submitted' if settled_unknown else 'unknown'),
+        event_id=(f'external-reconciliation:{task.task_id}:{operation.operation_id}'),
+        source_refs=[
+            task.task_id,
+            external_request.request_id,
+            operation.operation_id,
+        ],
+        now=now_utc(),
+    )
+
+    if (
+        recovery_transition.decision_code != 'reconcile_existing_operation'
+        or not recovery_transition.requires_reconciliation
+        or recovery_transition.operation_id != operation.operation_id
+        or 'external.reconcile' not in recovery_transition.required_actions
+    ):
+        raise RuntimeError(
+            'Published external recovery policy does not authorise '
+            'reconciliation of this existing operation.'
+        )
+
+    if reserved_unsettled:
+        recovery_work_item = build_recovery_work_item(
+            recovery_transition,
+            claim_id=claim.claim_id,
+            subject_ref=f'external-task:{task.task_id}',
+            now=external_request.dispatch_reserved_at or task.updated_at,
+        )
+        if recovery_work_item is None:
+            raise RuntimeError(
+                'Interrupted external dispatch did not materialise its reconciliation WorkItem.'
+            )
+        repository.save_runtime_work_item(
+            recovery_work_item,
+            claim.customer_id,
+        )
+
     if claim.revision != expected_revision:
         raise ApiError(
             status_code=409,
@@ -1591,6 +1774,13 @@ def reconcile_assessor_routing(
         ) from conflict
     except (IdempotencyConflict, KeyError) as conflict:
         raise _idempotency_error() from conflict
+    _complete_external_recovery_work_item(
+        repository,
+        claim=updated_claim,
+        task=accepted_task,
+        operation_id=accepted_operation.operation_id,
+    )
+
     return result, outcome.replayed
 
 
@@ -2177,6 +2367,24 @@ def route_assessor(
         and operation.status is AssessorRoutingOperationStatus.TERMINAL_FAILURE
     ):
         assert operation.failure_code is not None
+
+        terminal_task = next(
+            (
+                item
+                for item in repository.list_external_tasks_internal(operation.claim_id)
+                if item.task_id == _external_task_id(operation.operation_id)
+            ),
+            None,
+        )
+
+        if terminal_task is not None:
+            _persist_external_recovery_work_item(
+                repository,
+                claim=claim,
+                task=terminal_task,
+                operation_id=operation.operation_id,
+            )
+
         raise _assessor_failure_error(operation.failure_code)
 
     # Everything below this line can reach the provider, so the unresolved outcome is
@@ -2185,7 +2393,29 @@ def route_assessor(
     # presents a new key would otherwise build a fresh authority, operation, and task
     # and send the request a second time. What must not be repeated belongs to the
     # claim's external task, which is where this reads it.
-    if unreconciled_assessor_task(repository, payload.claim_id) is not None:
+    unresolved_task = unreconciled_assessor_task(
+        repository,
+        payload.claim_id,
+    )
+
+    if unresolved_task is not None:
+        unresolved_request = next(
+            (
+                item
+                for item in repository.list_external_task_requests_internal(payload.claim_id)
+                if item.task_id == unresolved_task.task_id
+            ),
+            None,
+        )
+
+        if unresolved_request is not None and unresolved_request.operation_id is not None:
+            _persist_external_recovery_work_item(
+                repository,
+                claim=claim,
+                task=unresolved_task,
+                operation_id=unresolved_request.operation_id,
+            )
+
         raise unreconciled_outcome_error()
 
     consent = next(
@@ -2376,6 +2606,12 @@ def route_assessor(
             failed_attempt,
             claim.customer_id,
         )
+        _persist_external_recovery_work_item(
+            repository,
+            claim=claim,
+            task=failed_task,
+            operation_id=operation.operation_id,
+        )
         # An attempt that settled releases its hold: the task status now says what may
         # happen next, and a retryable failure that the matrix permits to be retried
         # must be able to take the reservation again. An unknown outcome keeps it,
@@ -2437,6 +2673,12 @@ def route_assessor(
             refused_task,
             refused_attempt,
             claim.customer_id,
+        )
+        _persist_external_recovery_work_item(
+            repository,
+            claim=claim,
+            task=refused_task,
+            operation_id=operation.operation_id,
         )
         _release_dispatch(repository, claim=claim, request=external_request)
         raise ApiError(

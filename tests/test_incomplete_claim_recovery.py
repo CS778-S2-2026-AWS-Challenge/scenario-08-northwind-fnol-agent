@@ -1,14 +1,23 @@
-from datetime import UTC, datetime
+import json
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import cast
 
 import mongomock
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend import recovery_worker_main as recovery_worker_cli
+from backend.adapters.evidence_storage import MockEvidenceStorage
+from backend.core.runtime_profiles import DataRuntimeBundle
+from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import (
     Channel,
     ClaimState,
     CustomerNextStep,
     FollowUpContactPermission,
+    FollowUpReasonCode,
     FollowUpRecord,
     FollowUpStatus,
     PreferredChannel,
@@ -16,11 +25,25 @@ from backend.domain.models import (
     SessionRecord,
     SessionRecoveryContext,
     SessionStatus,
+    TerminalDispositionReasonCode,
     WorkingClaim,
+)
+from backend.domain.retention import (
+    RetentionOperationStatus,
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyRecord, RevisionConflict
+from backend.services import recovery_worker
+from backend.services.follow_up_recovery import (
+    process_due_follow_up,
+    process_expiring_follow_up,
+)
+from backend.services.retention import (
+    execute_retention_cleanup,
+    freeze_retention_cleanup_targets,
+    reserve_retention_from_terminal,
+)
 
 
 def _create_claim(
@@ -148,6 +171,18 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     assert len(resumed_follow_ups) == 1
     assert resumed_follow_ups[0].status is FollowUpStatus.RESOLVED
     assert resumed_follow_ups[0].outcome == 'claimant_resumed'
+
+    resume_events = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim_id,
+            claim_id=claim_id,
+        )
+    )
+    resume_events = [event for event in resume_events if event.idempotency_key == 'p17-resume']
+    assert len(resume_events) == 1
+    assert resume_events[0].actor.actor_id == 'cus_demo'
+    assert resume_events[0].claim_revision == final_claim.revision
 
 
 def test_pause_checkpoint_rejects_stale_revision_without_partial_write(
@@ -382,3 +417,450 @@ def test_mongodb_stale_incomplete_checkpoint_has_no_partial_children() -> None:
         )
         is None
     )
+
+
+def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    created = _create_claim(
+        client,
+        auth_headers,
+        'p17-worker-entrypoint-create',
+    )
+    claim = created['claim']
+    session = created['session']
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    revision = int(claim['revision'])
+
+    paused = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'p17-worker-entrypoint-pause',
+            'If-Match': f'"{revision}"',
+        },
+    )
+    assert paused.status_code == 200
+
+    follow_up = repository.list_follow_ups(claim_id, 'cus_demo')[0]
+    storage = MockEvidenceStorage()
+    bundle = cast(
+        DataRuntimeBundle,
+        SimpleNamespace(
+            repository=repository,
+            evidence_storage=storage,
+            close=lambda: None,
+        ),
+    )
+    monkeypatch.setattr(
+        recovery_worker_cli,
+        '_configured_bundle',
+        lambda: bundle,
+    )
+
+    def run_at(when: datetime) -> dict[str, int]:
+        monkeypatch.setattr(
+            recovery_worker_cli,
+            '_utc_now',
+            lambda: when,
+        )
+        assert recovery_worker_cli.main(['--once', '--limit', '10']) == 0
+        output = capsys.readouterr().out.strip().splitlines()
+        assert output
+        return cast(dict[str, int], json.loads(output[-1]))
+
+    assert follow_up.due_at is not None
+    first_cycle = run_at(follow_up.due_at)
+    assert first_cycle['due_candidates'] == 1
+    assert first_cycle['contacted'] == 1
+
+    visible_messages = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers=auth_headers,
+    )
+    assert visible_messages.status_code == 200
+    items = visible_messages.json()['items']
+    assert len(items) == 1
+    assert items[0]['actor'] == 'agent'
+    assert items[0]['recovery'] is None
+    assert items[0]['content'] == {
+        'type': 'text',
+        'text': (
+            'Your claim is still saved. You can return to continue '
+            'where you left off when you are ready.'
+        ),
+    }
+
+    for _ in range(2):
+        current = repository.get_follow_up(
+            claim_id,
+            follow_up.follow_up_id,
+            'cus_demo',
+        )
+        assert current is not None
+        assert current.due_at is not None
+        cycle = run_at(current.due_at)
+        assert cycle['contacted'] == 1
+
+    exhausted = repository.get_follow_up(
+        claim_id,
+        follow_up.follow_up_id,
+        'cus_demo',
+    )
+    assert exhausted is not None
+    assert exhausted.status is FollowUpStatus.BLOCKED
+    assert exhausted.reason_code is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED
+    assert exhausted.deadline_at is not None
+
+    expiry_cycle = run_at(exhausted.deadline_at)
+    assert expiry_cycle['expired'] == 1
+    assert expiry_cycle['retention_progressed'] == 1
+
+    retention = repository.get_retention_operation_for_claim(claim_id)
+    assert retention is not None
+    assert retention.targets_frozen_at is not None
+    assert retention.revision > 1
+    assert retention.status is RetentionOperationStatus.COMPLETED
+
+    # The same Claim ends the journey: the old Session and a delayed resume are
+    # denied with concealed absence, and no replacement Claim is created.
+    claims_before_denial = repository.claim_count
+    for path in (
+        f'/api/v1/claims/{claim_id}',
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}',
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+    ):
+        assert client.get(path, headers=auth_headers).status_code == 404, path
+    delayed_resume = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={**auth_headers, 'Idempotency-Key': 'p17-worker-entrypoint-late-resume'},
+        json={'intent': 'resume'},
+    )
+    assert delayed_resume.status_code == 404
+    assert repository.claim_count == claims_before_denial
+
+
+def test_recovery_cycle_isolates_one_failed_expiry_candidate(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_records = [
+        _create_claim(client, auth_headers, 'p17-isolation-first'),
+        _create_claim(client, auth_headers, 'p17-isolation-second'),
+    ]
+    candidates: list[FollowUpRecord] = []
+
+    for index, created in enumerate(created_records, start=1):
+        claim = cast(dict[str, object], created['claim'])
+        session = cast(dict[str, object], created['session'])
+        claim_id = str(claim['claim_id'])
+        session_id = str(session['session_id'])
+        revision_value = claim['revision']
+        assert isinstance(revision_value, int)
+        revision = revision_value
+        paused = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
+            headers={
+                **auth_headers,
+                'Idempotency-Key': f'p17-isolation-pause-{index}',
+                'If-Match': f'"{revision}"',
+            },
+        )
+        assert paused.status_code == 200
+        candidates.append(repository.list_follow_ups(claim_id, 'cus_demo')[0])
+
+    def list_expiring(
+        _now: datetime,
+        *,
+        limit: int,
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        return candidates[:limit], cursor
+
+    def list_pending(*, limit: int, cursor: str | None = None) -> tuple[list[object], None]:
+        del limit, cursor
+        return [], None
+
+    def list_due(
+        _now: datetime,
+        *,
+        limit: int,
+        cursor: str | None = None,
+    ) -> tuple[list[FollowUpRecord], str | None]:
+        del limit
+        return [], cursor
+
+    monkeypatch.setattr(repository, 'list_expiring_follow_ups', list_expiring)
+    monkeypatch.setattr(repository, 'list_pending_retention_operations', list_pending)
+    monkeypatch.setattr(repository, 'list_due_follow_ups', list_due)
+
+    processed: list[str] = []
+
+    def process_candidate(
+        _repository: object,
+        candidate: FollowUpRecord,
+        _now: datetime,
+    ) -> None:
+        if candidate.follow_up_id == candidates[0].follow_up_id:
+            raise RuntimeError('synthetic bad candidate')
+        processed.append(candidate.follow_up_id)
+
+    monkeypatch.setattr(
+        recovery_worker,
+        'process_expiring_follow_up',
+        process_candidate,
+    )
+
+    result = recovery_worker.run_recovery_cycle(
+        repository,
+        MockEvidenceStorage(),
+        now=datetime(2026, 9, 30, 7, 0, tzinfo=UTC),
+        limit=10,
+    )
+
+    assert result.failed_candidates == 1
+    assert processed == [candidates[1].follow_up_id]
+
+
+def test_p17_full_journey_pause_resume_stops_future_recovery(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = _create_claim(
+        client,
+        auth_headers,
+        'p17-full-resume-create',
+    )
+
+    claim = created['claim']
+    session = created['session']
+
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    revision = int(claim['revision'])
+
+    paused = client.post(
+        (f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'),
+        headers={
+            **auth_headers,
+            'Idempotency-Key': ('p17-full-resume-pause'),
+            'If-Match': f'"{revision}"',
+        },
+    )
+
+    assert paused.status_code == 200
+
+    follow_ups = repository.list_follow_ups(
+        claim_id,
+        'cus_demo',
+    )
+
+    assert len(follow_ups) == 1
+
+    obligation = follow_ups[0]
+
+    assert obligation.status is FollowUpStatus.PENDING
+    assert obligation.due_at is not None
+    assert obligation.deadline_at is not None
+
+    due_candidates, _ = repository.list_due_follow_ups(
+        obligation.due_at,
+        limit=10,
+        cursor=None,
+    )
+
+    assert obligation.follow_up_id in {item.follow_up_id for item in due_candidates}
+
+    resumed = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': ('p17-full-resume-return'),
+        },
+        json={
+            'intent': 'resume',
+        },
+    )
+
+    assert resumed.status_code == 201
+
+    final_claim = repository.get_claim(
+        claim_id,
+        'cus_demo',
+    )
+
+    assert final_claim is not None
+    assert final_claim.terminal_disposition is None
+    assert final_claim.active_session_id == resumed.json()['session_id']
+
+    resolved = repository.list_follow_ups(
+        claim_id,
+        'cus_demo',
+    )
+
+    assert len(resolved) == 1
+    assert resolved[0].status is FollowUpStatus.RESOLVED
+    assert resolved[0].reason_code is FollowUpReasonCode.CLAIMANT_RESUMED
+
+    future_due, _ = repository.list_due_follow_ups(
+        obligation.deadline_at - timedelta(microseconds=1),
+        limit=10,
+        cursor=None,
+    )
+
+    assert obligation.follow_up_id not in {item.follow_up_id for item in future_due}
+
+
+def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = _create_claim(
+        client,
+        auth_headers,
+        'p17-full-expiry-create',
+    )
+
+    claim = created['claim']
+    session = created['session']
+
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    revision = int(claim['revision'])
+
+    paused = client.post(
+        (f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'),
+        headers={
+            **auth_headers,
+            'Idempotency-Key': ('p17-full-expiry-pause'),
+            'If-Match': f'"{revision}"',
+        },
+    )
+
+    assert paused.status_code == 200
+
+    current = repository.list_follow_ups(
+        claim_id,
+        'cus_demo',
+    )[0]
+
+    assert current.deadline_at is not None
+
+    # Three immutable v1 in-app attempts. Each later due execution
+    # reconciles the previous no-response before committing the next.
+    for _ in range(3):
+        assert current.due_at is not None
+
+        transition = process_due_follow_up(
+            repository,
+            current,
+            current.due_at,
+        )
+
+        assert transition is not None
+
+        reloaded = repository.get_follow_up(
+            claim_id,
+            current.follow_up_id,
+            'cus_demo',
+        )
+
+        assert reloaded is not None
+        current = reloaded
+
+    assert current.attempt_count == 3
+    assert current.status is FollowUpStatus.BLOCKED
+    assert current.reason_code is FollowUpReasonCode.ATTEMPT_LIMIT_REACHED
+    assert current.due_at is None
+
+    deadline = current.deadline_at
+    assert deadline is not None
+
+    expired = process_expiring_follow_up(
+        repository,
+        current,
+        deadline,
+    )
+
+    assert expired is not None
+
+    terminal = repository.get_claim_internal(claim_id)
+
+    assert terminal is not None
+    assert terminal.terminal_disposition is not None
+    assert (
+        terminal.terminal_disposition.reason_code is TerminalDispositionReasonCode.RECOVERY_EXPIRED
+    )
+
+    terminal_follow_up = repository.get_follow_up(
+        claim_id,
+        current.follow_up_id,
+        'cus_demo',
+    )
+
+    assert terminal_follow_up is not None
+    assert terminal_follow_up.status is FollowUpStatus.RESOLVED
+    assert terminal_follow_up.reason_code is FollowUpReasonCode.RECOVERY_EXPIRED
+
+    retention = reserve_retention_from_terminal(
+        repository,
+        claim_id,
+        now=deadline + timedelta(minutes=1),
+    )
+
+    frozen = freeze_retention_cleanup_targets(
+        repository,
+        retention.operation_id,
+        now=deadline + timedelta(minutes=2),
+    )
+
+    completed = execute_retention_cleanup(
+        repository,
+        cast(FastAPI, client.app).state.evidence_storage,
+        frozen.operation_id,
+        now=deadline + timedelta(minutes=3),
+    )
+
+    assert completed.status is RetentionOperationStatus.COMPLETED
+
+    assert repository.get_claim_internal(claim_id) is None
+
+    old_session = client.get(
+        (f'/api/v1/claims/{claim_id}/sessions/{session_id}'),
+        headers=auth_headers,
+    )
+
+    assert old_session.status_code == 404
+
+    old_claim = client.get(
+        f'/api/v1/claims/{claim_id}',
+        headers=auth_headers,
+    )
+
+    assert old_claim.status_code == 404
+
+    staff_retention = client.get(
+        (f'/api/v1/workbench/claims/{claim_id}/retention'),
+        headers={'Authorization': ('Bearer synthetic-staff')},
+    )
+
+    assert staff_retention.status_code == 200
+    assert staff_retention.json()['operation_status'] == 'completed'

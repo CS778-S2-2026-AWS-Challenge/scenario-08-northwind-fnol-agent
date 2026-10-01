@@ -66,6 +66,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.retention import RetentionHoldRecord, RetentionOperationStatus
 from backend.domain.retrieval import PolicyRetrievalRecord
 from backend.domain.staff_agent import StaffAgentMessageRole
 from backend.domain.tag_registry import (
@@ -918,6 +919,9 @@ def _incomplete_context(
         resume_point=recovery.resume_point,
         follow_up_due_at=follow_up.due_at,
         follow_up_status=follow_up.status.value,
+        follow_up_reason=(
+            follow_up.reason_code.value if follow_up.reason_code is not None else None
+        ),
         follow_up_attempts=follow_up.attempt_count,
         expires_at=follow_up.deadline_at,
     )
@@ -1093,9 +1097,48 @@ def _registered_action(
     )
 
 
+def _retention_hold_actions(
+    claim: WorkingClaim,
+    ownership: WorkbenchOwnershipProjection,
+    retention_holds: Sequence[RetentionHoldRecord],
+    *,
+    retention_completed: bool,
+) -> list[WorkbenchAllowedAction]:
+    """Offer hold actions on a terminal Claim whose retention has not completed."""
+
+    if retention_completed:
+        return []
+    blocker = (
+        None
+        if ownership.current_staff_access is CurrentStaffAccess.PRIMARY
+        else 'Only the primary owner can change retention holds for this Claim.'
+    )
+
+    def action(code: str, target_ref: str, source_refs: list[str]) -> WorkbenchAllowedAction:
+        return _registered_action(
+            code,
+            target_ref,
+            claim.revision,
+            availability=(
+                ActionAvailability.BLOCKED
+                if blocker is not None
+                else ActionAvailability.CONFIRMATION_REQUIRED
+            ),
+            blocked_reason=blocker,
+            source_refs=source_refs,
+            result_state='blocked' if blocker is not None else 'pending_confirmation',
+        )
+
+    active = [hold for hold in retention_holds if hold.active]
+    if not active:
+        return [action('retention.hold.apply', claim.claim_id, [claim.claim_id])]
+    return [action('retention.hold.release', hold.hold_id, [hold.hold_id]) for hold in active]
+
+
 def _allowed_actions(
     claim: WorkingClaim,
     ownership: WorkbenchOwnershipProjection,
+    has_incomplete_recovery: bool,
     active_handoffs: Sequence[HandoffRecord],
     staff_actions: Sequence[StaffActionRecord],
     risk_signals: Sequence[WorkbenchRiskSignal],
@@ -1104,6 +1147,8 @@ def _allowed_actions(
     external_requests: Sequence[ExternalTaskRequest],
     external_results: Sequence[ExternalTaskResult],
     principal: Principal,
+    retention_holds: Sequence[RetentionHoldRecord] = (),
+    retention_completed: bool = False,
 ) -> list[WorkbenchAllowedAction]:
     if 'workbench:write' not in principal.scopes:
         return []
@@ -1161,9 +1206,28 @@ def _allowed_actions(
                 blocked_reason=blocker,
                 source_refs=terminal.source_refs,
                 result_state=('blocked' if blocker is not None else 'pending_confirmation'),
-            )
+            ),
+            *_retention_hold_actions(
+                claim, ownership, retention_holds, retention_completed=retention_completed
+            ),
         ]
     actions: list[WorkbenchAllowedAction] = []
+
+    if (
+        has_incomplete_recovery
+        and claim.terminal_disposition is None
+        and ownership.current_staff_access is CurrentStaffAccess.PRIMARY
+    ):
+        actions.append(
+            _registered_action(
+                'claim.abandon',
+                claim.claim_id,
+                claim.revision,
+                source_refs=[claim.claim_id],
+                result_state='pending_confirmation',
+            )
+        )
+
     if claim_decision_eligible(claim) and claim.claim_decision_id is None:
         blocker = None
         if 'claims_professional' not in principal.roles:
@@ -1901,9 +1965,12 @@ def _build_projection(
         external_limitation,
     )
     current_work = _current_work_item(active_handoffs, actions)
+    incomplete_context = _incomplete_context(repository, claim, sessions)
+    retention = repository.get_retention_operation_for_claim(claim.claim_id)
     allowed_actions = _allowed_actions(
         claim,
         ownership,
+        incomplete_context is not None,
         active_handoffs,
         actions,
         projected_risk_signals,
@@ -1912,6 +1979,10 @@ def _build_projection(
         external_requests,
         external_results,
         principal,
+        retention_holds=repository.list_retention_holds(claim.claim_id),
+        retention_completed=(
+            retention is not None and retention.status is RetentionOperationStatus.COMPLETED
+        ),
     )
     primary_action = _primary_action(
         allowed_actions,
@@ -1921,7 +1992,6 @@ def _build_projection(
     )
     claimant_messages = [item for item in messages if item.actor.value == 'claimant']
     lifecycle = _lifecycle(claim, active_handoffs, pending_evidence)
-    incomplete_context = _incomplete_context(repository, claim, sessions)
     work_summary = WorkbenchWorkSummary(
         queue_key=_queue_key(
             claim,

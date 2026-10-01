@@ -185,6 +185,6 @@ def test_truncated_v8_output_keeps_message_and_enters_existing_recovery(
     assert response.status_code == 200
     body = response.json()
     assert body['agent_message'] is None
-    assert body['recovery']['rule_id'] == 'claimant_turn.model_dependency_failure'
+    assert body['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     assert body['form_changes'] == []
     assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 1

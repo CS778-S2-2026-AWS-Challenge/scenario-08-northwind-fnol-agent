@@ -242,6 +242,60 @@ def test_unrelated_backend_change_does_not_select_complete_journey(path: str) ->
     assert 'tests/test_journey_runs.py' not in selection.tests
 
 
+@pytest.mark.parametrize(
+    'path',
+    [
+        'backend/domain/follow_up_execution.py',
+        'backend/domain/recovery.py',
+        'backend/domain/retention.py',
+        'backend/recovery_worker_main.py',
+        'backend/services/recovery_worker.py',
+        'backend/services/retention.py',
+        'backend/services/retention_holds.py',
+        'backend/services/terminal_claims.py',
+    ],
+)
+def test_recovery_modules_select_complete_p17_recovery_contracts(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_cross_session_recovery.py',
+        'tests/test_follow_up_execution.py',
+        'tests/test_incomplete_claim_recovery.py',
+        'tests/test_incomplete_claim_recovery_concurrency.py',
+        'tests/test_incomplete_claim_recovery_edges.py',
+        'tests/test_incomplete_claim_recovery_review.py',
+        'tests/test_p17_staff_abandonment.py',
+        'tests/test_retention_execution.py',
+        'tests/test_retention_hold_actions.py',
+        'tests/test_unified_recovery.py',
+    } <= set(selection.tests)
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        'backend/repositories/fixture.py',
+        'backend/repositories/mongodb.py',
+        'backend/repositories/protocols.py',
+    ],
+)
+def test_monolithic_repository_changes_select_cross_feature_contracts(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_account_data_api.py',
+        'tests/test_admin_access_audit.py',
+        'tests/test_api_boundaries.py',
+        'tests/test_audit_repository.py',
+        'tests/test_staff_agent_tools.py',
+        'tests/test_staff_workbench_authorization.py',
+        'tests/test_validation_seed.py',
+    } <= set(selection.tests)
+
+
 def test_unknown_test_support_module_uses_scoped_sentinel() -> None:
     selection = select_tests(['tests/custom_support/builders.py'])
 

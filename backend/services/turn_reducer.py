@@ -50,6 +50,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.recovery_policy_registry import RecoveryTrigger, classify_recovery
 from backend.domain.retrieval import PolicyRetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
     ActionEnvelopeRecord,
@@ -81,6 +82,11 @@ from backend.services.professional_reviews import build_policy_review_handoff
 
 if TYPE_CHECKING:
     from backend.services.turn_proposal_validation import ValidatedTurn
+
+
+def _recovery_policy_ref(trigger: RecoveryTrigger) -> str:
+    policy = classify_recovery(trigger)
+    return f'recovery-policy:{policy.policy_id}:{policy.version}'
 
 
 @dataclass(frozen=True, slots=True)
@@ -1214,12 +1220,39 @@ def reduce_turn(
             )
         )
     tool_records: list[ToolResultRecord] = []
+    recovery_work_items: list[RuntimeWorkItemRecord] = []
     if (
         runtime_trace is not None
         and runtime_trace.tool_call_id is not None
         and runtime_trace.tool_name is not None
         and runtime_trace.tool_result_status is not None
     ):
+        tool_source_refs = [f'claim:{claim_id}:revision:{expected_revision}']
+        if runtime_trace.tool_result_status == 'unavailable':
+            tool_policy_ref = _recovery_policy_ref(
+                RecoveryTrigger(
+                    source='tool',
+                    outcome_code='unavailable',
+                    blocking=runtime_trace.runtime_action_code == 'runtime.fail_safe',
+                )
+            )
+            tool_source_refs.append(tool_policy_ref)
+            if runtime_trace.runtime_action_code == 'runtime.fail_safe':
+                recovery_work_items.append(
+                    RuntimeWorkItemRecord(
+                        work_item_id=new_id('wki'),
+                        claim_id=claim_id,
+                        turn_id=runtime_turn_id,
+                        kind='system',
+                        subject_ref=runtime_trace.tool_name,
+                        owner='system',
+                        status='open',
+                        blocks_action=runtime_trace.action_code,
+                        source_refs=[claimant_message.message_id, tool_policy_ref],
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                    )
+                )
         tool_records.append(
             ToolResultRecord(
                 result_id=new_id('toolres'),
@@ -1229,7 +1262,7 @@ def reduce_turn(
                 tool_name=runtime_trace.tool_name,
                 status=runtime_trace.tool_result_status,
                 output=dict(runtime_trace.tool_output),
-                source_refs=[f'claim:{claim_id}:revision:{expected_revision}'],
+                source_refs=tool_source_refs,
                 limitations=[],
                 created_at=timestamp,
             )
@@ -1245,6 +1278,12 @@ def reduce_turn(
         )
         raw_refs = context_result.get('source_refs', [])
         source_refs = [str(ref) for ref in raw_refs] if isinstance(raw_refs, list) else []
+        if status == 'unavailable':
+            source_refs.append(
+                _recovery_policy_ref(
+                    RecoveryTrigger(source='retrieval', outcome_code='unavailable', blocking=False)
+                )
+            )
         raw_limitations = context_result.get('limitations', [])
         limitations = (
             [str(item) for item in raw_limitations]
@@ -1285,6 +1324,26 @@ def reduce_turn(
         )
         for item in effective_next_step.required_items
     ]
+    work_items.extend(recovery_work_items)
+    if professional_review and handoff is not None:
+        review_policy_ref = _recovery_policy_ref(
+            RecoveryTrigger(source='human', outcome_code='high_impact_review_required')
+        )
+        work_items.append(
+            RuntimeWorkItemRecord(
+                work_item_id=new_id('wki'),
+                claim_id=claim_id,
+                turn_id=runtime_turn_id,
+                kind='professional_review',
+                subject_ref=handoff.handoff_id,
+                owner='staff',
+                status='open',
+                blocks_action='high_impact.execute',
+                source_refs=[claimant_message.message_id, review_policy_ref],
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
     if confirmation_request is not None:
         # Bind the confirmation to the exact values shown by this turn.  The
         # evaluation is calculated from ``updated_claim``; using the pre-turn

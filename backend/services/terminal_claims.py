@@ -16,7 +16,14 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.follow_up_execution import (
+    FollowUpStaffAbandonmentRejected,
+    reduce_follow_up_staff_abandonment,
+)
+from backend.domain.ids import stable_digest
 from backend.domain.models import (
+    AbandonClaimRequest,
+    ActorReference,
     ActorType,
     ReopenClaimRequest,
     TerminalDispositionValue,
@@ -29,6 +36,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.incomplete_claims import find_incomplete_recovery
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -47,6 +55,7 @@ def _retry(
     route: str,
     key: str,
     fingerprint: str,
+    operation_name: str,
 ) -> WorkbenchClaimDetail | None:
     record = repository.find_idempotency(actor_id, route, key)
     if record is None:
@@ -55,13 +64,13 @@ def _retry(
         raise ApiError(
             status_code=409,
             code='IDEMPOTENCY_CONFLICT',
-            message='The idempotency key was reused with different reopen data.',
+            message=(f'The idempotency key was reused with different {operation_name} data.'),
         )
     if record.response_payload is None:
         raise ApiError(
             status_code=500,
             code='INTERNAL_ERROR',
-            message='The reopened Claim response could not be restored.',
+            message=(f'The {operation_name} Claim response could not be restored.'),
             retryable=True,
         )
     return WorkbenchClaimDetail.model_validate(record.response_payload)
@@ -119,6 +128,187 @@ def _save(
         ) from conflict
 
 
+def abandon_incomplete_claim(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    payload: AbandonClaimRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> WorkbenchClaimDetail:
+    """Authoritatively abandon an incomplete Claim through the Workbench."""
+
+    require_staff_capability(principal, 'workbench:write')
+
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    reason = payload.reason.strip()
+    route = f'/api/v1/workbench/claims/{claim_id}/abandon'
+
+    fingerprint = request_fingerprint(
+        {
+            **payload.model_dump(mode='json'),
+            'expected_revision': expected,
+        }
+    )
+
+    replay = _retry(
+        repository,
+        principal.subject,
+        route,
+        key,
+        fingerprint,
+        'abandon',
+    )
+    if replay is not None:
+        return replay
+
+    if not reason:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='An abandonment reason is required.',
+        )
+
+    claim = _claim(repository, principal, claim_id)
+
+    action = require_workbench_action(
+        repository,
+        principal,
+        claim,
+        expected,
+        'claim.abandon',
+        claim_id,
+    )
+
+    recovery = find_incomplete_recovery(
+        repository,
+        claim,
+    )
+    if recovery is None:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The Claim has no open incomplete-Claim recovery obligation.',
+        )
+
+    source_session, follow_up = recovery
+    timestamp = now_utc()
+
+    operations = repository.list_follow_up_operations(
+        claim.claim_id,
+        follow_up.follow_up_id,
+        claim.customer_id,
+    )
+
+    try:
+        transition = reduce_follow_up_staff_abandonment(
+            claim,
+            source_session,
+            follow_up,
+            operations,
+            timestamp,
+            ActorReference(
+                actor_type=ActorType.STAFF,
+                actor_id=principal.subject,
+            ),
+        )
+    except FollowUpStaffAbandonmentRejected as error:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message=str(error),
+        ) from error
+
+    response = project_workbench_claim_detail(
+        repository,
+        principal,
+        transition.claim,
+    )
+
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=source_session.session_id,
+        follow_up_id=follow_up.follow_up_id,
+        action_registry_version=action.registry_version,
+        action_code=action.action_code,
+        target_ref=action.target_ref,
+        response_payload=response.model_dump(mode='json'),
+    )
+
+    audit_event = AuditEventEnvelope(
+        event_id=('aud_abandon_' + stable_digest(f'{principal.subject}:{route}:{key}', 20)),
+        event_type=AuditEventType.ACTION_COMPLETED,
+        outcome=AuditOutcome.SUCCEEDED,
+        subject=AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim_id,
+            claim_id=claim_id,
+        ),
+        actor=AuditActor(
+            actor_type=ActorType.STAFF,
+            actor_id=principal.subject,
+            auth_source=principal.auth_source,
+        ),
+        reason=reason,
+        source_refs=list(
+            dict.fromkeys(
+                [
+                    *follow_up.source_refs,
+                    f'follow-up:{follow_up.follow_up_id}',
+                ]
+            )
+        ),
+        permission=AuditPermission(
+            required_permission='claim.abandon:primary_owner',
+            outcome=AuditPermissionOutcome.AUTHORISED,
+        ),
+        visibility=AuditVisibility.INTERNAL_ONLY,
+        correlation_id=key,
+        idempotency_key=key,
+        claim_revision=transition.claim.revision,
+        created_at=timestamp,
+    )
+
+    try:
+        repository.commit_recovery_staff_abandonment(
+            claim.revision,
+            follow_up,
+            transition.claim,
+            transition.follow_up,
+            transition.reconciled_operation,
+            claim.customer_id,
+            idempotency,
+            audit_event,
+        )
+    except RevisionConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The Claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=conflict.current_revision,
+        ) from conflict
+    except IdempotencyConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The abandonment operation conflicts with an existing request.',
+        ) from conflict
+    except KeyError as conflict:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The Claim recovery obligation is no longer available.',
+        ) from conflict
+
+    return response
+
+
 def reopen_claim(
     repository: PersistenceRepository,
     principal: Principal,
@@ -153,7 +343,14 @@ def reopen_claim(
         'expected_revision': expected,
     }
     fingerprint = request_fingerprint(fingerprint_payload)
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(
+        repository,
+        principal.subject,
+        route,
+        key,
+        fingerprint,
+        'reopen',
+    )
     if replay is not None:
         return replay
     if not reason:

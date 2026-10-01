@@ -12,6 +12,7 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
 )
+from backend.domain.workbench_action_registry import WORKBENCH_ACTION_REGISTRY_VERSION
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -126,7 +127,7 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
         'complete-review',
     )
     assert audit_record is not None
-    assert audit_record.action_registry_version == '2026-10-01.1'
+    assert audit_record.action_registry_version == WORKBENCH_ACTION_REGISTRY_VERSION
     assert audit_record.action_code == 'work_item.update'
     assert audit_record.target_ref == action['action_id']
 

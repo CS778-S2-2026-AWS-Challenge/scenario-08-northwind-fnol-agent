@@ -1,52 +1,114 @@
-# Recovery Policy Registry
+# Unified recovery and P17 lifecycle
 
-The claimant Runtime uses the typed registry in
-`backend/domain/recovery_policy_registry.py` to map provider-neutral failures
-to preservation, responsibility, claimant projection, resume entrypoint and
-audit behavior. The registry is a policy mapping layer; Claim State, Session,
-ExternalTask, WorkItem, handoff and audit records remain the authorities for
-their own data.
+Issue #1076 integrates the remaining #580/#630/#631 and #779 scope. The published
+policy authority is `backend/domain/recovery_policy_registry.py`; pure decisions
+live in `backend/domain/recovery.py`. The registry never persists live state.
 
-The first published rule is `claimant_turn.model_dependency_failure`.
-Before a model-dependent turn is attempted, an accepted inbound message and
-checkpoint must be preserved. A provider failure cannot create a fact, an
-external request or a success response. The original HTTP idempotency key
-replays the historical result, refreshing only `current_claim` and `current_claim_revision`
-from the authoritative Claim without invoking the model, reducer or dispatcher. An explicit retry uses the existing
-`submit_message` entrypoint with a new attempt identity and reloads authoritative
-records. No retry endpoint or second lifecycle is introduced.
+## Authority and execution
 
-If Runtime detects a safety or human-support interrupt, the shared handoff mutation must
-also commit before the provider call. Its failure is a hard request failure, not a recovery
-success. If the provider then fails, the recovery response includes a deterministic Agent
-notice with safety guidance and confirmation that support has been notified. The notice
-carries recovery metadata and does not hide explicit Retry. It neither applies failed
-model facts nor switches the turn to ControlledAgent.
+A normalized event selects an immutable policy and enters the pure reducer with
+authoritative source facts and an explicit aware timestamp. A typed transition
+then enters the existing repository mutation. No decision calls a provider, reads
+a database, obtains a global clock, or publishes work. Unknown coordinates,
+modified published rules, missing operation identity, and stale facts fail closed.
 
-Unknown recovery triggers fail closed. The complete external reconciliation,
-tool-unavailable, revision-conflict and high-impact review matrix remains
-tracked by issue #779.
+| Fact | Single writable authority | Derived consumers |
+| --- | --- | --- |
+| Claim facts, revision, terminal result | WorkingClaim | Claimant and Workbench |
+| Interruption and Session eligibility | SessionRecord / SessionRecoveryContext | Resume and FollowUp source validation |
+| P17 obligation, schedule and absolute deadline | FollowUpRecord | Worker and incomplete projections |
+| In-app execution identity and committed attempts | FollowUpOperation | Attempt aggregate and reconciliation |
+| External delivery certainty and result | ExternalTask | External recovery plan and WorkItems |
+| Staff responsibility | WorkItem / Handoff | Role-safe task projection |
+| Destructive cleanup, closure, inventory and progress | RetentionOperation | Retention worker and staff projection |
+| Immutable rules | RecoveryPolicyRegistry | Reducer and existing subsystem adapters |
+| History | AuditEventEnvelope | Internal authorized audit reads |
 
-## Remaining #779 policy evidence
+`reason_code` and `result` are compatibility adapters, not additional persisted
+fields. FollowUp persists `blocked_reason` separately from `resolution_code`;
+operations persist `result_code`. FollowUp version `1` maps explicitly to Registry
+version `v1`. Retention domain exports refer to the same model definitions.
 
-The following distinguishes this delivered slice from the broader issue. Existing subsystem
-behavior does not mean that its corresponding registry migration or end-to-end proof is done.
+## Published decision matrix
 
-| Requested #779 entry | Status of this delivery |
-| --- | --- |
-| `recovery.model_timeout` | Covered by the shared claimant model-dependency rule, including persist-first and explicit retry. |
-| `recovery.model_malformed_response` | Covered by that same rule; no duplicate registry lifecycle is introduced. |
-| `recovery.tool_unavailable` | Existing tool failure behavior retained; full policy migration/evidence remains #779 work. |
-| `recovery.external_not_submitted_retryable` | Existing external retry authority retained; not implemented as a new recovery rule here. |
-| `recovery.external_submitted_unknown` | Existing operation identity/reconciliation retained; complete registry migration remains open. |
-| `recovery.external_terminal_failure` | Existing staff resolution remains authoritative; broader policy evidence remains open. |
-| `recovery.revision_conflict` | CAS/stale-checkpoint protections are exercised here; a general conflict-recovery policy is not delivered. |
-| `recovery.high_impact_review_required` | Existing human-review authority retained; broader controlled resume matrix remains open. |
+| Trigger | Plan | Existing consumer / evidence |
+| --- | --- | --- |
+| Model timeout / malformed response / provider failure | Preserve accepted input; bounded retry or fail safe | messages, recovery decisions; recovery_message_policy / unified_recovery tests |
+| Tool or retrieval unavailable | Blocking fail safe or nonblocking continuation | turn_reducer; unified_recovery and runtime tests |
+| Revision conflict | Reload authoritative state | messages / revision CAS; unified_recovery tests |
+| External known not submitted | Existing bounded retry | integrations / external lifecycle; recovery_decisions tests |
+| External submitted, result unknown | Reconcile original operation before retry | ExternalTask / integrations; recovery_decisions tests |
+| External terminal failure | Existing staff resolution | ExternalTask and WorkItem; recovery_decisions tests |
+| High-impact review | Wait for authorized human decision | turn_reducer / existing handoff; unified_recovery tests |
+| FollowUp due | Execute authorized in-app contact | follow_up_execution / repository transaction; follow_up_execution tests |
+| Contact withdrawal | Block contact, preserve recoverability | follow_up_execution; incomplete_claim_recovery_edges tests |
+| Attempt exhaustion | Block contact, never abandon Claim | follow_up_execution; full P17 journey tests |
+| Recovery expiry | Existing terminal-disposition mutation | follow_up_execution; full P17 journey tests |
+| Retention eligible / hold / unknown cleanup result | Reserve / block destruction / reconcile same operation | retention domain and service; retention_eligibility / execution tests |
+| Old Session or retry after closure | Concealed absence / deny | Existing repository access guard; retention_access_closure tests |
 
-This PR references #779 and must not close it. The supplied claimant rule and its concrete
-tests do not establish the remaining tool, external or high-impact recovery loops.
+The transaction-local due-contact path atomically writes the updated FollowUp
+obligation, the same logical FollowUpOperation, one claimant-visible Message, and
+Audit evidence. It does not bump Claim revision or create a claimant idempotency
+record merely to count contact. Repository CAS/identity replay on those records is
+the event-deduplication and commit boundary accepted for this in-process path.
+ExternalTask retains its operation/reconciliation contract. There is no generic
+RecoveryInstance, Inbox/Outbox framework, additional worker platform, or persisted
+UI state machine.
 
-Claim creation also fails closed when branch evaluation still contains recorded
-facts: the API returns `CONFIRMATION_REQUIRED` and lists the fields that must be
-confirmed before the creation command can be prepared. This is a Claim creation
-boundary response, not a provider failure and not an implicit retry.
+## Frozen P17 v1 rules
+
+The policy allows at most three committed in-app attempts, 24 hours apart. The
+absolute deadline is the original interruption plus seven days. `due_at` is only
+scheduling; `now >= deadline_at` always takes expiry precedence. Attempt exhaustion
+stops automatic contact while keeping claimant recovery possible. Contact
+withdrawal changes permission; it never withdraws or abandons the Claim.
+
+Resume creates a Session for the same WorkingClaim, resolves the obligation, and
+reconciles reserved/committed work in the same mutation. Staff abandonment and
+authorized closure use existing terminal authority with distinct typed reasons.
+FollowUpOperation progresses reserved -> committed -> settled, or reserved ->
+cancelled. Committed delivery is the only attempt-count evidence. Operation IDs
+use the common factory's stable identity helper and retain existing v1 digest
+coordinates across restarts.
+
+Legacy backfill derives the deadline from persisted source interruption only. It
+preserves created time, historical due time and source references, and never
+fabricates operations. Missing or contradictory source records remain readable
+but blocked/nonexecutable. Due discovery excludes blocked/exhausted obligations
+because they cannot contact again; deadline discovery includes those open blocked
+obligations so recovery expiry can still terminate them. Both paths are paginated
+with opaque cursors and named due/deadline indexes.
+
+## Retention ordering and failure boundaries
+
+Revalidate terminal/source revision -> reserve and close claimant access -> freeze
+record refs and storage keys -> delete bytes -> clean database records -> persist
+minimum tombstones -> verify -> complete. Object outcomes are deleted,
+already_absent, failed or unknown. Failed/unknown outcomes cannot count as complete;
+DB failure or uncertain commit resumes the same durable operation and only
+unfinished steps. Inventory and completed evidence cannot be rewritten.
+
+A source-linked hold blocks deletion/anonymisation. It does not restore claimant
+access, reopen the Claim, revive Session credentials, or undo tombstones. Staff
+visibility retains minimum authority and reconciliation evidence; claimant reads
+and historical retries are checked for closure before replay. Destruction
+classifications and approved scalar tombstone fields are enumerated in
+`backend/domain/retention.py`, rather than selected by provider output.
+
+## Repeatable acceptance
+
+`tests/test_incomplete_claim_recovery.py` contains controlled-runtime API journeys
+for pause -> same-Claim resume and pause -> three attempts -> expiry -> retention ->
+old-session denial. Dedicated execution, concurrency, migration, discovery,
+retention and access-closure files cover replay and partial failure boundaries in
+Fixture and mongomock repository profiles. These are controlled-runtime and
+mock-adapter evidence; they do not certify deployed providers or a live Mongo
+replica set. Integration-marked live database tests require explicit infrastructure.
+
+The machine-readable [policy manifest](../../contracts/recovery-policy-registry.json)
+and [replay matrix](../../contracts/recovery-replay-matrix.json) record the
+published policy coordinates and deterministic reducer vectors. Current API and
+persistence contracts are documented in `docs/api.md` and
+`docs/persistence-schema.md`. Exact-head local results and CircleCI acceptance
+belong in the final integration PR.
