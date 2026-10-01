@@ -37,7 +37,17 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
-import AttachmentPreview from './components/AttachmentPreview.jsx'
+import {
+  AgentMessageRow,
+  ClaimantMessageAttachments,
+  ClaimantMessageRow,
+  ConversationStart,
+  StaffMessageRow,
+} from './components/ConversationMessages.jsx'
+import RecordedFactsCard from './components/RecordedFactsCard.jsx'
+import { fieldLabel, fieldSourceLabel, fieldStatusLabel, fieldValueText } from './claimFieldPresentation.js'
+import { evidenceFileStatusLabel, messageText } from './messagePresentation.js'
+import { factCardsByAgentMessage, notedProgress } from './recordedFacts.js'
 import { modelAttachmentCompatibility } from './attachmentModelCompatibility.js'
 import ExternalServiceAction from './components/ExternalServiceAction.jsx'
 import ExternalServicesPage from './components/ExternalServicesPage.jsx'
@@ -59,7 +69,6 @@ import {
 import ClaimAutoFillPanel from './components/ClaimAutoFillPanel.jsx'
 import ConversationHistorySidebar from './components/ConversationHistorySidebar.jsx'
 import {
-  AgentTurnDisclosure,
   AgentTurnPlaceholder,
 } from './components/AgentTurnActivity.jsx'
 import { completeTurnProgress, reduceTurnProgress } from './agentTurnProgress.js'
@@ -80,50 +89,17 @@ import ClaimantAvatar from './components/ClaimantAvatar.jsx'
 import { buildConversationTimeline, mergeMessagesById, orderMessages } from './conversationTimeline.js'
 import useProfileController from './profile/useProfileController.js'
 import useClaimAutoFillEditor from './profile/useClaimAutoFillEditor.js'
-import { WORKBENCH_URL, developerModeEnabled } from './runtimeConfig.js'
+import { WORKBENCH_URL } from './runtimeConfig.js'
 import {
   forgetAnonymousConversation,
   readAnonymousConversationHistory,
   rememberAnonymousConversation,
 } from './anonymousConversationHistory.js'
 import {
-  ClaimProgressDisclosure,
   ConversationActionCard,
   ConversationEvent,
   ConversationInfoPanel,
 } from './components/ConversationContext.jsx'
-
-const FIELD_LABELS = {
-  'claim.product_family': 'Claim type',
-  'incident.type': 'Incident type',
-  'incident.description': 'What happened',
-  'incident.cause': 'Cause',
-  'incident.injury_or_danger': 'Injury or immediate danger',
-  'incident.occurred_at': 'When it happened',
-  'incident.discovered_at': 'When it was discovered',
-  'incident.location': 'Incident location',
-  'loss.description': 'Damage or loss',
-  'parties.other_parties': 'Other people or vehicles involved',
-  'vehicle.registration': 'Vehicle registration',
-  'vehicle.damage_description': 'Vehicle damage',
-  'vehicle.drivable': 'Vehicle safe to drive',
-  'property.address': 'Affected property',
-  'property.affected_areas': 'Affected areas',
-  'property.ongoing_risk': 'Ongoing property risk',
-  'property.habitable': 'Property safe to live in',
-  'contents.items': 'Damaged, lost, or stolen items',
-  'contents.police_reference': 'Police reference for stolen items',
-  'theft.entry_context': 'How entry occurred',
-  'injury.persons_affected': 'Who was injured',
-  'injury.severity_reported': 'Injury severity',
-  'injury.medical_attention': 'Medical attention received',
-  'authorities.police_report_reference': 'Police report reference',
-  'authorities.emergency_services_notified': 'Emergency services notified',
-  'policy.policy_number': 'Policy number',
-  'claimant.role': 'Your role in this claim',
-  'claimant.client_number': 'Client number',
-  'claimant.contact_preference': 'Preferred contact method',
-}
 
 const PERMANENT_ANONYMOUS_RESUME_FAILURES = new Set([
   'AUTHENTICATION_REQUIRED',
@@ -144,22 +120,6 @@ const INPUT_LABELS = {
   describe_incident: 'Incident description',
   provide_incident_location: 'Incident location',
   describe_loss: 'Damage or loss',
-}
-
-const CLAIM_START_PROMPTS = [
-  { icon: 'car', text: 'I was in a car accident' },
-  { icon: 'home', text: 'My home or belongings were damaged' },
-  { icon: 'search', text: 'Something was lost or stolen' },
-]
-
-const FIELD_SOURCE_LABELS = {
-  claimant: 'Provided by you',
-  inference: 'Suggested from your description',
-  image: 'Suggested from your image',
-  document: 'Suggested from your document',
-  policy: 'From your policy information',
-  claim_history: 'From your previous claim information',
-  staff: 'Provided by Northwind support',
 }
 
 const SUPPORT_HANDOFF_TYPES = new Set(['human_support', 'urgent_support'])
@@ -193,144 +153,6 @@ function middleEllipsisLayoutParts(value, maxLength) {
     end: characters.slice(-endLength).join(''),
     truncated: true,
   }
-}
-
-function fieldLabel(fieldCode) {
-  return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
-}
-
-function fieldStatusLabel(status) {
-  if (status === 'confirmed') return 'Confirmed'
-  if (status === 'pending_generation') return 'Pending'
-  if (status === 'proposed') return 'Needs review'
-  if (status === 'missing') return 'Missing'
-  if (status === 'disputed') return 'Conflict'
-  if (status === 'unavailable') return 'Unavailable'
-  return 'Recorded'
-}
-
-function fieldSourceLabel(source) {
-  return FIELD_SOURCE_LABELS[source] || 'Source recorded by Northwind'
-}
-
-function fieldValueText(field) {
-  if (
-    field.status === 'pending_generation'
-    && (field.value === null || field.value === undefined || field.value === '')
-  ) {
-    return 'Expected later'
-  }
-  if (typeof field.value === 'boolean') return field.value ? 'Yes' : 'No'
-  if (Array.isArray(field.value)) return field.value.join(', ')
-  if (field.value && typeof field.value === 'object') {
-    return field.value.claimant_wording
-      || field.value.formatted
-      || Object.values(field.value).filter((value) => (
-        typeof value === 'string' || typeof value === 'number'
-      )).join(', ')
-  }
-  return String(field.value ?? '')
-}
-
-function ClaimStartIcon({ name, className = '' }) {
-  const paths = {
-    arrow: <path d="m9 18 6-6-6-6" />,
-    car: (
-      <>
-        <path d="m5 17-1 2M19 17l1 2M3 13l2-6h14l2 6v5H3v-5Z" />
-        <path d="M5 13h14M7 16h.01M17 16h.01" />
-      </>
-    ),
-    home: (
-      <>
-        <path d="m3 11 9-8 9 8" />
-        <path d="M5 10v10h14V10M9 20v-6h6v6" />
-      </>
-    ),
-    lock: (
-      <>
-        <rect x="5" y="10" width="14" height="10" rx="2" />
-        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-      </>
-    ),
-    search: (
-      <>
-        <circle cx="10" cy="10" r="6" />
-        <path d="m15 15 5 5M8 8h4v4H8z" />
-      </>
-    ),
-    shield: (
-      <>
-        <path d="M12 3 5 6v5c0 4.4 2.8 8.4 7 10 4.2-1.6 7-5.6 7-10V6l-7-3Z" />
-        <path d="m9 12 2 2 4-4" />
-      </>
-    ),
-  }
-
-  return (
-    <svg
-      className={`claim-start-icon ${className}`.trim()}
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      {paths[name]}
-    </svg>
-  )
-}
-
-function ConversationStart({ onChoosePrompt }) {
-  return (
-    <section className="conversation-start" aria-labelledby="conversation-title">
-      <div className="conversation-start-intro">
-        <span className="conversation-start-shield" aria-hidden="true">
-          <ClaimStartIcon name="shield" />
-        </span>
-        <div>
-          <h1 id="conversation-title">Let&apos;s get your claim started</h1>
-          <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
-        </div>
-      </div>
-      <div className="conversation-start-options" aria-labelledby="conversation-start-options-title">
-        <h3 id="conversation-start-options-title">Choose a starting point</h3>
-        <div className="conversation-start-prompt-list">
-          {CLAIM_START_PROMPTS.map((prompt) => (
-            <button
-              className="conversation-start-prompt"
-              type="button"
-              key={prompt.text}
-              onClick={() => onChoosePrompt(prompt.text)}
-            >
-              <span className="conversation-start-prompt-icon" aria-hidden="true">
-                <ClaimStartIcon name={prompt.icon} />
-              </span>
-              <span>{prompt.text}</span>
-              <ClaimStartIcon name="arrow" className="conversation-start-arrow" />
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="conversation-start-privacy">
-        <ClaimStartIcon name="lock" />
-        <span>Your information stays private and is only used to help prepare this claim.</span>
-      </p>
-    </section>
-  )
-}
-
-function messageText(message) {
-  if (typeof message?.content?.text === 'string') return message.content.text
-  if (typeof message?.content?.summary === 'string') return message.content.summary
-  return ''
-}
-
-function MessageTimestamp({ createdAt }) {
-  const timestamp = new Date(createdAt)
-  if (Number.isNaN(timestamp.getTime())) return null
-  return (
-    <time className="message-timestamp" dateTime={createdAt}>
-      {timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-    </time>
-  )
 }
 
 function assistancePresentation({ handoff, nextStep, requesting, reviewingReply, completed }) {
@@ -413,15 +235,6 @@ function conversationActionFromProjection(claim) {
   }
 }
 
-function evidenceFileStatusLabel(fileStatus, status) {
-  if (fileStatus === 'awaiting_upload') return 'Upload incomplete'
-  if (fileStatus === 'processing') return 'Processing'
-  if (fileStatus === 'failed') return 'Processing failed'
-  if (fileStatus === 'ready') return 'Ready'
-  if (fileStatus) return fileStatus
-  return status === 'received' ? 'Received' : status
-}
-
 function isSendableComposerAttachment(attachment) {
   if (attachment.status === 'staged') {
     return Boolean(attachment.stagedFile && attachment.uploadAttempt)
@@ -443,50 +256,6 @@ function attachmentSubmissionSignature(text, attachments, modelProfileId) {
       || attachment.name
     )),
   })
-}
-
-function localAttachmentFile(attachment) {
-  return attachment?.previewFile || attachment?.stagedFile || attachment?.retryFile || null
-}
-
-function ClaimantMessageAttachments({ message, evidenceItems, attachments, previewFiles }) {
-  const presentedAttachments = Array.isArray(attachments)
-    ? attachments.map((attachment) => ({
-      ...attachment,
-      previewFile: localAttachmentFile(attachment)
-        || previewFiles?.get(attachment.evidenceId || attachment.uploadAttempt?.evidenceId),
-    }))
-    : (message?.evidence_refs || []).map((evidenceId, index) => {
-      const evidence = evidenceItems.find((item) => item.evidence_id === evidenceId)
-      return {
-        id: evidenceId,
-        name: evidence?.original_filename || evidence?.kind || `Attached file ${index + 1}`,
-        previewFile: previewFiles?.get(evidenceId),
-        statusLabel: evidence
-          ? evidenceFileStatusLabel(evidence.file_status, evidence.status)
-          : 'Attached',
-      }
-    })
-
-  if (presentedAttachments.length === 0) return null
-
-  return (
-    <ul className="message-attachments" aria-label="Attached files">
-      {presentedAttachments.map((attachment, index) => (
-        <li className="message-attachment" key={attachment.id || attachment.name || index}>
-          <AttachmentPreview
-            attachment={attachment}
-            fallbackClassName="message-attachment-icon"
-            className="message-attachment-preview"
-          />
-          <span className="message-attachment-copy">
-            <strong>{attachment.name || `Attached file ${index + 1}`}</strong>
-            <small>{attachment.statusLabel || 'Attached'}</small>
-          </span>
-        </li>
-      ))}
-    </ul>
-  )
 }
 
 async function fetchClaimHistory({ signal } = {}) {
@@ -526,37 +295,6 @@ function mergeContentsItems(current, changes) {
     ...merged,
     ...changes.filter((item) => !currentIds.has(item.item_id)),
   ]
-}
-
-function claimProgress(dynamicForm) {
-  const requirements = dynamicForm?.requirements
-  const total = requirements?.current_action_total || 0
-  const current = requirements?.current_action_satisfied || 0
-  const items = requirements
-    ? [
-        ...(requirements.satisfied || []).map((fieldCode) => ({
-          fieldCode,
-          label: fieldLabel(fieldCode),
-          state: 'complete',
-        })),
-        ...(requirements.missing_required_now || []).map((fieldCode) => ({
-          fieldCode,
-          label: fieldLabel(fieldCode),
-          state: 'required',
-        })),
-        ...(requirements.pending_later || []).map((fieldCode) => ({
-          fieldCode,
-          label: fieldLabel(fieldCode),
-          state: 'later',
-        })),
-      ]
-    : []
-  return {
-    current,
-    total,
-    available: Boolean(requirements),
-    items,
-  }
 }
 
 function App() {
@@ -996,7 +734,9 @@ function App() {
     [contentsItems],
   )
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
-  const progress = useMemo(() => claimProgress(dynamicForm), [dynamicForm])
+  const factCards = useMemo(() => factCardsByAgentMessage(messages, form), [messages, form])
+  const latestFactCardId = [...factCards.keys()].at(-1) || null
+  const recordedProgress = useMemo(() => notedProgress(dynamicForm), [dynamicForm])
   const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
     && externalServiceInteraction.consentChecked
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
@@ -1050,6 +790,16 @@ function App() {
     [messages],
   )
   const conversationActionKind = conversationAction?.kind || null
+  // "Just noted" cards replace the "Review claim details" prompt. The prompt
+  // stays when it asks about anything no card shows, such as contents items.
+  const cardedFieldCodes = new Set([...factCards.values()].flat().map((fact) => fact.fieldCode))
+  const visibleConversationActionKind = (
+    conversationActionKind === 'review-details'
+    && conversationAction.requiredItems.length > 0
+    && conversationAction.requiredItems.every((fieldCode) => cardedFieldCodes.has(fieldCode))
+  )
+    ? null
+    : conversationActionKind
   const accountCustomerId = account?.customer_id || null
   const accountRevision = account?.revision || null
 
@@ -2671,15 +2421,18 @@ function App() {
     }
   }
 
-  async function confirmProposedFields() {
-    if (!claim || (proposedFields.length === 0 && proposedContentsItems.length === 0) || isBusy) return
+  function confirmProposedFields() {
+    return confirmFields([
+      ...proposedFields.map(([fieldCode]) => fieldCode),
+      ...(proposedContentsItems.length > 0 ? ['contents.items'] : []),
+    ])
+  }
+
+  async function confirmFields(fieldCodes) {
+    if (!claim || fieldCodes.length === 0 || isBusy) return
     setError('')
     setStatus('confirming')
     try {
-      const fieldCodes = [
-        ...proposedFields.map(([fieldCode]) => fieldCode),
-        ...(proposedContentsItems.length > 0 ? ['contents.items'] : []),
-      ]
       const fingerprint = `${claim.revision}:${fieldCodes.join(',')}`
       if (pendingConfirmation.current?.fingerprint !== fingerprint) {
         pendingConfirmation.current = {
@@ -2711,12 +2464,22 @@ function App() {
     setError('')
   }
 
-  async function saveFieldCorrection(fieldCode, field) {
-    const value = editValue.trim()
-    if (!claim || !value || isBusy) return
-    if (value === String(field.value)) {
+  function saveFieldCorrection(fieldCode, field) {
+    return saveFieldValue(fieldCode, field, editValue)
+  }
+
+  // Saves one corrected value; a corrected suggestion counts as checked.
+  // Returns whether the value is now stored.
+  async function saveFieldValue(fieldCode, field, rawValue) {
+    // The card sends typed values (Yes/No as booleans); the details panel sends text.
+    const value = typeof rawValue === 'string' ? rawValue.trim() : rawValue
+    if (!claim || value === '' || value === null || value === undefined || isBusy) return false
+    if (
+      JSON.stringify(value) === JSON.stringify(field.value)
+      || (typeof value === 'string' && value === fieldValueText(field))
+    ) {
       setEditingField(null)
-      return
+      return true
     }
 
     setError('')
@@ -2755,8 +2518,10 @@ function App() {
       setDynamicForm(updatedDynamicForm)
       setEditingField(null)
       setStatus('idle')
+      return true
     } catch (requestError) {
       showError(requestError)
+      return false
     }
   }
 
@@ -4250,14 +4015,6 @@ function App() {
               )}
             </div>
 
-            {claim && (
-              <ClaimProgressDisclosure
-                progress={progress}
-                expanded={conversationPanelExpanded('progress')}
-                onToggle={() => toggleConversationPanel('progress')}
-              />
-            )}
-
             <div
               ref={messageListRef}
               className="message-list"
@@ -4285,49 +4042,30 @@ function App() {
                 }
                 const message = item.message
                 if (message.actor === 'claimant') {
-                  const claimantText = messageText(message)
                   return (
-                    <article className="msg-user" key={item.key}>
-                      <div className="chat-message-row">
-                        <div className="user-message-body">
-                          <div className="chat-bubble user-bubble">
-                            {claimantText && <p className="user-bubble-text">{claimantText}</p>}
-                            <ClaimantMessageAttachments
-                              message={message}
-                              evidenceItems={evidenceItems}
-                              previewFiles={evidencePreviewFiles.current}
-                            />
-                          </div>
-                          {message.actor === 'claimant' && message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
-                            <div className="message-recovery" role="status">
-                              <p>{message.recovery.claimant_projection}</p>
-                              {recoveryFailure?.messageId === message.message_id && (
-                                <p className="message-state" role="alert">{recoveryFailure.message}</p>
-                              )}
-                              {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
-                                <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
-                              )}
-                            </div>
+                    <ClaimantMessageRow
+                      key={item.key}
+                      message={message}
+                      displayName={account?.profile?.display_name}
+                      evidenceItems={evidenceItems}
+                      previewFiles={evidencePreviewFiles.current}
+                    >
+                      {message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
+                        <div className="message-recovery" role="status">
+                          <p>{message.recovery.claimant_projection}</p>
+                          {recoveryFailure?.messageId === message.message_id && (
+                            <p className="message-state" role="alert">{recoveryFailure.message}</p>
+                          )}
+                          {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
+                            <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
                           )}
                         </div>
-                        <ClaimantAvatar className="message-avatar claimant-message-avatar" displayName={account?.profile?.display_name} />
-                      </div>
-                    </article>
+                      )}
+                    </ClaimantMessageRow>
                   )
                 }
                 if (message.actor === 'staff') {
-                  return (
-                    <article className="msg-staff" key={item.key}>
-                      <MessageTimestamp createdAt={message.created_at} />
-                      <div className="chat-message-row">
-                        <div className="message-avatar staff-mark" aria-hidden="true">N</div>
-                        <div className="staff-message-body">
-                          <div className="staff-label">Northwind staff</div>
-                          <div className="chat-bubble staff-bubble">{messageText(message)}</div>
-                        </div>
-                      </div>
-                    </article>
-                  )
+                  return <StaffMessageRow key={item.key} message={message} />
                 }
                 if (message.actor === 'system') {
                   return (
@@ -4337,19 +4075,24 @@ function App() {
                     </div>
                   )
                 }
+                const recordedFacts = factCards.get(message.message_id)
                 return (
-                  <article className="msg-agent" key={item.key}>
-                    <MessageTimestamp createdAt={message.created_at} />
-                    <div className="chat-message-row">
-                      <div className="message-avatar agent-avatar" aria-hidden="true">N</div>
-                      <div className="agent-body">
-                        <div className="agent-label">Claims assistant</div>
-                        {developerModeEnabled() && (
-                          <AgentTurnDisclosure progress={messageActivities[message.message_id]} />
+                  <AgentMessageRow
+                    key={item.key}
+                    message={message}
+                    activity={messageActivities[message.message_id]}
+                  >
+                        {recordedFacts && (
+                          <RecordedFactsCard
+                            facts={recordedFacts}
+                            fieldInputs={dynamicForm?.field_inputs}
+                            progress={recordedProgress}
+                            latest={message.message_id === latestFactCardId}
+                            busy={isBusy}
+                            onConfirm={confirmFields}
+                            onSave={(fact, value) => saveFieldValue(fact.fieldCode, fact.field, value)}
+                          />
                         )}
-                        <div className="chat-bubble agent-bubble">
-                          <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
-                        </div>
                         {(message.message_actions || []).map((action) => (
                           <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
                             <ExternalServiceAction
@@ -4369,17 +4112,15 @@ function App() {
                             />
                           </div>
                         ))}
-                        {item.key === lastAgentMessageId && conversationActionKind && (
+                        {item.key === lastAgentMessageId && visibleConversationActionKind && (
                           <div className="conversation-agent-action">
                             {renderConversationAction()}
                           </div>
                         )}
-                      </div>
-                    </div>
-                  </article>
+                  </AgentMessageRow>
                 )
               })}
-              {!lastAgentMessageId && conversationActionKind && (
+              {!lastAgentMessageId && visibleConversationActionKind && (
                 <div className="conversation-agent-action is-standalone">
                   {renderConversationAction()}
                 </div>

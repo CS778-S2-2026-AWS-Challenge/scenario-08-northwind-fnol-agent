@@ -71,7 +71,7 @@ describe('ClaimReviewPanel overview', () => {
     expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Home claim' })).toBeVisible()
     expect(screen.getByText('We still need incident, damage, and safety details before the claim can progress.')).toBeVisible()
-    expect(screen.getByText('4 of 8 details captured')).toBeVisible()
+    expect(screen.getByText('4 of 8 details noted')).toBeVisible()
     expect(screen.getByText('4 details remaining')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'What we know' })).toBeVisible()
     expect(screen.queryByText('When did it happen?')).not.toBeInTheDocument()
@@ -244,11 +244,11 @@ describe('ClaimSummaryProgress', () => {
       <ClaimSummaryProgress
         form={{}}
         contentsItems={[]}
-        dynamicForm={{ requirements: { ready: false, current_action_total: 11, current_action_satisfied: 5 } }}
+        dynamicForm={{ requirements: { ready: false, current_action_total: 11, current_action_satisfied: 3, missing_required_now: ['a', 'b', 'c', 'd', 'e', 'f'] } }}
       />,
     )
 
-    expect(screen.getByText('5 of 11 completed')).toBeVisible()
+    expect(screen.getByText('5 of 11 noted')).toBeVisible()
     expect(screen.getByText('Saved automatically')).toBeVisible()
     expect(screen.getByRole('progressbar', { name: 'Claim details captured' })).toHaveAttribute('aria-valuenow', '5')
   })

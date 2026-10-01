@@ -3043,6 +3043,14 @@ class BranchEvaluationRecord(ContractModel):
         return self
 
 
+class ClaimantFieldInput(ContractModel):
+    """How a claimant enters one registered field: its value type and, for an
+    enum, the registered values it accepts."""
+
+    value_type: str = Field(min_length=1, max_length=40)
+    allowed_values: list[str] = Field(default_factory=list)
+
+
 class DynamicFormProjection(ContractModel):
     """Claimant-safe projection of the latest valid branch evaluation."""
 
@@ -3054,6 +3062,9 @@ class DynamicFormProjection(ContractModel):
     active_branches: list[str] = Field(default_factory=list)
     fields: list[FieldSelectionResult] = Field(default_factory=list)
     requirements: RequirementResolution = Field(default_factory=RequirementResolution)
+    # Input shape for every projected or recorded claimant-visible field, so a
+    # correction offers Yes/No or the registered choices instead of free text.
+    field_inputs: dict[str, ClaimantFieldInput] = Field(default_factory=dict)
 
 
 ClaimantClaim.model_rebuild()

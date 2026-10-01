@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from backend.domain.agent_context_runtime import ContextBudgetPolicy
 from backend.repositories.fixture import FixtureRepository
+from backend.services import request_profile_registry
 from backend.services.context_budget import build_request_budget, estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.model_request_planner import plan_model_turn
@@ -49,10 +50,11 @@ def test_soft_limit_is_observable_without_refusing_a_legal_turn(
 
 
 def test_hard_limit_rejects_oversized_authoritative_input_without_truncating() -> None:
-    context = v8_context('A' * 20000)
+    message = 'A' * 40_000  # about 13,300 tokens on its own
+    context = v8_context(message)
     with pytest.raises(ContextBudgetExceeded):
         plan_model_turn(context)
-    assert context.message_text == 'A' * 20000
+    assert context.message_text == message
 
 
 def test_v8_api_budget_overflow_preserves_input_without_provider_or_controlled_fallback(
@@ -60,12 +62,21 @@ def test_v8_api_budget_overflow_preserves_input_without_provider_or_controlled_f
     client: TestClient,
     repository: FixtureRepository,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from backend.services.agent import InvariantGuardedAgent
     from tests.journey_v8_support import CLAIMANT, V8JourneyProvider
     from tests.test_claim_api import create_claim, submit_message
 
     caplog.set_level(logging.WARNING, logger='backend.services.model_agent')
+    # The fixed answer sheet leaves room for a maximum-size message under the
+    # production ceiling, so tighten the ceiling to exercise the overflow path.
+    turn_profile = request_profile('claimant.turn.v1')
+    monkeypatch.setitem(
+        request_profile_registry._PROFILES,
+        'claimant.turn.v1',
+        turn_profile.model_copy(update={'input_hard_limit': 8000}),
+    )
     provider = V8JourneyProvider([])
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     created = create_claim(client, CLAIMANT, key='input-budget-overflow').json()

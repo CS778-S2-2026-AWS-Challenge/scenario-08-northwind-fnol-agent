@@ -38,7 +38,11 @@ from backend.services.request_profile_registry import (
     request_profile_for_task,
 )
 from backend.services.turn_family_resolution import resolve_turn_family
-from backend.services.turn_field_contract import bind_provider_schema, compile_turn_field_contract
+from backend.services.turn_field_contract import (
+    bind_fixed_turn_schema,
+    bind_provider_schema,
+    compile_turn_field_contract,
+)
 from backend.services.turn_router import route_turn
 
 logger = logging.getLogger(__name__)
@@ -274,7 +278,14 @@ def plan_model_turn(
             branch_evaluation,
             branch_evaluator.registry,
         )
-        schema = bind_provider_schema(schema, field_contract)
+        # The main turn uses one fixed answer sheet per registry version so the
+        # schema can be cached; the per-turn contract still drives validation and
+        # the narrow repair schema.
+        schema = (
+            bind_fixed_turn_schema(schema, branch_evaluator.registry)
+            if profile.schema_id == 'claimant.turn.v1'
+            else bind_provider_schema(schema, field_contract)
+        )
     schema = json.loads(json.dumps(schema, separators=(',', ':'), sort_keys=True))
     tools: list[dict[str, object]] = (
         [context_resolve_tool().model_dump(mode='json')] if profile.tool_names else []

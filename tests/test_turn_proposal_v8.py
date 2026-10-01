@@ -101,17 +101,19 @@ def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts() -
     strict = cast(
         dict[str, Any], OpenAICompatibleModelGateway._strict_response_schema(plan.response_schema)
     )
-    variants = strict['properties']['field_changes']['items']['anyOf']
-
-    def value_types(variant: dict[str, Any]) -> set[str]:
-        value = variant['properties']['value']
-        options = value.get('anyOf', [value])
-        return {str(option.get('type')) for option in options}
-
-    # A value may be null only alongside a disposition (claimant will supply /
-    # third party pending); the parser enforces that pairing.
-    boolean_variant = next(item for item in variants if value_types(item) == {'boolean', 'null'})
-    assert set(boolean_variant['properties']) == {
+    # One fixed answer-sheet row for every field: the value cell accepts every
+    # registered shape and Runtime checks it against this turn's contract.
+    item = strict['properties']['field_changes']['items']
+    assert 'anyOf' not in item
+    assert 'vehicle.drivable' in item['properties']['field_code']['enum']
+    assert {str(option.get('type')) for option in item['properties']['value']['anyOf']} == {
+        'string',
+        'number',
+        'boolean',
+        'array',
+        'null',
+    }
+    assert set(item['properties']) == {
         'field_code',
         'value',
         'reported_text',
@@ -119,7 +121,7 @@ def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts() -
         'disposition',
         'service_identity',
     }
-    assert set(boolean_variant['required']) == set(boolean_variant['properties'])
+    assert set(item['required']) == set(item['properties'])
     V8TurnProposal.model_validate(raw)
     gateway = _RecordingGateway(
         [ModelResponse(completion_status=ModelCompletionStatus.COMPLETE, structured_output=raw)]
@@ -299,7 +301,39 @@ def test_malformed_optional_question_preserves_facts_and_the_model_reply(
     )
 
 
-@pytest.mark.parametrize('core_failure', ['empty_reply', 'blank_reply', 'invalid_fact'])
+def test_invalid_fact_is_dropped_and_the_rest_of_the_turn_stands(
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    from backend.services.agent import InvariantGuardedAgent
+    from tests.journey_v8_support import CLAIMANT, V8JourneyProvider, envelope, fact
+    from tests.test_claim_api import create_claim, submit_message
+
+    raw = envelope(fields=[fact('incident.location', 'Wellington', 'Wellington')])
+    raw['field_changes'].append(fact('vehicle.drivable', {'invalid': 'shape'}))
+    app.state.agent_turn_provider = InvariantGuardedAgent(V8JourneyProvider([raw]))
+    created = create_claim(client, CLAIMANT, key='invalid-fact').json()
+    claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']
+
+    response = submit_message(
+        client,
+        CLAIMANT,
+        claim_id,
+        session_id,
+        text='It happened in Wellington.',
+        key='invalid-fact-message',
+    )
+
+    assert response.status_code == 200
+    assert response.json()['agent_message'] is not None
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert claim is not None
+    assert claim.form['incident.location'].value == 'Wellington'
+    assert 'vehicle.drivable' not in claim.form
+
+
+@pytest.mark.parametrize('core_failure', ['empty_reply', 'blank_reply'])
 def test_bad_core_remains_atomic_even_when_optional_question_is_malformed(
     app: FastAPI,
     client: TestClient,
@@ -312,10 +346,7 @@ def test_bad_core_remains_atomic_even_when_optional_question_is_malformed(
 
     raw = envelope(fields=[fact('incident.location', 'Wellington', 'Wellington')])
     raw['next_question'] = {'field_codes': ['x'] * 4, 'wording': 'Question?', 'reason': 'invalid'}
-    if core_failure == 'invalid_fact':
-        raw['field_changes'].append(fact('vehicle.drivable', {'invalid': 'shape'}))
-    else:
-        raw['reply'] = '' if core_failure == 'empty_reply' else '   '
+    raw['reply'] = '' if core_failure == 'empty_reply' else '   '
     app.state.agent_turn_provider = InvariantGuardedAgent(V8JourneyProvider([raw]))
     created = create_claim(client, CLAIMANT, key='invalid-core').json()
     claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']

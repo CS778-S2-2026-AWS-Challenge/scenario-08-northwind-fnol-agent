@@ -1667,10 +1667,7 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(
       /Your request has been sent\. You can continue adding information while you wait\./,
     )).toBeInTheDocument()
-    const progress = screen.getByRole('button', { name: /Claim progress:/i })
-    expect(progress).not.toHaveTextContent('Staff assisting')
-    expect(progress).not.toHaveTextContent('A Northwind staff member is now assisting you.')
-    expect(progress).not.toHaveTextContent('A Northwind support request has been queued')
+    expect(screen.queryByText('Staff assisting')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Staff assistance' })).not.toBeInTheDocument()
     expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
     expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
@@ -4017,21 +4014,8 @@ describe('claimant intake projection', () => {
     const toProvideTab = screen.getByRole('tab', { name: 'Next steps' })
     expect(within(toProvideTab).getByText('2')).toBeVisible()
     expect(screen.queryByRole('button', { name: /Review claim details/i })).not.toBeInTheDocument()
-    const progress = screen.getByRole('button', {
-      name: /Claim progress: 1 of 2 required details complete/i,
-    })
-    expect(progress).toHaveAttribute('aria-expanded', 'false')
-    const requirements = screen.getByRole('list', { name: 'Claim requirements', hidden: true })
-    expect(requirements).not.toBeVisible()
-    await user.click(progress)
-    expect(progress).toHaveAttribute('aria-expanded', 'true')
-    expect(requirements).toBeVisible()
-    expect(requirements).toHaveTextContent('Complete: What happened')
-    expect(requirements).toHaveTextContent('Required: When it happened')
-    expect(requirements).toHaveTextContent('Needed later')
-    await user.click(progress)
-    expect(progress).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByText('Needed later: Affected property')).not.toBeInTheDocument()
+    // Progress now lives only on the "Just noted" card.
+    expect(screen.queryByRole('button', { name: /Claim progress/i })).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: 'Edit Incident details' }))
@@ -4049,9 +4033,124 @@ describe('claimant intake projection', () => {
     })))
     expect(await screen.findByText('9pm')).toBeInTheDocument()
     expect(screen.queryByText('Add the affected property address')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', {
-      name: /Claim progress: 1 of 2 required details complete/i,
-    })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  function notedTurn() {
+    const recorded = (value) => ({
+      value,
+      status: 'proposed',
+      source: 'claimant',
+      source_refs: [claimantMessage.message_id],
+    })
+    return {
+      ...initialTurn(),
+      claimant_message: { ...claimantMessage, message_id: claimantMessage.message_id },
+      agent_message: { ...agentMessage, in_reply_to: claimantMessage.message_id },
+      form_changes: [
+        { field_code: 'incident.location', field: recorded('Queen Street lights') },
+        { field_code: 'vehicle.drivable', field: recorded(false) },
+      ],
+      dynamic_form: {
+        claim_revision: 2,
+        requirements: {
+          current_action_total: 5,
+          current_action_satisfied: 0,
+          missing_required_now: ['incident.occurred_at', 'incident.description', 'loss.description'],
+          by_state: { proposed: ['incident.location', 'vehicle.drivable'] },
+        },
+        fields: [],
+        field_inputs: {
+          'incident.location': { value_type: 'location', allowed_values: [] },
+          'vehicle.drivable': { value_type: 'boolean', allowed_values: [] },
+        },
+      },
+      primary_action: primaryAction({
+        revision: 2,
+        actionCode: 'claimant.review_details',
+        actionType: 'claimant_input',
+        available: true,
+        requiredInputs: ['incident.location', 'vehicle.drivable'],
+      }),
+    }
+  }
+
+  it('shows what was just noted under the reply and confirms it with Looks right', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(notedTurn())
+    api.confirmClaimFields.mockResolvedValue({
+      revision: 3,
+      confirmed_fields: {
+        'incident.location': { value: 'Queen Street lights', status: 'confirmed', source: 'claimant', source_refs: [claimantMessage.message_id] },
+        'vehicle.drivable': { value: false, status: 'confirmed', source: 'claimant', source_refs: [claimantMessage.message_id] },
+      },
+      dynamic_form: null,
+      customer_next_step: initialClaim.customer_next_step,
+      primary_action: primaryAction({ revision: 3 }),
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    const card = await screen.findByRole('region', { name: 'Just noted' })
+    expect(card.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
+    expect(card).toHaveTextContent('Incident location')
+    expect(card).toHaveTextContent('Queen Street lights')
+    expect(card).toHaveTextContent('Vehicle safe to drive')
+    expect(card).toHaveTextContent('No')
+    expect(card).toHaveTextContent('2 of 5 noted · 2 to check')
+    expect(within(card).getAllByText('To check')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /Review claim details/i })).not.toBeInTheDocument()
+
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
+
+    await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
+      claimId: initialClaim.claim_id,
+      fieldCodes: ['incident.location', 'vehicle.drivable'],
+    })))
+    expect(await within(card).findAllByText('Checked')).toHaveLength(2)
+    expect(within(card).queryByRole('button', { name: 'Looks right' })).not.toBeInTheDocument()
+  })
+
+  it('edits a Yes/No fact on the card with a choice, not free text', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(notedTurn())
+    api.updateClaimField.mockResolvedValue({
+      revision: 3,
+      updated_fields: {
+        'vehicle.drivable': { value: true, status: 'proposed', source: 'claimant', source_refs: ['claim:clm_ui_vp:revision:3:field:vehicle.drivable'], assertions: [{ source_refs: [claimantMessage.message_id] }] },
+      },
+      dynamic_form: notedTurn().dynamic_form,
+      customer_next_step: initialClaim.customer_next_step,
+      primary_action: primaryAction({ revision: 3 }),
+    })
+    api.confirmClaimFields.mockResolvedValue({
+      revision: 4,
+      confirmed_fields: {
+        'vehicle.drivable': { value: true, status: 'confirmed', source: 'claimant', source_refs: ['claim:clm_ui_vp:revision:3:field:vehicle.drivable'], assertions: [{ source_refs: [claimantMessage.message_id] }] },
+      },
+      dynamic_form: notedTurn().dynamic_form,
+      customer_next_step: initialClaim.customer_next_step,
+      primary_action: primaryAction({ revision: 4 }),
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    const card = await screen.findByRole('region', { name: 'Just noted' })
+
+    await user.click(within(card).getByRole('button', { name: 'Edit' }))
+    await user.click(within(card).getByRole('button', { name: 'Change Vehicle safe to drive' }))
+    await user.selectOptions(within(card).getByRole('combobox', { name: 'Vehicle safe to drive' }), 'Yes')
+    await user.click(within(card).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.updateClaimField).toHaveBeenCalledWith(expect.objectContaining({
+      fieldCode: 'vehicle.drivable',
+      value: true,
+    })))
+    // The corrected fact stays on the card of the message that first stated it.
+    await waitFor(() => expect(within(card).getByText('Yes')).toBeInTheDocument())
+    expect(card).toHaveTextContent('Checked')
   })
 
   it.each([true, false])('installs the current snapshot and suppresses stale replay actions (readback succeeds: %s)', async (readbackSucceeds) => {

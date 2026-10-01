@@ -887,11 +887,15 @@ Claim branch 与 Claim state branch 必须分开：
 - 字段、工具和动作必须声明所属 branch 及激活条件，避免 motor/home/contents 的字段互相泄漏；
 - branch 或字段冲突时，Agent 应解释冲突并请求澄清，Runtime 不得静默覆盖已确认事实。
 
-每个模型 turn 的字段输入、provider schema 和最终 Runtime 校验必须来自同一个
-`TurnFieldContract`。该合同只包含本轮 branch 允许的 claimant 字段，并携带 registry
-版本和 branch evaluation revision。不能通过向 Prompt、schema 和 validator 分别复制字段
-表来模拟一致性。若 provider 输出仍不合法，只允许一次不带工具和副作用的字段级修正；
-修正不能改写 Agent 回复、动作、第三方 offer 或原本合法的字段。
+每个模型 turn 的字段输入（Prompt 中的 `field_value_contracts`）和最终 Runtime 校验必须来自
+同一个 `TurnFieldContract`。该合同只包含本轮 branch 允许的 claimant 字段，并携带 registry
+版本和 branch evaluation revision。不能通过向 Prompt 和 validator 分别复制字段表来模拟一致性。
+
+v8 回合的 provider schema（答题卡）按 registry 版本固定：字段代码列出全部 claimant 可写字段，
+值格子接受所有已注册的值形状，因此每轮相同、可以缓存。本轮不允许的字段或形状不对的值由
+Runtime 逐项丢弃并记录为 rejected，其余部分照常生效，该字段之后再问；不为此额外调用模型。
+v7 回退路径仍按本轮合同收窄 schema，若 provider 输出仍不合法，只允许一次不带工具和副作用的
+字段级修正；修正不能改写 Agent 回复、动作、第三方 offer 或原本合法的字段。
 
 ### 7.5 Claimant 等待进度
 

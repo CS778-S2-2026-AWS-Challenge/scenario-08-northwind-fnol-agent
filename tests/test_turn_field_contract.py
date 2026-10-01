@@ -10,9 +10,10 @@ from backend.domain.models import (
     ResponsibleParty,
     WorkingClaim,
 )
-from backend.domain.turn_field_contract import TurnFieldContractViolation
+from backend.domain.turn_field_contract import TurnFieldContractViolation, TurnFieldViolation
 from backend.services.model_agent import _merge_field_contract_repair
 from backend.services.turn_field_contract import (
+    bind_fixed_turn_schema,
     bind_provider_schema,
     compile_turn_field_contract,
     validate_field_changes,
@@ -128,6 +129,60 @@ def test_runtime_normalises_only_unambiguous_values_and_rejects_unknown_fields()
             contract,
             [ModelProposedFormChange(field_code='claimant.client_number', value='hidden')],
         )
+
+
+def test_fixed_answer_sheet_is_identical_across_turns_and_lists_writable_fields() -> None:
+    evaluator = BranchRuleEvaluator()
+    home = evaluator.evaluate(_home_claim(), recomputation_reason='test')
+    motor = evaluator.evaluate(
+        _home_claim().model_copy(update={'incident_type': 'motor', 'revision': 7}),
+        recomputation_reason='test',
+    )
+    assert (
+        compile_turn_field_contract(home).contract_id
+        != compile_turn_field_contract(motor).contract_id
+    )
+
+    first = bind_fixed_turn_schema(_response_schema(), evaluator.registry)
+    second = bind_fixed_turn_schema(_response_schema(), evaluator.registry)
+
+    assert first == second
+    item = first['properties']['field_changes']['items']  # type: ignore[index]
+    codes = item['properties']['field_code']['enum']
+    assert 'claim.product_family' in codes
+    assert 'loss.estimated_amount' in codes
+    assert 'claimant.client_number' not in codes
+    assert {option.get('type') for option in item['properties']['value']['anyOf']} == {
+        'string',
+        'number',
+        'boolean',
+        'array',
+        'null',
+    }
+
+
+def test_fixed_answer_sheet_drops_only_the_changes_this_turn_cannot_take() -> None:
+    contract = compile_turn_field_contract(
+        BranchRuleEvaluator().evaluate(_home_claim(), recomputation_reason='test')
+    )
+    rejected: list[TurnFieldViolation] = []
+
+    accepted = validate_field_changes(
+        contract,
+        [
+            ModelProposedFormChange(field_code='incident.location', value='Kitchen'),
+            ModelProposedFormChange(field_code='claimant.client_number', value='hidden'),
+            ModelProposedFormChange(field_code='claim.product_family', value='boat'),
+        ],
+        rejected_bounds=rejected,
+        reject_invalid=True,
+    )
+
+    assert [item.field_code for item in accepted] == ['incident.location']
+    assert {(item.field_code, item.reason_code) for item in rejected} == {
+        ('claimant.client_number', 'field_not_allowed'),
+        ('claim.product_family', 'invalid_value'),
+    }
 
 
 def test_repair_can_replace_only_the_invalid_field_changes() -> None:
