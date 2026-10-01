@@ -870,8 +870,10 @@ def test_claim_creation_returns_complete_result_and_deduplicates_by_working_clai
     assert stored.revision == 2
     assert stored.assignee_id is None
     assert stored.claim_state.workflow_state.value == 'created'
+    assert stored.customer_next_step.can_resume is False
     assert claimant_view.status_code == 200
     assert claimant_view.json()['external_claim'] == body
+    assert claimant_view.json()['customer_next_step']['can_resume'] is False
     assert 'external_claim_fingerprint' not in claimant_view.json()
     assert 'assessor_routing' not in claimant_view.json()
 

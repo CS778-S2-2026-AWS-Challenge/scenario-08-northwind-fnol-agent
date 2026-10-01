@@ -1911,6 +1911,7 @@ def _settle_recorded_claim_creation(
                 summary=result.next_step,
                 responsible_party=ResponsibleParty.SYSTEM,
                 expected_by=result.expected_by,
+                can_resume=not created,
             ),
             'revision': resulting_revision,
             'updated_at': timestamp,
