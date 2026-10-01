@@ -136,6 +136,25 @@ automatic dispatch, durable processing state, idempotency, and recovery.
 
 ## Week 5 Day 4 cloud boundary revalidation
 
+## Issue #1139 AWS capability validation
+
+The bounded Sydney validation used `origin/main@c9fd8f6be570ba3f68216217b294d9d7000effbc`
+and synthetic data only. EC2 launch/system checks, Docker installation, Docker
+Compose installation, DynamoDB synthetic put/read/repeat-write, Secrets
+Manager synthetic readback, CloudWatch log/metric submission, EventBridge
+synthetic event submission, ECR push, and a minimal Fargate task run succeeded.
+The private S3-to-CloudFront static path also remained validated.
+
+The application Compose check did not reach Backend startup. The repository's
+current `minio/mc` image reference could not be pulled in the checked EC2
+environment; temporary image substitutions were attempted only in the EC2
+copy and were not committed. Consequently, EC2 Backend liveness/readiness,
+MongoDB/MinIO restart readback, external model gateway, RAG, API HTTPS/CORS,
+and the full FNOL smoke remain unverified. Bedrock CLI invocation was denied,
+Knowledge Bases was unconfigured, and no runtime instance profile was
+discoverable. These are explicit deployment blockers rather than local fixture
+successes. No application data migration was executed.
+
 Issue #432 revalidated this boundary on 3 September 2026 against `main@8d4d4e5`. The local
 environment exposed no AWS or Cloudflare credential variable names, and the AWS CLI was not
 installed. No live cloud request was attempted: there was no approved service binding or local

@@ -44,19 +44,19 @@ The framework has the following boundaries and evidence states.
 | Component | Framework role | Evidence state | Boundary or restriction |
 | --- | --- | --- | --- |
 | CloudFront and private S3 | Static asset delivery | `validated` | The bounded synthetic check succeeded in Sydney; the origin remains private. |
-| EC2 | Host for the existing Compose topology | `unconfigured` | Launch, security-group, storage, restart, and outbound-network evidence is still required. |
+| EC2 | Host for the existing Compose topology | `validated` | A smallest bounded Sydney host launched and passed both system checks. The temporary diagnostic access was restricted to CloudShell's current address. The host must be stopped or removed after validation. |
 | Backend API origin | Separate HTTPS entry point | `unconfigured` | No API certificate, DNS, reverse proxy, or browser CORS result is claimed. |
-| Docker Compose | Run Backend, MongoDB, MinIO, and the configured model gateway together | `unconfigured` | Container startup, health, restart, and persistence must be verified on EC2. |
+| Docker Compose | Run Backend, MongoDB, MinIO, and the configured model gateway together | `unreachable` | Docker and the Compose plugin started on EC2, but the current Compose dependency `minio/mc:RELEASE.2025-07-21T05-28-08Z` could not be pulled. A temporary `latest` and ECR Public substitution was also rejected by the checked environment. The repository Compose file was not changed. |
 | MongoDB | First application persistence runtime | `local_only` | The current provider-neutral MongoDB contract remains in use; local evidence is not AWS evidence and this is not Atlas. |
 | MinIO | First Evidence and knowledge object-store runtime | `local_only` | Keep the current S3-compatible boundary until an AWS runtime object-store path is separately verified. |
-| External model gateway | Model inference | `unconfigured` | The existing external gateway remains the model boundary; no Bedrock result is claimed. |
-| IAM runtime identity | Permission boundary for the host and services | `unconfigured` | Use only the course-provided boundary; do not create or assume an unverified role. |
-| Secrets Manager | Candidate runtime secret injection | `unconfigured` | No secret, credential, or secret-read path is committed or claimed. |
-| CloudWatch and budget monitoring | Deployment visibility and cost control | `unconfigured` | Configure and verify only for resources that are actually deployed. |
-| DynamoDB | Not enabled by this framework | `unconfigured` | Local migration rehearsals remain `local_only`; no AWS table, adapter, or read/write result is claimed. |
-| Bedrock and Knowledge Bases | Not enabled by this framework | `unconfigured` | The provider-neutral RAG contract remains; no Bedrock retrieval or citation result is claimed. |
-| ECS/Fargate | Not used for the first framework | `unconfigured` | No image-pull, task-role, networking, secret, or persistent-volume evidence is claimed. |
-| Lambda and EventBridge | Excluded from the core Claim journey | `unconfigured` | Optional non-core automation must not control persistence, Evidence, RAG, or Claim state. |
+| External model gateway | Model inference | `unconfigured` | The existing external gateway remains the model boundary; the EC2 application did not reach a model call because the Compose stack was blocked before backend startup. No Bedrock result is claimed. |
+| IAM runtime identity | Permission boundary for the host and services | `permission_denied` | Instance-profile listing was denied and no passable runtime instance profile was discoverable. Do not create or assume an unverified role. |
+| Secrets Manager | Candidate runtime secret injection | `validated` | A synthetic secret was created and read back through the AWS API. Runtime injection into the application was not claimed because the Compose stack did not become reachable. |
+| CloudWatch and budget monitoring | Deployment visibility and cost control | `validated` | A synthetic log group/stream, log event, metric submission, and cost budgets were exercised. Metric listing was not treated as immediate proof because of propagation delay. |
+| DynamoDB | Not enabled by this framework | `validated` (capability only) | A bounded synthetic on-demand table put, consistent read, and repeat-write check succeeded. Local migration rehearsals remain `local_only`; no application adapter or migration is enabled by this framework. |
+| Bedrock and Knowledge Bases | Not enabled by this framework | `permission_denied` / `unavailable` | Runtime model invocation returned an AWS authorization denial. No Knowledge Base existed and no retrieval or citation result is claimed. |
+| ECS/Fargate | Not used for the first framework | `validated` (capability only) | A minimal public-image Fargate task registered, ran, and stopped successfully. This does not prove the application image, task role, private networking, secrets, or persistence path. |
+| Lambda and EventBridge | Excluded from the core Claim journey | `validated` (EventBridge only) / `unavailable` (Lambda runtime) | A disabled synthetic EventBridge rule accepted a test event. Lambda execution was not enabled because no authorized execution role was available. Optional automation must not control persistence, Evidence, RAG, or Claim state. |
 
 The framework uses Sydney (`ap-southeast-2`) for regional resources. CloudFront
 is global, but its origin is the Sydney S3 bucket.
@@ -72,10 +72,10 @@ remain in the private operator record and are intentionally absent here.
 | Synthetic object upload to a private Sydney S3 origin | `validated` | Upload succeeded; the object was not public. |
 | CloudFront read through the private origin | `validated` | The request returned HTTP `200`, the expected synthetic 52-byte body, `Via: CloudFront`, and `X-Cache: Hit from cloudfront`. |
 | Direct S3 object request | `validated` | The request returned HTTP `403`, confirming that the bucket was not made public. |
-| EC2 launch and application runtime | `unconfigured` | No EC2 host, Compose startup, or application-call evidence is included in this record. |
-| HTTPS API origin, certificate, DNS, reverse proxy, and CORS | `unconfigured` | No browser-safe API path has been configured or verified. |
-| Runtime identity and secret injection | `unconfigured` | No host-to-service identity or secret-read call has been verified. |
-| AWS persistence, Evidence, RAG, and full FNOL journey | `unconfigured` | No AWS application integration is claimed. |
+| EC2 launch and application runtime | `unreachable` | EC2 launch, system checks, Docker installation, and Compose installation succeeded. The application stack did not become reachable because its MinIO client image could not be pulled. |
+| HTTPS API origin, certificate, DNS, reverse proxy, and CORS | `unconfigured` | No browser-safe API path was configured. The API origin cannot be validated until the backend stack is reachable. |
+| Runtime identity and secret injection | `permission_denied` / `validated` | Instance-profile discovery was denied; an isolated synthetic Secrets Manager read succeeded. No application secret injection is claimed. |
+| AWS persistence, Evidence, RAG, and full FNOL journey | `unconfigured` | AWS service probes exist for selected capabilities, but no full application integration or FNOL journey is claimed. |
 
 The static result proves only private S3-to-CloudFront delivery. A console
 login, local MongoDB or MinIO result, fixture, mock, or external model response
@@ -83,6 +83,34 @@ does not upgrade any other row to `validated`.
 
 This evidence is supplied to #786 for prerequisite verification. It is not
 deployment-readiness evidence for the EC2 application stack or its API origin.
+
+## Issue #1139 validation update
+
+The validation pass used `origin/main@c9fd8f6be570ba3f68216217b294d9d7000effbc`
+in Sydney (`ap-southeast-2`) and synthetic data only. It created bounded
+temporary resources and did not execute MongoDB/MinIO-to-AWS migration.
+
+Validated capability evidence includes EC2 launch and system checks, Docker
+installation, Docker Compose installation, DynamoDB on-demand put/consistent
+read and repeat-write behaviour, synthetic Secrets Manager readback,
+CloudWatch log and metric submission, EventBridge rule/event submission, ECR
+push, and a minimal Fargate task run. The private S3-to-CloudFront static path
+remained validated with direct S3 access denied.
+
+The application-level EC2 check stopped at the container image stage. The
+current repository Compose reference for `minio/mc` was not pullable in the
+checked environment, so Backend liveness/readiness, MongoDB/MinIO restart
+readback, RAG, external model gateway, API HTTPS/CORS, and the full FNOL smoke
+remain unverified. A temporary image-name substitution was used only to test
+whether the dependency could be recovered; it was not committed and did not
+produce a successful stack startup.
+
+Bedrock runtime invocation was explicitly denied for the checked CLI identity;
+Knowledge Bases had no configured instance. IAM instance-profile discovery was
+also denied. These results are capability constraints, not application-code
+changes. The cost guard was configured against the observed account baseline
+plus an additional USD 200 in USD 20 actual-cost increments; the email
+subscription remains pending recipient verification.
 
 ## Verification labels and stop conditions
 
