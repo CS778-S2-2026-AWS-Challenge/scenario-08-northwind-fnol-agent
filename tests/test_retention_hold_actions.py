@@ -1,6 +1,7 @@
 """Authorised staff apply and release retention holds through the Workbench contract."""
 
 from datetime import datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ from backend.domain.retention import (
     RetentionOperationStatus,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.follow_up_recovery import process_expiring_follow_up
 from backend.services.recovery_worker import run_recovery_cycle
@@ -201,3 +203,131 @@ def test_workbench_hold_routes_create_release_and_project_hold_state(
         f'/api/v1/workbench/claims/{claim.claim_id}/retention', headers=staff_auth_headers
     )
     assert retention.json()['hold_active'] is False
+
+
+@pytest.mark.parametrize('kind', ['fixture', 'mongo'])
+def test_claim_change_after_the_offer_rejects_the_hold_without_a_partial_write(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Claim mutation that wins between action projection and commit is a revision
+    conflict, and no hold, Audit event or replay record is written."""
+
+    repository = _repository(kind)
+    claim, _ = _expired_with_retention(repository, f'clm_hold_race_{kind}')
+    operation_before = repository.get_retention_operation_for_claim(claim.claim_id)
+    commit = repository.commit_retention_hold_action
+
+    def concurrent_claim_mutation_wins(*args: Any, **kwargs: Any) -> None:
+        # Another staff mutation commits between the action projection and this write.
+        if isinstance(repository, MongoDBRepository):
+            repository._collection.update_one(
+                {'record_type': 'claim', 'claim_id': claim.claim_id}, {'$inc': {'revision': 1}}
+            )
+        else:
+            assert isinstance(repository, FixtureRepository)
+            current = repository._claims[claim.claim_id]
+            repository._claims[claim.claim_id] = current.model_copy(
+                update={'revision': current.revision + 1}
+            )
+        commit(*args, **kwargs)
+
+    monkeypatch.setattr(repository, 'commit_retention_hold_action', concurrent_claim_mutation_wins)
+
+    with pytest.raises(ApiError) as conflict:
+        apply_retention_hold(
+            repository, OWNER, claim.claim_id, APPLY, f'hold-race-{kind}', str(claim.revision)
+        )
+
+    assert (conflict.value.status_code, conflict.value.code) == (409, 'REVISION_CONFLICT')
+    assert repository.list_retention_holds(claim.claim_id) == []
+    assert repository.get_retention_operation_for_claim(claim.claim_id) == operation_before
+    assert (
+        repository.find_idempotency(
+            OWNER.subject,
+            f'/api/v1/workbench/claims/{claim.claim_id}/retention-holds',
+            f'hold-race-{kind}',
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    'failing_write', ['save_retention_hold', 'append_audit_event', 'save_idempotency']
+)
+def test_a_failed_write_leaves_no_partial_hold_and_the_retry_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    failing_write: str,
+) -> None:
+    repository = FixtureRepository()
+    claim, _ = _expired_with_retention(repository, f'clm_hold_fail_{failing_write}')
+    operation_before = repository.get_retention_operation_for_claim(claim.claim_id)
+    audit_before = list(repository._audit_events)
+
+    with monkeypatch.context() as patch:
+
+        def fail(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError('storage unavailable')
+
+        patch.setattr(repository, failing_write, fail)
+        with pytest.raises(RuntimeError):
+            apply_retention_hold(
+                repository, OWNER, claim.claim_id, APPLY, 'hold-fail', str(claim.revision)
+            )
+
+    assert repository.list_retention_holds(claim.claim_id) == []
+    assert repository.get_retention_operation_for_claim(claim.claim_id) == operation_before
+    assert list(repository._audit_events) == audit_before
+    route = f'/api/v1/workbench/claims/{claim.claim_id}/retention-holds'
+    assert repository.find_idempotency(OWNER.subject, route, 'hold-fail') is None
+
+    retried = apply_retention_hold(
+        repository, OWNER, claim.claim_id, APPLY, 'hold-fail', str(claim.revision)
+    )
+    assert retried.active is True
+    assert repository.find_idempotency(OWNER.subject, route, 'hold-fail') is not None
+
+
+class _SessionRecordingCollection:
+    """Record the session of every call, then delegate to mongomock without it."""
+
+    def __init__(self, collection: Any) -> None:
+        self._collection = collection
+        self.sessions: list[tuple[str, object]] = []
+
+    def __getattr__(self, name: str) -> Any:
+        target = getattr(self._collection, name)
+        if not callable(target):
+            return target
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            self.sessions.append((name, kwargs.pop('session', None)))
+            return target(*args, **kwargs)
+
+        return call
+
+
+def test_mongo_hold_action_reads_the_revision_and_writes_inside_one_transaction() -> None:
+    """mongomock cannot roll back, so this proves the logical boundary: the revision
+    read and every write carry the one transaction session."""
+
+    repository = _repository('mongo')
+    assert isinstance(repository, MongoDBRepository)
+    claim, _ = _expired_with_retention(repository, 'clm_hold_session')
+    transaction = object()
+    recorder = _SessionRecordingCollection(repository._collection)
+    repository._collection = recorder  # type: ignore[assignment]
+    repository._atomic = lambda operation: operation(transaction)  # type: ignore[method-assign]
+
+    apply_retention_hold(
+        repository, OWNER, claim.claim_id, APPLY, 'hold-session', str(claim.revision)
+    )
+
+    writes = {'insert_one', 'replace_one', 'update_one', 'update_many', 'delete_one'}
+    transactional = [
+        (name, session) for name, session in recorder.sessions if session is transaction
+    ]
+    assert transactional[0][0] == 'find_one'
+    written = [name for name, session in recorder.sessions if name in writes]
+    assert written
+    assert all(session is transaction for name, session in recorder.sessions if name in writes)
