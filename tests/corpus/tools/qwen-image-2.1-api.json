@@ -1,0 +1,104 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "qwen_image_2.1_bf16.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "type": "qwen_image",
+   "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+   "device": "default"
+  }
+ },
+ "3": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+  }
+ },
+ "4": {
+  "class_type": "QwenImage21Cache",
+  "inputs": {
+   "device": "auto",
+   "dtype": "default",
+   "model": [
+    "1",
+    0
+   ]
+  }
+ },
+ "5": {
+  "class_type": "TextEncodeQwenImage21",
+  "inputs": {
+   "negative_prompt": "",
+   "clip": [
+    "2",
+    0
+   ],
+   "prompt": "Photo of a silver hatchback with a dented rear bumper and a cracked tail light, parked in a supermarket car park in Auckland, overcast daylight, realistic, no people, no licence plate text",
+   "resolution": 1024
+  }
+ },
+ "6": {
+  "class_type": "EmptyLatentImage",
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  }
+ },
+ "7": {
+  "class_type": "KSampler",
+  "inputs": {
+   "sampler_name": "euler",
+   "negative": [
+    "5",
+    1
+   ],
+   "positive": [
+    "5",
+    0
+   ],
+   "seed": 447606998181262,
+   "denoise": 1.0,
+   "model": [
+    "4",
+    0
+   ],
+   "latent_image": [
+    "6",
+    0
+   ],
+   "scheduler": "simple",
+   "cfg": 1.0,
+   "steps": 25
+  }
+ },
+ "8": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "7",
+    0
+   ],
+   "vae": [
+    "3",
+    0
+   ]
+  }
+ },
+ "9": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "filename_prefix": "Qwen_image_2.1",
+   "images": [
+    "8",
+    0
+   ]
+  }
+ }
+}
