@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { workbenchApi } from '../api.js'
 import { containTabFocus } from '../focus.js'
+import { COMPACT_WORKBENCH_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js'
 import { staffAgentUnavailableReason } from '../staff-agent-availability.js'
 import { translate as t } from '../i18n.js'
 import { formatDateTime, words } from '../format.js'
@@ -50,6 +51,8 @@ export default function StaffAgent({
   const [error, setError] = useState(null)
   const [position, setPosition] = useState(null)
   const [capabilitiesLoaded, setCapabilitiesLoaded] = useState(false)
+  // The compact layout shows the open panel in place of the content and has no bubble to drag.
+  const compactLayout = useMediaQuery(COMPACT_WORKBENCH_QUERY)
   const widgetRef = useRef(null)
   const panelRef = useRef(null)
   const bubbleRef = useRef(null)
@@ -308,7 +311,7 @@ export default function StaffAgent({
   }
 
   function beginDrag(event) {
-    if (event.button !== 0) return
+    if (event.button !== 0 || compactLayout) return
     if (event.currentTarget.classList.contains('staff-agent__header')
       && event.target.closest('button, select, input, textarea')) return
     const widget = widgetRef.current
@@ -382,7 +385,7 @@ export default function StaffAgent({
   }
 
   return (
-    <div ref={widgetRef} className={`staff-agent${embedded ? ' staff-agent--embedded' : ''}${open ? ' is-open' : ''}`} style={!embedded && position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
+    <div ref={widgetRef} className={`staff-agent${embedded ? ' staff-agent--embedded' : ''}${open ? ' is-open' : ''}`} style={!embedded && !compactLayout && position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
       {!open && !embedded && (
         <button ref={bubbleRef} className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label={t('Open Staff Agent')} title={t('Draft with AI')}>
           <Bot size={23} />

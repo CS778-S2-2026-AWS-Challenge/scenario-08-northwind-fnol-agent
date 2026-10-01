@@ -972,7 +972,9 @@ p { line-height: 1.55; }
   .assistance-status > .button, .assistance-status__confirm, .assistance-status > .record-note, .assistance-status > .form-error, .handoff-resolution-inline > .button, .handoff-resolution-inline > .record-note, .handoff-resolution-inline > .action-form { justify-self: stretch; grid-column: 1 / -1; }
   .assistance-request { grid-template-columns: 1fr; }
   .assistance-request__actions { justify-content: flex-start; grid-column: 1; }
-  .staff-agent:not(.staff-agent--embedded) { display: none; }
+  .staff-agent:not(.staff-agent--embedded):not(.is-open) { display: none; }
+  .staff-agent.is-open:not(.staff-agent--embedded) { inset: 52px 0 58px; }
+  .staff-agent.is-open:not(.staff-agent--embedded) .staff-agent__panel { width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; }
   .settings-layout { display: block; overflow-y: auto; }
   .settings-navigation { position: sticky; z-index: 2; top: 0; padding: var(--space-2); overflow-x: auto; border-right: 0; border-bottom: var(--border-component); }
   .settings-navigation > .eyebrow { display: none; }

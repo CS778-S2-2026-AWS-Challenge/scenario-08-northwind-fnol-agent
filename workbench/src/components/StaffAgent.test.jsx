@@ -874,4 +874,24 @@ describe('StaffAgent', () => {
     expect(onOpenChange).not.toHaveBeenCalled()
   })
 
+  it('keeps the compact-layout panel in place instead of dragging it', async () => {
+    vi.stubGlobal('matchMedia', (query) => ({
+      matches: query === '(max-width: 800px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const { container } = renderAgent()
+    await screen.findByText('Staff Agent cannot answer right now')
+
+    const header = container.querySelector('.staff-agent__header')
+    fireEvent.pointerDown(header, { button: 0, clientX: 300, clientY: 80, pointerId: 1 })
+    fireEvent.pointerMove(header, { clientX: 120, clientY: 300, pointerId: 1 })
+    fireEvent.pointerUp(header, { pointerId: 1 })
+
+    expect(container.querySelector('.staff-agent')).not.toHaveAttribute('style')
+  })
+
 })
