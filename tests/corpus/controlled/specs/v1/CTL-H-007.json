@@ -1,0 +1,335 @@
+{
+ "case_id": "CTL-H-007",
+ "message_style": "typos",
+ "persona": "Busy parent typing quickly on her phone, all lower case with typos, but answers every question. Has the photo, the quote and the Police confirmation.",
+ "initial_message": "hi someone broke into our house on saterday 12th while we were at the kids netball in the morning. they jemmied the front bedroom window open and the latch is ripped off and the frame is all gouged. police have been round. how do i claim for the window",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.type": "Break-in through a bedroom window. Nothing was taken as far as we can tell.",
+  "incident.description": "While we were at the kids' netball someone jemmied open the front bedroom window. The latch was ripped off and the frame is gouged. They climbed in and went through the bedroom, but as far as we can tell nothing was taken.",
+  "incident.occurred_at": "Saturday 12 September 2026, between 9:30am and 1:00pm",
+  "incident.discovered_at": "Saturday 12 September 2026, about 1:00pm, when we got home",
+  "incident.location": "7 Karaka Test Row, Hokowhitu, Palmerston North",
+  "incident.cause": "Forced entry by a burglar who levered open the bedroom window",
+  "theft.entry_context": "Forced entry: the bedroom window was levered open",
+  "loss.description": "Front bedroom casement window: latch ripped off, stay bent, timber frame gouged",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "reference_available",
+  "police.event_reference": "TST-EV-200007",
+  "police.reported_on": "Saturday 12 September 2026, 1:40pm, by phone",
+  "if_asked_about_police_visit": "An officer came at about 4pm the same day.",
+  "property.address": "7 Karaka Test Row, Hokowhitu, Palmerston North",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "property.affected_areas": [
+   "front bedroom window"
+  ],
+  "property.ongoing_risk": "none; my husband screwed the window shut that afternoon",
+  "property.habitable": true,
+  "mitigation.emergency_action": "My husband screwed the window shut from inside the same afternoon",
+  "if_asked_about_stolen_items": "Nothing that we can find.",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "sms",
+  "claimant.email": "paige.juniperlea@example.invalid",
+  "claimant.phone": "+64 00 000 2007",
+  "policyholder.name": "Paige Juniperlea",
+  "policy.policy_number": "NW-SYN-HOM-200007",
+  "evidence.photos": "One photo of the window. Available now.",
+  "evidence.police": "The Police report confirmation. Available now.",
+  "evidence.repair_quote": "Quote from Elm Garth Renovations dated 15 September 2026, total $977.50 including GST. Available now."
+ },
+ "materials": [
+  {
+   "id": "photo-window",
+   "file": "photo-bedroom-window.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo from outside a white weatherboard house, close-up of a timber casement window that has been levered open. The window is pushed shut but the brass latch is ripped off and hangs by one screw, and the white-painted timber frame beside it has deep gouges with bare wood showing. Trampled plants in the garden bed below the sill. Overcast day. Only the window and a little cladding are in view; closed curtains behind the glass. No people, no text, no logos.",
+   "seed": 200701,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the levered bedroom window",
+   "expect_object": [
+    "window",
+    "casement window",
+    "window frame",
+    "frame",
+    "latch",
+    "window latch"
+   ]
+  },
+  {
+   "id": "builder-quote",
+   "file": "builder-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Elm Garth Renovations (Synthetic)",
+    "issuer_address": "21 Millbrook Test Street, Terrace End, Palmerston North",
+    "quote_number": "Q-2026-2007",
+    "quote_date": "15 September 2026",
+    "valid_until": "14 December 2026",
+    "customer": "Paige Juniperlea",
+    "subject": "7 Karaka Test Row, Hokowhitu, Palmerston North - front bedroom window after forced entry",
+    "items": [
+     {
+      "description": "Repair gouged timber window frame with epoxy filler; new stop bead",
+      "amount": 260.0
+     },
+     {
+      "description": "Supply and fit new casement stay and keyed fastener",
+      "amount": 140.0
+     },
+     {
+      "description": "Rehang casement sash and adjust hinges",
+      "amount": 120.0
+     },
+     {
+      "description": "Prime and paint bedroom window frame, inside and out",
+      "amount": 330.0
+     }
+    ],
+    "prepared_by": "Daniel Copperdale, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote for the bedroom window"
+  },
+  {
+   "id": "police-record",
+   "file": "police-report-confirmation.pdf",
+   "evidence_kind": "police_report",
+   "method": "template",
+   "template": "police_reference_record",
+   "data": {
+    "event_reference": "TST-EV-200007",
+    "reported_on": "Saturday 12 September 2026, 1:40pm",
+    "reported_by": "Paige Juniperlea",
+    "how_reported": "Phone report",
+    "summary": "Burglary at 7 Karaka Test Row, Hokowhitu, Palmerston North. Front bedroom window levered open during the morning. No property reported missing."
+   },
+   "fact_links": {
+    "event_reference": "police.event_reference",
+    "reported_by": "policyholder.name"
+   },
+   "purpose": "Police reference for the burglary"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200007",
+    "policyholder": "Paige Juniperlea",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "1 March 2026 to 28 February 2027",
+    "insured": {
+     "Insured address": "7 Karaka Test Row, Hokowhitu, Palmerston North",
+     "Occupancy": "Owner occupied",
+     "Sum insured": "$560,000"
+    },
+    "excess": "$500 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200007",
+    "family": "home",
+    "effective_from": "2026-03-01",
+    "effective_to": "2027-02-28",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H1",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-12",
+    "last_day": "2026-09-12"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "policy_inception_date": "2016-03-01"
+  },
+  "triage": {
+   "expected_class": "fast_track",
+   "required_reasons": [],
+   "allowed_reasons": [],
+   "rationale": "Forced bedroom window, nothing taken, nobody hurt, no other party, the window screwed shut and the home habitable. The photo, a complete builder's quote (NZD 977.50 including GST) and the Police record with its event reference are all in, and every required question is answerable. Main's theft branch also lists proof of ownership; nothing was taken and the claim is for the building, so the pack treats the photo, the repair quote and the Police record as the required materials. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt, proof of purchase or proof of ownership in the pack; nothing was taken"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 15 September 2026; incident 12 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 March 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2016-03-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-12",
+   "property.address": "7 Karaka Test Row, Hokowhitu, Palmerston North",
+   "property.habitable": true,
+   "property.ongoing_risk": "none"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-bedroom-window.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=builder-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=police-report-confirmation.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "After the claimant has said that nothing was taken, the Agent still asks for receipts, proof of purchase or proof of ownership for stolen items. Asking once whether anything was taken is fine."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the claim needs a professional assessor or a site inspection before it can be lodged."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-CLM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent records the incident type as theft or other; theft.entry_context is recorded only while the theft branch (BR-THEFT-001) is active or a candidate",
+   "Whether the photo or the quote is requested first",
+   "Wording of the Agent's replies"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "incident.type": [
+    "theft",
+    "other"
+   ],
+   "theft.entry_context": "forced_entry",
+   "incident.discovered_at": "2026-09-12",
+   "police.status": [
+    "reported",
+    "reference_available"
+   ],
+   "contents.police_reference": "TST-EV-200007",
+   "property.occupancy_relationship": "owner",
+   "property.occupancy": "occupied",
+   "policy.policy_number": "NW-SYN-HOM-200007"
+  }
+ }
+}

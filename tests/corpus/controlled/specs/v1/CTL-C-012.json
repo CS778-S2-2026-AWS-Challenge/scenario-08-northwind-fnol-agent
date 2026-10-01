@@ -1,0 +1,297 @@
+{
+ "case_id": "CTL-C-012",
+ "message_style": "typos",
+ "persona": "Casual, types fast in lower case. Only kept the short counter receipt, which shows the price and date but not what was bought. The laptop box with the serial label is at home.",
+ "initial_message": "hi i tripped on the stairs on tusday 15th sept carrying my laptp and it hit the tiles at the bottom. screen is crackd and the hinge snapped so it wont close anymore. can i claim for it on my contents",
+ "facts": {
+  "claim.product_family": "contents",
+  "incident.type": "accidental_damage",
+  "incident.description": "I was carrying my laptop downstairs, missed the second-to-last step and dropped it. It landed on the tiled floor at the bottom of the stairs.",
+  "incident.occurred_at": "Tuesday 15 September 2026, about 8:20am",
+  "incident.discovered_at": "Tuesday 15 September 2026, about 8:20am",
+  "incident.location": "12 Matai Test Close, Waikiwi, Invercargill",
+  "incident.cause": "Dropped on the stairs",
+  "loss.description": "Laptop screen cracked diagonally and the left hinge snapped, so the lid will not close",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "contents.items": [
+   {
+    "contents.item.description": "13-inch laptop, 16 GB, 512 GB, silver",
+    "contents.item.brand": "Corvane",
+    "contents.item.model": "Book 13",
+    "contents.item.category": "electronics",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 1899,
+    "contents.item.loss_type": "damaged",
+    "serial_number": "CB13-TST-3012",
+    "purchase_date": "27 April 2026",
+    "contents.item.ownership": "owned"
+   }
+  ],
+  "contents.receipt_availability": "The short counter receipt from the shop, available now. It shows the price and the date but not what I bought.",
+  "contents.proof_of_ownership": "Counter receipt; the laptop box with the serial label is at home",
+  "property.address": "12 Matai Test Close, Waikiwi, Invercargill",
+  "property.occupancy_relationship": "tenant",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "sms",
+  "claimant.email": "ethan.flaxmere@example.invalid",
+  "claimant.phone": "+64 00 000 3012",
+  "policyholder.name": "Ethan Flaxmere",
+  "policy.policy_number": "NW-SYN-CON-300012",
+  "evidence.photos": "one photo of the laptop at the bottom of the stairs. available now",
+  "evidence.receipt": "the receipt from longreach tech store dated 27 april 2026. it just has the price, not the laptop name. available now",
+  "if_asked_for_other_proof": "ive got the box at home with the serial number on it. i can send a photo of it later",
+  "if_asked_about_the_serial_number": "CB13-TST-3012, its on the box",
+  "if_asked_whether_the_damaged_item_is_kept": "yes its in my room, switched off"
+ },
+ "materials": [
+  {
+   "id": "photo-laptop",
+   "file": "photo-laptop.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo of a thin silver laptop lying half open on beige floor tiles at the bottom of a carpeted staircase, photographed from in front of the lid so that the lid fills the frame and only the silver front edge of the base shows. The switched-off black screen has a long crack running diagonally across it, and the lid hangs loose at an odd angle at the left corner because the hinge there has snapped. The silver lid edges are plain. Morning daylight. No people, no text, no logos.",
+   "seed": 301201,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the damaged laptop",
+   "expect_object": [
+    "laptop",
+    "laptop screen",
+    "notebook",
+    "notebook computer",
+    "screen"
+   ]
+  },
+  {
+   "id": "receipt-laptop",
+   "file": "receipt-laptop.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Longreach Tech Store (Synthetic)",
+    "issuer_address": "16 Glenrook Test Street, Invercargill Central, Invercargill",
+    "invoice_number": "INV-2026-3012",
+    "date": "27 April 2026",
+    "customer": "Ethan Flaxmere",
+    "items": [
+     {
+      "description": "",
+      "amount": 1899.0
+     }
+    ],
+    "payment_method": "EFTPOS"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "contents.items[0].purchase_date"
+   },
+   "purpose": "Receipt with the item description left out, so it does not show which item was bought"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-CON-300012",
+    "policyholder": "Ethan Flaxmere",
+    "wording": "Northwind Contents Standard Policy, version MVP-2026.1",
+    "cover": "Contents - sum insured",
+    "period": "10 February 2026 to 9 February 2027",
+    "insured": {
+     "Insured address": "12 Matai Test Close, Waikiwi, Invercargill",
+     "Contents sum insured": "$50,000"
+    },
+    "excess": "$400 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the contents wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-CON-300012",
+    "family": "contents",
+    "effective_from": "2026-02-10",
+    "effective_to": "2027-02-09",
+    "excess_nzd": 400,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "contents",
+  "scenario_category": "C1",
+  "condition": "missing_information",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-15",
+    "last_day": "2026-09-15"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "Plan feature none with condition missing_information. The receipt leaves out the item description (and so the serial number), a required field of a receipt; it still shows the seller, the purchase date, the amount and the payment method.",
+   "policy_inception_date": "2020-02-10"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "evidence_outstanding"
+   ],
+   "allowed_reasons": [],
+   "rationale": "Accidental damage to one laptop (NZD 1,899) at the insured address, nobody hurt, photo supplied, policy on file. The only proof of purchase does not say what was bought, so ownership of this laptop is not shown and the serial label photo can only come later; required material is incomplete. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "clear",
+     "basis": "Purchase date 27 April 2026 is before the incident on 15 September 2026"
+    },
+    "quote_before_loss": {
+     "expected": "not_applicable",
+     "basis": "No quote or assessment in the pack"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (10 February 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2020-02-10, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "contents",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-15"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-laptop.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-laptop.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.contents_items[loss_type=damaged]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "A4",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent asks for proof that identifies the laptop, for example an invoice that names it, the serial number, or a photo of the box label, or records that it will be sent later."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the claim cannot go ahead or will be declined because the receipt does not name the item."
+   }
+  ],
+  "expected_rag_sources": [
+   "CON-COV-01",
+   "CON-CLM-01",
+   "CON-LIM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks for the serial number, the box label photo or another proof of ownership"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "incident.type": "other",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "parties.other_parties": false,
+   "policy.policy_number": "NW-SYN-CON-300012"
+  }
+ }
+}

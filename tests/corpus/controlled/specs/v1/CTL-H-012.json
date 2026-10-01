@@ -1,0 +1,352 @@
+{
+ "case_id": "CTL-H-012",
+ "message_style": "emotional",
+ "persona": "Upset and chatty, uses exclamation marks, calms down once she knows what to do. Asked the shop for a copy of the heat pump invoice because the original was lost.",
+ "initial_message": "I'm honestly so shaken!! On Friday night (the 11th) the wind snapped a huge branch off the tree in our back yard and it came crashing down right on top of the heat pump outside. The top is completely crushed and now the heat pump won't even turn on. Thank goodness nobody was out there. What do I do now??",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "property.address": "12 Bellbird Test Drive, Rototuna, Hamilton",
+  "incident.location": "12 Bellbird Test Drive, Rototuna, Hamilton",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "phone",
+  "claimant.email": "mere.kererumont@example.invalid",
+  "claimant.phone": "+64 00 000 2012",
+  "policyholder.name": "Mere Kererumont",
+  "policy.policy_number": "NW-SYN-HOM-200012",
+  "incident.type": "weather",
+  "incident.description": "On Friday night strong wind snapped a large branch off the liquidambar tree in our back yard. It fell onto the heat pump outdoor unit beside the house and crushed the top. The heat pump has not worked since.",
+  "incident.occurred_at": "Friday 11 September 2026, about 11pm",
+  "incident.discovered_at": "Friday 11 September 2026, about 11pm",
+  "incident.cause": "Strong wind broke a branch off our own tree",
+  "loss.description": "Heat pump outdoor unit crushed on top and its fan grille bent in; the heat pump no longer turns on",
+  "property.affected_areas": [
+   "heat pump outdoor unit"
+  ],
+  "property.ongoing_risk": "none",
+  "property.habitable": true,
+  "if_asked_about_heating": "We are using a plug-in heater in the lounge for now. The house is fine to live in.",
+  "mitigation.emergency_action": "Turned the heat pump off at the isolating switch on Saturday morning; my brother cut up the branch and moved it off the unit",
+  "heat_pump.description": "Aurelio ComfortSplit 60, 6 kW split system, indoor and outdoor units",
+  "heat_pump.purchase_date": "7 June 2023",
+  "evidence.photos": "One photo of the branch on the heat pump, taken on Saturday morning. Available now.",
+  "evidence.repair_quote": "Quote from Nikau Ridge Sparks, total $4,427.50 including GST, dated 15 September 2026. Available now.",
+  "evidence.receipt": "A reprint of the heat pump invoice from Harakeke By Appliances. We bought it on 7 June 2023; the store printed this copy on 14 September 2026 because I could not find the original. Available now.",
+  "if_asked_about_receipt_dates": "We bought the heat pump on 7 June 2023. The store reprinted the invoice for me on 14 September because I could not find the original."
+ },
+ "materials": [
+  {
+   "id": "photo-heat-pump",
+   "file": "photo-heat-pump.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in morning daylight beside the pale weatherboard wall of a house: a beige heat pump outdoor unit on a small concrete pad, with a thick broken tree branch lying across its top. The metal top panel is crushed down in the middle and the round black fan grille on the front is bent inward. Leaves and twigs are scattered on the concrete. Close three-quarter view from above showing the crushed top and the grille; the lower front corner of the unit is out of frame.",
+   "seed": 203201,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the heat pump outdoor unit crushed by the branch",
+   "expect_object": [
+    "heat pump",
+    "outdoor unit",
+    "heat pump unit",
+    "air conditioner",
+    "air conditioning unit",
+    "ac unit",
+    "condenser",
+    "condenser unit",
+    "air conditioner unit"
+   ],
+   "seed_history": [
+    {
+     "seed": 201201,
+     "reasons": [
+      "CTL-H-012/photo-heat-pump.jpg: image-only pass names 'top of the air conditioning unit', expected one of ['heat pump', 'outdoor unit', 'heat pump unit', 'air conditioner', 'air conditioning unit', 'ac unit', 'condenser', 'condenser unit', 'air conditioner unit']"
+     ]
+    },
+    {
+     "seed": 202201,
+     "reasons": [
+      "CTL-H-012/photo-heat-pump.jpg: image-only pass names 'top panel of the air conditioning unit', expected one of ['heat pump', 'outdoor unit', 'heat pump unit', 'air conditioner', 'air conditioning unit', 'ac unit', 'condenser', 'condenser unit', 'air conditioner unit']"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "heat-pump-quote",
+   "file": "heat-pump-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Nikau Ridge Sparks (Synthetic)",
+    "issuer_address": "6 Nikau Test Glade, Te Rapa, Hamilton",
+    "quote_number": "Q-2026-2012",
+    "quote_date": "15 September 2026",
+    "valid_until": "14 December 2026",
+    "customer": "Mere Kererumont",
+    "subject": "12 Bellbird Test Drive, Rototuna, Hamilton - replace wind-damaged heat pump",
+    "items": [
+     {
+      "description": "Remove and dispose of damaged heat pump outdoor and indoor units",
+      "amount": 180.0
+     },
+     {
+      "description": "Supply matched 6 kW split system heat pump, indoor and outdoor units",
+      "amount": 3050.0
+     },
+     {
+      "description": "Install, pressure test, charge and commission",
+      "amount": 620.0
+     }
+    ],
+    "prepared_by": "George Fernmoor, electrician"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote for the heat pump"
+  },
+  {
+   "id": "receipt-reprint",
+   "file": "heat-pump-invoice-reprint.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Harakeke By Appliances (Synthetic)",
+    "issuer_address": "205 Upland Test Road, Frankton, Hamilton",
+    "invoice_number": "INV-2023-2012",
+    "date": "7 June 2023",
+    "reprinted_on": "14 September 2026",
+    "customer": "Mere Kererumont",
+    "items": [
+     {
+      "description": "Aurelio ComfortSplit 60 heat pump, 6 kW, indoor and outdoor units",
+      "serial": "ACS60-TST-2012",
+      "amount": 2899.0
+     },
+     {
+      "description": "Standard back-to-back installation",
+      "amount": 650.0
+     }
+    ],
+    "payment_method": "EFTPOS"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "heat_pump.purchase_date"
+   },
+   "purpose": "Proof of purchase and age of the heat pump (store reprint)"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200012",
+    "policyholder": "Mere Kererumont",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "1 May 2026 to 30 April 2027",
+    "insured": {
+     "Insured address": "12 Bellbird Test Drive, Rototuna, Hamilton",
+     "Occupancy": "Owner occupied",
+     "Sum insured": "$780,000"
+    },
+    "excess": "$750 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200012",
+    "family": "home",
+    "effective_from": "2026-05-01",
+    "effective_to": "2027-04-30",
+    "excess_nzd": 750,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H2",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-11",
+    "last_day": "2026-09-11"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [
+    "reprint_date_after_loss"
+   ],
+   "notes": "Innocent control: the heat pump invoice was reprinted on 14 September 2026, after the storm on 11 September 2026; the purchase date, 7 June 2023, is not. Only the purchase date counts (rules, section 3).",
+   "policy_inception_date": "2021-05-01"
+  },
+  "triage": {
+   "expected_class": "fast_track",
+   "required_reasons": [],
+   "allowed_reasons": [],
+   "rationale": "Wind damage to a fixed heat pump at the insured address, nobody hurt, home habitable, photo and a complete quote (NZD 4,427.50 including GST), policy on file. The invoice reprint date (14 September) is after the storm, but only the purchase date (7 June 2023) counts. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "clear",
+     "basis": "Purchase date 7 June 2023 is before the incident; the reprint date 14 September 2026 is ignored"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 15 September 2026; incident 11 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 May 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2021-05-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-11",
+   "property.address": "12 Bellbird Test Drive, Rototuna, Hamilton",
+   "property.habitable": true,
+   "property.ongoing_risk": "none"
+  },
+  "optional_facts": {
+   "incident.type": [
+    "weather",
+    "other"
+   ],
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "policy.policy_number": "NW-SYN-HOM-200012",
+   "property.occupancy_relationship": "owner"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-heat-pump.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=heat-pump-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=heat-pump-invoice-reprint.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30). The invoice is not a family requirement for home; it is asserted because the innocent control depends on it reaching the Claim."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent treats the reprint date as a problem: calls it suspicious, asks for the original invoice because of it, or says it may affect the claim. A neutral request to confirm when the heat pump was bought is fine."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-CLM-01",
+   "HOM-SET-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks the claimant to confirm when the heat pump was bought",
+   "Whether the Agent acknowledges that the claimant is upset"
+  ],
+  "intended_conflicts": []
+ }
+}

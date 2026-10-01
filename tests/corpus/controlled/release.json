@@ -1,0 +1,12 @@
+{
+ "repository": "CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent",
+ "tag": "controlled-corpus-v1-2026-10-01",
+ "asset": "fnol-controlled-corpus-v1-2026-10-01.zip",
+ "sha256": "8a59c56eac63e4839075c804e5f665de2950f5fddcd497c3ff50eb89586f3085",
+ "bytes": 36454914,
+ "corpora": [
+  "v1",
+  "samples-0.2"
+ ],
+ "note": "Pack files of the controlled test corpus; not frozen until RC1 (docs/controlled-test-corpus.md)."
+}

@@ -1,0 +1,250 @@
+{
+ "corpus": "controlled",
+ "corpus_version": "samples-0.2",
+ "schema_version": "0.2",
+ "generator_version": "tools-sha256:996f9b2ab1fd9490",
+ "written_utc": "2026-09-30T23:33:11+00:00",
+ "corpus_files": [],
+ "packs": [
+  {
+   "case_id": "CTL-C-001",
+   "files": [
+    {
+     "path": "cases/CTL-C-001/input/facts.json",
+     "sha256": "4dc6929fdce1d84f00e0f2a9cf41b9facc99a7d325c91c4b356ed27e2c7901bc",
+     "bytes": 2820
+    },
+    {
+     "path": "cases/CTL-C-001/input/initial_message.txt",
+     "sha256": "35c56e5c9c5d673aedae2b988f23c35849a585aae559b35b6ce78dc7b8eeabec",
+     "bytes": 176
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials.json",
+     "sha256": "0ab5d243dfda02f04f67792453ec550989f00d6aa97bfdf5a0d96c4998e0fd0f",
+     "bytes": 498
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials/photo-forced-window.jpg",
+     "sha256": "a0d68e3a5b1122d1cf0b8c43a7c20170271e40df271c376e14cae62caa178eda",
+     "bytes": 153601
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials/police-reference.pdf",
+     "sha256": "c87c903d68f24a63795fff144dbd37aa553da6ab99478e32b07fa072676a8c36",
+     "bytes": 2264
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials/policy-schedule.pdf",
+     "sha256": "11de88fa8e4a3ff5010e2fee0ad5d48b317cc2b6dac7868c23d27f1098256144",
+     "bytes": 2364
+    },
+    {
+     "path": "cases/CTL-C-001/input/materials/receipt-laptop.pdf",
+     "sha256": "3e94514eef6e46e22df88c7124340526d2bf862509130c17b20c7abf93fac744",
+     "bytes": 2346
+    },
+    {
+     "path": "cases/CTL-C-001/oracle/labels.json",
+     "sha256": "65c89a4fdf1229935c6122589c1d5d23067a7f9790775ff6e6e669f211122e33",
+     "bytes": 6373
+    },
+    {
+     "path": "cases/CTL-C-001/provenance.json",
+     "sha256": "0a28babf02f7269f3536470c531c096dfd0a8d904da1745bd96262ad9e4c9d3f",
+     "bytes": 4315
+    },
+    {
+     "path": "cases/CTL-C-001/review.json",
+     "sha256": "548bf80ae6acfa73ddd0472d364d7f8acdbbb3456ae19430ef179ab6147a18da",
+     "bytes": 2941
+    },
+    {
+     "path": "cases/CTL-C-001/setup.json",
+     "sha256": "26d50e6aa3dbd1d9a86bfc04cf6f59775407f142f5ac0a68bef788cb711bf351",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-C-002",
+   "files": [
+    {
+     "path": "cases/CTL-C-002/input/facts.json",
+     "sha256": "541fd54b8ac2498d7d30e556be55655d4d547ddbaad6382d4d42b09e84808f63",
+     "bytes": 2487
+    },
+    {
+     "path": "cases/CTL-C-002/input/initial_message.txt",
+     "sha256": "cd1fd9ef6084fb12f0a250167b0cdcae4940f1f6c64b15840b1224ba4b93d322",
+     "bytes": 150
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials.json",
+     "sha256": "0e65b9fecfaea4c816c293bb33ec7bd1cd3f7dd1815157d4790de11fb620e6b5",
+     "bytes": 383
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials/photo-tv-screen.jpg",
+     "sha256": "551d24c0dcf0ea906b12902bcf1960e3f16a7dbad0a9ad899a5b6698755f69e3",
+     "bytes": 207336
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials/policy-schedule.pdf",
+     "sha256": "a0834bce0c35c01c421bda1eb5384924dedcf948e11b65e784ab6a94e855d8a1",
+     "bytes": 2359
+    },
+    {
+     "path": "cases/CTL-C-002/input/materials/receipt-tv-reprint.pdf",
+     "sha256": "6d9b9e3637f1c2de9451dd3c7957762242d9a28457a9618498c221cf7b41172d",
+     "bytes": 2371
+    },
+    {
+     "path": "cases/CTL-C-002/oracle/labels.json",
+     "sha256": "ac962ba98b5f8e21f2a23ac849e12e6d06c66dbe38942419dffe267e0980f2ee",
+     "bytes": 5375
+    },
+    {
+     "path": "cases/CTL-C-002/provenance.json",
+     "sha256": "f7591ed41e8449910594f565372929ad6a3c7ab83ac381648e9db99e4b5059af",
+     "bytes": 3570
+    },
+    {
+     "path": "cases/CTL-C-002/review.json",
+     "sha256": "e05469d7f472d3131c46a0e4e3a992fe1cc0a7dd164dfe4a6ce80e37ad78f926",
+     "bytes": 3096
+    },
+    {
+     "path": "cases/CTL-C-002/setup.json",
+     "sha256": "f51e4b8cd94514e681b4538b6ae286e858c0195ca3eb5ac21194e8097cf32ae5",
+     "bytes": 353
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-H-001",
+   "files": [
+    {
+     "path": "cases/CTL-H-001/input/facts.json",
+     "sha256": "04e2dcdef152b81255f37c995d79d035e9355d22bb4fc4b62e8ac1357c55db3b",
+     "bytes": 2516
+    },
+    {
+     "path": "cases/CTL-H-001/input/initial_message.txt",
+     "sha256": "ff19ba9cdc0ef0e3e366472244fd0d6781cff7a6aafa60829e9951af9e17f2d7",
+     "bytes": 330
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials.json",
+     "sha256": "e68ca30b1d68ea88e8cd133147dafd4513318f58aaaec47ada668a29addddc70",
+     "bytes": 637
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/builder-quote-page1.pdf",
+     "sha256": "fc539c386a4e6f1602cc1257b914c0bdd3d892e149236bbdbf3f2a10dbf081e0",
+     "bytes": 2141
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/photo-ceiling-morning.jpg",
+     "sha256": "7d2b36a52309bdb1f57209d97c4569224886a46f7199efa41085d9eb16b4e0c6",
+     "bytes": 88675
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/photo-ceiling-night.jpg",
+     "sha256": "e0c32f0ec9a37c5b2a0f9974f8e5a4ce53214d2b254290d6ed0d3d7b44da9f5e",
+     "bytes": 21463
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/plumber-attendance-note.pdf",
+     "sha256": "8e1b05ca0bba83da2bfc4207c00f47c6388c13c7a6ec73400b77c7e32e5147c2",
+     "bytes": 2440
+    },
+    {
+     "path": "cases/CTL-H-001/input/materials/policy-schedule.pdf",
+     "sha256": "b4925f111517f79eb87f17c78de39680923e455f83e4e1e0686ebcf98dd13d0f",
+     "bytes": 2352
+    },
+    {
+     "path": "cases/CTL-H-001/oracle/labels.json",
+     "sha256": "acd17429de47a84081f8511a69e00118173dd6a2537bb01e4c65b0616983dc23",
+     "bytes": 5585
+    },
+    {
+     "path": "cases/CTL-H-001/provenance.json",
+     "sha256": "4dbbe6915c0590f33e1431ce279dc3bb894c518bbe888723c0ae33002bbe6245",
+     "bytes": 6652
+    },
+    {
+     "path": "cases/CTL-H-001/review.json",
+     "sha256": "033baa63102c6d1a84d704364c2021af9bf1200af422d08c2cef42da74d2a7cf",
+     "bytes": 5598
+    },
+    {
+     "path": "cases/CTL-H-001/setup.json",
+     "sha256": "ab657d879a3ce5044203bcdcdd0da6e28077b60291d2fc58a0adb7d9fe167987",
+     "bytes": 362
+    }
+   ]
+  },
+  {
+   "case_id": "CTL-M-001",
+   "files": [
+    {
+     "path": "cases/CTL-M-001/input/facts.json",
+     "sha256": "3734136aa0a0366d0fee221928cb923c0573f5b3c2e0bd4d315eb02966d09828",
+     "bytes": 2192
+    },
+    {
+     "path": "cases/CTL-M-001/input/initial_message.txt",
+     "sha256": "23c2020b271ebb1a7ce0d10547f27d3a83c7cd55e09aee86477574144bd9b77e",
+     "bytes": 164
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials.json",
+     "sha256": "8f6e84f53e1f6d63a248400f33fa8adbfb85be996220e4f358f39417a170ad20",
+     "bytes": 497
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/photo-bollard.jpg",
+     "sha256": "1ffe29275197c821c0ee76b5052d5226e772aa2ff2bb58834f4d69572c689424",
+     "bytes": 309854
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/photo-rear-bumper.jpg",
+     "sha256": "b836e0f749d30c436e3f964e43bfd36b5857064aff1495f166ed2661a0728b3c",
+     "bytes": 155907
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/policy-schedule.pdf",
+     "sha256": "2eba2259b4aba7af6ab41a30fa6bad4240d02d2191a4863f9e1bbddaaf0fd5de",
+     "bytes": 2420
+    },
+    {
+     "path": "cases/CTL-M-001/input/materials/repair-quote.pdf",
+     "sha256": "0074737a12f23783105ea6e14d6ee4073e23f432833f7fc360824cf2239f884e",
+     "bytes": 3487
+    },
+    {
+     "path": "cases/CTL-M-001/oracle/labels.json",
+     "sha256": "3ac9163bdab21e5027bccf773d38bdae1ae1a61cc7624b85126971d84ea3bd9a",
+     "bytes": 4818
+    },
+    {
+     "path": "cases/CTL-M-001/provenance.json",
+     "sha256": "137fe2164fa494f8b279b6bee82c0bcef8273966cf3c69fb7f41d181f8f4bfa7",
+     "bytes": 5154
+    },
+    {
+     "path": "cases/CTL-M-001/review.json",
+     "sha256": "1b87d576e81f1ddca5c8d9763c51c0e4172ee0243b0fd9877d6570d221d0c733",
+     "bytes": 5500
+    },
+    {
+     "path": "cases/CTL-M-001/setup.json",
+     "sha256": "55facdf4581c3357b2be8b9c9856c6c2969f6b22ee7b250cb0f11d9824b8dc3c",
+     "bytes": 350
+    }
+   ]
+  }
+ ]
+}

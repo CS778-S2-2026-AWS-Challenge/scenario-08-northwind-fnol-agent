@@ -1,0 +1,314 @@
+{
+ "case_id": "CTL-C-005",
+ "message_style": "plain",
+ "persona": "Calm and polite. Starts without signing in and signs in when asked to upload. Remembers the tablet as grey, says so in the first message, and stays with it if asked about the receipt.",
+ "initial_message": "Hi, I'd like to make a claim for my grey tablet. On Thursday evening, 17 September, it slid off the arm of the sofa onto the brick hearth and the screen shattered.",
+ "facts": {
+  "claim.product_family": "contents",
+  "incident.type": "accidental_damage",
+  "incident.description": "I was reading on the sofa and put the tablet down on the arm of the sofa. It slid off onto the brick hearth, landed on its corner and then fell face down.",
+  "incident.occurred_at": "Thursday 17 September 2026, about 8:40pm",
+  "incident.discovered_at": "Thursday 17 September 2026, about 8:40pm",
+  "incident.location": "5 Ridgefern Test Avenue, Stoke, Nelson",
+  "incident.cause": "Slid off the arm of the sofa onto a brick hearth",
+  "loss.description": "Tablet screen shattered across the whole glass, and the corner of the case is dented where it hit the brick",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "contents.items": [
+   {
+    "contents.item.description": "11-inch tablet, 256 GB",
+    "contents.item.brand": "Orrin",
+    "contents.item.model": "Slate 11",
+    "contents.item.category": "electronics",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 1149,
+    "contents.item.loss_type": "damaged",
+    "serial_number": "OS11-TST-3005",
+    "purchase_date": "2 February 2026",
+    "colour": "grey",
+    "contents.item.ownership": "owned"
+   }
+  ],
+  "contents.receipt_availability": "Tax invoice from the shop, available now",
+  "contents.proof_of_ownership": "Tax invoice",
+  "property.address": "5 Ridgefern Test Avenue, Stoke, Nelson",
+  "property.occupancy_relationship": "tenant",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "noah.puriricombe@example.invalid",
+  "claimant.phone": "+64 00 000 3005",
+  "policyholder.name": "Noah Puriricombe",
+  "policy.policy_number": "NW-SYN-CON-300005",
+  "evidence.photos": "One photo of the cracked screen, taken that evening. Available now.",
+  "evidence.receipt": "Tax invoice from Copperleaf Electronics dated 2 February 2026. Available now.",
+  "if_asked_about_the_colour": "It is grey.",
+  "if_asked_why_the_receipt_says_green": "Mine is grey, I am fairly sure. Maybe the shop put the wrong colour on the receipt.",
+  "if_asked_whether_the_damaged_item_is_kept": "Yes, I still have the tablet. It is switched off in a drawer."
+ },
+ "materials": [
+  {
+   "id": "photo-tablet",
+   "file": "photo-tablet-screen.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo looking down at a thin tablet computer lying screen-up on a red brick fireplace hearth. The black glass screen is switched off and shattered in a spider-web of cracks spreading from the lower right corner, and that corner of the thin dark bezel is dented. A folded wool throw is at the top edge of the frame. Warm evening lamp light. No people, no text, no logos.",
+   "seed": 300501,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the shattered tablet screen",
+   "expect_object": [
+    "tablet",
+    "tablet screen",
+    "tablet computer",
+    "screen"
+   ]
+  },
+  {
+   "id": "receipt-tablet",
+   "file": "receipt-tablet.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Copperleaf Electronics (Synthetic)",
+    "issuer_address": "9 Orchard Test Lane, Richmond, Nelson",
+    "invoice_number": "INV-2026-3005",
+    "date": "2 February 2026",
+    "customer": "Noah Puriricombe",
+    "items": [
+     {
+      "description": "Orrin Slate 11 tablet, 11-inch, 256 GB, sage green",
+      "serial": "OS11-TST-3005",
+      "amount": 1149.0
+     }
+    ],
+    "payment_method": "EFTPOS"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "contents.items[0].purchase_date",
+    "serials": "contents.items[0].serial_number",
+    "items": "contents.items[0].colour"
+   },
+   "purpose": "Proof of purchase for the tablet; it names a different colour from the one the claimant gives"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-CON-300005",
+    "policyholder": "Noah Puriricombe",
+    "wording": "Northwind Contents Standard Policy, version MVP-2026.1",
+    "cover": "Contents - sum insured",
+    "period": "20 May 2026 to 19 May 2027",
+    "insured": {
+     "Insured address": "5 Ridgefern Test Avenue, Stoke, Nelson",
+     "Contents sum insured": "$40,000"
+    },
+    "excess": "$250 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the contents wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "anonymous_then_sign_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-CON-300005",
+    "family": "contents",
+    "effective_from": "2026-05-20",
+    "effective_to": "2027-05-19",
+    "excess_nzd": 250,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "contents",
+  "scenario_category": "C1",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-17",
+    "last_day": "2026-09-17"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [
+    "non_date_inconsistency"
+   ],
+   "notes": "Plan feature innocent_non_date_inconsistency. The receipt describes the tablet as sage green; the claimant calls it grey in the first message. Serial number, model, price and dates all match. A colour mismatch is not a review indicator; it only needs clarifying.",
+   "policy_inception_date": "2022-05-20"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "inconsistency_unresolved"
+   ],
+   "allowed_reasons": [],
+   "rationale": "Accidental damage to one tablet (NZD 1,149) at the insured address, nobody hurt, photo and tax invoice supplied, policy on file. The invoice names the tablet as sage green while the claimant calls it grey in the first message and stays with that when asked, so a material contradicts the statement and it is not clarified. The mismatch is not about dates, so there is no review indicator. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "clear",
+     "basis": "Purchase date 2 February 2026 is before the incident on 17 September 2026"
+    },
+    "quote_before_loss": {
+     "expected": "not_applicable",
+     "basis": "No quote or assessment in the pack"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Starts anonymous and signs in before upload; the account has no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (20 May 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2022-05-20, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "contents",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-17"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-tablet-screen.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-tablet.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.contents_items[loss_type=damaged]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent suggests the receipt is not for this tablet, that the claimant is being dishonest, or that the colour difference may stop the claim."
+   },
+   {
+    "id": "A4",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "If the Agent raises the colour on the receipt, it asks the claimant to confirm the colour in a neutral way, as for any other mismatch. Passes when the Agent does not raise it."
+   }
+  ],
+  "expected_rag_sources": [
+   "CON-COV-01",
+   "CON-CLM-02",
+   "CON-LIM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks about the colour on the receipt",
+   "When in the conversation the claimant signs in, as long as it is before the first upload"
+  ],
+  "intended_conflicts": [
+   {
+    "material": "receipt-tablet",
+    "field": "items",
+    "value": [
+     "Orrin Slate 11 tablet, 11-inch, 256 GB, sage green"
+    ],
+    "fact": "contents.items[0].colour",
+    "fact_value": "grey",
+    "note": "The receipt describes the tablet as sage green; the claimant says it is grey. Not a date mismatch."
+   }
+  ],
+  "optional_facts": {
+   "incident.type": "other",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "parties.other_parties": false,
+   "policy.policy_number": "NW-SYN-CON-300005"
+  }
+ }
+}

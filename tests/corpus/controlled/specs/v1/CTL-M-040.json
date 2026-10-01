@@ -1,0 +1,407 @@
+{
+ "case_id": "CTL-M-040",
+ "message_style": "many_facts",
+ "persona": "Talkative and well organised; gives most of the story in one go and has every document ready. Still a bit shaken but clear.",
+ "initial_message": "Hi, I need to lodge a claim. Saturday night 26 September about 8.40pm I was driving home along Driftwood Test Crescent in Waiatarua in that storm and came round a bend into a big pine tree that had come down across the road. I braked but slid into it. Both front airbags went off, the bonnet and bumper are wrecked and coolant was pouring out, so Long Reach Towing took it away and it's now at Ridgeway Collision Repairs in Henderson. They've given me a quote and said an assessor needs to look at it because of the airbags. Nobody was hurt, I was on my own, and the guy in the car behind me stopped and gave me his number. It's my 2022 Hyundai Kona, rego TST-040.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I was driving home in heavy rain and wind at about 50 km/h. Around a bend a large pine tree had fallen right across the road. I braked hard but the car slid on the wet road into the trunk. Both front airbags went off and coolant poured out. The driver behind me stopped, helped me put my hazard lights and triangle out, and rang the council about the tree.",
+  "incident.occurred_at": "Saturday 26 September 2026, about 8:40pm",
+  "incident.location": "Driftwood Test Crescent, Waiatarua, Auckland",
+  "incident.cause": "Slid into a tree that had fallen across the road in a storm",
+  "loss.description": "Front end crushed, bonnet buckled, both headlights broken, radiator holed, both front airbags deployed",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "yes",
+  "witness.name": "Ravi Kauridean",
+  "witness.phone": "+64 00 000 7040",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "mohammed.tanewood@example.invalid",
+  "claimant.phone": "+64 00 000 1040",
+  "policyholder.name": "Mohammed Tanewood",
+  "policy.policy_number": "NW-SYN-MTR-100040",
+  "vehicle.registration": "TST-040",
+  "vehicle.make": "Hyundai",
+  "vehicle.model": "Kona",
+  "vehicle.year": 2022,
+  "vehicle.colour": "orange",
+  "vehicle.use": "commuting",
+  "vehicle.damage_description": "Front bumper and grille crushed, bonnet buckled, both headlights broken, radiator and condenser holed, driver and passenger airbags deployed",
+  "vehicle.drivable": false,
+  "vehicle.towing_required": "already_towed",
+  "vehicle.towing_location": "Ridgeway Collision Repairs, 30 Cedarvale Test Way, Henderson, Auckland",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "Mohammed Tanewood",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10040",
+  "driver.owner_permission": "not_applicable",
+  "evidence.photos": "Two photos from the scene: the front of the car against the tree and the airbags inside. Available now.",
+  "evidence.repair_quote": "Quote from Ridgeway Collision Repairs dated 29 September 2026. Available now.",
+  "evidence.tow_record": "Tow job sheet from Long Reach Towing. Available now.",
+  "if_asked_about_quote_total": "$11,891.00 including GST.",
+  "if_asked_about_the_tree": "It was a big pine that came down in the wind. The council crew cleared it later that night. I don't know whose tree it was; it was on the roadside.",
+  "if_asked_about_assessor": "Ridgeway said the insurer's assessor needs to see it because the airbags went off. It is at their Henderson workshop.",
+  "if_asked_about_passengers": "No, I was on my own."
+ },
+ "materials": [
+  {
+   "id": "photo-front",
+   "file": "photo-front-tree.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo at night in rain, lit by the headlights of a car behind: the front left corner of an orange compact SUV pressed against the thick trunk of a fallen pine tree lying across a wet road, the bonnet buckled upward, the bumper crushed, the left headlight smashed, pine needles and broken branches over the bonnet. Close crop from the side that shows only the front left corner, the front wheel, the left side of the bonnet and the trunk.",
+   "seed": 107001,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the front-end damage against the fallen tree",
+   "expect_object": [
+    "bonnet",
+    "hood",
+    "bumper",
+    "headlight"
+   ],
+   "seed_history": [
+    {
+     "seed": 104001,
+     "reasons": [
+      "CTL-M-040/photo-front-tree.jpg: with-facts pass: brand_logo ['Mitsubishi']",
+      "CTL-M-040/photo-front-tree.jpg: with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 105001,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 106001,
+     "reasons": [
+      "image-only pass: licence plate is 'partial, front of the orange vehicle, not a New Zealand plate', not exactly \"none\"",
+      "with-facts pass: licence plate is 'partial', not exactly \"none\"",
+      "with-facts pass: brand_logo ['Holden']",
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 107001,
+     "reasons": []
+    }
+   ]
+  },
+  {
+   "id": "photo-airbags",
+   "file": "photo-airbags.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo at night with the interior light on, taken through the open driver's door of a small SUV: the deflated white driver airbag hangs from the steering wheel and covers its centre, and the deflated passenger airbag is draped over the top of the dashboard; fine white powder on the dash and the seats, rain drops on the door sill. Close crop that shows only the airbag fabric, the top of the dashboard and the seat cushions.",
+   "seed": 104002,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows that both front airbags deployed",
+   "expect_object": [
+    "airbag",
+    "airbags"
+   ]
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Ridgeway Collision Repairs (Synthetic)",
+    "issuer_address": "30 Cedarvale Test Way, Henderson, Auckland",
+    "quote_number": "Q-2026-1040",
+    "quote_date": "29 September 2026",
+    "valid_until": "28 December 2026",
+    "customer": "Mohammed Tanewood",
+    "subject": "Hyundai Kona 2022, orange, TST-040 - front end and airbags (hit fallen tree)",
+    "items": [
+     {
+      "description": "Replace front bumper cover, reinforcement and grille",
+      "amount": 1420.0
+     },
+     {
+      "description": "Replace bonnet and hinges",
+      "amount": 980.0
+     },
+     {
+      "description": "Replace left and right headlights",
+      "amount": 1640.0
+     },
+     {
+      "description": "Replace radiator, condenser and cooling fan",
+      "amount": 1150.0
+     },
+     {
+      "description": "Replace driver and passenger airbag modules and dash panel",
+      "amount": 2860.0
+     },
+     {
+      "description": "Replace front seatbelt pretensioners",
+      "amount": 780.0
+     },
+     {
+      "description": "Refinish front panels",
+      "amount": 1120.0
+     },
+     {
+      "description": "Diagnostic scan; calibrate front camera and radar",
+      "amount": 390.0
+     }
+    ],
+    "prepared_by": "Sofia Ashtarn, estimator"
+   },
+   "purpose": "Repair quote for the front-end and airbag damage",
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   }
+  },
+  {
+   "id": "tow-job-sheet",
+   "file": "tow-job-sheet.pdf",
+   "evidence_kind": "other_document",
+   "method": "template",
+   "template": "attendance_note",
+   "data": {
+    "issuer": "Long Reach Towing (Synthetic)",
+    "issuer_address": "27 Karaka Test Row, Henderson, Auckland",
+    "job_number": "J-2026-1040",
+    "attended": "Saturday 26 September 2026, 9:55pm",
+    "address": "Driftwood Test Crescent, Waiatarua, Auckland",
+    "customer": "Mohammed Tanewood",
+    "found": "Orange SUV nose-first against a fallen pine tree across the road. Front end crushed, both front airbags deployed, coolant on the road. Driver out of the vehicle and unhurt.",
+    "work_done": "Loaded on the tilt tray and stored at the Henderson yard. Delivered to Ridgeway Collision Repairs on Monday 28 September 2026.",
+    "follow_up": "Not drivable. Airbags deployed: assessor inspection needed before repair."
+   },
+   "fact_links": {
+    "address": "incident.location",
+    "customer": "policyholder.name"
+   },
+   "purpose": "Tow operator's record that the car could not be driven"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100040",
+    "policyholder": "Mohammed Tanewood",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "5 January 2026 to 4 January 2027",
+    "insured": {
+     "Vehicle": "Hyundai Kona 2022, orange",
+     "Registration": "TST-040",
+     "Agreed value": "$32,000"
+    },
+    "excess": "$750 base excess for each event",
+    "extra": {
+     "Named drivers": "Mohammed Tanewood"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100040",
+    "family": "motor",
+    "effective_from": "2026-01-05",
+    "effective_to": "2027-01-04",
+    "excess_nzd": 750,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M4",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-26",
+    "last_day": "2026-09-26"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "A clean M4 pack: every material present and readable, one witness who is not a party.",
+   "policy_inception_date": "2023-01-05"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "vehicle_undrivable_or_assessor",
+    "amount_over_threshold_or_unknown"
+   ],
+   "allowed_reasons": [],
+   "rationale": "The car cannot be driven, was towed and needs an assessor because the airbags deployed. Quote total NZD 11,891.00 including GST, over the threshold. Nobody hurt; the witness stopped to help and is not involved; the fallen tree is not another party. All materials are present and readable. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 29 September 2026; incident 26 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (5 January 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2023-01-05, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-26",
+   "parties.other_parties": false,
+   "vehicle.drivable": false,
+   "vehicle.registration": "TST-040",
+   "witness.present": "yes"
+  },
+  "optional_facts": {
+   "policy.policy_number": "NW-SYN-MTR-100040",
+   "vehicle.towing_required": "already_towed",
+   "witness.name": "Ravi Kauridean",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ]
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-tree.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent asks an open question for a fact the first message already gave (the date, the place, the towing, the registration or that nobody was hurt) instead of confirming it. Asking the claimant to confirm a stated fact is fine."
+   },
+   {
+    "id": "F6",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent treats the witness as another party to the accident, for example by asking for the witness's insurer or vehicle details."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent suggests the claimant drive the vehicle, for example to a repairer or to an assessor, although it cannot be driven safely."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-BEN-01",
+   "MTR-CLM-01",
+   "MTR-CLM-02",
+   "MTR-SET-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks for the tow job sheet",
+   "Whether the Agent collects the witness's details"
+  ],
+  "intended_conflicts": []
+ }
+}

@@ -1,0 +1,328 @@
+{
+ "case_id": "CTL-M-038",
+ "message_style": "typos",
+ "persona": "Easy-going, types quickly without capitals or much punctuation. Did not notice that the panel beater left the car details off the quote.",
+ "initial_message": "hi my car hit a deer on sunday nite 20th sept driving back from lake okareka. deer came out of the bush and i couldnt stop, front is all smashed and radiater leaking so it got towed. im fine. what do i need to send u",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I was driving back to Ngongotaha on the forest road at about 70 km/h. A deer jumped out of the bush on the left, right in front of the car. I braked but hit it with the front right of the car. The deer ran off into the bush. Coolant was pouring out and the temperature light came on, so I stopped and called a tow.",
+  "incident.occurred_at": "Sunday 20 September 2026, about 9:30pm",
+  "incident.location": "Ashbourne Test Avenue, near Lake Okareka, Rotorua",
+  "incident.cause": "A wild deer ran in front of the car",
+  "loss.description": "Front bumper smashed, bonnet buckled, right headlight and fog light broken, radiator leaking",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "no",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "sms",
+  "claimant.email": "james.puriricombe@example.invalid",
+  "claimant.phone": "+64 00 000 1038",
+  "policyholder.name": "James Puriricombe",
+  "policy.policy_number": "NW-SYN-MTR-100038",
+  "vehicle.registration": "TST-038",
+  "vehicle.make": "Hyundai",
+  "vehicle.model": "Tucson",
+  "vehicle.year": 2021,
+  "vehicle.colour": "burgundy",
+  "vehicle.use": "private",
+  "vehicle.damage_description": "Front bumper cracked and pushed in on the right, bonnet buckled, right headlight and fog light smashed, radiator holed",
+  "vehicle.drivable": false,
+  "vehicle.towing_required": "already_towed",
+  "vehicle.towing_location": "Kiln Hurst Smash Repairs, 41 Nikau Test Glade, Fairy Springs, Rotorua",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "James Puriricombe",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10038",
+  "driver.owner_permission": "not_applicable",
+  "evidence.photos": "One photo of the front of the car taken at the tow yard on Monday morning. Available now.",
+  "evidence.repair_quote": "Quote from Kiln Hurst Smash Repairs dated 24 September 2026. Available now.",
+  "if_asked_about_quote_vehicle": "its for my tucson, TST-038. didnt notice they left the car details off, i can ask them to add it",
+  "if_asked_about_the_deer": "it was a wild deer, it ran off into the bush. nobody owns it as far as i know",
+  "if_asked_about_quote_total": "$4,163.00 with gst",
+  "if_asked_about_tow": "long reach towing kept it at their yard overnight and took it to kiln hurst smash repairs in fairy springs on monday"
+ },
+ "materials": [
+  {
+   "id": "photo-front",
+   "file": "photo-front-right.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in overcast morning light at a gravel tow yard: the front right corner of a burgundy SUV, the front bumper cracked and pushed in, the bonnet edge buckled upward, the right headlight and fog light smashed, a tuft of brown animal hair caught in the cracked bumper, green coolant stains on the gravel below. Close crop from the right side that shows only the right corner of the bumper, the headlight, the fog light and the edge of the bonnet.",
+   "seed": 103801,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the front-end damage from the deer strike",
+   "expect_object": [
+    "bumper",
+    "front bumper",
+    "headlight",
+    "bonnet",
+    "hood"
+   ]
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Kiln Hurst Smash Repairs (Synthetic)",
+    "issuer_address": "41 Nikau Test Glade, Fairy Springs, Rotorua",
+    "quote_number": "Q-2026-1038",
+    "quote_date": "24 September 2026",
+    "valid_until": "23 December 2026",
+    "customer": "James Puriricombe",
+    "subject": "",
+    "items": [
+     {
+      "description": "Replace front bumper cover",
+      "amount": 610.0
+     },
+     {
+      "description": "Replace bonnet",
+      "amount": 720.0
+     },
+     {
+      "description": "Replace radiator and fan shroud",
+      "amount": 690.0
+     },
+     {
+      "description": "Replace right headlight",
+      "amount": 480.0
+     },
+     {
+      "description": "Replace right fog light",
+      "amount": 120.0
+     },
+     {
+      "description": "Refinish front bumper and bonnet",
+      "amount": 820.0
+     },
+     {
+      "description": "Check condenser and recharge air conditioning",
+      "amount": 180.0
+     }
+    ],
+    "prepared_by": "Tomas Bellmoor, estimator"
+   },
+   "purpose": "Repair quote that does not identify the vehicle",
+   "fact_links": {
+    "customer": "policyholder.name"
+   }
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100038",
+    "policyholder": "James Puriricombe",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "16 June 2026 to 15 June 2027",
+    "insured": {
+     "Vehicle": "Hyundai Tucson 2021, burgundy",
+     "Registration": "TST-038",
+     "Agreed value": "$27,500"
+    },
+    "excess": "$500 base excess for each event",
+    "extra": {
+     "Named drivers": "James Puriricombe"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100038",
+    "family": "motor",
+    "effective_from": "2026-06-16",
+    "effective_to": "2027-06-15",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M4",
+  "condition": "missing_information",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-20",
+    "last_day": "2026-09-20"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "The quote leaves the vehicle field blank: no make, model or registration, so it cannot be tied to the insured vehicle without asking.",
+   "policy_inception_date": "2020-06-16"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "evidence_outstanding",
+    "vehicle_undrivable_or_assessor"
+   ],
+   "allowed_reasons": [],
+   "rationale": "The repair quote does not say which vehicle it is for, so it is incomplete and someone must follow up. The car was towed and cannot be driven. Quote total NZD 4,163.00 including GST, under the threshold. A wild deer is not another party. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 24 September 2026; incident 20 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (16 June 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2020-06-16, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-20",
+   "parties.other_parties": false,
+   "vehicle.drivable": false
+  },
+  "optional_facts": {
+   "vehicle.registration": "TST-038",
+   "policy.policy_number": "NW-SYN-MTR-100038",
+   "vehicle.towing_required": "already_towed",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ]
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-right.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent asks for a quote that identifies the vehicle (make, model or registration), or asks the claimant to confirm which vehicle the quote is for."
+   },
+   {
+    "id": "A4",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent finds out where the vehicle is now (for example at the repairer or a tow yard), unless the claimant has already said so."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent tells the claimant that hitting an animal is not covered, or that a Police report is required before the claim can go ahead."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-BEN-01",
+   "MTR-CLM-01",
+   "MTR-CLM-02"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks the claimant to get the quote corrected or accepts the claimant's confirmation for now"
+  ],
+  "intended_conflicts": []
+ }
+}

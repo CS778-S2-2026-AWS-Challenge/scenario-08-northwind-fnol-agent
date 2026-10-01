@@ -1,0 +1,417 @@
+{
+ "case_id": "CTL-C-020",
+ "message_style": "emotional",
+ "persona": "Stressed and flustered, apologises for rambling, but keeps the facts straight. Rents the house; has photos of the desk and the computer and a receipt for each, but none for the rug.",
+ "initial_message": "I'm so upset right now. On Friday 18th the washing machine hose split while we were out and when we got home the whole study floor was under water!! My computer was sitting on the floor and now it won't turn on, the desk legs have gone all swollen and the rug is soaked through. I just don't know where to start with this.",
+ "facts": {
+  "claim.product_family": "contents",
+  "incident.type": "water",
+  "incident.description": "We went out at about 1pm. When we got home at about 4:45pm, water was running out of the laundry and across the study floor next door. The cold inlet hose on the back of the washing machine had split. I turned off the tap behind the machine straight away. My desktop computer was on the floor under the desk and sat in the water, the bottom of the desk legs and the lowest drawer soaked it up, and the rug was soaked.",
+  "incident.occurred_at": "Friday 18 September 2026, between 1pm and 4:45pm",
+  "incident.discovered_at": "Friday 18 September 2026, about 4:45pm",
+  "incident.location": "20 Kereru Test Road, Kensington, Whangarei",
+  "incident.cause": "The cold water inlet hose of the washing machine split",
+  "loss.description": "Desktop computer does not power on after standing in water; oak desk legs and lowest drawer swollen and split; wool rug soaked and stained",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "contents.items": [
+   {
+    "contents.item.description": "Desktop computer tower",
+    "contents.item.brand": "Norvik",
+    "contents.item.model": "Forge 7",
+    "contents.item.category": "electronics",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 2650,
+    "contents.item.loss_type": "damaged",
+    "serial_number": "NF7-TST-3020",
+    "purchase_date": "22 November 2025",
+    "contents.item.ownership": "owned"
+   },
+   {
+    "contents.item.description": "Solid oak writing desk with three drawers",
+    "contents.item.brand": "Kauri Hall",
+    "contents.item.model": "Scribe desk",
+    "contents.item.category": "furniture",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 1980,
+    "contents.item.loss_type": "damaged",
+    "purchase_date": "9 May 2026",
+    "contents.item.ownership": "owned"
+   },
+   {
+    "contents.item.description": "Wool rug, 2 m by 3 m, blue and cream",
+    "contents.item.brand": "unknown",
+    "contents.item.model": "unknown",
+    "contents.item.category": "furnishings",
+    "contents.item.quantity": 1,
+    "contents.item.estimated_value": 690,
+    "contents.item.loss_type": "damaged",
+    "purchase_date": "2024, at a weekend market",
+    "contents.item.ownership": "owned"
+   }
+  ],
+  "contents.receipt_availability": "Receipts for the computer and the desk, available now. No receipt for the rug; I paid cash at a market.",
+  "contents.proof_of_ownership": "Receipts for the computer and the desk",
+  "property.address": "20 Kereru Test Road, Kensington, Whangarei",
+  "property.occupancy_relationship": "tenant",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "phone",
+  "claimant.email": "mohammed.saltmarsh@example.invalid",
+  "claimant.phone": "+64 00 000 3020",
+  "policyholder.name": "Mohammed Saltmarsh",
+  "policy.policy_number": "NW-SYN-CON-300020",
+  "evidence.photos": "One photo of the desk and one of the computer, both taken that evening. Available now.",
+  "evidence.receipts": "The computer receipt and the desk receipt. Both available now.",
+  "if_asked_about_the_hose": "It was fine that morning when I did a load. It just split along the side. The landlord had a plumber fit a new hose on Saturday.",
+  "if_asked_about_the_building": "We rent. The landlord knows and is dealing with the floorboards and the laundry. I'm only claiming for our own things.",
+  "if_asked_whether_water_is_still_leaking": "No, I turned the tap off as soon as we got home and the new hose is fine.",
+  "if_asked_about_the_damaged_items_now": "The desk and the computer are in the garage drying out. I've kept everything. The rug is hanging on the line."
+ },
+ "materials": [
+  {
+   "id": "photo-desk",
+   "file": "photo-water-damaged-desk.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in a small home study in late afternoon daylight: the lower part of a solid oak writing desk standing in a shallow puddle of water on wooden floorboards, the bottoms of the desk legs and the lowest drawer front swollen and split with dark water stains soaking up the timber, the finish on the drawer lifting and bubbling. A soaked blue and cream wool rug is pushed back at the edge of the frame. The damaged desk legs and drawer are in the centre of the frame. No people, no text, no logos.",
+   "seed": 302001,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the water damage to the desk",
+   "expect_object": [
+    "desk",
+    "writing desk",
+    "drawer",
+    "desk drawer",
+    "desk leg"
+   ],
+   "seed_history": [
+    {
+     "seed": 302001,
+     "reasons": [
+      "CTL-C-020/photo-water-damaged-desk.jpg: image-only pass names 'bottom corner of wooden cabinet', expected one of ['desk', 'writing desk', 'drawer', 'desk drawer', 'desk leg']"
+     ]
+    },
+    {
+     "seed": 303001,
+     "reasons": [
+      "CTL-C-020/photo-water-damaged-desk.jpg: image-only pass names 'bottom of wooden cabinet', expected one of ['desk', 'writing desk', 'drawer', 'desk drawer', 'desk leg']"
+     ]
+    },
+    {
+     "seed": 304001,
+     "reasons": [
+      "CTL-C-020/photo-water-damaged-desk.jpg: image-only pass names 'bottom of wooden cabinet', expected one of ['desk', 'writing desk', 'drawer', 'desk drawer', 'desk leg']"
+     ]
+    },
+    {
+     "seed": 305001,
+     "reasons": [
+      "CTL-C-020/photo-water-damaged-desk.jpg: image-only pass names 'base of wooden cabinet', expected one of ['desk', 'writing desk', 'drawer', 'desk drawer', 'desk leg']"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "photo-computer",
+   "file": "photo-water-damaged-computer.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in a home study in late afternoon daylight: a plain matte black desktop computer tower case, seen side-on with its plain side panel facing the camera, standing on wet wooden floorboards in a shallow puddle of water beside an oak desk leg, a dirty tide line of water marks along the bottom of the case, droplets on the side panel, unplugged cables lying in the water. Close-up, the computer tower in the centre of the frame. No people, no text, no logos.",
+   "seed": 302002,
+   "size": [
+    912,
+    1216
+   ],
+   "purpose": "Shows the computer that stood in the water",
+   "expect_object": [
+    "computer",
+    "computer tower",
+    "desktop computer",
+    "computer case",
+    "pc",
+    "tower"
+   ]
+  },
+  {
+   "id": "receipt-computer",
+   "file": "receipt-computer.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Longreach Tech Store (Synthetic)",
+    "issuer_address": "15 Lighthouse Test Road, Whangarei Central, Whangarei",
+    "invoice_number": "INV-2025-3020",
+    "date": "22 November 2025",
+    "customer": "Mohammed Saltmarsh",
+    "items": [
+     {
+      "description": "Norvik Forge 7 desktop computer, 32 GB, 2 TB",
+      "serial": "NF7-TST-3020",
+      "amount": 2650.0
+     }
+    ],
+    "payment_method": "Card ending 3020"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "contents.items[0].purchase_date",
+    "serials": "contents.items[0].serial_number"
+   },
+   "purpose": "Proof of purchase for the computer"
+  },
+  {
+   "id": "receipt-desk",
+   "file": "receipt-desk.pdf",
+   "evidence_kind": "receipt",
+   "method": "template",
+   "template": "receipt",
+   "data": {
+    "issuer": "Manuka Stead Home & Living (Synthetic)",
+    "issuer_address": "33 Pinecrest Test Avenue, Tikipunga, Whangarei",
+    "invoice_number": "INV-2026-3020",
+    "date": "9 May 2026",
+    "customer": "Mohammed Saltmarsh",
+    "items": [
+     {
+      "description": "Kauri Hall Scribe desk, solid oak, three drawers",
+      "amount": 1980.0
+     }
+    ],
+    "payment_method": "EFTPOS"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "date": "contents.items[1].purchase_date",
+    "items": "contents.items[1].contents.item.model"
+   },
+   "purpose": "Proof of purchase for the desk"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-CON-300020",
+    "policyholder": "Mohammed Saltmarsh",
+    "wording": "Northwind Contents Standard Policy, version MVP-2026.1",
+    "cover": "Contents - sum insured",
+    "period": "1 August 2026 to 31 July 2027",
+    "insured": {
+     "Insured address": "20 Kereru Test Road, Kensington, Whangarei",
+     "Contents sum insured": "$60,000"
+    },
+    "excess": "$400 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the contents wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-CON-300020",
+    "family": "contents",
+    "effective_from": "2026-08-01",
+    "effective_to": "2027-07-31",
+    "excess_nzd": 400,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "contents",
+  "scenario_category": "C2",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-18",
+    "last_day": "2026-09-18"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "policy_inception_date": "2018-08-01",
+   "notes": "Item-level evidence that all agrees: each item has its own value, a photo covers the two main items, and the two receipts match the fact sheet. Only the total amount needs follow-up."
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "amount_over_threshold_or_unknown"
+   ],
+   "allowed_reasons": [
+    "evidence_outstanding"
+   ],
+   "rationale": "Sudden escape of water from a split washing machine hose at the insured address; nobody hurt, the tap is off and nothing is still leaking, and the building is the landlord's. The three items total NZD 5,320 (2,650 + 1,980 + 690), over the NZD 5,000 threshold, so the claim needs follow-up. Both receipts are dated before the loss and match the fact sheet, and no review check applies. Allowed but not required: the rug has no receipt (evidence_outstanding). It does not change the class. Coverage is not unclear: the pack policy carries no lookup uncertainty marker. The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "clear",
+     "basis": "Both receipts are dated before the incident on 18 September 2026: the computer on 22 November 2025, the desk on 9 May 2026"
+    },
+    "quote_before_loss": {
+     "expected": "not_applicable",
+     "basis": "No quote or assessment in the pack"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 August 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2018-08-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "contents",
+   "incident.type": "water",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-18"
+  },
+  "optional_facts": {
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "policy.policy_number": "NW-SYN-CON-300020",
+   "property.occupancy_relationship": "tenant"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-water-damaged-desk.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-water-damaged-computer.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-computer.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E4",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=receipt-desk.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.contents_items[loss_type=damaged]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the items are covered or will be replaced, or that they are not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the damage is gradual, or not covered because the hose was worn or the machine broke down."
+   },
+   {
+    "id": "A4",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent acknowledges the claimant's distress briefly and keeps to the next practical step, and it collects all three damaged items (the computer, the desk and the rug), one by one or as a list."
+   }
+  ],
+  "expected_rag_sources": [
+   "CON-COV-01",
+   "CON-CLM-01",
+   "CON-EXC-02"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks the claimant to keep the damaged items for inspection",
+   "Whether the Agent asks for other proof of ownership for the rug"
+  ],
+  "intended_conflicts": []
+ }
+}

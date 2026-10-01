@@ -1,0 +1,1002 @@
+[
+ {
+  "category": "M1",
+  "feature": "innocent_reprint_date_after_loss",
+  "condition": "unsupported_format",
+  "case_id": "CTL-M-001",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "M1",
+  "feature": "innocent_same_day_purchase",
+  "condition": "normal",
+  "case_id": "CTL-M-002",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "innocent_one_prior_claim",
+  "condition": "normal",
+  "case_id": "CTL-M-003",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "innocent_one_prior_claim",
+  "condition": "normal",
+  "case_id": "CTL-M-004",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "hint_two_prior_claims",
+  "condition": "normal",
+  "case_id": "CTL-M-005",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "hint_two_prior_claims",
+  "condition": "normal",
+  "case_id": "CTL-M-006",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "possible_duplicate",
+  "condition": "normal",
+  "case_id": "CTL-M-007",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "possible_duplicate",
+  "condition": "normal",
+  "case_id": "CTL-M-008",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "policy_not_found",
+  "condition": "normal",
+  "case_id": "CTL-M-009",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "none",
+  "condition": "illegible",
+  "case_id": "CTL-M-010",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "none",
+  "condition": "expired",
+  "case_id": "CTL-M-011",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M1",
+  "feature": "none",
+  "condition": "corrupt_file",
+  "case_id": "CTL-M-012",
+  "family": "motor",
+  "scenario": "Collision and fast progression",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "M2",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-013",
+  "family": "motor",
+  "scenario": "Injury or continuing danger",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M2",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-014",
+  "family": "motor",
+  "scenario": "Injury or continuing danger",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M2",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-015",
+  "family": "motor",
+  "scenario": "Injury or continuing danger",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M2",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-016",
+  "family": "motor",
+  "scenario": "Injury or continuing danger",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M2",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-017",
+  "family": "motor",
+  "scenario": "Injury or continuing danger",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M2",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-018",
+  "family": "motor",
+  "scenario": "Injury or continuing danger",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "innocent_non_date_inconsistency",
+  "condition": "normal",
+  "case_id": "CTL-M-019",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "missing_information",
+  "case_id": "CTL-M-020",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "conflicting",
+  "case_id": "CTL-M-021",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "unsupported_format",
+  "case_id": "CTL-M-022",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "not_yet_available",
+  "case_id": "CTL-M-023",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "not_yet_available",
+  "case_id": "CTL-M-024",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-025",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-026",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-027",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M3",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-028",
+  "family": "motor",
+  "scenario": "Another party or Police",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "quote_before_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-M-029",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "quote_before_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-M-030",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "quote_before_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-M-031",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "quote_before_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-M-032",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "quote_before_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-M-033",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "history_lookup_outage",
+  "condition": "normal",
+  "case_id": "CTL-M-034",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "none",
+  "condition": "illegible",
+  "case_id": "CTL-M-035",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "none",
+  "condition": "missing_page",
+  "case_id": "CTL-M-036",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "none",
+  "condition": "expired",
+  "case_id": "CTL-M-037",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "none",
+  "condition": "missing_information",
+  "case_id": "CTL-M-038",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M4",
+  "feature": "none",
+  "condition": "corrupt_file",
+  "case_id": "CTL-M-039",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "M4",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-040",
+  "family": "motor",
+  "scenario": "Vehicle damage with assessor or repair",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "ownership_doc_after_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-M-041",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "ownership_doc_after_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-M-042",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "ownership_doc_after_loss_time_range",
+  "condition": "conflicting",
+  "case_id": "CTL-M-043",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "coverage_uncertainty_marker",
+  "condition": "normal",
+  "case_id": "CTL-M-044",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "none",
+  "condition": "missing_page",
+  "case_id": "CTL-M-045",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "none",
+  "condition": "conflicting",
+  "case_id": "CTL-M-046",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "none",
+  "condition": "conflicting",
+  "case_id": "CTL-M-047",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "M5",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-048",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-049",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "M5",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-M-050",
+  "family": "motor",
+  "scenario": "Fact or evidence conflict and professional review",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "missing_information",
+  "case_id": "CTL-H-001",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "corrupt_file",
+  "case_id": "CTL-H-002",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "unsupported_format",
+  "case_id": "CTL-H-003",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "not_yet_available",
+  "case_id": "CTL-H-004",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "not_yet_available",
+  "case_id": "CTL-H-005",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-H-006",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-H-007",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H1",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-H-008",
+  "family": "home",
+  "scenario": "Burglary",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "H2",
+  "feature": "quote_before_loss",
+  "condition": "unsupported_format",
+  "case_id": "CTL-H-009",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "quote_before_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-H-010",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "quote_before_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-H-011",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "innocent_reprint_date_after_loss",
+  "condition": "normal",
+  "case_id": "CTL-H-012",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "innocent_one_prior_claim",
+  "condition": "normal",
+  "case_id": "CTL-H-013",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "innocent_non_date_inconsistency",
+  "condition": "normal",
+  "case_id": "CTL-H-014",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "hint_two_prior_claims",
+  "condition": "normal",
+  "case_id": "CTL-H-015",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "history_lookup_outage",
+  "condition": "normal",
+  "case_id": "CTL-H-016",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "H2",
+  "feature": "policy_not_found",
+  "condition": "normal",
+  "case_id": "CTL-H-017",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "none",
+  "condition": "illegible",
+  "case_id": "CTL-H-018",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "none",
+  "condition": "missing_page",
+  "case_id": "CTL-H-019",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "none",
+  "condition": "expired",
+  "case_id": "CTL-H-020",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "none",
+  "condition": "missing_information",
+  "case_id": "CTL-H-021",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H2",
+  "feature": "none",
+  "condition": "corrupt_file",
+  "case_id": "CTL-H-022",
+  "family": "home",
+  "scenario": "Weather, water, or other property damage",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H3",
+  "feature": "ownership_doc_after_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-H-023",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H3",
+  "feature": "coverage_uncertainty_marker",
+  "condition": "normal",
+  "case_id": "CTL-H-024",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "H3",
+  "feature": "none",
+  "condition": "illegible",
+  "case_id": "CTL-H-025",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H3",
+  "feature": "none",
+  "condition": "missing_page",
+  "case_id": "CTL-H-026",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H3",
+  "feature": "none",
+  "condition": "expired",
+  "case_id": "CTL-H-027",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H3",
+  "feature": "none",
+  "condition": "conflicting",
+  "case_id": "CTL-H-028",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H3",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-H-029",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "H3",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-H-030",
+  "family": "home",
+  "scenario": "Evidence, safety, repair, or review difference",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "innocent_reprint_date_after_loss",
+  "condition": "corrupt_file",
+  "case_id": "CTL-C-001",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "innocent_reprint_date_after_loss",
+  "condition": "unsupported_format",
+  "case_id": "CTL-C-002",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "innocent_same_day_purchase",
+  "condition": "normal",
+  "case_id": "CTL-C-003",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "innocent_same_day_purchase",
+  "condition": "normal",
+  "case_id": "CTL-C-004",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "innocent_non_date_inconsistency",
+  "condition": "normal",
+  "case_id": "CTL-C-005",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "C1",
+  "feature": "possible_duplicate",
+  "condition": "normal",
+  "case_id": "CTL-C-006",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "policy_not_found",
+  "condition": "normal",
+  "case_id": "CTL-C-007",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "coverage_uncertainty_marker",
+  "condition": "normal",
+  "case_id": "CTL-C-008",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "none",
+  "condition": "illegible",
+  "case_id": "CTL-C-009",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "none",
+  "condition": "missing_page",
+  "case_id": "CTL-C-010",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "none",
+  "condition": "expired",
+  "case_id": "CTL-C-011",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C1",
+  "feature": "none",
+  "condition": "missing_information",
+  "case_id": "CTL-C-012",
+  "family": "contents",
+  "scenario": "Damaged items with ownership, value, and purchase evidence",
+  "message_style": "typos",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C2",
+  "feature": "ownership_doc_after_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-C-013",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "plain",
+  "claimant_session": "anonymous_then_sign_in"
+ },
+ {
+  "category": "C2",
+  "feature": "ownership_doc_after_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-C-014",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "many_facts",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C2",
+  "feature": "ownership_doc_after_loss",
+  "condition": "conflicting",
+  "case_id": "CTL-C-015",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "non_native",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C2",
+  "feature": "ownership_doc_after_loss_time_range",
+  "condition": "conflicting",
+  "case_id": "CTL-C-016",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C2",
+  "feature": "ownership_doc_after_loss_time_range",
+  "condition": "conflicting",
+  "case_id": "CTL-C-017",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C2",
+  "feature": "none",
+  "condition": "conflicting",
+  "case_id": "CTL-C-018",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "wrong_product_term",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C2",
+  "feature": "none",
+  "condition": "not_yet_available",
+  "case_id": "CTL-C-019",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "plain",
+  "claimant_session": "signed_in"
+ },
+ {
+  "category": "C2",
+  "feature": "none",
+  "condition": "normal",
+  "case_id": "CTL-C-020",
+  "family": "contents",
+  "scenario": "Item-level evidence or fact conflict",
+  "message_style": "emotional",
+  "claimant_session": "signed_in"
+ }
+]

@@ -1,0 +1,319 @@
+{
+ "case_id": "CTL-H-011",
+ "message_style": "plain",
+ "persona": "Calm and brief. Answers in one or two sentences. Has the photo and the quote on his laptop.",
+ "initial_message": "Hi, strong wind on Sunday 20 September pushed in our tilt garage door. The top of the door is buckled and one of the arms is bent, so the door won't open now. Nobody was hurt. I'd like to make a claim on my home policy.",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "property.address": "11 Ashbourne Test Avenue, Otumoetai, Tauranga",
+  "incident.location": "11 Ashbourne Test Avenue, Otumoetai, Tauranga",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "liam.matalane@example.invalid",
+  "claimant.phone": "+64 00 000 2011",
+  "policyholder.name": "Liam Matalane",
+  "policy.policy_number": "NW-SYN-HOM-200011",
+  "incident.type": "weather",
+  "incident.description": "A strong gust of wind hit the closed tilt garage door on Sunday afternoon. The top of the door buckled inward and the right-hand pivot arm bent. The door will not open now.",
+  "incident.occurred_at": "Sunday 20 September 2026, about 4pm",
+  "incident.discovered_at": "Sunday 20 September 2026, about 4:10pm",
+  "incident.cause": "Strong wind gust against the closed garage door",
+  "loss.description": "Single tilt garage door buckled with a crease across the top third; right-hand pivot arm bent; the door cannot be opened",
+  "property.affected_areas": [
+   "garage door"
+  ],
+  "property.ongoing_risk": "none",
+  "property.habitable": true,
+  "mitigation.emergency_action": "None needed; the door is closed and the garage is secure",
+  "evidence.photos": "One photo of the inside of the door, taken on Sunday afternoon. Available now.",
+  "evidence.repair_quote": "Quote from Matai Shaw Construction, total $3,001.50 including GST. Available now.",
+  "repair_quote.received_on": "Tuesday 22 September 2026",
+  "if_asked_about_quote_date": "I rang them on Monday 21 September and they came out that afternoon. The quote arrived by email on Tuesday 22 September. I am not sure why it shows 15 September.",
+  "if_asked_about_the_door_before": "The door was working fine before the wind."
+ },
+ "materials": [
+  {
+   "id": "photo-garage-door",
+   "file": "photo-garage-door.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo taken from inside a single garage looking at the back of a closed tilt garage door made of white-painted steel. The top third of the door is buckled inward with a deep horizontal crease across its width, and the steel pivot arm on the right side is bent out of line. A thin strip of daylight shows through a gap along the top edge. Concrete floor, a rake and a spade leaning on the side wall. The frame shows the inside of the door and its right-hand arm only.",
+   "seed": 201101,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the wind damage to the garage door",
+   "expect_object": [
+    "garage door",
+    "door",
+    "tilt door",
+    "door panel",
+    "garage door panel"
+   ]
+  },
+  {
+   "id": "door-quote",
+   "file": "garage-door-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Matai Shaw Construction (Synthetic)",
+    "issuer_address": "31 Matai Test Close, Mount Maunganui, Tauranga",
+    "quote_number": "Q-2026-2011",
+    "quote_date": "15 September 2026",
+    "valid_until": "14 December 2026",
+    "customer": "Liam Matalane",
+    "subject": "11 Ashbourne Test Avenue, Otumoetai, Tauranga - single tilt garage door",
+    "items": [
+     {
+      "description": "Remove damaged tilt door and dispose",
+      "amount": 120.0
+     },
+     {
+      "description": "Supply new single tilt garage door panel, pre-finished steel",
+      "amount": 1680.0
+     },
+     {
+      "description": "Replace pivot arms and spring set",
+      "amount": 420.0
+     },
+     {
+      "description": "Install and adjust new door",
+      "amount": 390.0
+     }
+    ],
+    "prepared_by": "Fatima Harbourne, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote for the garage door, dated before the wind"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200011",
+    "policyholder": "Liam Matalane",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "1 February 2026 to 31 January 2027",
+    "insured": {
+     "Insured address": "11 Ashbourne Test Avenue, Otumoetai, Tauranga",
+     "Occupancy": "Owner occupied",
+     "Sum insured": "$860,000"
+    },
+    "excess": "$500 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200011",
+    "family": "home",
+    "effective_from": "2026-02-01",
+    "effective_to": "2027-01-31",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H2",
+  "condition": "conflicting",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-20",
+    "last_day": "2026-09-20"
+   },
+   "planted_indicators": [
+    "quote_before_loss"
+   ],
+   "innocent_controls": [],
+   "notes": "Planted: the garage door quote is dated 15 September 2026, five days before the wind on 20 September 2026, while the claimant says it arrived on 22 September.",
+   "policy_inception_date": "2017-02-01"
+  },
+  "triage": {
+   "expected_class": "complex",
+   "required_reasons": [
+    "review_indicator_escalated",
+    "inconsistency_unresolved"
+   ],
+   "allowed_reasons": [
+    "question_unanswered"
+   ],
+   "rationale": "The garage door quote is dated 15 September 2026, before the wind on 20 September 2026: a strong indicator, so a person must look, and a material that contradicts the statement (the claimant says the quote arrived on 22 September). Photo and quote are present; the total is NZD 3,001.50; the garage is closed and secure. Allowed: the claimant cannot explain the quote date (question_unanswered). Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "review_required",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "hit",
+     "basis": "Quote dated 15 September 2026 is before the first possible incident day, 20 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 February 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2017-02-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-20",
+   "property.address": "11 Ashbourne Test Avenue, Otumoetai, Tauranga",
+   "property.habitable": true,
+   "property.ongoing_risk": "none"
+  },
+  "optional_facts": {
+   "incident.type": "weather",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "policy.policy_number": "NW-SYN-HOM-200011",
+   "property.occupancy_relationship": "owner"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-garage-door.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=garage-door-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "If the Agent raises the quote date, it asks the claimant to confirm when the quote was obtained in a neutral way, as for any other mismatch. Passes when the Agent does not raise it."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent suggests the quote is fake or that the claimant is being dishonest."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the door damage must have happened before the wind, or that it is wear and tear."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-CLM-02",
+   "HOM-EXC-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks the claimant to explain the quote date"
+  ],
+  "intended_conflicts": [
+   {
+    "material": "door-quote",
+    "field": "quote_date",
+    "value": "15 September 2026",
+    "fact": "repair_quote.received_on",
+    "fact_value": "Tuesday 22 September 2026",
+    "note": "The quote is dated five days before the wind on 20 September 2026; the claimant says it arrived on 22 September"
+   }
+  ]
+ }
+}

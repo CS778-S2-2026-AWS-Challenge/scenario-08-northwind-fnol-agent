@@ -1,0 +1,361 @@
+{
+ "case_id": "CTL-M-047",
+ "message_style": "plain",
+ "persona": "Calm nurse who works late shifts and drives home through the country roads north-west of Auckland. Starts the report without signing in and signs in when asked to upload. Has not noticed that the body shop typed the registration wrong.",
+ "initial_message": "Hi, I hit a wild pig on a country road near Kaukapakapa on Monday 7 September at about 9:40pm, driving home from work. The front bumper is cracked, the grille is broken and one fog light is smashed. I wasn't hurt and the car is still drivable. The pig ran off into the bush.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I was driving home from a late shift on a rural road. A wild pig ran out of the scrub onto the road right in front of me. I braked but hit it with the front left of the car. It ran off into the bush and I drove home carefully.",
+  "incident.occurred_at": "Monday 7 September 2026, about 9:40pm",
+  "incident.location": "Upland Test Road, Kaukapakapa, Auckland",
+  "incident.cause": "A wild pig ran onto the road in front of the car",
+  "loss.description": "Front bumper cracked, lower grille broken and left fog light smashed",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "no",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "in_app",
+  "claimant.email": "ravi.tidewell@example.invalid",
+  "claimant.phone": "+64 00 000 1047",
+  "claimant.address": "47 Copperleaf Test Drive, Henderson, Auckland",
+  "policyholder.name": "Ravi Tidewell",
+  "policy.policy_number": "NW-SYN-MTR-100047",
+  "vehicle.registration": "TST-047",
+  "vehicle.make": "Volkswagen",
+  "vehicle.model": "Golf",
+  "vehicle.year": 2015,
+  "vehicle.colour": "black",
+  "vehicle.use": "commuting",
+  "vehicle.damage_description": "Front bumper cracked and pushed in on the left side, lower grille broken, left fog light smashed, with mud and coarse hair caught in the cracks",
+  "vehicle.drivable": true,
+  "vehicle.towing_required": "not_required",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "Ravi Tidewell",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10047",
+  "driver.owner_permission": "not_applicable",
+  "if_asked_about_the_animal": "It was a wild pig, not anyone's stock. There were no farm buildings or fences nearby, just bush. It ran away.",
+  "if_asked_about_the_registration": "The registration is TST-047.",
+  "if_asked_about_the_registration_on_the_quote": "Oh, I didn't notice that. My car is TST-047; they must have mixed up the numbers.",
+  "evidence.photos": "One photo of the front of the car taken in my garage the next morning. Available now.",
+  "evidence.repair_quote": "Quote from Harbourside Panel & Paint dated 9 September 2026, total $2,323.00 including GST. Available now."
+ },
+ "materials": [
+  {
+   "id": "photo-front",
+   "file": "photo-front-bumper.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in a home garage in morning light, close-up of the lower front left corner of a black hatchback, seen from the front left. The plastic front bumper is cracked and pushed in, the black honeycomb lower grille beside it is broken, and the round fog light in the bumper corner is smashed, with dried mud and coarse dark bristly hair caught in the cracks. The frame shows only the bumper corner, the fog light, part of the lower grille and the front tyre; the centre of the bumper is outside the frame. No licence plate, no badges, no logos, no text, no people.",
+   "seed": 104701,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the front bumper, grille and fog light damage",
+   "expect_object": [
+    "bumper",
+    "front bumper",
+    "grille",
+    "fog light",
+    "fog lamp"
+   ],
+   "seed_history": [
+    {
+     "seed": 104701,
+     "reasons": [
+      "CTL-M-047/photo-front-bumper.jpg: image-only pass: licence plate is 'partial', not exactly \"none\"",
+      "CTL-M-047/photo-front-bumper.jpg: with-facts pass: licence plate is 'partial', not exactly \"none\""
+     ]
+    },
+    {
+     "seed": 105701,
+     "reasons": [
+      "image-only pass: licence plate is 'partial', not exactly \"none\"",
+      "with-facts pass: licence plate is 'readable; front of the car; looks like a New Zealand plate', not exactly \"none\""
+     ]
+    },
+    {
+     "seed": 106701,
+     "reasons": [
+      "image-only pass: licence plate is 'partial', not exactly \"none\"",
+      "with-facts pass: licence plate is 'partial', not exactly \"none\"",
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 107701,
+     "reasons": [
+      "image-only pass: licence plate is 'partial, not a New Zealand plate', not exactly \"none\"",
+      "with-facts pass: licence plate is 'partial', not exactly \"none\""
+     ]
+    }
+   ]
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Harbourside Panel & Paint (Synthetic)",
+    "issuer_address": "22 Harbourlight Test Lane, Penrose, Auckland",
+    "quote_number": "Q-2026-1047",
+    "quote_date": "9 September 2026",
+    "valid_until": "8 December 2026",
+    "customer": "Ravi Tidewell",
+    "subject": "Volkswagen Golf 2015, black, TST-074 - front bumper, lower grille and left fog light",
+    "items": [
+     {
+      "description": "Supply front bumper cover",
+      "amount": 820.0
+     },
+     {
+      "description": "Supply lower grille",
+      "amount": 260.0
+     },
+     {
+      "description": "Supply left fog lamp",
+      "amount": 190.0
+     },
+     {
+      "description": "Refinish front bumper cover",
+      "amount": 540.0
+     },
+     {
+      "description": "Remove and refit parking sensors and number plate bracket",
+      "amount": 120.0
+     },
+     {
+      "description": "Paint materials and consumables",
+      "amount": 90.0
+     }
+    ],
+    "prepared_by": "George Fernmoor, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   },
+   "purpose": "Repair estimate required for motor damage; the registration on it is mistyped"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100047",
+    "policyholder": "Ravi Tidewell",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "1 July 2026 to 30 June 2027",
+    "insured": {
+     "Vehicle": "Volkswagen Golf 2015, black",
+     "Registration": "TST-047",
+     "Agreed value": "$9,800"
+    },
+    "excess": "$500 base excess for each event",
+    "extra": {
+     "Named drivers": "Ravi Tidewell",
+     "Permitted use": "Private use and commuting"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "anonymous_then_sign_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100047",
+    "family": "motor",
+    "effective_from": "2026-07-01",
+    "effective_to": "2027-06-30",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M5",
+  "condition": "conflicting",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-07",
+    "last_day": "2026-09-07"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "policy_inception_date": "2023-07-01",
+   "notes": "The repair quote prints the registration TST-074; the claimant's car and the policy schedule are TST-047 (digits transposed). The mismatch is unrelated to dates, so no review indicator applies. The claimant starts without signing in and signs in before the first upload."
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "inconsistency_unresolved"
+   ],
+   "allowed_reasons": [],
+   "rationale": "The repair quote names registration TST-074, while the claimant and the policy schedule give TST-047. The material contradicts the statement and nothing in the pack corrects the quote, so someone must follow it up. It is not a date conflict, so the review indicators stay none. A wild animal is not another party; nobody hurt, car drivable, one clear photo, quote NZD 2,323.00 including GST. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 9 September 2026; incident 7 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Starts anonymous, signs in before upload; the account has no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 July 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2023-07-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-07",
+   "parties.other_parties": false,
+   "vehicle.drivable": true
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-bumper.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says a Police report is required before this claim can go ahead."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "If the Agent raises the registration printed on the quote, it asks the claimant neutrally which registration is correct or suggests getting the quote corrected, without implying the claimant did anything wrong. Passes when the Agent does not raise it."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-CLM-01",
+   "MTR-CLM-02"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "When in the journey the claimant is asked to sign in, as long as it is before the first upload",
+   "Whether the Agent notices the registration on the quote"
+  ],
+  "intended_conflicts": [
+   {
+    "material": "repair-quote",
+    "field": "subject",
+    "value": "Volkswagen Golf 2015, black, TST-074 - front bumper, lower grille and left fog light",
+    "fact": "vehicle.registration",
+    "fact_value": "TST-047",
+    "note": "The quote prints TST-074; the car and the policy schedule are TST-047"
+   }
+  ],
+  "optional_facts": {
+   "vehicle.registration": "TST-047",
+   "policy.policy_number": "NW-SYN-MTR-100047",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "vehicle.towing_required": "not_required",
+   "vehicle.use": [
+    "commuting",
+    "private"
+   ]
+  }
+ }
+}

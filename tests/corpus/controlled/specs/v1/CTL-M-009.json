@@ -1,0 +1,313 @@
+{
+ "case_id": "CTL-M-009",
+ "message_style": "wrong_product_term",
+ "persona": "Friendly and unsure which insurance covers what; calls it her \"home and contents insurance\". Has the policy schedule, a photo and the quote.",
+ "initial_message": "Hi, I want to make a claim on my home and contents insurance. On Sunday 23 August I pulled over onto the grass on a narrow gravel road in the Maitai Valley and hit a big rock hidden in the long grass. The bumper is cracked at the front right corner of my ute and the guard above the wheel is dented. Nobody was hurt and the ute still drives.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I pulled over onto the grass verge on a narrow gravel road to check directions and the front right corner of the ute hit a large rock that was hidden in the long grass.",
+  "incident.occurred_at": "Sunday 23 August 2026, about 3:00pm",
+  "incident.location": "Gravel section of Cedarvale Test Way, Maitai Valley, Nelson",
+  "incident.cause": "Hit a rock hidden in long grass while pulling onto the verge",
+  "loss.description": "Front bumper cracked at the right corner, front right guard dented, wheel arch liner torn",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "no",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "ngaire.manukastead@example.invalid",
+  "claimant.phone": "+64 00 000 1009",
+  "claimant.home_address": "9 Kowhai Test Grove, Stoke, Nelson",
+  "policyholder.name": "Ngaire Manukastead",
+  "policy.policy_number": "NW-SYN-MTR-100009",
+  "vehicle.registration": "TST-009",
+  "vehicle.make": "Toyota",
+  "vehicle.model": "Hilux",
+  "vehicle.year": 2017,
+  "vehicle.colour": "white",
+  "vehicle.use": "private",
+  "vehicle.damage_description": "Front bumper cracked and pushed back at the right corner, a dent about 30 cm across in the front right guard above the wheel, and the plastic wheel arch liner torn. Lights and wheel not damaged.",
+  "vehicle.drivable": true,
+  "vehicle.towing_required": "not_required",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "Ngaire Manukastead",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10009",
+  "driver.owner_permission": "not_applicable",
+  "evidence.photos": "One photo of the front right corner at the roadside. Available now.",
+  "evidence.repair_quote": "Quote from Totara Brook Body Works dated 18 September 2026, total $2,162.00 including GST. Available now.",
+  "vehicle.body": "Double-cab ute",
+  "evidence.policy_schedule": "My policy schedule as a PDF. Available now.",
+  "if_asked_which_insurance": "I thought it was all under my home and contents. The schedule I have says Northwind Motor, so I suppose it is the car insurance.",
+  "if_told_policy_not_found": "That is strange; the number is on my schedule and I pay it every month."
+ },
+ "materials": [
+  {
+   "id": "photo-front-corner",
+   "file": "photo-front-right-corner.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo, close-up of the front right corner of a white double-cab ute parked on a gravel roadside verge with long grass. The bumper corner is cracked and pushed back into the wheel arch, the front guard above the wheel is dented, and the black plastic wheel arch liner is torn. A large grey rock is half hidden in the grass in front of it. Overcast afternoon light. The frame shows only the bumper corner, the front wheel, the guard and the rock. No text, no logos, no people.",
+   "seed": 100901,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the front corner damage described by the claimant",
+   "expect_object": [
+    "bumper",
+    "front bumper",
+    "guard",
+    "front guard",
+    "fender",
+    "wheel arch"
+   ]
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Totara Brook Body Works (Synthetic)",
+    "issuer_address": "15 Pinecrest Test Avenue, Annesbrook, Nelson",
+    "quote_number": "Q-2026-1009",
+    "quote_date": "18 September 2026",
+    "valid_until": "17 December 2026",
+    "customer": "Ngaire Manukastead",
+    "subject": "Toyota Hilux 2017, white, TST-009 - front bumper, front right guard and liner",
+    "items": [
+     {
+      "description": "Repair dent in front right guard and refinish",
+      "amount": 540.0
+     },
+     {
+      "description": "Supply front bumper cover, primed",
+      "amount": 520.0
+     },
+     {
+      "description": "Paint front bumper",
+      "amount": 480.0
+     },
+     {
+      "description": "Supply front right wheel arch liner",
+      "amount": 95.0
+     },
+     {
+      "description": "Remove and refit front bumper and wheel arch liner",
+      "amount": 190.0
+     },
+     {
+      "description": "Paint materials and consumables",
+      "amount": 55.0
+     }
+    ],
+    "prepared_by": "Kai Rewifield, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   },
+   "purpose": "Repair estimate required for motor damage"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100009",
+    "policyholder": "Ngaire Manukastead",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "1 May 2026 to 30 April 2027",
+    "insured": {
+     "Vehicle": "Toyota Hilux 2017 double cab, white",
+     "Registration": "TST-009",
+     "Agreed value": "$29,000"
+    },
+    "excess": "$500 base excess for each event",
+    "extra": {
+     "Named drivers": "Ngaire Manukastead"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M1",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-08-23",
+    "last_day": "2026-08-23"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "Policy not found: the pack policy is left out of setup.policies_in_system, so the lookup cannot find NW-SYN-MTR-100009 although the claimant has its schedule. The claimant calls the product \"home and contents insurance\"; the Claim must end as motor (G3).",
+   "policy_inception_date": "2020-05-01"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "policy_lookup_failed"
+   ],
+   "allowed_reasons": [],
+   "rationale": "Otherwise fast: single vehicle, nobody hurt, car drivable, a photo and a complete quote at NZD 2,162.00 including GST. But the policy lookup cannot find the claimant's motor policy, and not found is not the same as fine, so staff must check the policy. The wrong product name in the first message is a wording slip, not an inconsistency: every fact and document describes the vehicle. Coverage is not unclear: the lookup returns no record and no uncertainty marker."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 18 September 2026; incident 23 August 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The pack policy is not in the lookup, so the system has no policy record at all; today it is not checked. With no policy record the rule has nothing to compare, so it also gives not_checked. The original inception date in the pack design, 2020-05-01, is years before the incident.",
+     "requires": "policy_inception_date",
+     "value_if_data": "not_checked",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-08-23",
+   "parties.other_parties": false,
+   "vehicle.drivable": true
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-right-corner.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent tells the claimant that they are not insured, that the policy does not exist, or that the claim cannot be lodged because the policy was not found. Saying staff will check the policy details is fine."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent handles the loss as damage to the claimant's vehicle and does not ask for home or contents details such as the insured property address or a list of household items."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-CLM-01",
+   "MTR-CLM-02"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent points out that this is motor insurance rather than home and contents",
+   "Whether the Agent asks for the policy schedule"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "vehicle.registration": "TST-009",
+   "policy.policy_number": "NW-SYN-MTR-100009",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "vehicle.towing_required": "not_required",
+   "driver.relationship_to_policyholder": "policyholder",
+   "driver.licence_status": "valid",
+   "vehicle.use": "private",
+   "witness.present": "no"
+  }
+ }
+}

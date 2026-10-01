@@ -1,0 +1,312 @@
+{
+ "case_id": "CTL-H-018",
+ "message_style": "non_native",
+ "persona": "English is her second language; short, simple sentences. Cooperative. Took only one photo, at night, and it is blurry.",
+ "initial_message": "Hi, I want to make claim. Saturday 19 September in the evening the water pipe from dishwasher come off and water go under my kitchen floor. Now the floor is swelling and lifting in kitchen and dining. I turn off the tap under the sink. Nobody hurt.",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "property.address": "18 Herondale Test Lane, Papatoetoe, Auckland",
+  "incident.location": "18 Herondale Test Lane, Papatoetoe, Auckland",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "sms",
+  "claimant.email": "anjali.nikauridge@example.invalid",
+  "claimant.phone": "+64 00 000 2018",
+  "policyholder.name": "Anjali Nikauridge",
+  "policy.policy_number": "NW-SYN-HOM-200018",
+  "incident.type": "water",
+  "incident.description": "On Saturday evening the water supply hose came off the back of the dishwasher. Water spread under the laminate floor in the kitchen and dining area before I noticed. I turned off the tap under the sink and dried what I could.",
+  "incident.occurred_at": "Saturday 19 September 2026, about 8pm",
+  "incident.discovered_at": "Saturday 19 September 2026, about 8:20pm",
+  "incident.cause": "The dishwasher water supply hose came loose",
+  "loss.description": "Laminate floor swollen and lifted at the joins over about 14 m2 of the kitchen and dining area",
+  "property.affected_areas": [
+   "kitchen floor",
+   "dining area floor"
+  ],
+  "property.ongoing_risk": "none",
+  "property.habitable": true,
+  "mitigation.emergency_action": "Turned off the tap under the sink, pulled the dishwasher out and dried the floor with towels",
+  "evidence.photos": "One photo taken on Saturday night with my phone. The light was bad and it is very blurry. I have no other photo.",
+  "if_asked_for_a_clearer_photo": "Yes, I can take a clearer photo in daylight tomorrow and send it then.",
+  "evidence.repair_quote": "Quote from Kauri Dean Builders, total $4,232.00 including GST, dated 23 September 2026. Available now."
+ },
+ "materials": [
+  {
+   "id": "photo-floor-source",
+   "include": false,
+   "file": "photo-kitchen-floor-source.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo at night in a kitchen lit by a single downlight: light oak-look laminate flooring swollen and peaked along its joins in front of the lower kitchen cabinets, with a shallow puddle of water on the floor and a towel pushed against the cabinet kickboard. The frame shows the floor and the bottom of the cabinets only.",
+   "seed": 201801,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Source for the kitchen floor photo before the illegible variant"
+  },
+  {
+   "id": "photo-floor",
+   "file": "photo-kitchen-floor.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "transform",
+   "source": "photo-floor-source",
+   "transform": "blur",
+   "params": {
+    "radius": 11,
+    "quality": 40
+   },
+   "purpose": "The only photo of the floor damage, too blurred to read",
+   "expect_object": [
+    "floor",
+    "flooring",
+    "laminate",
+    "laminate floor",
+    "laminate flooring",
+    "kitchen floor"
+   ]
+  },
+  {
+   "id": "builder-quote",
+   "file": "builder-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Kauri Dean Builders (Synthetic)",
+    "issuer_address": "140 Kauri Test Heights, East Tamaki, Auckland",
+    "quote_number": "Q-2026-2018",
+    "quote_date": "23 September 2026",
+    "valid_until": "22 December 2026",
+    "customer": "Anjali Nikauridge",
+    "subject": "18 Herondale Test Lane, Papatoetoe, Auckland - kitchen and dining laminate floor water damage",
+    "items": [
+     {
+      "description": "Remove dishwasher and kickboards, lift and dispose of laminate, 14 m2",
+      "amount": 560.0
+     },
+     {
+      "description": "Dry subfloor with dehumidifier, 3 days",
+      "amount": 450.0
+     },
+     {
+      "description": "Supply and lay new laminate with underlay, 14 m2",
+      "amount": 2380.0
+     },
+     {
+      "description": "Refit kickboards, scotia and dishwasher",
+      "amount": 290.0
+     }
+    ],
+    "prepared_by": "Daniel Copperdale, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote for the floor"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200018",
+    "policyholder": "Anjali Nikauridge",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "1 February 2026 to 31 January 2027",
+    "insured": {
+     "Insured address": "18 Herondale Test Lane, Papatoetoe, Auckland",
+     "Occupancy": "Owner occupied",
+     "Sum insured": "$980,000"
+    },
+    "excess": "$500 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200018",
+    "family": "home",
+    "effective_from": "2026-02-01",
+    "effective_to": "2027-01-31",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H2",
+  "condition": "illegible",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-19",
+    "last_day": "2026-09-19"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "Boundary: the only photo of the damage is blurred beyond reading; no clear photo remains.",
+   "policy_inception_date": "2020-02-01"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "evidence_outstanding"
+   ],
+   "allowed_reasons": [],
+   "rationale": "The only photo of the floor is too blurred to show the damage, so a usable incident image is still needed. The quote is complete (NZD 4,232.00 including GST), the leak is stopped and the home is habitable. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 23 September 2026; incident 19 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 February 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2020-02-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-19",
+   "property.address": "18 Herondale Test Lane, Papatoetoe, Auckland",
+   "property.habitable": true,
+   "property.ongoing_risk": "none"
+  },
+  "optional_facts": {
+   "incident.type": "water",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ],
+   "policy.policy_number": "NW-SYN-HOM-200018",
+   "property.occupancy_relationship": "owner"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-kitchen-floor.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=builder-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent asks for a clearer photo of the floor damage, or says one can be sent later."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent describes the floor damage from the photo as if it could see it clearly, for example by stating its size or position from the image. Repeating what the claimant said about the floor is fine."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-CLM-01",
+   "HOM-CLM-02"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent restates questions in simpler English"
+  ],
+  "intended_conflicts": []
+ }
+}

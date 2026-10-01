@@ -1,0 +1,373 @@
+{
+ "case_id": "CTL-M-039",
+ "message_style": "plain",
+ "persona": "Calm and clear. Starts without signing in. Has two photos and the quote as a PDF that her phone saved from an email; she does not know the file is damaged.",
+ "initial_message": "Hi, I need to report damage to my car. In the early hours of Wednesday 23 September the carport roof at our house collapsed under the heavy snow and came down on my car. The roof of the car is crushed and the windscreen is broken, so it had to be towed to a panel beater. Nobody was hurt.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "weather",
+  "incident.description": "It snowed heavily all Tuesday evening. At about 2am we heard a loud crack. In the morning we found that the timber carport had collapsed under the weight of the snow and the beams and roofing were lying on my car. A builder cut the beams away later that morning and the car was towed out.",
+  "incident.occurred_at": "Wednesday 23 September 2026, about 2am",
+  "incident.discovered_at": "Wednesday 23 September 2026, about 6:45am",
+  "incident.location": "39 Upland Test Road, Lake Hayes Estate, Queenstown",
+  "incident.cause": "Heavy snow collapsed the carport roof onto the parked car",
+  "loss.description": "Car roof crushed in the middle, windscreen cracked all over, roof rails bent",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "no",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "in_app",
+  "claimant.email": "hana.driftwood@example.invalid",
+  "claimant.phone": "+64 00 000 1039",
+  "policyholder.name": "Hana Driftwood",
+  "policy.policy_number": "NW-SYN-MTR-100039",
+  "vehicle.registration": "TST-039",
+  "vehicle.make": "Honda",
+  "vehicle.model": "CR-V",
+  "vehicle.year": 2019,
+  "vehicle.colour": "white",
+  "vehicle.use": "private",
+  "vehicle.damage_description": "Roof crushed in the middle, windscreen cracked all over, both A-pillar tops bent, roof rails bent",
+  "vehicle.drivable": false,
+  "vehicle.towing_required": "already_towed",
+  "vehicle.towing_location": "Cedar Holt Auto Refinish, 6 Bellbird Test Drive, Frankton, Queenstown",
+  "evidence.photos": "Two photos from Wednesday morning: the car roof under the beams and the collapsed carport. Available now.",
+  "evidence.repair_quote": "Quote from Cedar Holt Auto Refinish, saved from their email. Available now.",
+  "if_asked_about_driver": "Nobody was driving. The car was parked in the carport overnight.",
+  "if_asked_about_quote_total": "They told me it was about $4,900 including GST.",
+  "if_asked_about_resending_quote": "I can ask Cedar Holt to email it again and send it through.",
+  "if_asked_about_carport": "The carport belongs to our house. I will sort that out separately; this claim is only for the car.",
+  "if_asked_about_ongoing_risk": "The carport has been cleared away. Nobody is at risk."
+ },
+ "materials": [
+  {
+   "id": "photo-roof",
+   "file": "photo-roof-snow.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in early morning light: the roof of a white SUV crushed down in the middle under two snapped timber carport beams and sagging corrugated roofing, thick wet snow on top, the windscreen cracked in a web of lines. Close crop that shows only the car roof, the top of the windscreen and the broken beams.",
+   "seed": 103901,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the crushed roof and broken windscreen",
+   "expect_object": [
+    "roof",
+    "car roof",
+    "windscreen",
+    "windshield"
+   ]
+  },
+  {
+   "id": "photo-carport",
+   "file": "photo-carport.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in early morning light: a collapsed timber carport beside a house, its snapped beams and corrugated roofing sagging to the ground under a thick layer of fresh snow, snow-covered hills in the background, footprints in the snow on the driveway.",
+   "seed": 103902,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the collapsed carport",
+   "expect_object": [
+    "carport"
+   ],
+   "seed_history": [
+    {
+     "seed": 103902,
+     "reasons": [
+      "CTL-M-039/photo-carport.jpg: image-only pass names 'wooden structure', expected one of ['carport']",
+      "CTL-M-039/photo-carport.jpg: with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 104902,
+     "reasons": [
+      "image-only pass names 'wooden roof structure', expected one of ['carport']",
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 105902,
+     "reasons": [
+      "image-only pass names 'wooden structure', expected one of ['carport']",
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 106902,
+     "reasons": [
+      "image-only pass names 'wooden structure', expected one of ['carport']",
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "quote-source",
+   "include": false,
+   "file": "repair-quote-source.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Cedar Holt Auto Refinish (Synthetic)",
+    "issuer_address": "6 Bellbird Test Drive, Frankton, Queenstown",
+    "quote_number": "Q-2026-1039",
+    "quote_date": "28 September 2026",
+    "valid_until": "27 December 2026",
+    "customer": "Hana Driftwood",
+    "subject": "Honda CR-V 2019, white, TST-039 - roof, windscreen and A-pillars (carport collapse)",
+    "items": [
+     {
+      "description": "Replace roof panel",
+      "amount": 1650.0
+     },
+     {
+      "description": "Replace windscreen",
+      "amount": 720.0
+     },
+     {
+      "description": "Repair left and right A-pillar tops",
+      "amount": 580.0
+     },
+     {
+      "description": "Replace roof rails",
+      "amount": 390.0
+     },
+     {
+      "description": "Refinish roof and pillars",
+      "amount": 890.0
+     }
+    ],
+    "prepared_by": "Charlotte Ridgefern, estimator"
+   },
+   "purpose": "Source for the corrupt quote",
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   }
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "transform",
+   "source": "quote-source",
+   "transform": "truncate",
+   "params": {
+    "keep_fraction": 0.4
+   },
+   "purpose": "The quote as the claimant has it: a truncated file that cannot be opened"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100039",
+    "policyholder": "Hana Driftwood",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "30 June 2026 to 29 June 2027",
+    "insured": {
+     "Vehicle": "Honda CR-V 2019, white",
+     "Registration": "TST-039",
+     "Agreed value": "$29,000"
+    },
+    "excess": "$500 base excess for each event",
+    "extra": {
+     "Named drivers": "Hana Driftwood"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "anonymous_then_sign_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100039",
+    "family": "motor",
+    "effective_from": "2026-06-30",
+    "effective_to": "2027-06-29",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M4",
+  "condition": "corrupt_file",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-23",
+    "last_day": "2026-09-23"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "The only quote is truncated and cannot be opened, so its date cannot be read: quote_before_loss is not checked, not clear. The claimant starts without an account and signs in before the first upload.",
+   "policy_inception_date": "2022-06-30"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "evidence_outstanding",
+    "vehicle_undrivable_or_assessor"
+   ],
+   "allowed_reasons": [
+    "amount_over_threshold_or_unknown"
+   ],
+   "rationale": "The quote file cannot be opened, so the required quote is outstanding. The car cannot be driven (windscreen and roof) and was towed. The source quote totals NZD 4,864.50 including GST and the claimant says \"about $4,900\" if asked, but no readable document gives an amount, so whether the amount counts as known depends on whether the Agent asks; amount_over_threshold_or_unknown is allowed. Parked car, no other party, nobody hurt. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "not_checked",
+     "basis": "The only quote is a truncated file that cannot be opened, so its date cannot be read"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Starts anonymous and signs in before the first upload; the account has no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (30 June 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2022-06-30, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-23",
+   "vehicle.drivable": false
+  },
+  "optional_facts": {
+   "incident.type": [
+    "weather",
+    "other"
+   ],
+   "incident.discovered_at": "2026-09-23",
+   "parties.other_parties": false,
+   "vehicle.registration": "TST-039",
+   "policy.policy_number": "NW-SYN-MTR-100039",
+   "vehicle.towing_required": "already_towed",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ]
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-roof-snow.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent tells the claimant the quote file could not be opened, or asks for another copy of the quote."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent tells the claimant that the quote was received and is fine, or quotes a total from it."
+   },
+   {
+    "id": "F6",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent tells the claimant that the carport or the house is covered or not covered under this motor policy."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-BEN-01",
+   "MTR-CLM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "When in the conversation the claimant signs in, as long as it is before the first upload",
+   "Whether the Agent asks the claimant for the quote amount"
+  ],
+  "intended_conflicts": []
+ }
+}

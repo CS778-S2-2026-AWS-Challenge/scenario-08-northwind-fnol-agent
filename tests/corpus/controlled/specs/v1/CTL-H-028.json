@@ -1,0 +1,374 @@
+{
+ "case_id": "CTL-H-028",
+ "message_style": "many_facts",
+ "persona": "Talkative and organised; gives a lot of detail at once. Has not noticed that the builder's quote shows the wrong house number.",
+ "initial_message": "Hi there, on Saturday 19 September at about 7:40pm our upstairs bath overflowed. I'd left the tap running while I took a phone call downstairs and it ran over for about 20 minutes. Water came through the dining room ceiling underneath and the ceiling light filled with water, so I turned the power off at the switchboard. An electrician came on Sunday morning, took the light down and said the wiring is safe, and the power is back on. The ceiling is stained and sagging about a metre across and the dining room carpet got soaked. Nobody was hurt and we're still living in the house. I've already got a builder's quote. My policy number is NW-SYN-HOM-200028.",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.type": "water",
+  "incident.description": "I ran a bath upstairs and went downstairs to take a phone call, and forgot the tap was on. It overflowed for about 20 minutes. Water soaked through the bathroom floor into the dining room ceiling below and filled the ceiling light fitting, and dripped onto the dining room carpet.",
+  "incident.occurred_at": "Saturday 19 September 2026, about 7:40pm",
+  "incident.discovered_at": "Saturday 19 September 2026, about 8pm",
+  "incident.location": "28 Tussock Test Way, Hokowhitu, Palmerston North",
+  "incident.cause": "The upstairs bath overflowed after the tap was left running for about 20 minutes",
+  "loss.description": "Dining room ceiling plasterboard stained and sagging about a metre across; the ceiling light fitting filled with water; dining room carpet soaked",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "property.address": "28 Tussock Test Way, Hokowhitu, Palmerston North",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "property.affected_areas": [
+   "upstairs bathroom floor",
+   "dining room ceiling",
+   "dining room carpet"
+  ],
+  "property.ongoing_risk": "none",
+  "property.habitable": true,
+  "mitigation.emergency_action": "Turned off the bath tap, mopped up upstairs, switched the power off at the switchboard, and put buckets and towels down in the dining room",
+  "mitigation.temporary_repair": "The electrician removed the water-filled ceiling light and made the circuit safe on Sunday 20 September 2026",
+  "mitigation.contractor": "Nikau Ridge Sparks",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "isla.totarabrook@example.invalid",
+  "claimant.phone": "+64 00 000 2028",
+  "policyholder.name": "Isla Totarabrook",
+  "policy.policy_number": "NW-SYN-HOM-200028",
+  "evidence.photos": "One photo of the stained, sagging dining room ceiling where the light was removed. Available now.",
+  "evidence.attendance_note": "The electrician's attendance note. Available now.",
+  "evidence.repair_quote": "Builder's quote from Kauri Dean Builders dated 23 September 2026, total $5,968.50 including GST. Available now.",
+  "if_asked_about_quote_address": "That's odd. Our house is number 28, not 82. I didn't check the quote that closely.",
+  "if_asked_about_the_bathroom": "The bathroom floor is vinyl and looks fine; the builder is checking underneath it as part of the drying."
+ },
+ "materials": [
+  {
+   "id": "photo-ceiling",
+   "file": "photo-dining-ceiling.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo looking up at a white plasterboard dining room ceiling with a large brown water stain about a metre across. The plasterboard sags downward in the middle of the stain with a hairline crack along a joint, and next to it there is an empty round hole with two capped wires where a ceiling light has been removed. The top edge of a timber dining table and a red plastic bucket are at the bottom of the frame. Daylight from a window.",
+   "seed": 202801,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the water-damaged dining room ceiling",
+   "expect_object": [
+    "ceiling",
+    "plasterboard ceiling",
+    "ceiling panel"
+   ],
+   "seed_history": [
+    {
+     "seed": 202801,
+     "reasons": [
+      "CTL-H-028/photo-dining-ceiling.jpg: with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 203801,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 204801,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 205801,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "attendance-note",
+   "file": "electrician-attendance-note.pdf",
+   "evidence_kind": "other_document",
+   "method": "template",
+   "template": "attendance_note",
+   "data": {
+    "issuer": "Nikau Ridge Sparks (Synthetic)",
+    "issuer_address": "7 Cedarvale Test Way, Terrace End, Palmerston North",
+    "job_number": "J-2026-2028",
+    "attended": "Sunday 20 September 2026, 8:30am",
+    "address": "28 Tussock Test Way, Hokowhitu, Palmerston North",
+    "customer": "Isla Totarabrook",
+    "found": "Water had entered the dining room ceiling light fitting from a bath overflow in the bathroom above. The customer had turned the power off at the switchboard.",
+    "work_done": "Removed the water-damaged light fitting, capped and insulated the wiring, tested the lighting and power circuits (insulation resistance satisfactory) and restored power. Dining room light left disconnected.",
+    "follow_up": "Fit a new light fitting once the ceiling is repaired and dry."
+   },
+   "fact_links": {
+    "address": "property.address",
+    "customer": "policyholder.name"
+   },
+   "purpose": "Contractor record of the electrical make-safe"
+  },
+  {
+   "id": "builder-quote",
+   "file": "builder-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Kauri Dean Builders (Synthetic)",
+    "issuer_address": "19 Millbrook Test Street, Takaro, Palmerston North",
+    "quote_number": "Q-2026-2028",
+    "quote_date": "23 September 2026",
+    "valid_until": "22 December 2026",
+    "customer": "Isla Totarabrook",
+    "subject": "82 Tussock Test Way, Hokowhitu, Palmerston North - dining room ceiling and carpet water damage",
+    "items": [
+     {
+      "description": "Dry out ceiling cavity and floor under the bathroom, dehumidifier 3 days",
+      "amount": 620.0
+     },
+     {
+      "description": "Remove and dispose of damaged ceiling plasterboard, 3.5 m2",
+      "amount": 380.0
+     },
+     {
+      "description": "Supply and fix new plasterboard; stop, sand and paint the whole dining room ceiling",
+      "amount": 1640.0
+     },
+     {
+      "description": "Uplift and dispose of wet carpet and underlay, dining room",
+      "amount": 260.0
+     },
+     {
+      "description": "Supply and lay carpet and underlay, dining room, 16 m2",
+      "amount": 2080.0
+     },
+     {
+      "description": "Supply and install replacement ceiling light fitting (electrician)",
+      "amount": 210.0
+     }
+    ],
+    "prepared_by": "Kiri Saltmarsh, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote required for home damage"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200028",
+    "policyholder": "Isla Totarabrook",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "1 March 2026 to 28 February 2027",
+    "insured": {
+     "Insured address": "28 Tussock Test Way, Hokowhitu, Palmerston North",
+     "Sum insured": "$760,000"
+    },
+    "excess": "$1,000 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200028",
+    "family": "home",
+    "effective_from": "2026-03-01",
+    "effective_to": "2027-02-28",
+    "excess_nzd": 1000,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H3",
+  "condition": "conflicting",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-19",
+    "last_day": "2026-09-19"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "notes": "Condition conflicting: the builder's quote is for 82 Tussock Test Way, while the insured address, the claimant's statement, the electrician's note and the schedule all say 28. No date conflict; every date is consistent.",
+   "policy_inception_date": "2022-03-01"
+  },
+  "triage": {
+   "expected_class": "standard",
+   "required_reasons": [
+    "inconsistency_unresolved",
+    "amount_over_threshold_or_unknown"
+   ],
+   "allowed_reasons": [],
+   "rationale": "The builder's quote names 82 Tussock Test Way, not the insured address 28 Tussock Test Way, so a material contradicts the statement and needs a corrected quote; the claimant only confirms the house number, which does not fix the document. The quote totals NZD 5,968.50 including GST, over 5,000. The electrician has made the wiring safe, the overflow has stopped and the home is habitable, so nothing is complex. Leaving the tap running is not a triage reason. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 23 September 2026; incident 19 September 2026. The address mismatch is not a date check."
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (1 March 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2022-03-01, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-19",
+   "property.address": "28 Tussock Test Way, Hokowhitu, Palmerston North",
+   "property.habitable": true,
+   "property.ongoing_risk": "none",
+   "policy.policy_number": "NW-SYN-HOM-200028"
+  },
+  "optional_facts": {
+   "incident.type": "water",
+   "parties.other_parties": false,
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ]
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-dining-ceiling.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=builder-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the damage is not covered, or suggests it may be refused, because the claimant left the bath tap running."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent asks an open question for a fact the claimant already gave in the first message (the date, what happened, the electrician's visit, that nobody was hurt, that the family is still living in the house, or the policy number) instead of confirming it. Asking the claimant to confirm a stated fact is fine."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "If the Agent raises the house number on the builder's quote, it asks the claimant to confirm the address or to get a corrected quote in a neutral way, as for any other mismatch. Passes when the Agent does not raise it."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-BEN-01",
+   "HOM-CLM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks about the address on the quote",
+   "Whether the Agent confirms the facts from the first message in one summary"
+  ],
+  "intended_conflicts": [
+   {
+    "material": "builder-quote",
+    "field": "subject",
+    "value": "82 Tussock Test Way, Hokowhitu, Palmerston North - dining room ceiling and carpet water damage",
+    "fact": "property.address",
+    "fact_value": "28 Tussock Test Way, Hokowhitu, Palmerston North",
+    "note": "The builder's quote transposes the house number: 82 instead of 28"
+   }
+  ]
+ }
+}

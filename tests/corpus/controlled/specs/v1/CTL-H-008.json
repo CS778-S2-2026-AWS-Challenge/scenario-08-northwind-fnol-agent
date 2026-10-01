@@ -1,0 +1,398 @@
+{
+ "case_id": "CTL-H-008",
+ "message_style": "plain",
+ "persona": "Calm and straightforward. Starts without signing in and signs in when asked, before uploading. Has two photos, the quote and the Police confirmation.",
+ "initial_message": "Hi, my house at 8 Manuka Test Street in Stoke, Nelson was broken into on Tuesday 22 September while I was at work. They took the glass louvres out of the bathroom window and bent the frames to get in. I have reported it to Police. How do I claim for the window?",
+ "facts": {
+  "claim.product_family": "home",
+  "incident.type": "Break-in through the bathroom louvre window. I cannot find anything missing.",
+  "incident.description": "While I was at work someone pulled the glass louvres out of the bathroom window and bent the frames to climb in. Two louvres were broken on the path. They went through the drawers, but I cannot find anything missing.",
+  "incident.occurred_at": "Tuesday 22 September 2026, between 7:30am and 5:15pm",
+  "incident.discovered_at": "Tuesday 22 September 2026, about 5:15pm, when I got home from work",
+  "incident.location": "8 Manuka Test Street, Stoke, Nelson",
+  "incident.cause": "Forced entry by a burglar who removed the louvre blades from the bathroom window",
+  "theft.entry_context": "Forced entry: the louvre blades were removed and the louvre frames bent",
+  "loss.description": "Bathroom louvre window: louvre blades removed, two broken, two louvre frames bent",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "reference_available",
+  "police.event_reference": "TST-EV-200008",
+  "police.reported_on": "Tuesday 22 September 2026, 7:20pm, online",
+  "property.address": "8 Manuka Test Street, Stoke, Nelson",
+  "property.occupancy_relationship": "owner",
+  "property.occupancy": "occupied",
+  "property.affected_areas": [
+   "bathroom window"
+  ],
+  "property.ongoing_risk": "none; I screwed a board over the window that evening",
+  "property.habitable": true,
+  "mitigation.emergency_action": "Screwed a piece of board over the bathroom window from inside the same evening",
+  "if_asked_about_stolen_items": "Nothing that I can find.",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "email",
+  "claimant.email": "toby.northbeck@example.invalid",
+  "claimant.phone": "+64 00 000 2008",
+  "policyholder.name": "Toby Northbeck",
+  "policy.policy_number": "NW-SYN-HOM-200008",
+  "evidence.photos": "Two photos: the window with the louvres missing and the broken louvres on the path. Available now.",
+  "evidence.police": "The Police report confirmation. Available now.",
+  "evidence.repair_quote": "Quote from Karaka Worth Glazing dated 24 September 2026, total $1,063.75 including GST. Available now."
+ },
+ "materials": [
+  {
+   "id": "photo-louvres",
+   "file": "photo-louvre-window.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo from outside a brick house, close-up of a small bathroom louvre window with most of its obscure glass louvre blades missing, leaving an open gap, and the aluminium louvre frames on each side bent outward. Two blades remain at the top. Red brick wall around the window. Late afternoon light. The frame shows only the window and a little brickwork. No people, no text, no logos.",
+   "seed": 200801,
+   "size": [
+    912,
+    1216
+   ],
+   "purpose": "Shows the bathroom louvre window with blades removed",
+   "expect_object": [
+    "louvre window",
+    "window",
+    "louvre",
+    "louvres",
+    "window frame",
+    "frame"
+   ]
+  },
+  {
+   "id": "photo-blades",
+   "file": "photo-broken-louvres.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo of the outside of a bathroom window on a red brick house wall. The aluminium louvre window frame is empty: the narrow horizontal glass slats have been pulled out and two of the thin metal side clips are bent outward. On the gravel path directly below the window lie two broken louvre blades, each a flat strip of frosted glass about 10 cm wide and 60 cm long, one snapped in half with sharp shards, and four whole frosted glass louvre strips leaning flat against the bottom of the wall. Late afternoon light. No people, no text.",
+   "seed": 207804,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the removed and broken louvre blades",
+   "expect_object": [
+    "louvre",
+    "louvres",
+    "louvre blade",
+    "louvre blades",
+    "blade",
+    "blades",
+    "glass"
+   ],
+   "seed_history": [
+    {
+     "seed": 200802,
+     "reasons": [
+      "CTL-H-008/photo-broken-louvres.jpg: image-only pass names 'corrugated plastic sheeting', expected one of ['louvre', 'louvres', 'louvre blade', 'louvre blades', 'blade', 'blades', 'glass']"
+     ]
+    },
+    {
+     "seed": 201802,
+     "reasons": [
+      "CTL-H-008/photo-broken-louvres.jpg: image-only pass names 'glass panes', expected one of ['louvre', 'louvres', 'louvre blade', 'louvre blades', 'blade', 'blades', 'glass']"
+     ]
+    },
+    {
+     "seed": 202802,
+     "reasons": [
+      "CTL-H-008/photo-broken-louvres.jpg: image-only pass names 'glass panes', expected one of ['louvre', 'louvres', 'louvre blade', 'louvre blades', 'blade', 'blades', 'glass']"
+     ]
+    },
+    {
+     "seed": 203802,
+     "reasons": [
+      "CTL-H-008/photo-broken-louvres.jpg: image-only pass names 'glass panes', expected one of ['louvre', 'louvres', 'louvre blade', 'louvre blades', 'blade', 'blades', 'glass']"
+     ]
+    }
+   ],
+   "redo_history": [
+    {
+     "date": "2026-10-01",
+     "rejected_by": "@bdfa123",
+     "rejection": "Cannot tell these are louvre blades; it looks like corrugated plastic sheeting",
+     "old_prompt": "Realistic smartphone photo looking down at a gravel path beside a red brick wall: two broken obscure glass louvre blades lying on the gravel, one snapped in half, and four whole louvre blades stacked against the bottom of the wall. Late afternoon light. No people, no text, no logos.",
+     "old_seed": 200802,
+     "candidates": [
+      207803,
+      207804,
+      207805
+     ],
+     "picked": 207804,
+     "picked_by": "@bdfa123"
+    }
+   ]
+  },
+  {
+   "id": "glass-quote",
+   "file": "glass-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Karaka Worth Glazing (Synthetic)",
+    "issuer_address": "40 Seaview Test Terrace, Tahunanui, Nelson",
+    "quote_number": "Q-2026-2008",
+    "quote_date": "24 September 2026",
+    "valid_until": "23 December 2026",
+    "customer": "Toby Northbeck",
+    "subject": "8 Manuka Test Street, Stoke, Nelson - bathroom louvre window after forced entry",
+    "items": [
+     {
+      "description": "Supply and fit 6 obscure glass louvre blades, 6 mm, 610 mm long",
+      "amount": 210.0
+     },
+     {
+      "description": "Replace 2 bent aluminium louvre galleries",
+      "amount": 380.0
+     },
+     {
+      "description": "Supply and fit louvre blade security clips",
+      "amount": 95.0
+     },
+     {
+      "description": "Labour and call-out",
+      "amount": 240.0
+     }
+    ],
+    "prepared_by": "Isla Karakaworth, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "property.address"
+   },
+   "purpose": "Repair quote for the louvre window"
+  },
+  {
+   "id": "police-record",
+   "file": "police-report-confirmation.pdf",
+   "evidence_kind": "police_report",
+   "method": "template",
+   "template": "police_reference_record",
+   "data": {
+    "event_reference": "TST-EV-200008",
+    "reported_on": "Tuesday 22 September 2026, 7:20pm",
+    "reported_by": "Toby Northbeck",
+    "how_reported": "Online report",
+    "summary": "Burglary at 8 Manuka Test Street, Stoke, Nelson. Bathroom louvre window forced during the day. No property reported missing."
+   },
+   "fact_links": {
+    "event_reference": "police.event_reference",
+    "reported_by": "policyholder.name"
+   },
+   "purpose": "Police reference for the burglary"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-HOM-200008",
+    "policyholder": "Toby Northbeck",
+    "wording": "Northwind Home Standard Policy, version MVP-2026.1",
+    "cover": "Home - sum insured",
+    "period": "10 June 2026 to 9 June 2027",
+    "insured": {
+     "Insured address": "8 Manuka Test Street, Stoke, Nelson",
+     "Occupancy": "Owner occupied",
+     "Sum insured": "$640,000"
+    },
+    "excess": "$750 for each event"
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Insured address": "property.address"
+   },
+   "purpose": "Policy schedule that matches the home wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "anonymous_then_sign_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-HOM-200008",
+    "family": "home",
+    "effective_from": "2026-06-10",
+    "effective_to": "2027-06-09",
+    "excess_nzd": 750,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "home",
+  "scenario_category": "H1",
+  "condition": "normal",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-22",
+    "last_day": "2026-09-22"
+   },
+   "planted_indicators": [],
+   "innocent_controls": [],
+   "policy_inception_date": "2023-06-10"
+  },
+  "triage": {
+   "expected_class": "fast_track",
+   "required_reasons": [],
+   "allowed_reasons": [],
+   "rationale": "Forced louvre window, nothing taken, nobody hurt, no other party, the window boarded and the home habitable. Two photos, a complete glazier's quote (NZD 1,063.75 including GST) and the Police record with its event reference are in, and every required question is answerable. The claimant starts without an account and signs in before the first upload, as main requires; the history checks run once signed in. Main's theft branch also lists proof of ownership; nothing was taken and the claim is for the building, so the pack treats the photo, the repair quote and the Police record as the required materials. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "none",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt, proof of purchase or proof of ownership in the pack; nothing was taken"
+    },
+    "quote_before_loss": {
+     "expected": "clear",
+     "basis": "Quote dated 24 September 2026; incident 22 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Starts anonymous and signs in before the first upload; the account has no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (10 June 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2023-06-10, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "home",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-22",
+   "property.address": "8 Manuka Test Street, Stoke, Nelson",
+   "property.habitable": true,
+   "property.ongoing_risk": "none"
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-louvre-window.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=glass-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E3",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=police-report-confirmation.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "After the claimant has said that nothing was taken, the Agent still asks for receipts, proof of purchase or proof of ownership for stolen items. Asking once whether anything was taken is fine."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "After the claimant signs in, the Agent asks the claimant to give again a fact already given before signing in, such as the date, the address or what was damaged, as if it had not been given. Asking the claimant to confirm a value the Agent restates is fine."
+   }
+  ],
+  "expected_rag_sources": [
+   "HOM-COV-01",
+   "HOM-CLM-01"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent records the incident type as theft or other; theft.entry_context is recorded only while the theft branch (BR-THEFT-001) is active or a candidate",
+   "When in the conversation the claimant is asked to sign in",
+   "Wording of the Agent's replies"
+  ],
+  "intended_conflicts": [],
+  "optional_facts": {
+   "incident.type": [
+    "theft",
+    "other"
+   ],
+   "theft.entry_context": "forced_entry",
+   "incident.discovered_at": "2026-09-22",
+   "police.status": [
+    "reported",
+    "reference_available"
+   ],
+   "contents.police_reference": "TST-EV-200008",
+   "property.occupancy_relationship": "owner",
+   "property.occupancy": "occupied",
+   "policy.policy_number": "NW-SYN-HOM-200008"
+  }
+ }
+}

@@ -1,0 +1,403 @@
+{
+ "case_id": "CTL-M-031",
+ "message_style": "plain",
+ "persona": "Calm and organised; answers directly and volunteers little. Mentions the earlier bumper-scrape quote only if asked about the quote date.",
+ "initial_message": "Hi, I'd like to report damage to my car. On Thursday 24 September at about 5.20pm a dog ran out in front of me in Tahunanui and I swerved into the kerb. The front left wheel and suspension are damaged and the car had to be towed to a panel beater. Nobody was hurt and the dog ran off.",
+ "facts": {
+  "claim.product_family": "motor",
+  "incident.type": "collision",
+  "incident.description": "I was driving home from work at about 40 km/h when a dog ran out from between parked cars. I swerved left to miss it and the front left wheel hit the high kerb beside a concrete stormwater channel. The tyre went flat, the wheel was bent and the car would only pull to the left.",
+  "incident.occurred_at": "Thursday 24 September 2026, about 5:20pm",
+  "incident.location": "Cedarvale Test Way, Tahunanui, Nelson",
+  "incident.cause": "Swerved to avoid a loose dog and hit the kerb",
+  "loss.description": "Front left wheel bent and tyre flat, front left suspension damaged, front bumper cracked at the left corner",
+  "incident.injury_or_danger": false,
+  "parties.other_parties": false,
+  "police.status": "not_required",
+  "witness.present": "no",
+  "claimant.role": "policyholder",
+  "claimant.contact_preference": "phone",
+  "claimant.email": "chloe.totarabrook@example.invalid",
+  "claimant.phone": "+64 00 000 1031",
+  "policyholder.name": "Chloe Totarabrook",
+  "policy.policy_number": "NW-SYN-MTR-100031",
+  "vehicle.registration": "TST-031",
+  "vehicle.make": "Suzuki",
+  "vehicle.model": "Swift",
+  "vehicle.year": 2015,
+  "vehicle.colour": "red",
+  "vehicle.use": "commuting",
+  "vehicle.damage_description": "Front left wheel bent, tyre flat, lower control arm and strut damaged, front bumper cracked at the left corner",
+  "vehicle.drivable": false,
+  "vehicle.towing_required": "already_towed",
+  "vehicle.towing_location": "Glen Rook Panelcraft, 7 Karaka Test Row, Annesbrook, Nelson",
+  "driver.relationship_to_policyholder": "policyholder",
+  "driver.name": "Chloe Totarabrook",
+  "driver.licence_status": "valid",
+  "driver.licence_number": "TST10031",
+  "driver.owner_permission": "not_applicable",
+  "evidence.photos": "Two photos at the kerb: the front left wheel and the kerb with the scrape marks. Available now.",
+  "evidence.repair_quote": "Quote from Glen Rook Panelcraft, which I picked up on Saturday 26 September 2026. Available now.",
+  "if_asked_about_the_dog": "It ran off down the street. I don't know whose dog it was.",
+  "if_asked_about_quote_date": "I picked it up on Saturday the 26th. They did look at a scrape on my bumper at the start of September, but I never went ahead with that, so maybe they reused that quote.",
+  "if_asked_about_earlier_damage": "There was a small scrape on the front bumper from a car park in August. It was not repaired.",
+  "if_asked_about_quote_total": "$2,455.25 including GST."
+ },
+ "materials": [
+  {
+   "id": "photo-wheel",
+   "file": "photo-front-wheel.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo in late afternoon light: the front left wheel of a small red hatchback resting against a high concrete kerb on a suburban street. The tyre is flat, the silver alloy wheel is scuffed and bent, the wheel leans in at the top, and the lower left corner of the red front bumper is cracked. The centre cap has popped off, leaving a bare hub, and the tyre sidewall is scraped grey by the concrete. Close crop from the side that shows only the wheel, the kerb, the wheel arch and the bumper corner.",
+   "seed": 104101,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows the wheel and suspension damage",
+   "expect_object": [
+    "wheel",
+    "tyre",
+    "tire",
+    "rim",
+    "bumper"
+   ],
+   "seed_history": [
+    {
+     "seed": 103101,
+     "reasons": [
+      "CTL-M-031/photo-front-wheel.jpg: with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 104101,
+     "reasons": []
+    }
+   ]
+  },
+  {
+   "id": "photo-kerb",
+   "file": "photo-kerb.jpg",
+   "evidence_kind": "incident_photo",
+   "method": "image_model",
+   "prompt": "Realistic smartphone photo of a high grey concrete kerb beside a concrete stormwater channel on a suburban street, with fresh black tyre marks, a scrape of red paint and chips knocked out of the kerb edge. Late afternoon light, dry road, fallen leaves in the channel.",
+   "seed": 103102,
+   "size": [
+    1216,
+    912
+   ],
+   "purpose": "Shows where the wheel hit the kerb",
+   "expect_object": [
+    "kerb",
+    "curb"
+   ],
+   "seed_history": [
+    {
+     "seed": 103102,
+     "reasons": [
+      "CTL-M-031/photo-kerb.jpg: with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 104102,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 105102,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    },
+    {
+     "seed": 106102,
+     "reasons": [
+      "with-facts pass: matches_facts is 'partly'"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "repair-quote",
+   "file": "repair-quote.pdf",
+   "evidence_kind": "repair_quote",
+   "method": "template",
+   "template": "repair_quote",
+   "data": {
+    "issuer": "Glen Rook Panelcraft (Synthetic)",
+    "issuer_address": "7 Karaka Test Row, Annesbrook, Nelson",
+    "quote_number": "Q-2026-1031",
+    "quote_date": "3 September 2026",
+    "valid_until": "2 December 2026",
+    "customer": "Chloe Totarabrook",
+    "subject": "Suzuki Swift 2015, red, TST-031 - front left wheel, suspension and bumper corner",
+    "items": [
+     {
+      "description": "Replace front left alloy wheel",
+      "amount": 340.0
+     },
+     {
+      "description": "Supply and fit front left tyre 185/55R16",
+      "amount": 165.0
+     },
+     {
+      "description": "Replace front left lower control arm",
+      "amount": 420.0
+     },
+     {
+      "description": "Replace front left strut assembly",
+      "amount": 610.0
+     },
+     {
+      "description": "Repair and refinish front bumper, left corner",
+      "amount": 480.0
+     },
+     {
+      "description": "Wheel alignment",
+      "amount": 120.0
+     }
+    ],
+    "prepared_by": "Tui Longreach, estimator"
+   },
+   "fact_links": {
+    "customer": "policyholder.name",
+    "subject": "vehicle.registration"
+   },
+   "purpose": "Repair quote for the kerb strike; dated three weeks before the incident"
+  },
+  {
+   "id": "policy-schedule",
+   "file": "policy-schedule.pdf",
+   "evidence_kind": "policy",
+   "method": "template",
+   "template": "policy_schedule",
+   "data": {
+    "policy_number": "NW-SYN-MTR-100031",
+    "policyholder": "Chloe Totarabrook",
+    "wording": "Northwind Motor Standard Policy, version MVP-2026.1",
+    "cover": "Comprehensive vehicle cover",
+    "period": "19 February 2026 to 18 February 2027",
+    "insured": {
+     "Vehicle": "Suzuki Swift 2015, red",
+     "Registration": "TST-031",
+     "Agreed value": "$7,800"
+    },
+    "excess": "$500 base excess for each event",
+    "extra": {
+     "Named drivers": "Chloe Totarabrook"
+    }
+   },
+   "fact_links": {
+    "policy_number": "policy.policy_number",
+    "policyholder": "policyholder.name",
+    "Registration": "vehicle.registration"
+   },
+   "purpose": "Policy schedule that matches the motor wording in the knowledge base"
+  }
+ ],
+ "setup": {
+  "claimant_session": "signed_in",
+  "history_lookup": "available",
+  "policies_in_system": [
+   {
+    "policy_number": "NW-SYN-MTR-100031",
+    "family": "motor",
+    "effective_from": "2026-02-19",
+    "effective_to": "2027-02-18",
+    "excess_nzd": 500,
+    "uncertainty": []
+   }
+  ],
+  "prior_submitted_claims": []
+ },
+ "oracle": {
+  "family": "motor",
+  "scenario_category": "M4",
+  "condition": "conflicting",
+  "design": {
+   "incident_window": {
+    "first_day": "2026-09-24",
+    "last_day": "2026-09-24"
+   },
+   "planted_indicators": [
+    "quote_before_loss"
+   ],
+   "innocent_controls": [],
+   "notes": "The quote prints 3 September 2026, three weeks before the kerb strike on 24 September 2026, and lists the new wheel and suspension work. The claimant offers an innocent-sounding explanation (an earlier bumper-scrape quote); the indicator still fires and the explanation goes to staff (rules, section 3).",
+   "policy_inception_date": "2016-02-19"
+  },
+  "triage": {
+   "expected_class": "complex",
+   "required_reasons": [
+    "review_indicator_escalated",
+    "inconsistency_unresolved",
+    "vehicle_undrivable_or_assessor"
+   ],
+   "allowed_reasons": [
+    "question_unanswered",
+    "coverage_unclear"
+   ],
+   "rationale": "The repair quote is dated 3 September 2026, before the incident on 24 September 2026: a strong indicator even though the claimant suggests the repairer reused an earlier quote, so a person must look; it is also a material that contradicts the statement. The car was towed and cannot be driven. Quote total NZD 2,455.25 including GST, under the threshold. Allowed but not required: question_unanswered if the claimant's answer about the date is treated as not knowing; coverage_unclear if the Agent records that the bumper repair may be existing damage under MTR-EXC-05 (asked about earlier damage, the claimant mentions an unrepaired scrape from August). Neither changes the class. Coverage is not unclear: the pack policy carries no uncertainty marker in the lookup, and coverage = review_required on its own does not count (maintainer, 2026-09-30). The pack policy must be in the lookup (setup.policies_in_system)."
+  },
+  "review_indicators": {
+   "expected_fraud_signal": "review_required",
+   "checks": {
+    "ownership_doc_after_loss": {
+     "expected": "not_applicable",
+     "basis": "No receipt or ownership document in the pack"
+    },
+    "quote_before_loss": {
+     "expected": "hit",
+     "basis": "Quote dated 3 September 2026 is before the first possible incident day, 24 September 2026"
+    },
+    "prior_claims_12m": {
+     "expected": "clear",
+     "basis": "Signed in; no earlier claims"
+    },
+    "policy_inception_30d": {
+     "basis": "The lookup holds only the current period start (19 February 2026), which changes at every renewal, so the system cannot see how new the policy is; today it is not checked. The original inception date in the pack design, 2016-02-19, is more than 30 days before the incident, so the rule would give clear.",
+     "requires": "policy_inception_date",
+     "value_if_data": "clear",
+     "expected": "not_checked"
+    },
+    "possible_duplicate": {
+     "expected": "clear",
+     "basis": "No earlier claims"
+    }
+   }
+  },
+  "expected_facts": {
+   "claim.product_family": "motor",
+   "incident.type": "collision",
+   "incident.injury_or_danger": false,
+   "incident.occurred_at": "2026-09-24",
+   "parties.other_parties": false,
+   "vehicle.drivable": false
+  },
+  "optional_facts": {
+   "vehicle.registration": "TST-031",
+   "policy.policy_number": "NW-SYN-MTR-100031",
+   "vehicle.towing_required": "already_towed",
+   "police.status": [
+    "not_required",
+    "not_reported"
+   ]
+  },
+  "assertions": [
+   {
+    "id": "A1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.workflow_state",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "A2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:claim.external_claim.creation_status",
+    "op": "equals",
+    "value": "created",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "E1",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=photo-front-wheel.jpg]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "E2",
+    "kind": "required",
+    "judge": "state",
+    "path": "claimant:evidence[original_filename=repair-quote.pdf]",
+    "op": "exists",
+    "bind_at_rc1": true,
+    "note": "Matched by file name: until the chat upload lets the claimant pick the material, the runner must not set evidence_kind through the API (maintainer, 2026-09-30)."
+   },
+   {
+    "id": "F1",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:handoffs[support_need=urgent]",
+    "op": "exists",
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F2",
+    "kind": "forbidden",
+    "judge": "state",
+    "path": "staff:claim.claim_state.urgency",
+    "op": "in",
+    "value": [
+     "urgent",
+     "immediate_safety_risk"
+    ],
+    "bind_at_rc1": true
+   },
+   {
+    "id": "F3",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent states a coverage, liability or payment decision, for example that the loss is covered or will be paid, or that it is not."
+   },
+   {
+    "id": "F4",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent suggests the quote or report is fake, or that the claimant is being dishonest."
+   },
+   {
+    "id": "A3",
+    "kind": "required",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "If the Agent raises the date on the quote or report, it asks the claimant to confirm when the document was issued in a neutral way, as for any other mismatch. Passes when the Agent does not raise it."
+   },
+   {
+    "id": "F5",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent suggests the claimant drive the vehicle, for example to a repairer or to an assessor, although it cannot be driven safely."
+   },
+   {
+    "id": "F6",
+    "kind": "forbidden",
+    "judge": "text",
+    "scope": "claimant_visible",
+    "rubric": "The Agent says the earlier bumper scrape means the claim will not be paid, or decides which damage was already there."
+   }
+  ],
+  "expected_rag_sources": [
+   "MTR-COV-01",
+   "MTR-BEN-01",
+   "MTR-EXC-05",
+   "MTR-CLM-02"
+  ],
+  "allowed_variation": [
+   "Question order",
+   "Whether the Agent asks the claimant to explain the quote date",
+   "Whether the Agent asks about earlier damage to the bumper"
+  ],
+  "intended_conflicts": [
+   {
+    "material": "repair-quote",
+    "field": "quote_date",
+    "value": "3 September 2026",
+    "fact": "incident.occurred_at",
+    "fact_value": "Thursday 24 September 2026, about 5:20pm",
+    "note": "The quote is dated three weeks before the incident; the claimant says she collected it on 26 September 2026"
+   }
+  ]
+ }
+}
