@@ -1,0 +1,770 @@
+.workspace-utility-page.is-agreement-page {
+  width: 100%;
+  max-width: none;
+  padding-top: 0;
+}
+
+.workspace-utility-page.is-agreement-page > .claim-history-state {
+  width: min(100%, var(--claimant-agreement-content-measure));
+  margin: var(--space-8) auto 0;
+}
+
+.claim-submitted-page {
+  width: min(100%, var(--claimant-submission-content-measure));
+  container: claim-submission / inline-size;
+  margin: 0 auto;
+  padding: var(--space-16) 0 var(--space-12);
+}
+
+.claim-submitted-card {
+  overflow: hidden;
+  border: var(--border-component);
+  border-radius: var(--claimant-agreement-card-radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-subtle);
+}
+
+.claim-submitted-hero {
+  display: grid;
+  grid-template-columns: var(--space-12) minmax(0, 1fr);
+  gap: var(--space-5);
+  padding: var(--space-8);
+}
+
+.claim-submitted-icon {
+  width: var(--space-12);
+  height: var(--space-12);
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-round);
+  color: var(--claimant-claims-accent-strong);
+  background: var(--color-accent-soft);
+  font-size: var(--font-size-section);
+  font-weight: var(--font-weight-medium);
+}
+
+.claim-submitted-hero h1,
+.claim-submitted-hero p,
+.claim-submitted-reference p,
+.claim-submitted-timeline h2,
+.claim-submitted-timeline h3,
+.claim-submitted-stage-content p,
+.claim-submitted-details h2,
+.claim-submitted-details dl {
+  margin: 0;
+}
+
+.claim-submitted-hero h1 {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-hero);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-heading);
+}
+
+.claim-submitted-hero p {
+  max-width: var(--measure-reading);
+  margin-top: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.claim-submitted-reference {
+  margin: 0 var(--space-8);
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-lg);
+  color: var(--claimant-claims-accent-strong);
+  background: var(--color-accent-soft);
+}
+
+.claim-submitted-reference p {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-body);
+}
+
+.claim-submitted-reference strong {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-page);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-heading);
+}
+
+.claim-submitted-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-8);
+  padding: var(--space-8);
+}
+
+.claim-submitted-timeline,
+.claim-submitted-details {
+  min-width: 0;
+}
+
+.claim-submitted-timeline h2,
+.claim-submitted-details h2 {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-section);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-heading);
+}
+
+.claim-submitted-timeline ol {
+  display: grid;
+  gap: var(--space-6);
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.claim-submitted-timeline li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: var(--space-6) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.claim-submitted-stage-marker {
+  position: relative;
+  display: flex;
+  min-height: var(--space-6);
+  align-self: stretch;
+  justify-content: center;
+}
+
+.claim-submitted-stage-marker > span {
+  position: relative;
+  z-index: var(--claimant-workspace-content-layer);
+  width: var(--space-6);
+  height: var(--space-6);
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-round);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-heading);
+}
+
+.claim-submitted-timeline li:not(:last-child) .claim-submitted-stage-marker::after {
+  position: absolute;
+  top: var(--space-6);
+  bottom: calc(var(--space-6) * -1);
+  left: 50%;
+  width: calc(var(--space-1) / 2);
+  content: '';
+  transform: translateX(-50%);
+  background: var(--color-accent-light);
+}
+
+.claim-submitted-timeline .is-complete .claim-submitted-stage-marker > span {
+  color: var(--color-on-accent);
+  background: var(--claimant-claims-accent-strong);
+}
+
+.claim-submitted-timeline .is-current .claim-submitted-stage-marker > span {
+  border: var(--border-action);
+  background: var(--color-surface);
+}
+
+.claim-submitted-timeline .is-current .claim-submitted-stage-marker > span::before {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-round);
+  content: '';
+  background: var(--claimant-claims-accent-strong);
+}
+
+.claim-submitted-stage-content header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.claim-submitted-stage-content h3 {
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-body);
+}
+
+.claim-submitted-stage-content header > span,
+.claim-submitted-status {
+  display: inline-flex;
+  min-height: var(--space-8);
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-round);
+  color: var(--claimant-claims-accent-strong);
+  background: var(--color-accent-soft);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+}
+
+.claim-submitted-stage-content p {
+  margin-top: var(--space-1);
+  color: var(--claimant-claims-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+
+.claim-submitted-stage-content time {
+  font-variant-numeric: tabular-nums;
+}
+
+.claim-submitted-details {
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-page);
+}
+
+.claim-submitted-details dl {
+  display: grid;
+  gap: var(--space-5);
+  margin-top: var(--space-6);
+}
+
+.claim-submitted-details dt {
+  margin-bottom: var(--space-1);
+  color: var(--claimant-claims-text-muted);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-body);
+}
+
+.claim-submitted-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-body);
+}
+
+.claim-submitted-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-5) var(--space-8);
+  border-top: var(--border-component);
+  border-color: var(--color-divider);
+}
+
+.claim-submitted-actions .primary-button {
+  min-height: var(--size-control-touch);
+  padding-inline: var(--space-5);
+  background: var(--claimant-claims-accent-strong);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.claim-submitted-actions .primary-button:hover {
+  background: var(--claimant-claims-accent);
+}
+
+.claim-submitted-actions .primary-button:focus-visible {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+
+@container claim-submission (max-width: 680px) {
+  .claim-submitted-overview {
+    grid-template-columns: 1fr;
+  }
+}
+
+.agreement-review-page {
+  width: min(100%, var(--claimant-agreement-content-measure));
+  margin: 0 auto;
+  padding: var(--space-8) 0 var(--space-12);
+}
+
+.agreement-review-card {
+  overflow: hidden;
+  border: var(--border-component);
+  border-radius: var(--claimant-agreement-card-radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-subtle);
+}
+
+.agreement-page-header,
+.agreement-summary,
+.agreement-confirmation {
+  padding: var(--space-8);
+}
+
+.agreement-page-header {
+  padding-bottom: var(--space-6);
+}
+
+.agreement-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  color: var(--claimant-claims-text-muted);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+}
+
+.agreement-progress ol {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agreement-progress-indicator {
+  display: flex;
+  align-items: center;
+}
+
+.agreement-progress li {
+  display: flex;
+  align-items: center;
+}
+
+.agreement-progress li:not(:last-child)::after {
+  width: var(--space-4);
+  height: calc(var(--space-1) / 2);
+  content: '';
+  background: var(--color-accent-light);
+}
+
+.agreement-progress li > span:first-child {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--color-accent);
+}
+
+.agreement-progress li.is-current > span:first-child {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+  background: var(--color-surface);
+}
+
+.agreement-progress li.is-pending > span:first-child,
+.agreement-progress.is-unavailable li > span:first-child {
+  background: var(--color-divider);
+}
+
+.agreement-progress.is-unavailable li:not(:last-child)::after {
+  background: var(--color-divider);
+}
+
+.agreement-progress p,
+.agreement-page-header > p,
+.agreement-section-heading p,
+.agreement-confirmation header p,
+.agreement-display-copy,
+.agreement-submission-error p {
+  margin: 0;
+}
+
+.agreement-page-header h1 {
+  max-width: var(--measure-reading);
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-hero);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-heading);
+}
+
+.agreement-page-header > p {
+  max-width: var(--measure-reading);
+  margin-top: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.agreement-summary,
+.agreement-confirmation,
+.agreement-submission-error {
+  border-top: var(--border-component);
+  border-color: var(--color-divider);
+}
+
+.agreement-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.agreement-section-heading h2,
+.agreement-confirmation h2,
+.agreement-submission-error h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-section);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-heading);
+}
+
+.agreement-section-heading p,
+.agreement-confirmation header p {
+  margin-top: var(--space-2);
+  color: var(--claimant-claims-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+
+.agreement-edit-action {
+  min-height: var(--size-control-touch);
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-accent-strong);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.agreement-edit-action:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-accent-soft);
+}
+
+.agreement-edit-action:disabled {
+  color: var(--claimant-claims-text-muted);
+  cursor: not-allowed;
+}
+
+.agreement-edit-action:focus-visible,
+.agreement-confirmation-option input:focus-visible,
+.agreement-actions button:focus-visible {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+
+.agreement-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6) var(--space-10);
+  margin: var(--space-8) 0 0;
+}
+
+.agreement-summary-grid > div {
+  min-width: 0;
+}
+
+.agreement-summary-grid dt {
+  margin-bottom: var(--space-1);
+  color: var(--claimant-claims-text-muted);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-body);
+}
+
+.agreement-summary-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-body);
+}
+
+.agreement-summary-grid time {
+  font-variant-numeric: tabular-nums;
+}
+
+.agreement-status-badge {
+  display: inline-flex;
+  min-height: var(--space-8);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-round);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+}
+
+.agreement-status-badge > span {
+  width: var(--space-2);
+  height: var(--space-2);
+  flex: 0 0 auto;
+  border-radius: var(--radius-round);
+  background: currentColor;
+}
+
+.agreement-status-badge.is-success {
+  color: var(--claimant-claims-accent-strong);
+  background: var(--color-accent-soft);
+}
+
+.agreement-status-badge.is-warning {
+  color: var(--color-risk-notice);
+  background: var(--color-warning-soft);
+}
+
+.agreement-status-badge.is-neutral {
+  color: var(--color-text-secondary);
+  background: var(--color-page);
+}
+
+.agreement-submission-error {
+  padding: var(--space-6) var(--space-8);
+  background: var(--color-danger-soft);
+}
+
+.agreement-submission-error h2 {
+  color: var(--color-danger);
+}
+
+.agreement-submission-error p {
+  max-width: var(--measure-reading);
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.agreement-confirmation header {
+  margin-bottom: var(--space-5);
+}
+
+.agreement-display-copy {
+  max-width: var(--measure-reading);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.agreement-confirmation-list {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.agreement-confirmation-option {
+  display: grid;
+  min-height: var(--size-control-touch);
+  grid-template-columns: var(--space-5) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-primary);
+  background: var(--color-accent-soft);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  cursor: pointer;
+}
+
+.agreement-confirmation-option:hover {
+  background: var(--color-page);
+}
+
+.agreement-confirmation-option:has(input:focus-visible) {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+
+.agreement-confirmation-option input {
+  width: var(--space-5);
+  height: var(--space-5);
+  display: grid;
+  margin: 0;
+  appearance: none;
+  place-content: center;
+  border: var(--border-component);
+  border-color: var(--color-accent-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.agreement-confirmation-option input::before {
+  content: '✓';
+  color: var(--color-on-accent);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-heading);
+  opacity: 0;
+}
+
+.agreement-confirmation-option input:checked {
+  border-color: var(--claimant-claims-accent-strong);
+  background: var(--claimant-claims-accent-strong);
+}
+
+.agreement-confirmation-option input:checked::before {
+  opacity: 1;
+}
+
+.agreement-confirmation-option input:focus-visible {
+  outline-offset: var(--space-1);
+}
+
+.agreement-confirmation-option input:disabled,
+.agreement-confirmation-option:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.agreement-confirmed-state {
+  min-height: var(--size-control-touch);
+  margin: var(--space-5) 0 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  color: var(--claimant-claims-accent-strong);
+  background: var(--color-accent-soft);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.agreement-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-8);
+  border-top: var(--border-component);
+  border-color: var(--color-divider);
+  background: var(--color-page);
+}
+
+.agreement-actions .agreement-back,
+.agreement-actions .agreement-submit {
+  min-height: var(--size-control-touch);
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.agreement-actions .agreement-submit {
+  min-width: 0;
+  border-color: var(--claimant-claims-accent-strong);
+  background: var(--claimant-claims-accent-strong);
+}
+
+.agreement-actions .agreement-submit:hover:not(:disabled) {
+  border-color: var(--claimant-claims-accent);
+  background: var(--claimant-claims-accent);
+}
+
+.agreement-actions .agreement-submit:disabled {
+  border-color: var(--color-panel);
+  color: var(--color-text-secondary);
+  background: var(--color-panel);
+  opacity: 1;
+}
+
+@media (max-width: 680px) {
+  .claim-submitted-page {
+    padding: var(--space-6) 0 var(--space-8);
+  }
+
+  .claim-submitted-hero,
+  .claim-submitted-overview {
+    padding: var(--space-6);
+  }
+
+  .claim-submitted-reference {
+    margin-inline: var(--space-6);
+  }
+
+  .claim-submitted-overview {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+
+  .claim-submitted-actions {
+    padding-inline: var(--space-6);
+  }
+
+  .agreement-review-page {
+    padding: var(--space-4) 0 var(--space-8);
+  }
+
+  .agreement-page-header,
+  .agreement-summary,
+  .agreement-confirmation {
+    padding: var(--space-6);
+  }
+
+  .agreement-page-header h1 {
+    font-size: var(--font-size-page);
+  }
+
+  .agreement-summary-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    margin-top: var(--space-6);
+  }
+
+  .agreement-submission-error,
+  .agreement-actions {
+    padding-inline: var(--space-6);
+  }
+}
+
+@media (max-width: 520px) {
+  .claim-submitted-hero {
+    grid-template-columns: var(--space-10) minmax(0, 1fr);
+    gap: var(--space-4);
+    padding-inline: var(--space-4);
+  }
+
+  .claim-submitted-icon {
+    width: var(--space-10);
+    height: var(--space-10);
+  }
+
+  .claim-submitted-hero h1 {
+    font-size: var(--font-size-page);
+  }
+
+  .claim-submitted-reference {
+    margin-inline: var(--space-4);
+    padding-inline: var(--space-4);
+  }
+
+  .claim-submitted-overview,
+  .claim-submitted-actions {
+    padding-inline: var(--space-4);
+  }
+
+  .claim-submitted-actions .primary-button {
+    width: 100%;
+  }
+
+  .agreement-page-header,
+  .agreement-summary,
+  .agreement-confirmation,
+  .agreement-submission-error,
+  .agreement-actions {
+    padding-inline: var(--space-4);
+  }
+
+  .agreement-section-heading {
+    align-items: flex-start;
+  }
+
+  .agreement-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agreement-actions .agreement-back,
+  .agreement-actions .agreement-submit {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agreement-review-card * {
+    transition: none;
+  }
+}

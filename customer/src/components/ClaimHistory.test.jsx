@@ -26,6 +26,15 @@ const newerClaim = {
   updated_at: '2026-09-14T03:30:00Z',
 }
 
+const rejectedClaim = {
+  ...newerClaim,
+  claim_decision: {
+    decision: 'rejected',
+    decided_at: '2026-09-15T04:45:00Z',
+    claimant_explanation: 'The policy does not cover this type of loss.',
+  },
+}
+
 // The most recently updated report is still in progress: it is promoted separately from past Claims.
 const reportInProgress = {
   claim_id: 'clm_motor_in_progress',
@@ -81,6 +90,16 @@ it('opens a created Claim from the keyboard', async () => {
   await user.keyboard('{Enter}')
 
   expect(onSelect).toHaveBeenCalledWith(newerClaim)
+})
+
+it('shows the claimant-safe final decision in Claim history without staff-only fields', () => {
+  render(<ClaimHistory claims={[rejectedClaim]} onSelect={vi.fn()} />)
+
+  const row = within(screen.getByRole('button', { name: /NWF-2026-001042/ }))
+  expect(row.getByText('Decision: Rejected')).toBeInTheDocument()
+  expect(row.getByText('The policy does not cover this type of loss.')).toBeInTheDocument()
+  expect(row.queryByText(/internal/i)).not.toBeInTheDocument()
+  expect(row.queryByText(/decided by/i)).not.toBeInTheDocument()
 })
 
 it('offers a route to start a Claim when the claimant has none', async () => {
@@ -170,6 +189,17 @@ it('shows the selected Claim status summary and opens Evidence history', async (
   await user.click(screen.getByRole('button', { name: /Evidence history/ }))
 
   expect(onOpenEvidence).toHaveBeenCalledOnce()
+})
+
+it('shows the final decision, explanation, and time in the read-only Claim record', () => {
+  render(<ClaimFeatureDirectory claim={rejectedClaim} onOpenEvidence={vi.fn()} />)
+
+  const decision = screen.getByRole('heading', { name: 'Claim rejected' }).closest('section')
+  expect(decision).not.toBeNull()
+  expect(within(decision).getByText('Rejected')).toBeInTheDocument()
+  expect(within(decision).getByText('The policy does not cover this type of loss.'))
+    .toBeInTheDocument()
+  expect(within(decision).getByText('Decided 15 Sept 2026, 4:45 pm')).toBeInTheDocument()
 })
 
 it('does not invent an estimated wait when the server omits it', () => {

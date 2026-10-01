@@ -28,8 +28,15 @@ function reportUpdatedLabel(updatedAt) {
   return isToday ? 'Updated today' : `Updated ${formatDateTime(updatedAt)}`
 }
 
+function claimDecisionLabel(decision) {
+  if (decision === 'approved') return 'Approved'
+  if (decision === 'rejected') return 'Rejected'
+  return null
+}
+
 function ClaimHistoryRow({ claim, onSelect }) {
   const nextStep = claim.customer_next_step || {}
+  const decisionLabel = claimDecisionLabel(claim.claim_decision?.decision)
   const detailsId = `claim-history-${claim.claim_id}-details`
   return (
     <li>
@@ -49,6 +56,12 @@ function ClaimHistoryRow({ claim, onSelect }) {
         </span>
         <span className="claim-history-card-reference">{claimReference(claim)}</span>
         <span className="claim-history-card-details" id={detailsId}>
+          {decisionLabel && (
+            <span className="claim-history-card-decision">
+              <strong>Decision: {decisionLabel}</strong>
+              <span>{claim.claim_decision.claimant_explanation}</span>
+            </span>
+          )}
           <span className="claim-history-card-summary">
             {nextStep.summary || 'No next step is available yet.'}
           </span>
@@ -186,6 +199,8 @@ export default function ClaimHistory({
 
 export function ClaimFeatureDirectory({ claim, onOpenEvidence }) {
   const nextStep = claim.customer_next_step || {}
+  const decision = claim.claim_decision
+  const decisionLabel = claimDecisionLabel(decision?.decision)
   const claimNumber = claim.external_claim?.claim_number || claim.claim_id
   const statusLabel = claimStatusLabel(nextStep.status)
   const responsibleParty = responsiblePartyLabel(nextStep.responsible_party)
@@ -228,6 +243,24 @@ export function ClaimFeatureDirectory({ claim, onOpenEvidence }) {
           <time dateTime={claim.updated_at}>Last updated {formatDateTime(claim.updated_at)}</time>
         </p>
       </div>
+      {decisionLabel && (
+        <section className="claim-decision-summary" aria-labelledby="claim-decision-title">
+          <div className="claim-decision-summary-heading">
+            <div>
+              <p className="eyebrow">Claim decision</p>
+              <h3 id="claim-decision-title">Claim {decisionLabel.toLowerCase()}</h3>
+            </div>
+            <span className={`claim-decision-badge is-${decision.decision}`}>
+              <span aria-hidden="true">{decision.decision === 'approved' ? '✓' : '×'}</span>
+              {decisionLabel}
+            </span>
+          </div>
+          <p>{decision.claimant_explanation}</p>
+          <time dateTime={decision.decided_at}>
+            Decided {formatDateTime(decision.decided_at)}
+          </time>
+        </section>
+      )}
       <div className="claim-feature-list" aria-label="Features available for this Claim">
         <button className="claim-feature-card" type="button" onClick={onOpenEvidence}>
           <span className="claim-feature-icon" aria-hidden="true">↗</span>

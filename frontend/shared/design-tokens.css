@@ -138,6 +138,12 @@
   --claimant-profile-address-min-height: 96px;
   --claimant-details-panel-width: 400px;
 
+  /* Step 4 keeps the final review comfortably scannable without stretching
+     the Claim summary across the conversation workspace. */
+  --claimant-agreement-content-measure: 960px;
+  --claimant-agreement-card-radius: var(--radius-xl);
+  --claimant-submission-content-measure: 880px;
+
   /* Claimant attachment cards stay compact while shrinking with narrow composers. */
   --claimant-attachment-card-width: 400px;
 
