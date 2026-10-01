@@ -76,9 +76,10 @@ def run_recovery_cycle(
                 candidate.follow_up_id,
             )
 
-    # The expired Claim's terminal disposition is the durable handoff source. A
-    # reservation that is refused or fails here stays discoverable on later cycles,
-    # and the stable operation identity makes every retry the same reservation.
+    # A retention-eligible terminal disposition (expiry, staff abandonment or authorised
+    # closure) is the durable handoff source. A reservation that is refused or fails
+    # here stays discoverable on later cycles, and the stable operation identity makes
+    # every retry the same reservation.
     for claim_id in repository.list_retention_handoff_candidates(limit=limit):
         try:
             reserve_retention_from_terminal(repository, claim_id, now=now)

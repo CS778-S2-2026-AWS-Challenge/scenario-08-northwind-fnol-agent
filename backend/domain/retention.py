@@ -345,6 +345,20 @@ def retention_terminal_source_ref(
     return f'claim-terminal:{claim_id}:revision:{recorded_revision}'
 
 
+# The one retention eligibility rule for a terminal Claim. Validation and the worker's
+# handoff discovery both read it, so every eligible terminal reaches retention.
+RETENTION_ELIGIBLE_TERMINAL_REASONS: frozenset[TerminalDispositionReasonCode] = frozenset(
+    {
+        TerminalDispositionReasonCode.RECOVERY_EXPIRED,
+        TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT,
+        TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
+    }
+)
+RETENTION_ELIGIBLE_TERMINAL_VALUES: frozenset[TerminalDispositionValue] = frozenset(
+    {TerminalDispositionValue.ABANDONED, TerminalDispositionValue.CLOSED}
+)
+
+
 def validate_retention_source_authority(
     claim: WorkingClaim,
     operation: RetentionOperation,
@@ -365,16 +379,10 @@ def validate_retention_source_authority(
             claim.claim_id,
         )
 
-    eligible_reasons = {
-        TerminalDispositionReasonCode.RECOVERY_EXPIRED,
-        TerminalDispositionReasonCode.AUTHORISED_STAFF_ABANDONMENT,
-        TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
-    }
-
-    if terminal.reason_code not in eligible_reasons or terminal.value not in {
-        TerminalDispositionValue.ABANDONED,
-        TerminalDispositionValue.CLOSED,
-    }:
+    if (
+        terminal.reason_code not in RETENTION_ELIGIBLE_TERMINAL_REASONS
+        or terminal.value not in RETENTION_ELIGIBLE_TERMINAL_VALUES
+    ):
         raise RetentionEligibilityRejected(
             RetentionEligibilityReason.TERMINAL_NOT_ELIGIBLE,
             claim.claim_id,

@@ -100,7 +100,6 @@ from backend.domain.models import (
     SignalDecisionRecord,
     StaffActionRecord,
     StaffActionStatus,
-    TerminalDispositionReasonCode,
     WorkingClaim,
     assert_follow_up_operation_transition,
 )
@@ -118,6 +117,8 @@ from backend.domain.realtime import (
     realtime_resources_for_records,
 )
 from backend.domain.retention import (
+    RETENTION_ELIGIBLE_TERMINAL_REASONS,
+    RETENTION_ELIGIBLE_TERMINAL_VALUES,
     RETENTION_STORAGE_TARGETS,
     RETENTION_TARGET_STORAGE_TYPE,
     ObjectDeletionOutcome,
@@ -574,12 +575,12 @@ class MongoDBRepository:
         )
         self._collection.create_index(
             [('record_type', 1), ('terminal_disposition.recorded_at', 1), ('claim_id', 1)],
-            name='claim_recovery_expiry_handoff',
+            name='claim_retention_handoff',
             partialFilterExpression={
                 'record_type': 'claim',
-                'terminal_disposition.reason_code': (
-                    TerminalDispositionReasonCode.RECOVERY_EXPIRED.value
-                ),
+                'terminal_disposition.reason_code': {
+                    '$in': sorted(reason.value for reason in RETENTION_ELIGIBLE_TERMINAL_REASONS)
+                },
             },
         )
         self._collection.create_index(
@@ -719,14 +720,17 @@ class MongoDBRepository:
     ) -> list[str]:
         if not 1 <= limit <= 100:
             raise ValueError('Retention handoff discovery limit must be between 1 and 100.')
-        # Expired Claims leave this set once reserved; cleanup removes the Claim record, so
+        # Eligible Claims leave this set once reserved; cleanup removes the Claim record, so
         # the scan is bounded by in-flight handoffs rather than by historical volume.
         documents = self._collection.find(
             {
                 'record_type': 'claim',
-                'terminal_disposition.reason_code': (
-                    TerminalDispositionReasonCode.RECOVERY_EXPIRED.value
-                ),
+                'terminal_disposition.reason_code': {
+                    '$in': sorted(reason.value for reason in RETENTION_ELIGIBLE_TERMINAL_REASONS)
+                },
+                'terminal_disposition.value': {
+                    '$in': sorted(value.value for value in RETENTION_ELIGIBLE_TERMINAL_VALUES)
+                },
             },
             projection={'claim_id': 1},
         ).sort([('terminal_disposition.recorded_at', 1), ('claim_id', 1)])

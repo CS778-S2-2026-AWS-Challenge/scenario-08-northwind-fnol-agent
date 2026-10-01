@@ -726,10 +726,11 @@ class PersistenceRepository(ClaimRepository, Protocol):
         *,
         limit: int,
     ) -> list[str]:
-        """Return Claim IDs whose recovery expiry has no RetentionOperation yet.
+        """Return retention-eligible terminal Claim IDs with no RetentionOperation yet.
 
-        The terminal disposition is the durable handoff source, so a reservation that
-        failed after expiry stays discoverable until reservation succeeds.
+        Eligibility is ``RETENTION_ELIGIBLE_TERMINAL_REASONS`` and ``_VALUES``: recovery
+        expiry, staff abandonment and authorised closure. The terminal disposition is
+        the durable handoff source, so a reservation that failed stays discoverable.
 
         Args:
             limit: Maximum Claim IDs in one bounded page (1-100).

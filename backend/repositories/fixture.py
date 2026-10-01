@@ -87,7 +87,6 @@ from backend.domain.models import (
     SignalDecisionRecord,
     StaffActionRecord,
     StaffActionStatus,
-    TerminalDispositionReasonCode,
     WorkingClaim,
     assert_follow_up_operation_transition,
 )
@@ -105,6 +104,8 @@ from backend.domain.realtime import (
     realtime_resources_for_records,
 )
 from backend.domain.retention import (
+    RETENTION_ELIGIBLE_TERMINAL_REASONS,
+    RETENTION_ELIGIBLE_TERMINAL_VALUES,
     RETENTION_STORAGE_TARGETS,
     ObjectDeletionOutcome,
     ResourceAccessClosed,
@@ -318,17 +319,17 @@ class FixtureRepository(PersistenceRepository):
             raise ValueError('Retention handoff discovery limit must be between 1 and 100.')
         with self._claim_mutation_lock:
             reserved = {operation.claim_id for operation in self._retention_operations.values()}
-            expired = sorted(
-                (
-                    (claim.terminal_disposition.recorded_at, claim.claim_id)
-                    for claim in self._claims.values()
-                    if claim.terminal_disposition is not None
-                    and claim.terminal_disposition.reason_code
-                    is TerminalDispositionReasonCode.RECOVERY_EXPIRED
+            eligible: list[tuple[datetime, str]] = []
+            for claim in self._claims.values():
+                terminal = claim.terminal_disposition
+                if (
+                    terminal is not None
+                    and terminal.reason_code in RETENTION_ELIGIBLE_TERMINAL_REASONS
+                    and terminal.value in RETENTION_ELIGIBLE_TERMINAL_VALUES
                     and claim.claim_id not in reserved
-                ),
-            )
-            return [claim_id for _, claim_id in expired[:limit]]
+                ):
+                    eligible.append((terminal.recorded_at, claim.claim_id))
+            return [claim_id for _, claim_id in sorted(eligible)[:limit]]
 
     def reserve_eligible_retention_operation(
         self,
