@@ -807,6 +807,11 @@ p { line-height: 1.55; }
 .workbench-app:has(#claim-panel-conversation) > .staff-agent:not(.is-open), .workbench-app:has(.conversation-detail .staff-composer) > .staff-agent:not(.is-open) { bottom: min(calc(var(--space-16) + var(--space-6)), calc(100vh - var(--space-16))); }
 .workbench-app:has(#claim-panel-conversation .staff-composer__notice) > .staff-agent:not(.is-open), .workbench-app:has(#claim-panel-conversation .assistance-status--composer) > .staff-agent:not(.is-open), .workbench-app:has(.conversation-detail .staff-composer__notice) > .staff-agent:not(.is-open), .workbench-app:has(.conversation-detail .assistance-status--composer) > .staff-agent:not(.is-open) { bottom: min(calc(var(--space-16) + var(--space-16) + var(--space-4)), calc(100vh - var(--space-16))); }
 .staff-agent.is-open { top: var(--space-4); right: var(--space-4); bottom: auto; }
+@media (min-width: 801px) {
+  /* Let the end of scrollable Claim content and messages scroll clear of the floating bubble. */
+  .workbench-app:has(> .staff-agent .staff-agent__bubble) .message-list { padding-bottom: calc(var(--space-12) + var(--space-6)); }
+  .workbench-app:has(> .staff-agent .staff-agent__bubble) .open-claim-panel:not(:has(.conversation-view))::after { content: ''; display: block; height: var(--space-6); }
+}
 .staff-agent--embedded, .staff-agent--embedded.is-open { position: static; z-index: auto; width: 100%; min-width: 0; min-height: 0; flex: 1; }
 .staff-agent__bubble { display: grid; width: var(--space-12); height: var(--space-12); place-items: center; border: var(--border-component); border-radius: var(--radius-round); background: var(--color-workbench-nav); color: var(--color-surface); box-shadow: var(--shadow-popover); cursor: grab; touch-action: none; }
 .staff-agent__bubble:active { cursor: grabbing; }
