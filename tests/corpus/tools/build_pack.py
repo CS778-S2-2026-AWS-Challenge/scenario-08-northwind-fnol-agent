@@ -33,9 +33,10 @@ def sha256(path: str) -> str:
 
 
 def generator_version() -> str:
+    """Hash of the tool sources, the same on every checkout whatever its line endings."""
     digest = hashlib.sha256()
     for path in [*sorted(glob.glob(os.path.join(HERE, '*.py'))), imagegen.GRAPH]:
-        digest.update(Path(path).read_bytes())
+        digest.update(Path(path).read_bytes().replace(b'\r\n', b'\n'))
     return 'tools-sha256:' + digest.hexdigest()[:16]
 
 
