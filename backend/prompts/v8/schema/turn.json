@@ -176,6 +176,7 @@
                     "type": "number"
                   },
                   "currency": {
+                    "description": "ISO 4217 code the claimant stated; NZD when they did not name a currency.",
                     "maxLength": 3,
                     "minLength": 3,
                     "pattern": "^[A-Z]{3}$",
@@ -272,11 +273,24 @@
             "maxLength": 150,
             "minLength": 1,
             "type": "string"
+          },
+          "claimant_request_quote": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The claimant's exact words asking for this service in the current message; null when they did not ask."
           }
         },
         "required": [
           "service_identity",
-          "rationale"
+          "rationale",
+          "claimant_request_quote"
         ],
         "type": "object"
       },

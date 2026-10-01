@@ -455,6 +455,15 @@ class ClaimState(ContractModel):
     next_action: AgentAction = AgentAction.ASK
 
 
+class ClaimTriage(ContractModel):
+    """Staff-only triage of a created Claim; never part of a claimant projection."""
+
+    severity: Severity
+    reasons: list[str] = Field(default_factory=list, max_length=20)
+    rules_version: str = Field(min_length=1, max_length=100)
+    amount_threshold: float = Field(ge=0.0)
+
+
 class ActorReference(ContractModel):
     actor_type: ActorType
     actor_id: str

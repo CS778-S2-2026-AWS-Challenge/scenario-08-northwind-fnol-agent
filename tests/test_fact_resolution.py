@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -31,7 +32,7 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
-from backend.services.agent import AgentProposal, AgentTurnContext
+from backend.services.agent import AgentProposal, AgentTurnContext, ControlledAgent
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
     resolve_form_change,
@@ -336,6 +337,39 @@ def test_question_budget_counts_repetition_and_stops_the_tenth_question(family: 
     assert '?' not in response
 
 
+def test_exhausted_budget_keeps_the_next_step_once_requirements_are_ready() -> None:
+    session = SessionRecord(
+        session_id='ses_ready',
+        claim_id='clm_ready',
+        customer_id='cus_fact',
+        question_budget=1,
+        question_turn_count=1,
+        started_at=NOW,
+        last_active_at=NOW,
+    )
+    ready_step = CustomerNextStep(
+        status='ready_to_create',
+        summary='Review your payout contact, then submit the Claim.',
+        responsible_party=ResponsibleParty.CLAIMANT,
+        required_items=[],
+    )
+
+    counted, step, response = _apply_question_accounting(
+        session,
+        asking_proposal('incident.location'),
+        ready_step,
+        'Was anything else damaged?',
+        'msg_extra',
+        NOW,
+        requirements_ready=True,
+    )
+
+    assert step == ready_step
+    assert response == 'Was anything else damaged?'
+    assert counted.post_session_follow_up_required is False
+    assert counted.question_turn_count == 2
+
+
 def test_question_accounting_marks_repeated_requested_fact() -> None:
     session = SessionRecord(
         session_id='ses_questions',
@@ -610,6 +644,84 @@ def test_question_budget_is_persisted_across_a_restarted_claim_session() -> None
     assert stored_session.post_session_follow_up_required is True
     assert turn['decision']['customer_next_step']['status'] == 'question_budget_reached'
     assert '?' not in turn['agent_message']['content']['text']
+
+
+class BudgetThenControlledAgent:
+    """Spends the question budget, then lets the controlled agent complete intake.
+
+    The model-gateway path is covered in `tests/test_question_budget_v8.py`.
+    """
+
+    def __init__(self) -> None:
+        self._controlled = ControlledAgent()
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        if context.message_text != 'I still need help.':
+            return self._controlled.propose_turn(context)
+        return asking_proposal('incident.location')
+
+
+def test_exhausted_budget_does_not_block_a_claim_whose_requirements_are_ready() -> None:
+    journey_input = json.loads(
+        (
+            Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
+        ).read_text(encoding='utf-8')
+    )['input']
+    repository = FixtureRepository()
+    agent = BudgetThenControlledAgent()
+    with TestClient(create_app(SETTINGS, repository, agent)) as client:
+        created = _create_claim(client, 'motor', 'create-budget-ready')
+        claim_id = str(created['claim']['claim_id'])
+        session_id = str(created['session']['session_id'])
+        revision = int(created['claim']['revision'])
+        for index in range(9):
+            turn = _send(
+                client, claim_id, session_id, revision, 'I still need help.', f'spend-{index}'
+            )
+            revision = int(turn['claim_revision'])
+        described = _send(client, claim_id, session_id, revision, journey_input, 'describe')
+        confirmed = client.post(
+            f'/api/v1/claims/{claim_id}/form/confirmations',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'confirm-all',
+                'If-Match': str(described['claim_revision']),
+            },
+            json={'field_codes': sorted({c['field_code'] for c in described['form_changes']})},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        completed = client.patch(
+            f'/api/v1/claims/{claim_id}/form',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'complete-drivable',
+                'If-Match': str(confirmed.json()['revision']),
+            },
+            json={'updates': [{'field_code': 'vehicle.drivable', 'value': True}]},
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()['customer_next_step']['status'] == 'ready_to_create'
+
+        extra = _send(
+            client,
+            claim_id,
+            session_id,
+            int(completed.json()['revision']),
+            'I still need help.',
+            'extra-question',
+        )
+        claim = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json()
+
+    assert extra['decision']['customer_next_step']['status'] == 'ready_to_create'
+    assert 'remaining information' not in extra['agent_message']['content']['text']
+    assert claim['dynamic_form']['requirements']['ready'] is True
+    assert claim['customer_next_step']['status'] == 'ready_to_create'
+    assert claim['primary_action']['action_code'] == 'claimant.review_payout_contact'
+    assert claim['primary_action']['available'] is True
+    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    assert stored_session is not None
+    assert stored_session.question_turn_count == 10
+    assert stored_session.post_session_follow_up_required is False
 
 
 def test_claimant_form_mutation_responses_filter_internal_retrieval_provenance() -> None:

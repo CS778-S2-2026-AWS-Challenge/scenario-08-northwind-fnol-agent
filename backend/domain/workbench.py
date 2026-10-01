@@ -21,6 +21,7 @@ from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimState,
     ClaimTerminalDisposition,
+    ClaimTriage,
     ContentsItem,
     ContentsItemEvidenceAssociationProjection,
     ContractModel,
@@ -462,6 +463,7 @@ class WorkbenchClaimListItem(ContractModel):
     work_summary: WorkbenchWorkSummary
     integration_summary: WorkbenchIntegrationSummary
     tags: list[StaffTag] = Field(default_factory=list)
+    triage: ClaimTriage | None = None
     created_at: datetime
     updated_at: datetime
 

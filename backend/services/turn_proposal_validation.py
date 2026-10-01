@@ -23,6 +23,7 @@ from backend.domain.agent_v8 import (
 )
 from backend.domain.branch_registry import build_default_registry
 from backend.domain.external_service_registry import SERVICE_REGISTRY
+from backend.domain.field_registry import parse_registered_number
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.domain.models import (
     BranchEvaluationResult,
@@ -114,6 +115,20 @@ class ValidatedTurn:
     policy_judgment_sources: tuple[Mapping[str, object], ...] = ()
 
 
+def _explicit_service_requests(
+    suggestions: Sequence[V8ServiceSuggestion], message_text: str | None
+) -> frozenset[str]:
+    """Services whose claimant request quote appears verbatim in the current message."""
+    message = ' '.join((message_text or '').split()).casefold()
+    requested: set[str] = set()
+    for suggestion in suggestions:
+        quote = ' '.join((suggestion.claimant_request_quote or '').split()).casefold()
+        quote = quote.strip('"\'‘’“”')  # noqa: RUF001 -- typographic quotes some models emit
+        if len(quote) >= 3 and quote in message:
+            requested.add(suggestion.service_identity)
+    return frozenset(requested)
+
+
 def claimant_report_supports_value(
     field_code: str,
     value: object,
@@ -147,6 +162,15 @@ def claimant_report_supports_value(
         return all(
             isinstance(item, str) and ' '.join(item.split()).casefold() in quote for item in value
         )
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        # An amount is supported when the quotation states the same figure,
+        # written with or without a currency sign, thousands separators or cents.
+        stated = {
+            parsed
+            for token in re.findall(r'\d[\d,]*(?:\.\d{1,2})?', quote)
+            if (parsed := parse_registered_number(token)) is not None
+        }
+        return float(value) in stated
     if not isinstance(value, bool):
         return False
     negative = bool(
@@ -435,8 +459,9 @@ def validate_turn_proposal(
     open_handoffs: Collection[object],
     message_text: str | None,
     evidence: Sequence[AgentEvidenceReference] = (),
-    service_eligibility_resolver: Callable[[list[ProposedFormChange]], Collection[str]]
-    | None = None,
+    service_eligibility_resolver: (
+        Callable[[list[ProposedFormChange], frozenset[str]], Collection[str]] | None
+    ) = None,
     authorised_service_ids: Collection[str] = (),
     authorized_policy_sources: Sequence[Mapping[str, object]] = (),
 ) -> ValidatedTurn:
@@ -619,7 +644,9 @@ def validate_turn_proposal(
         open_handoffs or safety_interrupt is not None or escalation is not None
     )
     if service_eligibility_resolver is not None and not services_suppressed:
-        eligible_service_ids = service_eligibility_resolver(changes)
+        eligible_service_ids = service_eligibility_resolver(
+            changes, _explicit_service_requests(proposal.service_suggestions, message_text)
+        )
     # A fact the model hands to a third party needs a real, durable
     # responsibility record for that service on this Claim -- being merely
     # eligible to offer the service is not evidence anyone has actually taken

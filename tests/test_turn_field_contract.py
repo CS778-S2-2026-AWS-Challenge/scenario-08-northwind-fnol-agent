@@ -72,6 +72,7 @@ def test_one_turn_contract_drives_all_registered_value_shapes_and_schema() -> No
         'boolean',
         'enum',
         'location',
+        'number',
         'temporal',
         'text',
         'text_list',
@@ -86,6 +87,12 @@ def test_one_turn_contract_drives_all_registered_value_shapes_and_schema() -> No
     value_options = product_family['properties']['value']['anyOf']
     assert value_options[0]['enum'] == ['contents', 'home', 'motor']
     assert value_options[1] == {'type': 'null'}
+    amount = next(
+        item
+        for item in variants
+        if item['properties']['field_code'].get('const') == 'loss.estimated_amount'
+    )
+    assert amount['properties']['value']['anyOf'][0] == {'type': 'number', 'minimum': 0}
     assert schema['properties']['field_changes']['maxItems'] == len(contract.fields)  # type: ignore[index]
 
 
@@ -102,6 +109,7 @@ def test_runtime_normalises_only_unambiguous_values_and_rejects_unknown_fields()
             value=[' Kitchen ', ' Hall '],
         ),
         ModelProposedFormChange(field_code='incident.occurred_at', value='2026-09-18T08:30:00Z'),
+        ModelProposedFormChange(field_code='loss.estimated_amount', value='$1,850'),
     ]
 
     values = {item.field_code: item.value for item in validate_field_changes(contract, changes)}
@@ -113,6 +121,7 @@ def test_runtime_normalises_only_unambiguous_values_and_rejects_unknown_fields()
         'incident.location': 'Kitchen',
         'property.affected_areas': ['Kitchen', 'Hall'],
         'incident.occurred_at': '2026-09-18T08:30:00Z',
+        'loss.estimated_amount': 1850.0,
     }
     with pytest.raises(TurnFieldContractViolation):
         validate_field_changes(

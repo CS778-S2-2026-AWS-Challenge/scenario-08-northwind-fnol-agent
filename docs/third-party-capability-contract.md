@@ -37,6 +37,9 @@ read-only list; presence grants no eligibility or permission. No candidate-catal
 lifecycle is introduced. After validating field changes, Runtime resolves the accepted same-turn
 family using the existing fact-resolution rules, or the persisted confirmed family, and queries
 `eligible_service_ids` again. Registry, family, lifecycle and cooldown filters remain authoritative.
+Before the incident description is confirmed (a same-turn confirmation counts), only a service
+the claimant explicitly requests in the current message is eligible: on the model path, a
+`claimant_request_quote` found verbatim in that message.
 Unsupported or disputed family assertions cannot unlock services. Only
 the reducer creates offers. A suggestion grants neither consent nor dispatch authority. Pattern
 selection remains only for explicit renewed intent during cooldown and the no-model path.
@@ -44,7 +47,7 @@ If no capability is eligible, chat continues without a fabricated offer or execu
 
 | Contract | Producer | Authority boundary |
 | --- | --- | --- |
-| Eligible capability | Runtime `eligible_service_ids` | Family, lifecycle, availability and suppression filters. |
+| Eligible capability | Runtime `eligible_service_ids` | Family, confirmed incident description (or explicit request), lifecycle, availability and suppression filters. |
 | Service suggestion | Model `V8ServiceSuggestion` | Advisory subset of the eligible identities. |
 | Offer | Reducer / external Runtime WorkItem | Bound to the actual Agent message and disclosure fingerprint. |
 | Consent | Claimant | Existing scoped `ExternalServiceConsent`; never inferred from prose. |

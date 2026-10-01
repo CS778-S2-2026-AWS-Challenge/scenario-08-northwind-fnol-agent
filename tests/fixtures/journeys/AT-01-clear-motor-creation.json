@@ -1,7 +1,7 @@
 {
   "scenario_id": "AT-01-clear-motor-creation",
   "description": "A clear minor motor report progresses from natural language through confirmation to controlled mock claim creation.",
-  "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
+  "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive. The other driver admitted it was their fault.",
   "expected_proposed_fields": [
     "incident.description",
     "incident.type",
@@ -11,7 +11,8 @@
     "incident.occurred_at",
     "parties.other_parties",
     "vehicle.damage_description",
-    "vehicle.drivable"
+    "vehicle.drivable",
+    "incident.liability_position"
   ],
   "expected_route": "standard_motor_intake",
   "expected_creation_status": "created",
@@ -23,7 +24,7 @@
       "facts": [
         {
           "field_code": "incident.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive. The other driver admitted it was their fault.",
           "status": "proposed",
           "source": "claimant"
         },
@@ -72,6 +73,12 @@
         {
           "field_code": "vehicle.drivable",
           "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.liability_position",
+          "value": "other_party_accepts",
           "status": "confirmed",
           "source": "claimant"
         }
@@ -87,7 +94,7 @@
       "facts": [
         {
           "field_code": "incident.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive. The other driver admitted it was their fault.",
           "status": "confirmed",
           "source": "claimant"
         },
@@ -136,6 +143,12 @@
         {
           "field_code": "vehicle.drivable",
           "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.liability_position",
+          "value": "other_party_accepts",
           "status": "confirmed",
           "source": "claimant"
         }
@@ -151,7 +164,7 @@
       "facts": [
         {
           "field_code": "incident.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive. The other driver admitted it was their fault.",
           "status": "confirmed",
           "source": "claimant"
         },
@@ -200,6 +213,12 @@
         {
           "field_code": "vehicle.drivable",
           "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.liability_position",
+          "value": "other_party_accepts",
           "status": "confirmed",
           "source": "claimant"
         }
@@ -269,6 +288,12 @@
         {
           "field_code": "vehicle.drivable",
           "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.liability_position",
+          "value": "other_party_accepts",
           "status": "confirmed",
           "source": "claimant"
         }

@@ -196,9 +196,9 @@ class RequestProfile(ContractModel):
 class ContextBudgetPolicy(ContractModel):
     policy_version: str = 'northwind-context-budget-v1'
     ordinary_input_target: int = Field(default=3000, ge=100)
-    ordinary_input_hard_limit: int = Field(default=7500, ge=100)
+    ordinary_input_hard_limit: int = Field(default=12_000, ge=100)
     ordinary_output_limit: int = Field(default=180, ge=1)
-    tool_path_input_hard_limit: int = Field(default=6000, ge=100)
+    tool_path_input_hard_limit: int = Field(default=12_000, ge=100)
     tool_path_output_limit: int = Field(default=300, ge=1)
     max_model_invocations: int = Field(default=2, ge=1, le=2)
     max_model_selected_tools: int = Field(default=1, ge=0, le=1)
