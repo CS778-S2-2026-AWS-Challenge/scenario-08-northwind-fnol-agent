@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { workbenchApi } from '../api.js'
+import { containTabFocus } from '../focus.js'
+import { staffAgentUnavailableReason } from '../staff-agent-availability.js'
 import { translate as t } from '../i18n.js'
 import { formatDateTime, words } from '../format.js'
 import AttachmentDraftControl from './AttachmentDraftControl.jsx'
@@ -47,7 +49,12 @@ export default function StaffAgent({
   const [sessionNotice, setSessionNotice] = useState('')
   const [error, setError] = useState(null)
   const [position, setPosition] = useState(null)
+  const [capabilitiesLoaded, setCapabilitiesLoaded] = useState(false)
   const widgetRef = useRef(null)
+  const panelRef = useRef(null)
+  const bubbleRef = useRef(null)
+  const openerRef = useRef(null)
+  const panelWasOpenRef = useRef(false)
   const messageRef = useRef(null)
   const attachmentDraftRef = useRef(null)
   const voiceInputRef = useRef(null)
@@ -93,6 +100,7 @@ export default function StaffAgent({
     setLoading(true)
     setSessionNotice('')
     setError(null)
+    setCapabilitiesLoaded(false)
     try {
       const [sessionResponse, claimResponse, capabilityResponse] = await Promise.all([
         workbenchApi.staffAgentSessions(token),
@@ -105,6 +113,7 @@ export default function StaffAgent({
       const nextModels = capabilityResponse.models || []
       setModels(nextModels)
       if (capabilityResponse.default_model_profile_id) setNewSessionModel(capabilityResponse.default_model_profile_id)
+      setCapabilitiesLoaded(true)
       const nextSessionId = requestedSessionId || nextSessions[0]?.session_id || null
       if (nextSessionId) await selectSession(nextSessionId)
     } catch (nextError) {
@@ -122,6 +131,30 @@ export default function StaffAgent({
     const task = window.setTimeout(loadAgent, 0)
     return () => window.clearTimeout(task)
   }, [open, loadAgent, requestedSessionId])
+
+  // The floating panel is a non-modal dialog: focus moves in on open and returns to the
+  // control that opened it on close. The embedded route panel is ordinary page content.
+  useEffect(() => {
+    if (embedded) return
+    const wasOpen = panelWasOpenRef.current
+    panelWasOpenRef.current = open
+    if (open && !wasOpen) {
+      const active = document.activeElement
+      openerRef.current = active && active !== document.body && !widgetRef.current?.contains(active)
+        ? active
+        : null
+      ;(messageRef.current || panelRef.current)?.focus()
+    } else if (!open && wasOpen) {
+      const opener = openerRef.current
+      openerRef.current = null
+      ;(opener?.isConnected ? opener : bubbleRef.current)?.focus()
+    }
+  }, [embedded, open])
+
+  const activeSession = sessions.find((session) => session.session_id === activeSessionId)
+  const unavailableReason = capabilitiesLoaded
+    ? staffAgentUnavailableReason(models, activeSessionId ? activeSession?.model_profile_id : newSessionModel)
+    : null
 
   const positioned = position !== null
   useEffect(() => {
@@ -169,7 +202,13 @@ export default function StaffAgent({
     event.preventDefault()
     const submittedDraft = message
     const content = submittedDraft.trim()
-    if (!content || loading || sending || attachmentDraftRef.current?.hasPendingAttachments()) return
+    if (
+      !content
+      || loading
+      || sending
+      || unavailableReason
+      || attachmentDraftRef.current?.hasPendingAttachments()
+    ) return
     voiceInputRef.current?.cancel({ announce: false, restoreFocus: false })
     setSending(true)
     setSessionNotice('')
@@ -320,6 +359,20 @@ export default function StaffAgent({
     }
   }
 
+  function handlePanelKeyDown(event) {
+    if (embedded || !panelRef.current?.contains(event.target)) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      if (scopeOpen) {
+        setScopeOpen(false)
+        return
+      }
+      onOpenChange(false)
+      return
+    }
+    containTabFocus(event, panelRef.current)
+  }
+
   function openAgent() {
     if (suppressClickRef.current) {
       suppressClickRef.current = false
@@ -331,12 +384,19 @@ export default function StaffAgent({
   return (
     <div ref={widgetRef} className={`staff-agent${embedded ? ' staff-agent--embedded' : ''}${open ? ' is-open' : ''}`} style={!embedded && position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
       {!open && !embedded && (
-        <button className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label={t('Open Staff Agent')} title={t('Draft with AI')}>
+        <button ref={bubbleRef} className="staff-agent__bubble" type="button" onClick={openAgent} onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={cancelDrag} aria-label={t('Open Staff Agent')} title={t('Draft with AI')}>
           <Bot size={23} />
         </button>
       )}
       {open && (
-        <section className="staff-agent__panel" aria-labelledby="staff-agent-title">
+        <section
+          ref={panelRef}
+          className="staff-agent__panel"
+          role={embedded ? undefined : 'dialog'}
+          aria-labelledby="staff-agent-title"
+          tabIndex={embedded ? undefined : -1}
+          onKeyDown={handlePanelKeyDown}
+        >
           <header className="staff-agent__header" onPointerDown={embedded ? undefined : beginDrag} onPointerMove={embedded ? undefined : drag} onPointerUp={embedded ? undefined : endDrag} onPointerCancel={embedded ? undefined : cancelDrag}>
             <span className="staff-agent__grip" aria-hidden="true"><GripHorizontal size={18} /></span>
             <div className="staff-agent__identity">
@@ -425,6 +485,15 @@ export default function StaffAgent({
               ))}
             </div>
 
+            {unavailableReason && (
+              <div className="agent-notice agent-notice--unavailable" id="staff-agent-unavailable" role="status">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>
+                  <strong>{t('Staff Agent cannot answer right now')}</strong>
+                  <small>{t(unavailableReason)} {t('Messages cannot be sent until a model is available. Your draft and earlier sessions stay here.')}</small>
+                </span>
+              </div>
+            )}
             {sessionNotice && (
               <div className="agent-notice" role="status">
                 <CheckCircle2 size={16} aria-hidden="true" />
@@ -480,16 +549,16 @@ export default function StaffAgent({
                       id="staff-agent-message"
                       ref={messageRef}
                       value={message}
-                      describedBy={describedBy}
+                      describedBy={[describedBy, unavailableReason ? 'staff-agent-unavailable' : null].filter(Boolean).join(' ') || undefined}
                       onValueChange={updateComposerDraft}
                       placeholder={t('Ask about selected Claims or policy…')}
                       label={t('Message Staff Agent')}
-                      submitDisabled={!message.trim() || loading || sending || attachmentsPending}
+                      submitDisabled={!message.trim() || loading || sending || attachmentsPending || Boolean(unavailableReason)}
                     />
                     <button
                       className="agent-composer__send compact-composer__send"
                       type="submit"
-                      disabled={!message.trim() || loading || sending || attachmentsPending}
+                      disabled={!message.trim() || loading || sending || attachmentsPending || Boolean(unavailableReason)}
                       aria-busy={sending}
                       aria-label={t('Send to Staff Agent')}
                       title={attachmentsPending ? 'Remove attachments to send text; file delivery is not available yet' : sending ? 'Sending to Staff Agent' : 'Send to Staff Agent'}

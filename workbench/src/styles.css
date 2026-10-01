@@ -894,6 +894,7 @@ p { line-height: 1.55; }
 .agent-draft__execution small { margin-top: var(--space-1); color: inherit; font-size: var(--workbench-font-meta); line-height: var(--line-height-body); }
 .agent-notice, .agent-error { display: grid; flex: 0 0 auto; align-items: start; gap: var(--space-2); margin: 0 var(--space-3) var(--space-2); padding: var(--space-2); border-radius: var(--radius-sm); font-size: var(--workbench-font-meta); grid-template-columns: var(--space-5) minmax(0, 1fr) auto; }
 .agent-notice { background: var(--color-accent-soft); color: var(--color-accent-strong); grid-template-columns: var(--space-5) minmax(0, 1fr); }
+.agent-notice--unavailable { background: var(--color-warning-soft); color: var(--color-warning); }
 .agent-error { background: var(--color-danger-soft); color: var(--color-danger); }
 .agent-notice > svg, .agent-error > svg { margin-top: var(--space-1); }
 .agent-notice strong, .agent-notice small, .agent-error strong, .agent-error small { display: block; }
