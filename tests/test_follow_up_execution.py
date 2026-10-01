@@ -1011,7 +1011,7 @@ def test_failed_retention_handoff_after_expiry_is_retried_by_a_later_cycle(
     repository = _repository(kind)
     claim, _, _, interrupted_at = _checkpoint(repository)
     deadline = interrupted_at + INCOMPLETE_CLAIM_FOLLOW_UP_RECOVERY_DEADLINE
-    real_reserve = recovery_worker_module.reserve_retention_from_terminal
+    real_reserve = reserve_retention_from_terminal
     attempts: list[str] = []
 
     def fail_once(repo: PersistenceRepository, claim_id: str, *, now: datetime) -> object:
