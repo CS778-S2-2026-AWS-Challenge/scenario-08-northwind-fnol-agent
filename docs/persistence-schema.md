@@ -1539,6 +1539,19 @@ uniqueness, `(follow_up_id, sequence)` uniqueness, `retention_operation_claim_un
 and `retention_hold_claim_state` indexes. All execution and cleanup commits
 revalidate authoritative source/revision immediately before mutation.
 
+Expiry and retention reservation are separate commits. The expiry-to-retention handoff is therefore
+derived, not stored: `list_retention_handoff_candidates` returns, in terminal `recorded_at` then
+Claim order, Claims whose terminal `reason_code` is `RECOVERY_EXPIRED` and that have no
+RetentionOperation. MongoDB reads the partial `claim_recovery_expiry_handoff` index and checks
+`retention_operation_claim_unique` per Claim; Fixture applies the same predicate. A reservation that
+fails or is refused stays discoverable on the next bounded worker cycle, and the stable `ret_`
+identity makes every retry the same reservation. A Claim leaves the set once reserved, and cleanup
+removes the Claim record, so the scan is bounded by in-flight handoffs. Reopen clears the terminal
+disposition and so removes the Claim from discovery.
+
+Retention cleanup locates each frozen database target by its own identity field scoped to the
+Claim. Audit envelopes are scoped by `subject.claim_id`, the same field the inventory freeze reads.
+
 Claimant access closure is checked before historical idempotency replay. Cleanup
 retires claimant retry records and preserves staff/internal source evidence and
 minimum Audit/tombstones. Cross-store deletion uses the durable RetentionOperation
