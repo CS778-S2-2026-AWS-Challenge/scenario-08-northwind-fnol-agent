@@ -2064,7 +2064,34 @@ export default function WorkbenchPage() {
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} externalActionNotices={activeExternalActionRecoveries} section={currentSection} conversationSessionId={selectedSessionId || detail?.active_session_id || null} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onRetryExternalActionContext={refreshExternalActionContext} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} onExternalTaskAction={performExternalTaskAction} />
+                <ClaimWorkspace
+                  detail={detail}
+                  resources={resources}
+                  loading={detailLoading}
+                  stale={detailStale}
+                  error={detailError}
+                  externalActionNotices={activeExternalActionRecoveries}
+                  section={currentSection}
+                  conversationSessionId={selectedSessionId || detail?.active_session_id || null}
+                  draft={currentTab?.draft || ''}
+                  profile={profile}
+                  readOnly={isDraftQueue}
+                  onSection={changeSection}
+                  onDraft={isDraftQueue ? undefined : (draft) => claimId && tabs.update(claimId, { draft })}
+                  onRetry={() => loadDetail(claimId)}
+                  onRetrySection={() => loadSectionResources(claimId, currentSection)}
+                  onRetryExternalActionContext={refreshExternalActionContext}
+                  onAccept={isDraftQueue ? undefined : acceptHandoff}
+                  onResolve={isDraftQueue ? undefined : resolveHandoff}
+                  onSignalDecision={isDraftQueue ? undefined : decideSignal}
+                  onCreateAction={isDraftQueue ? undefined : createStaffAction}
+                  onUpdateAction={isDraftQueue ? undefined : updateStaffAction}
+                  onLoadEvidence={loadEvidence}
+                  onSend={isDraftQueue ? undefined : sendMessage}
+                  onOwnershipAction={isDraftQueue ? undefined : performOwnershipAction}
+                  onReopen={isDraftQueue ? undefined : reopenClaim}
+                  onExternalTaskAction={isDraftQueue ? undefined : performExternalTaskAction}
+                />
               </div>
             </section>
           </div>

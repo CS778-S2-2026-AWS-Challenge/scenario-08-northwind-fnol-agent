@@ -24,6 +24,15 @@ const api = vi.hoisted(() => ({
   workItems: vi.fn(),
   realtimeEvents: vi.fn(),
   acceptHandoff: vi.fn(),
+  resolveHandoff: vi.fn(),
+  decideSignal: vi.fn(),
+  createStaffAction: vi.fn(),
+  updateStaffAction: vi.fn(),
+  sendMessage: vi.fn(),
+  requestCowork: vi.fn(),
+  requestTransfer: vi.fn(),
+  requeue: vi.fn(),
+  decideCollaboration: vi.fn(),
   acceptExternalTaskReview: vi.fn(),
   reconcileExternalTaskResponse: vi.fn(),
   reopenClaim: vi.fn(),
@@ -58,28 +67,33 @@ vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs 
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
-  default: ({ detail, resources, externalActionNotices = [], onAccept, onReopen, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => <div>
-    {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
-    {resources.handoffs?.error && <p>Handoff context unavailable</p>}
-    {resources.externalRequests?.error && <p>External context unavailable</p>}
-    {externalActionNotices.map((notice) => (
-      <div role="alert" key={`${notice.claimId}:${notice.taskId}`}>
-        <p>{notice.message}</p>
-        <p>{notice.taskId}</p>
-        <button type="button" disabled={notice.recovering} onClick={() => onRetryExternalActionContext(notice.taskId)}>
-          Retry external readback
-        </button>
-      </div>
-    ))}
-    <button type="button" onClick={onRetry}>Test claim refresh</button>
-    {detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
-    {detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
-    {detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
-      const promise = onExternalTaskAction(detail.allowed_actions[0], {})
-      externalActionTracker.lastPromise = promise
-      promise.catch(() => {})
-    }}>Test projected external action</button>}
-  </div>,
+  default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
+    const mutationCallbacks = [onAccept, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onExternalTaskAction].filter(Boolean)
+    return <div>
+      <output data-testid="workspace-mode">{readOnly ? 'read-only' : 'interactive'}</output>
+      <output data-testid="mutation-callback-count">{mutationCallbacks.length}</output>
+      {detail && <output data-testid="claim-revision">Claim revision {detail.revision}</output>}
+      {resources.handoffs?.error && <p>Handoff context unavailable</p>}
+      {resources.externalRequests?.error && <p>External context unavailable</p>}
+      {externalActionNotices.map((notice) => (
+        <div role="alert" key={`${notice.claimId}:${notice.taskId}`}>
+          <p>{notice.message}</p>
+          <p>{notice.taskId}</p>
+          <button type="button" disabled={notice.recovering} onClick={() => onRetryExternalActionContext(notice.taskId)}>
+            Retry external readback
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={onRetry}>Test claim refresh</button>
+      {!readOnly && detail?.work_summary?.primary_action_code === 'claim.reopen' && <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>}
+      {!readOnly && detail?.work_summary?.primary_action_code === 'human.accept_handoff' && <button type="button" onClick={() => onAccept({ handoff_id: 'hnd_1' }).catch(() => {})}>Test projected accept</button>}
+      {!readOnly && detail?.work_summary?.primary_action_code?.startsWith('external.') && !externalActionNotices.length && <button type="button" onClick={() => {
+        const promise = onExternalTaskAction(detail.allowed_actions[0], {})
+        externalActionTracker.lastPromise = promise
+        promise.catch(() => {})
+      }}>Test projected external action</button>}
+    </div>
+  },
 }))
 vi.mock('../components/StaffAgent.jsx', () => ({
   default: ({ open, embedded = false, requestedSessionId, onBusinessActionExecuted }) => {
@@ -288,8 +302,24 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.claim).not.toHaveBeenCalled()
   })
 
-  it('scopes the Draft claims route, search, and filters to the incomplete-claims projection', async () => {
+  it('opens Draft claims in an explicit read-only workspace with no mutation callbacks', async () => {
     const user = userEvent.setup()
+    const acceptAction = {
+      action_code: 'human.accept_handoff',
+      target_type: 'handoff',
+      target_ref: 'hnd_1',
+      availability: 'confirmation_required',
+      based_on_revision: 1,
+    }
+    api.claim.mockResolvedValue({
+      ...claim,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: acceptAction.action_code,
+        primary_action_target_ref: acceptAction.target_ref,
+      },
+      allowed_actions: [acceptAction],
+    })
     renderPage('/workbench/drafts?search=NW-900&priority=routine')
 
     expect(await screen.findByRole('heading', { name: 'Draft claims' })).toBeVisible()
@@ -311,8 +341,47 @@ describe('WorkbenchPage queue routing', () => {
       '/workbench/drafts/clm_route_1?priority=routine&search=NW-900',
     ))
     expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1')
+    expect(screen.getByTestId('workspace-mode')).toHaveTextContent('read-only')
+    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('0')
+    expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
     expect(api.acceptHandoff).not.toHaveBeenCalled()
+    expect(api.resolveHandoff).not.toHaveBeenCalled()
+    expect(api.decideSignal).not.toHaveBeenCalled()
+    expect(api.createStaffAction).not.toHaveBeenCalled()
+    expect(api.updateStaffAction).not.toHaveBeenCalled()
+    expect(api.sendMessage).not.toHaveBeenCalled()
+    expect(api.requestCowork).not.toHaveBeenCalled()
+    expect(api.requestTransfer).not.toHaveBeenCalled()
+    expect(api.requeue).not.toHaveBeenCalled()
+    expect(api.decideCollaboration).not.toHaveBeenCalled()
+    expect(api.acceptExternalTaskReview).not.toHaveBeenCalled()
+    expect(api.reconcileExternalTaskResponse).not.toHaveBeenCalled()
     expect(api.reopenClaim).not.toHaveBeenCalled()
+  })
+
+  it('keeps the submitted Claim workspace interactive for projected actions', async () => {
+    const acceptAction = {
+      action_code: 'human.accept_handoff',
+      target_type: 'handoff',
+      target_ref: 'hnd_1',
+      availability: 'confirmation_required',
+      based_on_revision: 1,
+    }
+    api.claim.mockResolvedValue({
+      ...claim,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: acceptAction.action_code,
+        primary_action_target_ref: acceptAction.target_ref,
+      },
+      allowed_actions: [acceptAction],
+    })
+
+    renderPage('/workbench/claims/clm_route_1')
+
+    expect(await screen.findByTestId('workspace-mode')).toHaveTextContent('interactive')
+    expect(screen.getByTestId('mutation-callback-count')).toHaveTextContent('9')
+    expect(screen.getByRole('button', { name: 'Test projected accept' })).toBeVisible()
   })
 
   it('does not override an explicit Claim route with a different persisted active tab', async () => {
