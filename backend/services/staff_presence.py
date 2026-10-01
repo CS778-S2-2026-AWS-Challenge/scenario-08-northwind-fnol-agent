@@ -25,10 +25,14 @@ def update_presence(
     require_staff_capability(principal, 'workbench:write')
     now = _now()
     current = repository.get_staff_presence(principal.subject)
+    current_online = current.online if current is not None else False
+    current_available = current.available if current is not None else False
+    online = payload.online if payload.online is not None else current_online
+    available = payload.available if payload.available is not None else current_available
     record = StaffPresenceRecord(
         staff_id=principal.subject,
-        online=payload.online,
-        available=payload.available if payload.online else False,
+        online=online,
+        available=available if online else False,
         last_seen_at=now,
         expires_at=now + timedelta(seconds=payload.lease_seconds),
         revision=(current.revision + 1) if current is not None else 1,

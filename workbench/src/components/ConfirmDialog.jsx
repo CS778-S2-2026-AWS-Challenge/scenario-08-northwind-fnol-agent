@@ -20,6 +20,7 @@ export default function ConfirmDialog({
   confirmDisabled = false,
   danger = false,
   error = null,
+  dialogClassName = '',
   returnFocusRef = null,
   onCancel,
   onConfirm,
@@ -87,7 +88,7 @@ export default function ConfirmDialog({
       if (event.target === event.currentTarget && !busy) onCancel()
     }}>
       <div
-        className="confirmation-dialog settings-dialog"
+        className={['confirmation-dialog', 'settings-dialog', dialogClassName].filter(Boolean).join(' ')}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}

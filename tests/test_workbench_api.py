@@ -54,7 +54,7 @@ from backend.domain.models import (
 )
 from backend.domain.realtime import RealtimeResource
 from backend.domain.retrieval import RetrievalSource
-from backend.domain.staff_identity import StaffPresenceUpdate
+from backend.domain.staff_identity import StaffPresenceRecord, StaffPresenceUpdate
 from backend.domain.workbench import (
     ClaimLifecycleState,
     MissingInformationAttention,
@@ -2362,6 +2362,29 @@ def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
     )
 
 
+def test_presence_lease_renewal_preserves_explicit_unavailability(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+) -> None:
+    unavailable = client.patch(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'online': True, 'available': False, 'lease_seconds': 30},
+    )
+    assert unavailable.status_code == 200
+
+    renewed = client.patch(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'lease_seconds': 300},
+    )
+
+    assert renewed.status_code == 200
+    assert renewed.json()['online'] is True
+    assert renewed.json()['available'] is False
+    assert renewed.json()['revision'] == unavailable.json()['revision'] + 1
+
+
 def test_presence_projection_handles_unknown_staff_and_rejects_non_staff_pool_reads(
     repository: FixtureRepository,
 ) -> None:
@@ -2380,26 +2403,54 @@ def test_presence_projection_handles_unknown_staff_and_rejects_non_staff_pool_re
     assert error.value.code == 'ACCESS_DENIED'
 
 
-def test_presence_update_maps_repository_revision_conflict(
+def test_presence_lease_renewal_cannot_overwrite_concurrent_unavailability(
     repository: FixtureRepository,
 ) -> None:
-    def stale_save(*args: object, **kwargs: object) -> None:
-        from backend.repositories.protocols import RevisionConflict
+    principal = Principal(
+        subject='stf_demo',
+        actor_type='staff',
+        scopes=frozenset({'workbench:read', 'workbench:write'}),
+    )
+    update_presence(
+        repository,
+        principal,
+        StaffPresenceUpdate(online=True, available=True),
+    )
+    original_save = repository.save_staff_presence
+    raced = False
 
-        raise RevisionConflict(9)
+    def concurrent_unavailability(
+        presence: StaffPresenceRecord,
+        expected_revision: int | None = None,
+    ) -> None:
+        nonlocal raced
+        if not raced:
+            raced = True
+            current = repository.get_staff_presence('stf_demo')
+            assert current is not None
+            original_save(
+                current.model_copy(
+                    update={
+                        'available': False,
+                        'revision': current.revision + 1,
+                        'updated_at': datetime.now(UTC),
+                    }
+                ),
+                current.revision,
+            )
+        original_save(presence, expected_revision)
 
-    repository.save_staff_presence = stale_save  # type: ignore[method-assign]
+    repository.save_staff_presence = concurrent_unavailability  # type: ignore[method-assign]
     with pytest.raises(ApiError) as error:
         update_presence(
             repository,
-            Principal(
-                subject='stf_demo',
-                actor_type='staff',
-                scopes=frozenset({'workbench:read', 'workbench:write'}),
-            ),
-            StaffPresenceUpdate(online=True, available=True),
+            principal,
+            StaffPresenceUpdate(lease_seconds=300),
         )
     assert error.value.code == 'REVISION_CONFLICT'
+    current = repository.get_staff_presence('stf_demo')
+    assert current is not None
+    assert current.available is False
 
 
 def test_staff_logout_rejects_a_session_that_is_already_inactive(

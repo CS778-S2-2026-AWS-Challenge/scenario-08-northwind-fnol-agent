@@ -25,6 +25,15 @@ export function actionFailureMessage(action, error) {
   if (error.code === 'OWNERSHIP_CONFLICT') {
     return `${action} was not completed because another ownership request now conflicts with it.${latest} Review the current owner and pending requests before continuing.${suffix}`
   }
+  if (error.code === 'CLAIM_ALREADY_ASSIGNED') {
+    return `This claim has already been assigned to another staff member.${latest} Review the current owner before continuing.${suffix}`
+  }
+  if (error.code === 'CLAIM_NOT_READY_FOR_ACCEPTANCE') {
+    return `${action} was not completed because this Claim is no longer ready to be taken.${latest} Review its current workflow and available actions before continuing.${suffix}`
+  }
+  if (error.code === 'STAFF_NOT_AVAILABLE') {
+    return `${action} was not completed because your staff presence is not currently available for new work.${latest} Set your presence to available, then refresh the Claim and try again.${suffix}`
+  }
   if (error.code === 'ACCESS_DENIED' || error.status === 403) {
     return `${action} was not completed because this staff identity is not authorised for the current action.${latest} Ask the primary owner or an authorised colleague to continue.${suffix}`
   }

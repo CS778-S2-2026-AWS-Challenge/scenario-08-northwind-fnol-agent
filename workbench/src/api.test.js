@@ -206,6 +206,39 @@ describe('Workbench feedback API', () => {
   })
 })
 
+describe('Workbench staff presence API', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    vi.unstubAllGlobals()
+  })
+
+  it('renews the authenticated staff lease without writing availability state', async () => {
+    const presence = {
+      staff_id: 'stf_demo',
+      online: true,
+      available: true,
+      revision: 4,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, presence))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(workbenchApi.updatePresence('staff-token', {
+      leaseSeconds: 300,
+    })).resolves.toEqual(presence)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/workbench/staff/presence',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({ Authorization: 'Bearer staff-token' }),
+        body: JSON.stringify({
+          lease_seconds: 300,
+        }),
+      }),
+    )
+  })
+})
+
 
 describe('Workbench API failures', () => {
   beforeEach(() => {
@@ -300,6 +333,49 @@ describe('Workbench API failures', () => {
     expect(
       fetchMock.mock.calls[0][1].headers['Idempotency-Key'],
     ).not.toBe(
+      fetchMock.mock.calls[1][1].headers['Idempotency-Key'],
+    )
+  })
+})
+
+describe('workbenchApi Claim ownership acceptance', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    sessionStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it('posts an empty body with auth and revision, and reuses its key after an ambiguous failure', async () => {
+    const accepted = {
+      claim_id: 'clm_accept',
+      revision: 8,
+      ownership: {
+        state: 'assigned',
+        current_staff_access: 'primary',
+        primary_assignee: { staff_id: 'stf_demo' },
+      },
+    }
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection lost'))
+      .mockResolvedValueOnce(jsonResponse(200, accepted))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      workbenchApi.acceptClaim('staff-token', 'clm_accept', 7),
+    ).rejects.toMatchObject({ code: 'NETWORK_ERROR', retryable: true })
+    await expect(
+      workbenchApi.acceptClaim('staff-token', 'clm_accept', 7),
+    ).resolves.toEqual(accepted)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const [url, options] of fetchMock.mock.calls) {
+      expect(url).toBe('/api/v1/workbench/claims/clm_accept/accept')
+      expect(options.method).toBe('POST')
+      expect(options.headers.Authorization).toBe('Bearer staff-token')
+      expect(options.headers['If-Match']).toBe('7')
+      expect(options.body).toBe('{}')
+    }
+    expect(fetchMock.mock.calls[0][1].headers['Idempotency-Key']).toBe(
       fetchMock.mock.calls[1][1].headers['Idempotency-Key'],
     )
   })

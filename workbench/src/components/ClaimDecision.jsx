@@ -169,6 +169,7 @@ export function ClaimDecisionControls({ action, onDecision }) {
         busy={busy}
         confirmDisabled={retryBlocked}
         danger={rejecting}
+        dialogClassName="claim-decision-dialog"
         returnFocusRef={returnFocusRef}
         onCancel={reset}
         onConfirm={submit}
@@ -179,6 +180,7 @@ export function ClaimDecisionControls({ action, onDecision }) {
             id={`${hintId}-input`}
             value={explanation}
             maxLength={MAX_EXPLANATION_LENGTH}
+            rows={8}
             disabled={inputLocked}
             required={rejecting}
             aria-labelledby={`${hintId}-label`}

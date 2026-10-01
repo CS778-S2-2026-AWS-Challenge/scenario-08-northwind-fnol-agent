@@ -20,7 +20,7 @@ const MESSAGE_DELIVERY_READBACK_TIMEOUT_MS = 15_000
 
 export default function WorkbenchPage() {
   useLanguage()
-  const { token, profile, logout } = useAuth()
+  const { token, profile, presenceRevision, logout } = useAuth()
   const { claimId, section: routeSection, agentSessionId: routeAgentSessionId, conversationSessionId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
@@ -55,6 +55,7 @@ export default function WorkbenchPage() {
   const rootRestoreAttemptedRef = useRef(false)
   const currentClaimIdRef = useRef(null)
   const detailRequestId = useRef(0)
+  const observedPresenceRevisionRef = useRef(null)
   const backgroundRefreshId = useRef(0)
   const realtimeCursorRef = useRef(null)
   const realtimeSeenEventIdsRef = useRef(new Set())
@@ -76,6 +77,7 @@ export default function WorkbenchPage() {
   const [agentSessionId, setAgentSessionId] = useState(null)
   const [revisionNotice, setRevisionNotice] = useState(null)
   const [decisionNotice, setDecisionNotice] = useState(null)
+  const [ownershipNotice, setOwnershipNotice] = useState(null)
   const [externalActionRecoveries, setExternalActionRecoveries] = useState({})
   const externalRecoveryInFlight = useRef(new Set())
   const isAgentRoute = Boolean(routeAgentSessionId)
@@ -923,6 +925,7 @@ export default function WorkbenchPage() {
   }, [])
   useEffect(() => {
     setDecisionNotice(null)
+    setOwnershipNotice(null)
     if (activeClaimId) {
       loadDetail(activeClaimId)
     } else {
@@ -934,6 +937,14 @@ export default function WorkbenchPage() {
       setResources({})
     }
   }, [activeClaimId, loadDetail])
+  useEffect(() => {
+    if (!Number.isInteger(presenceRevision)) return
+    const previous = observedPresenceRevisionRef.current
+    observedPresenceRevisionRef.current = presenceRevision
+    if (previous === null || previous === presenceRevision) return
+    const currentClaimId = currentClaimIdRef.current
+    if (currentClaimId) loadDetail(currentClaimId)
+  }, [loadDetail, presenceRevision])
   useEffect(() => {
     if (activeClaimId && detail?.claim_id === activeClaimId) {
       loadSectionResources(activeClaimId, currentSection)
@@ -1483,6 +1494,83 @@ export default function WorkbenchPage() {
         current.revision,
       )
     ))
+  }
+
+  async function acceptClaim(action) {
+    const attemptClaimId = action?.target_ref
+    let mutationSucceeded = false
+    setOwnershipNotice(null)
+    try {
+      const { claimReadback } = await runClaimMutation('Taking ownership of this Claim', async (current) => {
+        const projectedAction = findProjectedAction(
+          current.allowed_actions,
+          'ownership.accept_claim',
+          current.claim_id,
+        )
+        if (
+          currentClaimIdRef.current !== attemptClaimId
+          || current.claim_id !== attemptClaimId
+          || action?.action_code !== 'ownership.accept_claim'
+          || action?.target_type !== 'claim'
+          || action?.based_on_revision !== current.revision
+          || current.work_summary?.primary_action_code !== 'ownership.accept_claim'
+          || current.work_summary?.primary_action_target_ref !== current.claim_id
+          || projectedAction?.based_on_revision !== current.revision
+          || !canSubmitProjectedAction(projectedAction)
+        ) {
+          const error = new Error('The ownership action no longer matches the Claim shown on this route. Review the latest Claim before trying again.')
+          error.code = 'STALE_PROJECTED_ACTION'
+          throw error
+        }
+        const response = await workbenchApi.acceptClaim(
+          token,
+          current.claim_id,
+          current.revision,
+        )
+        mutationSucceeded = true
+        return response
+      }, { strictReadback: true })
+
+      if (!isCurrentStaffPrimary(claimReadback, profile)) {
+        const error = new Error('Ownership was recorded, but the refreshed Claim does not show you as its primary owner. Refresh the Claim before taking another action.')
+        error.code = 'OWNERSHIP_READBACK_MISMATCH'
+        throw error
+      }
+      setOwnershipNotice({
+        claimId: claimReadback.claim_id,
+        kind: 'status',
+        message: t('Claim assigned to you. Review started.'),
+      })
+      return claimReadback
+    } catch (error) {
+      const latest = detailRef.current
+      if (isCurrentStaffPrimary(latest, profile)) {
+        setOwnershipNotice({
+          claimId: latest.claim_id,
+          kind: 'status',
+          message: t('Claim assigned to you. Review started.'),
+        })
+        return latest
+      }
+
+      if (mutationSucceeded) {
+        error.message = 'The Claim was assigned, but the latest owner could not be confirmed. Refresh this Claim before taking another action.'
+        setOwnershipNotice({ claimId: attemptClaimId, kind: 'error', message: error.message })
+      } else if (error.code === 'CLAIM_ALREADY_ASSIGNED') {
+        error.message = t('This claim has already been assigned to another staff member.')
+        setOwnershipNotice({ claimId: attemptClaimId, kind: 'error', message: error.message })
+      } else {
+        const latestAction = findProjectedAction(
+          latest?.allowed_actions,
+          'ownership.accept_claim',
+          latest?.claim_id,
+        )
+        if (!latestAction || !canSubmitProjectedAction(latestAction)) {
+          setOwnershipNotice({ claimId: attemptClaimId, kind: 'error', message: error.message })
+        }
+      }
+      throw error
+    }
   }
 
   async function resolveHandoff(handoff, payload) {
@@ -2150,6 +2238,12 @@ export default function WorkbenchPage() {
             <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss Claim movement notice')} onClick={() => setMovementNotice(null)}>×</button>
           </div>
         )}
+        {ownershipNotice && ownershipNotice.claimId === activeClaimId && (
+          <div className={`movement-notice${ownershipNotice.kind === 'error' ? ' movement-notice--error' : ''}`} role={ownershipNotice.kind === 'error' ? 'alert' : 'status'} aria-live={ownershipNotice.kind === 'error' ? 'assertive' : 'polite'}>
+            <span>{ownershipNotice.message}</span>
+            <button type="button" className="icon-button icon-button--small" aria-label={t('Dismiss ownership notice')} onClick={() => setOwnershipNotice(null)}>×</button>
+          </div>
+        )}
         {decisionNotice && decisionNotice.claimId === activeClaimId && (
           <div className={`movement-notice${decisionNotice.kind === 'error' ? ' movement-notice--error' : ''}`} role={decisionNotice.kind === 'error' ? 'alert' : 'status'} aria-live={decisionNotice.kind === 'error' ? 'assertive' : 'polite'}>
             <span>{decisionNotice.message}</span>
@@ -2240,6 +2334,7 @@ export default function WorkbenchPage() {
                   onRetrySection={() => loadSectionResources(claimId, currentSection)}
                   onRetryExternalActionContext={refreshExternalActionContext}
                   onAccept={isDraftQueue ? undefined : acceptHandoff}
+                  onAcceptClaim={isDraftQueue ? undefined : acceptClaim}
                   onResolve={isDraftQueue ? undefined : resolveHandoff}
                   onSignalDecision={isDraftQueue ? undefined : decideSignal}
                   onCreateAction={isDraftQueue ? undefined : createStaffAction}
@@ -2753,6 +2848,20 @@ function externalActionReadbackError(cause) {
   error.cause = cause
   return error
 }
+
+function isCurrentStaffPrimary(detail, profile) {
+  return Boolean(
+    detail
+    && (
+      detail.ownership?.current_staff_access === 'primary'
+      || (
+        profile?.staff_id
+        && detail.ownership?.primary_assignee?.staff_id === profile.staff_id
+      )
+    )
+  )
+}
+
 function queueFilterKey(filters) {
   return JSON.stringify(queueRequestFilters(filters))
 }
