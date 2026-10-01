@@ -57,6 +57,11 @@ INTAKE_REQUIREMENTS = {
             'Please check whether another party was involved.',
         ),
         ControlledIntakeField(
+            'incident.liability_position',
+            'Did the other driver or party accept responsibility for what happened?',
+            'Please check who accepted responsibility.',
+        ),
+        ControlledIntakeField(
             'vehicle.damage_description',
             'What damage can you see on the vehicle?',
             'Please check the vehicle damage description.',

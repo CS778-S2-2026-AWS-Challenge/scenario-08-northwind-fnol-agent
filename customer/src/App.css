@@ -1369,7 +1369,7 @@ textarea:focus-visible {
   min-height: 100svh;
   height: 100svh;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 308px;
+  grid-template-columns: 240px minmax(0, 1fr) var(--claimant-details-panel-width);
   overflow: hidden;
   background: #f7f4ef;
   color: #1a1814;

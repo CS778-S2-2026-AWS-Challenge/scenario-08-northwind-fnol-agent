@@ -1164,7 +1164,7 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
   })
 
-  it('keeps third-party support out of chat and reopens it from What to provide', async () => {
+  it('keeps third-party support out of chat and reopens it from Next steps', async () => {
     const user = userEvent.setup()
     api.createClaim.mockResolvedValue({
       claim: {
@@ -1198,10 +1198,11 @@ describe('claimant intake projection', () => {
     expect(container.querySelector('.message-list .service-capability-list')).not.toBeInTheDocument()
     expect(container.querySelector('.message-list .external-capabilities-trigger')).not.toBeInTheDocument()
 
-    const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
+    const documentsTab = screen.getByRole('tab', { name: 'Next steps' })
     await user.click(documentsTab)
+    await user.click(screen.getByText('More options').closest('summary'))
     const trigger = screen.getByRole('button', { name: /Use a third-party service/ })
-    expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('What to provide')
+    expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('Next steps')
     expect(trigger).toHaveTextContent('View 2 options')
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
@@ -1248,7 +1249,8 @@ describe('claimant intake projection', () => {
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
     expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'What to provide' }))
+    await user.click(screen.getByRole('tab', { name: 'Next steps' }))
+    await user.click(screen.getByText('More options').closest('summary'))
     await user.click(screen.getByRole('button', { name: /Use a third-party service/ }))
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
   })
@@ -1458,8 +1460,17 @@ describe('claimant intake projection', () => {
     expect(claimDetails).toHaveClass('is-open')
     expect(within(claimNavigation).getByRole('button', { name: 'External services' }))
       .toHaveAttribute('aria-current', 'page')
-    expect(within(claimDetails).getByRole('tab', { name: 'Summary' })).toBeVisible()
-    expect(within(claimDetails).getByRole('tab', { name: 'What to provide' })).toBeVisible()
+    expect(within(claimDetails).getByRole('heading', { name: 'Claim details' })).toBeVisible()
+    expect(within(claimDetails).queryByText(/^Revision /)).not.toBeInTheDocument()
+    expect(within(claimDetails).getByRole('button', { name: 'Collapse panel' })).toBeVisible()
+    expect(within(claimDetails).getByRole('tab', { name: 'Overview' })).toBeVisible()
+    expect(within(claimDetails).getByRole('tab', { name: 'Next steps' })).toBeVisible()
+
+    await user.click(within(claimDetails).getByRole('button', { name: 'Collapse panel' }))
+    expect(claimDetails).toHaveClass('is-collapsed')
+    const reopenDetails = screen.getByRole('button', { name: 'Open claim details panel' })
+    await user.click(reopenDetails)
+    expect(claimDetails).toHaveClass('is-open')
   })
 
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
@@ -2148,6 +2159,10 @@ describe('claimant intake projection', () => {
     expect(within(container.querySelector('.privacy-page')).queryByText(initialClaim.claim_id))
       .not.toBeInTheDocument()
 
+    const privacyLayout = container.querySelector('.intake-page.privacy-view')
+    expect(privacyLayout).toHaveClass('details-closed')
+    expect(container.querySelector('.intake-details-panel')).toHaveAttribute('hidden')
+
     await user.click(screen.getByRole('button', { name: 'View information recorded for this claim' }))
     expect(screen.getByRole('heading', { level: 1, name: 'Claim features' })).toBeVisible()
   })
@@ -2501,8 +2516,8 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()
     expect(screen.getByText(/Your information stays private/)).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Your summary will build as you chat' })).toBeVisible()
-    expect(screen.getByText(/Key dates, people, damage and supporting items/)).toBeVisible()
+    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeVisible()
+    expect(screen.getByText('Tell us what happened and the Agent will build this overview as you chat.')).toBeVisible()
 
     const composer = screen.getByPlaceholderText('Write what happened, or choose a prompt above…')
     const send = screen.getByRole('button', { name: 'Send' })
@@ -3591,7 +3606,9 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    await screen.findByRole('heading', { name: 'Claim details' })
+    await screen.findByRole('complementary', { name: 'Claim details' })
+    await user.click(screen.getByRole('button', { name: /^Incident details/ }))
+    await user.click(screen.getByRole('button', { name: /^Safety and ongoing risk/ }))
 
     // A boolean value must read as Yes/No, never the raw JavaScript "true"/"false" string.
     expect(screen.getByText('Yes')).toBeVisible()
@@ -3706,6 +3723,79 @@ describe('claimant intake projection', () => {
       name: /Vehicle damage assessment/i,
     })).toBeInTheDocument()
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'External services' }))
+
+    const servicesPage = (await screen.findByRole('heading', {
+      level: 1,
+      name: 'External services',
+    })).closest('.external-services-page')
+    expect(servicesPage).not.toBeNull()
+    expect(within(servicesPage).getByText('Northwind assessment service')).toBeVisible()
+    expect(within(servicesPage).queryByRole('heading', { name: 'No external service is needed right now' }))
+      .not.toBeInTheDocument()
+  })
+
+  it('restores message-bound service offers on the External services page', async () => {
+    const user = userEvent.setup()
+    const messageAction = {
+      offer_id: 'offer-assessor-history',
+      agent_message_id: agentMessage.message_id,
+      service_identity: 'vehicle_damage_assessment_routing',
+      service_name: 'Vehicle damage assessment',
+      provider: 'Northwind assessment service',
+      purpose: 'Arrange a vehicle damage assessment.',
+      shared_data_summary: ['Your confirmed incident region'],
+      consent_status: 'not_recorded',
+      status: 'consent_required',
+      routing: null,
+      failure_code: null,
+      can_request: true,
+    }
+    const restoredClaim = {
+      ...initialClaim,
+      incident_type: 'motor',
+      external_service_action: null,
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [{ ...restoredClaim, can_resume: true }],
+      page: { next_cursor: null },
+    })
+    api.resumeClaimSession.mockResolvedValue({
+      session_id: 'ses_ui_vp',
+      model_profile_id: 'qwen-local',
+      started_at: '2026-09-10T01:00:02Z',
+      resume: {
+        customer_next_step: restoredClaim.customer_next_step,
+        summary: 'My car was damaged.',
+        pending_items: [],
+        prior_commitments: [],
+      },
+    })
+    api.getClaim.mockResolvedValue(restoredClaim)
+    api.getClaimMessages.mockResolvedValue({
+      items: [claimantMessage, { ...agentMessage, message_actions: [messageAction] }],
+    })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Motor claim/ }))
+    await screen.findByText(agentMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'External services' }))
+
+    const servicesPage = screen.getByRole('heading', {
+      level: 1,
+      name: 'External services',
+    }).closest('.external-services-page')
+    expect(servicesPage).not.toBeNull()
+    expect(within(servicesPage).getByText('Northwind assessment service')).toBeVisible()
+    expect(within(servicesPage).queryByRole('heading', { name: 'No external service is needed right now' }))
+      .not.toBeInTheDocument()
   })
 
   it('uses backend-required items for the review action instead of local field counts', async () => {
@@ -3750,10 +3840,10 @@ describe('claimant intake projection', () => {
     const chatView = screen.getByRole('button', { name: 'Chat' })
     const detailsView = screen.getByRole('button', { name: 'Details' })
     expect(detailsView).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
 
-    await user.click(screen.getByRole('tab', { name: 'What to provide' }))
-    expect(screen.getByRole('tabpanel', { name: 'What to provide' })).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Next steps' }))
+    expect(screen.getByRole('tabpanel', { name: 'Next steps' })).toBeInTheDocument()
 
     await user.click(chatView)
     expect(chatView).toHaveAttribute('aria-selected', 'true')
@@ -3787,8 +3877,10 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(await screen.findByText('Incident type needs your review.')).toBeVisible()
-    expect(screen.queryByText('type needs your review.')).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: /^Incident details/ }))
+    const incidentType = screen.getByRole('button', { name: 'Edit Incident type' })
+    expect(within(incidentType).getByText('Incident type')).toBeVisible()
+    expect(within(incidentType).getByText('Needs review')).toBeVisible()
   })
 
   it('renders backend dynamic requirements and re-renders a corrected field', async () => {
@@ -3834,6 +3926,8 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
+    const toProvideTab = screen.getByRole('tab', { name: 'Next steps' })
+    expect(within(toProvideTab).getByText('2')).toBeVisible()
     expect(screen.queryByRole('button', { name: /Review claim details/i })).not.toBeInTheDocument()
     const progress = screen.getByRole('button', {
       name: /Claim progress: 1 of 2 required details complete/i,
@@ -3852,7 +3946,8 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText('Needed later: Affected property')).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
 
-    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    await user.click(screen.getByRole('button', { name: 'Edit Incident details' }))
+    await user.click(screen.getByRole('button', { name: 'Edit When it happened' }))
     const correction = screen.getByRole('textbox', { name: 'Correct When it happened' })
     await user.clear(correction)
     await user.type(correction, '9pm')
@@ -4364,7 +4459,7 @@ describe('claimant intake projection', () => {
     unmount()
   })
 
-  it('shows what to provide from the Evidence projection and supports keyboard tab navigation', async () => {
+  it('shows Next steps from the Evidence projection and supports keyboard tab navigation', async () => {
     const user = userEvent.setup()
     let pushEvidenceUpdate
     api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
@@ -4429,10 +4524,10 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const summaryTab = await screen.findByRole('tab', { name: 'Summary' })
-    const documentsTab = screen.getByRole('tab', { name: 'What to provide' })
+    const summaryTab = await screen.findByRole('tab', { name: 'Overview' })
+    const documentsTab = screen.getByRole('tab', { name: 'Next steps' })
     expect(summaryTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('What we have so far')).toBeInTheDocument()
+    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /What to provide/ })).not.toBeInTheDocument()
 
     summaryTab.focus()
@@ -4447,14 +4542,14 @@ describe('claimant intake projection', () => {
     await user.keyboard('{Home}')
     expect(summaryTab).toHaveFocus()
     expect(summaryTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('What we have so far')).toBeInTheDocument()
+    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeInTheDocument()
 
     await user.click(documentsTab)
     expect(documentsTab).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('Repair quote')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Evidence history' })).not.toBeInTheDocument()
 
-    const documentsPanel = screen.getByRole('tabpanel', { name: 'What to provide' })
+    const documentsPanel = screen.getByRole('tabpanel', { name: 'Next steps' })
     const uploadInput = documentsPanel.querySelector('input[type="file"]')
     await user.upload(
       uploadInput,

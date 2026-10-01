@@ -11,6 +11,7 @@ from backend.domain.branch_registry import (
     BranchRegistrySnapshot,
     build_default_registry,
 )
+from backend.domain.field_registry import parse_registered_number
 from backend.domain.models import BranchEvaluationResult, FieldSelectionState, TemporalFactValue
 from backend.domain.turn_field_contract import (
     TurnFieldContract,
@@ -75,6 +76,8 @@ def _value_schema(field: TurnFieldDefinition) -> dict[str, object]:
         return {'type': 'boolean'}
     if field.value_type == 'enum':
         return {'type': 'string', 'enum': field.allowed_values}
+    if field.value_type == 'number':
+        return {'type': 'number', 'minimum': 0}
     if field.value_type == 'text_list':
         return {
             'type': 'array',
@@ -176,6 +179,9 @@ def normalise_field_value(field: TurnFieldDefinition, value: Any) -> Any:
         return value.strip()
     if field.value_type == 'text_list' and isinstance(value, list):
         return [item.strip() if isinstance(item, str) else item for item in value]
+    if field.value_type == 'number':
+        number = parse_registered_number(value)
+        return value if number is None else number
     return value
 
 
@@ -214,6 +220,8 @@ def _field_value_is_valid(field: TurnFieldDefinition, value: Any) -> bool:
         return isinstance(value, bool)
     if field.value_type == 'enum':
         return isinstance(value, str) and value in field.allowed_values
+    if field.value_type == 'number':
+        return parse_registered_number(value) is not None
     if field.value_type == 'location':
         return (isinstance(value, str) and bool(value.strip())) or (
             isinstance(value, Mapping) and bool(value)

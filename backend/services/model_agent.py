@@ -27,6 +27,7 @@ from backend.domain.agent_v7 import (
 )
 from backend.domain.agent_v8 import V8TurnProposal
 from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
+from backend.domain.field_registry import parse_registered_number
 from backend.domain.ids import new_id
 from backend.domain.knowledge import (
     KnowledgeRetrievalUnavailable,
@@ -241,6 +242,9 @@ def _normalise_model_field_value(field_code: str, value: Any) -> Any:
             for item in re.split(r'\s*(?:,|;|\band\b)\s*', value, flags=re.IGNORECASE)
             if item.strip()
         ]
+    if value_type == 'number' and isinstance(value, str):
+        number = parse_registered_number(value)
+        return value if number is None else number
     return value
 
 

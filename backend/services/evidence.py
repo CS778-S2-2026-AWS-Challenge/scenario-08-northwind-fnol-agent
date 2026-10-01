@@ -1,5 +1,6 @@
 import re
-from datetime import datetime
+from collections.abc import Mapping
+from datetime import datetime, timedelta
 from hashlib import sha256
 
 from backend.adapters.evidence_storage import (
@@ -1211,6 +1212,16 @@ def complete_upload(
             'storage_key': stored.storage_key,
             'upload_checksum': stored.checksum,
             'processing_state': 'queued',
+            **(
+                {
+                    'processing_operation_id': _processing_operation_id(
+                        evidence_id, evidence.material_version, stored.checksum
+                    ),
+                    'processing_attempt': 0,
+                }
+                if evidence.media_type == 'application/pdf'
+                else {}
+            ),
         },
         _transition_entry(
             field_code=None,
@@ -1262,6 +1273,203 @@ def complete_upload(
         ),
     )
     return response
+
+
+def _processing_operation_id(evidence_id: str, material_version: int, checksum: str) -> str:
+    """Return a stable internal operation identity for one material generation."""
+
+    digest = request_fingerprint(
+        {
+            'evidence_id': evidence_id,
+            'material_version': material_version,
+            'checksum': checksum.lower(),
+        }
+    )
+    return f'epr_{digest[:20]}'
+
+
+def reserve_evidence_processing(
+    repository: PersistenceRepository,
+    claim_id: str,
+    evidence_id: str,
+    expected_revision: int,
+    material_version: int,
+) -> tuple[WorkingClaim, EvidenceRecord, int]:
+    """CAS-reserve one current PDF attempt before invoking a provider."""
+
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        raise _claim_not_found()
+    _validate_revision(claim, expected_revision)
+    evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    if evidence is None:
+        raise _evidence_not_found()
+    if (
+        evidence.source is not EvidenceSource.CLAIMANT
+        or evidence.status is not EvidenceStatus.RECEIVED
+        or evidence.file_status is not EvidenceFileStatus.PROCESSING
+        or evidence.media_type != 'application/pdf'
+        or evidence.material_version != material_version
+        or evidence.claimant_history_state is not EvidenceHistoryState.AVAILABLE
+        or evidence.provenance.get('extraction_state')
+        or evidence.provenance.get('processing_state') not in {'queued', 'running'}
+    ):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The PDF is not awaiting the current processing attempt.',
+            retryable=True,
+        )
+    if evidence.provenance.get('processing_state') == 'running':
+        lease = evidence.provenance.get('processing_lease_expires_at')
+        try:
+            lease_expired = isinstance(lease, str) and datetime.fromisoformat(lease) <= now_utc()
+        except ValueError:
+            lease_expired = False
+        if not lease_expired:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='The PDF processing attempt is already running.',
+                retryable=True,
+            )
+    checksum = evidence.provenance.get('upload_checksum')
+    operation_id = evidence.provenance.get('processing_operation_id')
+    if not isinstance(checksum, str) or not isinstance(operation_id, str):
+        if not isinstance(checksum, str):
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='The PDF has no recorded final object checksum.',
+            )
+        operation_id = _processing_operation_id(evidence_id, material_version, checksum)
+    attempt = evidence.provenance.get('processing_attempt', 0)
+    if not isinstance(attempt, int) or attempt < 0:
+        attempt = 0
+    next_attempt = attempt + 1
+    timestamp = now_utc()
+    reserved = evidence.model_copy(
+        update={
+            'provenance': _with_transition(
+                {
+                    **evidence.provenance,
+                    'processing_operation_id': operation_id,
+                    'processing_attempt': next_attempt,
+                    'processing_state': 'running',
+                    'processing_started_at': timestamp.isoformat(),
+                    'processing_lease_expires_at': (timestamp + timedelta(minutes=5)).isoformat(),
+                },
+                _transition_entry(
+                    field_code=None,
+                    from_state=evidence.file_status.value,
+                    to_state=EvidenceFileStatus.PROCESSING.value,
+                    source=evidence.source.value,
+                    at=timestamp.isoformat(),
+                    actor_type=ActorType.SYSTEM.value,
+                    actor_id='pdf_evidence_processor',
+                ),
+            ),
+            'updated_at': timestamp,
+        }
+    )
+    updated_claim = _updated_claim(claim, _records_with(repository, claim, reserved))
+    _persist(
+        repository,
+        updated_claim,
+        expected_revision,
+        reserved,
+        IdempotencyRecord(
+            actor_id=claim.customer_id,
+            route=f'internal/claims/{claim_id}/evidence/{evidence_id}/pdf-reserve',
+            key=f'{operation_id}:{next_attempt}',
+            request_fingerprint=request_fingerprint(
+                {
+                    'operation_id': operation_id,
+                    'material_version': material_version,
+                    'attempt': next_attempt,
+                }
+            ),
+            claim_id=claim_id,
+            session_id=claim.active_session_id or '',
+            response_payload=None,
+        ),
+    )
+    return updated_claim, reserved, next_attempt
+
+
+def defer_evidence_processing(
+    repository: PersistenceRepository,
+    claim_id: str,
+    evidence_id: str,
+    expected_revision: int,
+    material_version: int,
+    failure_code: str,
+) -> None:
+    """Return a reserved PDF to queued state without exposing provider details."""
+
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        raise _claim_not_found()
+    _validate_revision(claim, expected_revision)
+    evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    if evidence is None:
+        raise _evidence_not_found()
+    if (
+        evidence.media_type != 'application/pdf'
+        or evidence.material_version != material_version
+        or evidence.file_status is not EvidenceFileStatus.PROCESSING
+        or evidence.provenance.get('processing_state') != 'running'
+    ):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The PDF processing attempt is no longer current.',
+            retryable=True,
+        )
+    timestamp = now_utc()
+    queued = evidence.model_copy(
+        update={
+            'provenance': _with_transition(
+                {
+                    **evidence.provenance,
+                    'processing_state': 'queued',
+                    'processing_last_failure': failure_code,
+                    'processing_lease_expires_at': None,
+                },
+                _transition_entry(
+                    field_code=None,
+                    from_state=EvidenceFileStatus.PROCESSING.value,
+                    to_state=EvidenceFileStatus.PROCESSING.value,
+                    source=evidence.source.value,
+                    at=timestamp.isoformat(),
+                    actor_type=ActorType.SYSTEM.value,
+                    actor_id='pdf_evidence_processor',
+                ),
+            ),
+            'updated_at': timestamp,
+        }
+    )
+    updated_claim = _updated_claim(claim, _records_with(repository, claim, queued))
+    _persist(
+        repository,
+        updated_claim,
+        expected_revision,
+        queued,
+        IdempotencyRecord(
+            actor_id=claim.customer_id,
+            route=f'internal/claims/{claim_id}/evidence/{evidence_id}/pdf-defer',
+            key=(
+                f'{evidence.provenance.get("processing_operation_id", evidence_id)}:'
+                f'{evidence.provenance.get("processing_attempt", 0)}'
+            ),
+            request_fingerprint=request_fingerprint(
+                {'failure_code': failure_code, 'material_version': material_version}
+            ),
+            claim_id=claim_id,
+            session_id=claim.active_session_id or '',
+            response_payload=None,
+        ),
+    )
 
 
 def repair_processing_image(
@@ -1362,11 +1570,23 @@ def complete_evidence_processing(
     payload: CompleteEvidenceProcessingRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    *,
+    expected_material_version: int | None = None,
+    processor_id: str = 'mock_evidence_processor',
+    processing_provenance: Mapping[str, object] | None = None,
 ) -> EvidenceProcessingResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
-    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    fingerprint_input: dict[str, object] = payload.model_dump(mode='json')
+    if expected_material_version is not None or processing_provenance:
+        fingerprint_input = {
+            'payload': fingerprint_input,
+            'material_version': expected_material_version,
+            'processor_id': processor_id,
+            'processing_provenance': dict(processing_provenance or {}),
+        }
+    fingerprint = request_fingerprint(fingerprint_input)
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _claim_not_found()
@@ -1391,6 +1611,16 @@ def complete_evidence_processing(
     evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
     if evidence is None:
         raise _evidence_not_found()
+    if (
+        expected_material_version is not None
+        and evidence.material_version != expected_material_version
+    ):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The processing result does not belong to the current material generation.',
+            retryable=True,
+        )
     if payload.outcome == 'retry':
         if evidence.file_status is not EvidenceFileStatus.FAILED:
             raise ApiError(
@@ -1412,7 +1642,7 @@ def complete_evidence_processing(
                         source=evidence.source.value,
                         at=timestamp.isoformat(),
                         actor_type=ActorType.SYSTEM.value,
-                        actor_id='mock_evidence_processor',
+                        actor_id=processor_id,
                     ),
                 ),
                 'updated_at': timestamp,
@@ -1470,9 +1700,16 @@ def complete_evidence_processing(
         failed = evidence.model_copy(
             update={
                 'file_status': EvidenceFileStatus.FAILED,
+                'wait_type': EvidenceWaitType.CLAIMANT,
+                'responsible_party': ResponsibleParty.CLAIMANT,
                 'context_summary': 'Northwind could not process this evidence upload.',
                 'provenance': _with_transition(
-                    {**evidence.provenance, 'processing_state': 'failed'},
+                    {
+                        **evidence.provenance,
+                        **dict(processing_provenance or {}),
+                        'processing_state': 'failed',
+                        'processing_lease_expires_at': None,
+                    },
                     _transition_entry(
                         field_code=None,
                         from_state=EvidenceFileStatus.PROCESSING.value,
@@ -1480,7 +1717,7 @@ def complete_evidence_processing(
                         source=evidence.source.value,
                         at=timestamp.isoformat(),
                         actor_type=ActorType.SYSTEM.value,
-                        actor_id='mock_evidence_processor',
+                        actor_id=processor_id,
                     ),
                 ),
                 'updated_at': timestamp,
@@ -1580,15 +1817,17 @@ def complete_evidence_processing(
             updated_at=timestamp,
             updated_by=ActorReference(
                 actor_type=ActorType.SYSTEM,
-                actor_id='mock_evidence_processor',
+                actor_id=processor_id,
             ),
         )
         for fact in payload.facts
     }
     provenance: dict[str, object] = {
         **evidence.provenance,
+        **dict(processing_provenance or {}),
         'processing_state': 'completed',
-        'extraction_state': 'proposed',
+        'processing_lease_expires_at': None,
+        'extraction_state': 'proposed' if field_codes else 'no_facts',
         'fact_decisions': {code: 'proposed' for code in field_codes},
     }
     provenance = _with_transition(
@@ -1600,7 +1839,7 @@ def complete_evidence_processing(
             source=evidence.source.value,
             at=timestamp.isoformat(),
             actor_type=ActorType.SYSTEM.value,
-            actor_id='mock_evidence_processor',
+            actor_id=processor_id,
         ),
     )
     for field_code in field_codes:
@@ -1613,12 +1852,15 @@ def complete_evidence_processing(
                 source=form_source.value,
                 at=timestamp.isoformat(),
                 actor_type=ActorType.SYSTEM.value,
-                actor_id='mock_evidence_processor',
+                actor_id=processor_id,
             ),
         )
     processed = evidence.model_copy(
         update={
             'file_status': EvidenceFileStatus.READY,
+            'wait_type': None,
+            'responsible_party': None,
+            'context_summary': 'The evidence is available for review.',
             'provenance': provenance,
             'updated_at': timestamp,
         }

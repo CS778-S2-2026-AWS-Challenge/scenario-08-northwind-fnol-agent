@@ -296,7 +296,9 @@ class AgentTurnContext:
     turn_family_resolution: TurnFamilyResolution | None = None
     selected_external_service_ids: tuple[str, ...] = ()
     eligible_service_ids: frozenset[str] | None = None
-    service_eligibility_resolver: Callable[[list[ProposedFormChange]], frozenset[str]] | None = None
+    service_eligibility_resolver: (
+        Callable[[list[ProposedFormChange], frozenset[str]], frozenset[str]] | None
+    ) = None
     external_service_context_loader: (
         Callable[[], tuple[ExternalServiceLifecycleProjection, ...]] | None
     ) = None
@@ -454,6 +456,18 @@ def _initial_form_changes(message_text: str, incident_type: str | None) -> list[
                 confidence=1.0,
             )
         )
+    liability = controlled_liability_position(message_text)
+    if liability is not None:
+        changes.append(
+            ProposedFormChange(
+                field_code='incident.liability_position',
+                value=liability,
+                source=FormSource.CLAIMANT,
+                status=FormStatus.CONFIRMED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=1.0,
+            )
+        )
     if re.search(
         r'\b(?:bumper|vehicle|car|panel)\b[^.!?]*(?:damag|dent|scratch|broken)',
         message_text,
@@ -545,6 +559,48 @@ def _guided_initial_form_changes(
     ]
 
 
+_LIABILITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        'disputed',
+        re.compile(
+            r'\b(?:den(?:y|ies|ied)|disput\w*|blam\w*\s+me|says?\s+it\s+was\s+my\s+fault|'
+            r"won't\s+accept|refus\w*\s+to\s+accept)\b",
+            re.I,
+        ),
+    ),
+    (
+        'shared',
+        re.compile(r'\b(?:both\s+(?:of\s+us\s+)?(?:were\s+)?at\s+fault|shared\s+fault)\b', re.I),
+    ),
+    ('claimant_accepts', re.compile(r'\b(?:it\s+was\s+my\s+fault|i\s+was\s+at\s+fault)\b', re.I)),
+    (
+        'other_party_accepts',
+        re.compile(
+            r'\b(?:admitted|accepted|admits|accepts)\b[^.!?]*'
+            r'\b(?:(?:their|his|her)\s+fault|responsib\w*|liab\w*)',
+            re.I,
+        ),
+    ),
+)
+
+
+def controlled_liability_position(message_text: str, *, answering: bool = False) -> str | None:
+    """Read an explicit liability statement; never infer fault from how a collision happened."""
+
+    for value, pattern in _LIABILITY_PATTERNS:
+        if pattern.search(message_text):
+            return value
+    if answering:
+        lowered = message_text.strip().casefold()
+        if re.search(r"\b(?:don't know|do not know|not sure|unsure|no idea)\b", lowered):
+            return 'unknown'
+        if re.fullmatch(r'(?:yes|yeah|yep|they did|he did|she did)[.!]?', lowered):
+            return 'other_party_accepts'
+        if re.fullmatch(r"(?:no|nope|they didn't|they did not)[.!]?", lowered):
+            return 'disputed'
+    return None
+
+
 def _safety_is_explicitly_clear(message_text: str) -> bool:
     injury_clear = any(pattern.search(message_text) for pattern in INJURY_NEGATION_PATTERNS)
     danger_clear = any(pattern.search(message_text) for pattern in DANGER_NEGATION_PATTERNS)
@@ -578,6 +634,8 @@ def _controlled_requirement_value(field_code: str, message_text: str) -> Any | N
         if re.search(r'\b(?:other|another|second)\b.*\b(?:party|person|vehicle|car)\b', lowered):
             return True
         return None
+    if field_code == 'incident.liability_position':
+        return controlled_liability_position(text, answering=True)
     if field_code == 'vehicle.drivable':
         if re.search(r"\b(?:not drivable|cannot drive|can't drive|unsafe|undrivable)\b", lowered):
             return False

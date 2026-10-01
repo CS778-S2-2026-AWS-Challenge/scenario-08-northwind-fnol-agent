@@ -14,7 +14,11 @@ from backend.services.context_budget import build_request_budget, estimate_json_
 from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import estimate_tokens
-from backend.services.request_profile_registry import V7_INPUT_HARD_LIMIT, request_profile
+from backend.services.request_profile_registry import (
+    V7_INPUT_HARD_LIMIT,
+    V8_INPUT_HARD_LIMIT,
+    request_profile,
+)
 from tests.test_agent_context_runtime_v7 import _context
 from tests.test_turn_proposal_v8 import v8_context
 
@@ -37,8 +41,8 @@ def test_soft_limit_is_observable_without_refusing_a_legal_turn(
     caplog.set_level(logging.INFO, logger='backend.services.context_budget')
     plan = plan_model_turn(v8_context('My car was rear-ended yesterday.'))
     assert plan is not None
-    assert 3000 < plan.request_budget.raw_input_tokens <= 7500
-    assert plan.request_budget.hard_limit == 7500
+    assert 3000 < plan.request_budget.raw_input_tokens <= V8_INPUT_HARD_LIMIT
+    assert plan.request_budget.hard_limit == V8_INPUT_HARD_LIMIT == 12_000
     assert any(
         record.message == 'agent_turn_input_budget_soft_exceeded' for record in caplog.records
     )
@@ -66,7 +70,8 @@ def test_v8_api_budget_overflow_preserves_input_without_provider_or_controlled_f
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     created = create_claim(client, CLAIMANT, key='input-budget-overflow').json()
     claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']
-    message = '车辆损失说明' * 800
+    # At the 5000-character message cap, four-byte characters still exceed the input ceiling.
+    message = '🚗' * 5000
     response = submit_message(
         client, CLAIMANT, claim_id, session_id, text=message, key='input-budget-overflow-message'
     )
@@ -95,10 +100,10 @@ def test_lookup_hard_limit_is_per_request_not_cumulative_input_plus_output() -> 
         schema={},
         context={},
         tools=[],
-        prior_turn_tokens=5000,
+        prior_turn_tokens=9000,
     )
-    assert result.raw_input_tokens <= 7500
-    assert result.turn_cumulative_tokens > 7500
+    assert result.raw_input_tokens <= V8_INPUT_HARD_LIMIT
+    assert result.turn_cumulative_tokens > V8_INPUT_HARD_LIMIT
     assert result.reserved_output_tokens == 6500
 
 
@@ -133,4 +138,4 @@ def test_v7_rollback_three_family_context_fits_measured_compensation(
     plan = plan_model_turn(replace(context, branch_evaluation=evaluation))
     assert plan is not None
     assert plan.request_budget.raw_input_tokens <= V7_INPUT_HARD_LIMIT
-    assert plan.request_budget.hard_limit == V7_INPUT_HARD_LIMIT == 5500
+    assert plan.request_budget.hard_limit == V7_INPUT_HARD_LIMIT == 8000

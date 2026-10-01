@@ -40,8 +40,10 @@ def _prompt_services(provider: V8JourneyProvider, turn: int = 0) -> list[dict[st
     request = provider.gateway.requests[turn]
     message = next(item for item in request.messages if item.role.value == 'user')
     assert message.content is not None
+    # The planner omits an empty section, as it does when the lifecycle lookup fails.
     return cast(
-        list[dict[str, Any]], json.loads(message.content)['claim.current']['eligible_services']
+        list[dict[str, Any]],
+        json.loads(message.content)['claim.current'].get('eligible_services', []),
     )
 
 
@@ -65,7 +67,13 @@ def test_first_turn_toolbox_is_visible_but_only_accepted_family_unlocks_service(
 ) -> None:
     caplog.set_level(logging.INFO, logger='backend.services.turn_proposal_validation')
     provider = V8JourneyProvider(
-        [envelope(fields=[fact('claim.product_family', family, quotation)], services=[RECOVERY])]
+        [
+            envelope(
+                fields=[fact('claim.product_family', family, quotation)],
+                services=[RECOVERY],
+                requested={RECOVERY: 'Please arrange a tow'},
+            )
+        ]
     )
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     claim_id, session_id, revision = _new_claim(client)
@@ -117,6 +125,7 @@ def test_granted_generic_offer_does_not_become_retry_when_task_storage_is_unavai
                     fact('incident.location', 'Queen Street', 'Queen Street'),
                 ],
                 services=[RECOVERY],
+                requested={RECOVERY: 'Please arrange a tow'},
             ),
             envelope(
                 fields=[fact('vehicle.damage_description', 'Dented bumper', 'bumper is dented')]
@@ -258,6 +267,7 @@ def test_conflicting_family_assertion_cannot_unlock_services_for_the_disputed_fa
             envelope(
                 fields=[fact('claim.product_family', 'motor', 'My car was rear-ended')],
                 services=[RECOVERY],
+                requested={RECOVERY: 'Please arrange a tow'},
             ),
         ]
     )
@@ -317,6 +327,7 @@ def test_external_task_lookup_cannot_break_chat_or_duplicate_existing_work(
             envelope(
                 fields=[fact('claim.product_family', 'motor', 'My car was rear-ended')],
                 services=[RECOVERY],
+                requested={RECOVERY: 'Please arrange a tow'},
             )
         ]
     )

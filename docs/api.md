@@ -770,6 +770,10 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 
 A newly created claim should initialise `severity = unassessed`, `coverage = not_assessed`, and `evidence = not_started`.
 
+Neither Runtime nor staff write-back writes `severity`; the stored value stays `unassessed`.
+Workbench projections report the computed triage in `claim_state.severity` and in `triage`; see
+"Workbench triage".
+
 ### Working Claim
 
 The canonical backend record has these fields. API projections omit fields the caller is not authorised to see.
@@ -1030,6 +1034,9 @@ Initial common field codes:
 | `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
 | `parties.other_parties` | boolean | Whether another person or organisation is involved; participant details use separate records |
+| `incident.liability_position` | enum | `other_party_accepts`, `claimant_accepts`, `shared`, `disputed`, or `unknown`; required once `parties.other_parties` is confirmed true; a triage input, never a liability decision |
+| `loss.estimated_amount` | number | Estimated loss in NZD: the claimant's estimate or a quote or assessment total including GST; a triage input, never a settlement value |
+| `claim.cover_disagreement` | enum | `none`, `excess`, or `cover`: whether the claimant disputes the excess or the cover |
 | `authorities.police_report_reference` | string | Reference if already issued |
 | `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
@@ -2703,17 +2710,30 @@ storage outage returns retryable `503 DEPENDENCY_UNAVAILABLE` without a Claim mu
 object size/checksum mismatch returns `409 INVALID_STATE_TRANSITION`. Readiness means the
 image is usable, not malware-scanned, fact-verified, or sufficient for every business requirement.
 Completion does not extract or confirm Claim fields. Both persistence profiles use this boundary.
-PDF remains `202 processing`; no automatic PDF processor is dispatched by this change.
-Filename, media type, size, and file status can be read from the evidence list. Storage keys,
-checksums, processing references, and file contents remain internal.
+PDF completion returns `202 processing` after the final object identity, byte length, checksum,
+current material generation, ownership and media type are durable. On a persistent
+`model_gateway` runtime, the shared Evidence worker dispatches the current protected object
+through the published `openrouter-gpt4o-mini` binding (`openai/gpt-4o`) with the
+`evidence_processing` purpose and `northwind-evidence-pdf-v1` prompt contract. The model receives
+only the current PDF and currently unoccupied, registered field contracts. A successful response
+enters the existing processing-completion boundary and creates source-linked `proposed` facts;
+it never confirms a field. A valid document with no eligible facts becomes `ready` with no
+proposals. Filename, media type, size, and file status can be read from the Evidence list. Storage
+keys, checksums, processing operation/lease details, provider request identifiers, credentials,
+raw model responses and unrestricted provenance remain internal.
 
-On persistent data profiles, backend startup also runs bounded background recovery of legacy
-claimant JPEG/PNG records still marked `processing` with queued provenance. It validates each
-record's current final object and applies the same terminal result with Claim revision and
-material-generation checks. Storage outages and conflicts remain retryable on later passes.
-Clients observe recovery through the existing Evidence reads and realtime invalidations;
-GET requests do not perform repair. Old completion idempotency responses remain historical,
-so clients refresh the authoritative Evidence resource after recovery. PDF is excluded.
+On persistent data profiles, backend startup runs one bounded Evidence worker. It continues to
+recover legacy claimant JPEG/PNG records and, when the governed GPT-4o processor is configured,
+selects queued PDFs or PDFs whose five-minute processing lease expired. One stable
+`epr_...` operation identity belongs to the current material generation; each reservation advances
+the Claim revision with compare-and-set before provider I/O. Timeout, rate limit, object-store
+outage and unavailable configuration return the same generation to `queued`. Invalid PDF bytes,
+malformed model output and terminal provider rejection settle it as `failed` without partial
+facts. Claim revision or generation conflicts cannot overwrite newer state and remain eligible
+for a later bounded recovery pass. Clients observe recovery through existing Evidence reads and
+realtime invalidations; GET requests do not repair or dispatch work. Old completion idempotency
+responses remain historical, so clients refresh the authoritative Evidence resource after
+recovery.
 
 Authorised staff can read completed fixture evidence through
 `GET /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content`. This applies the same
@@ -3013,6 +3033,47 @@ the selected `view`, `cursor`, and `limit`. A count failure does not discard a u
 server returns its rows with `view_counts.status: "unavailable"`, an empty `items` list, and a
 non-null `limitation`. Clients must not convert unavailable totals into zero. An unknown or no
 longer published `view` returns `422 VALIDATION_ERROR` and is never treated as `all`.
+
+#### Workbench triage
+
+Every Workbench Claim list item and detail carries `triage`: `null` until the external claim is
+created (`external_claim.creation_status = created`), then this staff-only object:
+
+```json
+{
+  "severity": "standard",
+  "reasons": ["third_party_recovery", "amount_unknown"],
+  "rules_version": "triage-rules-v1",
+  "amount_threshold": 5000.0
+}
+```
+
+The rules in `backend/domain/triage.py` compute it when the Claim is read, from the current form,
+Evidence, handoffs, policy retrieval records and active branches, so new information changes it on
+the next read. Three questions apply in order and every matched reason is returned:
+
+| Class | Reason codes |
+|---|---|
+| `complex` | `injury_or_danger`, `liability_unresolved`, `coverage_uncertain`, `cover_disagreement`, `home_uninhabitable_or_ongoing`, `fraud_review_required` |
+| `standard` | `document_outstanding`, `fact_unresolved`, `policy_not_verified`, `vehicle_not_drivable`, `amount_over_threshold`, `amount_unknown`, `third_party_recovery` |
+| `fast_track` | No reason matched |
+
+Unknown, unavailable or unchecked inputs never yield `fast_track`. `amount_threshold` is the
+configured business threshold (`NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD`, default NZD 5,000). The
+highest of `loss.estimated_amount` (NZD) and the sum of confirmed contents item values is
+compared, and an amount equal to the threshold is not over it. Contents values in another
+currency are converted with the dated reference table in `backend/domain/currency.py`; a
+currency outside that table makes the amount unknown.
+
+`coverage_uncertain` comes from an uncertainty on the policy retrieval record for the Claim's
+policy number or `coverage = ambiguous`, never from `coverage = review_required` alone.
+`document_outstanding` compares canonical Evidence kinds (`canonical_evidence_kind` in
+`backend/domain/evidence.py`: `incident_image` and `photo` read as `incident_photo`). A receipt or
+invoice counts as proof of ownership; no other kind stands in for a required kind, so an
+assessment report does not replace a repair quote.
+
+`claim_state.severity` in Workbench projections equals `triage.severity`. Staff cannot change the
+triage. No claimant projection contains `triage`, `severity` or reason codes.
 
 `tags` is a backend projection from authoritative Claim fields and branches, Evidence records,
 WorkItems, handoffs, external-operation results, and review Signals. The Workbench client MUST

@@ -108,7 +108,7 @@ def contents_item(item_id: str = 'item_1') -> ContentsItem:
 def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record() -> None:
     registry = build_default_registry()
 
-    assert registry.field_registry_version == '7'
+    assert registry.field_registry_version == '8'
     assert registry.field_by_code['property.ongoing_risk'].value_type == 'enum'
     assert registry.field_by_code['property.habitable'].value_type == 'boolean'
     assert registry.branch_by_id['family.home'].fields >= {

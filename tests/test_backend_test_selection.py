@@ -32,6 +32,24 @@ def test_policy_judgment_change_selects_validation_persistence_and_api_consumers
     }
 
 
+@pytest.mark.parametrize(
+    'path',
+    [
+        'backend/services/image_recovery.py',
+        'backend/services/pdf_processing.py',
+    ],
+)
+def test_evidence_processing_worker_changes_select_pdf_and_recovery_contracts(path: str) -> None:
+    selection = select_tests([path])
+
+    assert selection.mode == 'scoped'
+    assert {
+        'tests/test_evidence_api.py',
+        'tests/test_image_recovery.py',
+        'tests/test_pdf_processing.py',
+    } <= set(selection.tests)
+
+
 def test_narrow_claim_api_change_selects_direct_consumers() -> None:
     selection = select_tests(['backend/api/claims.py'])
 

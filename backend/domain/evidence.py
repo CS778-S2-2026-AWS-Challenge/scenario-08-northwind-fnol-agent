@@ -37,6 +37,19 @@ REGISTERED_EVIDENCE_KINDS = frozenset(
     }
 )
 
+# One incident photo has carried three names: claimant uploads store `incident_photo`,
+# branch requirements and demo materials used `incident_image`, and tag projection read
+# `photo`. Stored records keep their kind; every comparison maps through this function.
+# `item_photo` (a photo of one contents item) stays a separate kind.
+INCIDENT_PHOTO_KIND = 'incident_photo'
+_LEGACY_EVIDENCE_KINDS = {'incident_image': INCIDENT_PHOTO_KIND, 'photo': INCIDENT_PHOTO_KIND}
+
+
+def canonical_evidence_kind(kind: str) -> str:
+    """Return the single current name for an Evidence kind."""
+    return _LEGACY_EVIDENCE_KINDS.get(kind, kind)
+
+
 REGISTERED_EVIDENCE_NEEDS = frozenset(
     {
         'current_action',

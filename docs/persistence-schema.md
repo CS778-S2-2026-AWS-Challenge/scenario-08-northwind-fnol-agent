@@ -756,19 +756,47 @@ the append-only audit collection through a bounded, filterable projection.
 
 ## Evidence Invariants
 
-- Persistent backend startup automatically recovers legacy queued JPEG/PNG uploads. Discovery
+- Persistent backend startup runs one bounded Evidence worker for legacy queued JPEG/PNG uploads
+  and automatic PDF processing. Discovery
   uses `list_evidence_recovery_page`: ascending Evidence identity, an exclusive after-identity
   cursor, default 10 records and a hard cap of 50. MongoDB bounds the existing `_id_` index to
   the `evidence:` record prefix; Fixture preserves the same page order. This background access
   pattern adds no collection, index or record field and does not scan unrelated record types.
   Pages include all Evidence states so a persistently unavailable object cannot starve later
-  records. The service selects only claimant-owned, received, available-history, queued,
+  records. Image recovery selects only claimant-owned, received, available-history, queued,
   unextracted `processing` JPEG/PNG records and invokes the same generation/revision-checked
-  validation and atomic mutation as targeted repair. Each page is followed by a five-second
+  validation and atomic mutation as targeted repair. With a governed GPT-4o processor, the same
+  worker also selects equivalent PDFs in `queued` state, or `running` PDFs whose valid five-minute
+  lease has expired. Each page is followed by a five-second
   pause; a completed pass waits sixty seconds before retrying conflicts or storage outages.
   Multiple backend processes may discover the same record; Claim CAS and operation idempotency
   prevent duplicate accepted mutations. Shutdown stops discovery and waits for in-flight work
-  before closing persistence. HTTP reads remain read-only and PDF is never selected.
+  before closing persistence. Upload completion may wake the worker early, while HTTP reads remain
+  read-only.
+
+- Each current PDF material generation owns one deterministic `epr_...` processing operation
+  identity derived from its Evidence identity, material version and verified checksum. Reservation
+  uses Claim compare-and-set before provider I/O, increments a bounded attempt counter and records
+  a five-minute lease in internal provenance. Active leases cannot be dispatched twice. Expired
+  leases are recoverable after restart; malformed or missing lease values are skipped rather than
+  hot-looped. The reservation, Evidence record, Claim aggregate and idempotency record use the
+  existing atomic Claim write and do not create a second operation collection or fact store.
+
+- The PDF processor reads only the protected final object for the reserved Claim/Evidence identity
+  and verifies byte length, checksum, media envelope and current material generation. It sends the
+  bytes through the governed OpenRouter GPT-4o document binding and accepts only registered,
+  unoccupied field contracts outside protected participant and system-owned fields. Completion
+  writes document-source proposals with both stable Evidence and generation source references.
+  An empty valid result is `ready` with `extraction_state=no_facts`; it does not fabricate a fact.
+  Retryable dependency/provider/configuration failures return the generation to `queued` with a
+  bounded failure code. Invalid bytes, malformed output and terminal rejection become `failed`.
+  No failure path persists exception text, raw responses or partial proposals.
+
+- PDF operation identity, attempts, leases, object references, checksums, provider request IDs and
+  model-processing provenance are internal. Claimant and staff Evidence projections continue to
+  expose only their role-safe lifecycle and file metadata. Replacing material archives the old
+  generation through the existing typed history and starts a new operation identity; an obsolete
+  callback or recovery attempt cannot overwrite the current generation.
 
 - JPEG/PNG upload completion validates final object bytes before one atomic Evidence mutation.
   A valid image records `image_validation=decoded-v1` and `processing_state=completed` in internal
@@ -936,6 +964,8 @@ Evidence record or protected object.
   competing ownership.
 - Staff write-back records actor, reason, outcome, evidence references, and a separate
   claimant-safe update.
+- `WorkingClaim.claim_state.severity` stays `unassessed` in storage. Triage is not persisted:
+  Workbench projections compute it when read.
 - Every Workbench handoff, signal, WorkItem, message, and ownership mutation first resolves the
   exact current projected action. Its idempotency record stores the registry version, action code,
   and target alongside the resulting response.
