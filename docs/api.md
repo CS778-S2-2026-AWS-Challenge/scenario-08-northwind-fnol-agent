@@ -4841,7 +4841,11 @@ active hold. Other staff see the action as `blocked`; executing an action the
 projection does not offer returns `403 ACCESS_DENIED`; a stale revision returns
 `409 REVISION_CONFLICT`. An exact replay returns the first response; the same key
 with different data returns `409 IDEMPOTENCY_CONFLICT`. Each action appends one
-internal-only `action.completed` Audit event whose reason is the note. A hold
+internal-only `action.completed` Audit event whose reason is the note. The hold
+transition (and the RetentionOperation hold or resume it implies), the Audit event
+and the replay record commit in one repository mutation that first rechecks the
+`If-Match` Claim revision; if another Claim mutation committed after the action was
+offered, the request returns `409 REVISION_CONFLICT` and none of them is written. A hold
 does not change the Claim revision, terminal disposition, or claimant access;
 while any hold is active, retention cleanup stays `held`, and release lets the
 same RetentionOperation resume. `WorkbenchRetentionHold` returns `hold_id`,
