@@ -8,8 +8,7 @@ from typing import Any, TypeVar
 from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
-from backend.domain.claim_ownership import claim_acceptance_eligible
-from backend.domain.claim_ownership import completed_fnol as claim_decision_eligible
+from backend.domain.claim_ownership import claim_acceptance_eligible, completed_fnol
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
     ExternalCapabilityProvenance,
@@ -1473,6 +1472,11 @@ def _allowed_actions(
             )
         )
     return actions
+
+
+def claim_decision_eligible(claim: WorkingClaim) -> bool:
+    """Retain the existing decision contract over the shared FNOL completion predicate."""
+    return completed_fnol(claim)
 
 
 def _claim_decision(

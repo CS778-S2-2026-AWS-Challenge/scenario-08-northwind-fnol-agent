@@ -7240,7 +7240,34 @@
         "title": "EvidenceActionRequestPayload",
         "type": "object"
       },
-      "EvidenceCompleteResponse": {
+      "EvidenceCompleteResponse-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "customer_next_step": {
+            "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/ClaimantEvidence"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence",
+          "revision",
+          "status_url",
+          "customer_next_step"
+        ],
+        "title": "EvidenceCompleteResponse",
+        "type": "object"
+      },
+      "EvidenceCompleteResponse-Output": {
         "additionalProperties": false,
         "properties": {
           "customer_next_step": {
@@ -15494,13 +15521,6 @@
       },
       "ValidationError": {
         "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
           "loc": {
             "items": {
               "anyOf": [
@@ -22589,7 +22609,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EvidenceCompleteResponse"
+                  "$ref": "#/components/schemas/EvidenceCompleteResponse-Input"
                 }
               }
             },
@@ -22599,7 +22619,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EvidenceCompleteResponse"
+                  "$ref": "#/components/schemas/EvidenceCompleteResponse-Output"
                 }
               }
             },
