@@ -797,15 +797,28 @@ def send_staff_message(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
-    audit_event = build_staff_message_audit_event(
-        principal=principal,
-        claim=updated,
-        message=message,
-        route=route,
-        idempotency_key=key,
-        required_permission=projected_action.action_code,
-        created_at=timestamp,
-        source_refs=((active.handoff_id,) if active is not None else ()),
+    audit_event = (
+        build_handoff_audit_event(
+            principal=principal,
+            claim=updated,
+            handoff=updated_handoff,
+            route=route,
+            idempotency_key=key,
+            required_permission=projected_action.action_code,
+            reason='Staff claimant message advanced the handoff work.',
+            created_at=timestamp,
+            source_refs=(message.message_id,),
+        )
+        if updated_handoff is not None
+        else build_staff_message_audit_event(
+            principal=principal,
+            claim=updated,
+            message=message,
+            route=route,
+            idempotency_key=key,
+            required_permission=projected_action.action_code,
+            created_at=timestamp,
+        )
     )
     records: dict[str, Any] = {'message': message}
     if updated_handoff is not None:
