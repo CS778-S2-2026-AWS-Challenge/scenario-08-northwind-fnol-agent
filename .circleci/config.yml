@@ -321,6 +321,10 @@ jobs:
             echo "Path coupling satisfied."
 
   workbench-control-inventory-evidence:
+    parameters:
+      stop_after:
+        type: integer
+        default: 10
     docker:
       - image: cimg/python:3.12-node
     resource_class: small
@@ -385,6 +389,7 @@ jobs:
             wait_for_url http://127.0.0.1:8000/health
             wait_for_url http://127.0.0.1:8002/workbench/
 
+            export WORKBENCH_INVENTORY_STOP_AFTER="<< parameters.stop_after >>"
             node tests/browser/pr1170_workbench_inventory.cjs
       - store_artifacts:
           path: browser-evidence
@@ -475,5 +480,16 @@ workflows:
       - customer-quality
       - workbench-quality
       - admin-quality
-      - workbench-control-inventory-evidence
+      - workbench-control-inventory-evidence:
+          name: workbench-inventory-through-surfaces
+          stop_after: 4
+      - workbench-control-inventory-evidence:
+          name: workbench-inventory-through-realtime
+          stop_after: 5
+      - workbench-control-inventory-evidence:
+          name: workbench-inventory-through-claim
+          stop_after: 6
+      - workbench-control-inventory-evidence:
+          name: workbench-control-inventory-evidence
+          stop_after: 10
       - p12-browser-evidence
