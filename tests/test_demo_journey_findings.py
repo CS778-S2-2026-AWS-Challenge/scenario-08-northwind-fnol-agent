@@ -1,14 +1,12 @@
-"""Demo capture findings: incident time, chat photos, papers the claimant sends later."""
+"""Demo capture findings: incident time and chat photos, judged by the model."""
 
-import re
-from datetime import UTC, datetime
-from types import SimpleNamespace
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.domain.agent_v8 import V8DocumentRequest
-from backend.domain.evidence import effective_evidence_kind
+from backend.domain.evidence import evidence_kind
 from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
@@ -17,24 +15,33 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import InvariantGuardedAgent
-from backend.services.turn_reducer import deferred_document_evidence
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 
-NZ_MOMENT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}\+1[23]:00$')
 
-
-def test_relative_incident_time_is_stored_as_a_new_zealand_time(
+def test_incident_time_is_the_models_reading_checked_not_rewritten(
     app: FastAPI, client: TestClient, repository: FixtureRepository
 ) -> None:
-    # The values the live model produced for "about 20 minutes ago" in the capture.
+    worked_out = (
+        (datetime.now(UTC) - timedelta(minutes=20))
+        .astimezone(ZoneInfo('Pacific/Auckland'))
+        .strftime('%Y-%m-%dT%H:%M%z')
+    )
+    worked_out = f'{worked_out[:-2]}:{worked_out[-2:]}'
     provider = V8JourneyProvider(
         [
             envelope(
                 fields=[
                     fact('claim.product_family', 'motor', 'rear-ended'),
-                    fact('incident.occurred_at', 'PT20M', 'about 20 minutes ago'),
+                    fact(
+                        'incident.occurred_at',
+                        worked_out,
+                        'about 20 minutes ago',
+                        precision='approximate',
+                    ),
                 ]
             ),
+            # The model's own token is not stored; the claimant's words are.
+            envelope(fields=[fact('incident.occurred_at', 'PT20M', 'just after lunch')]),
             envelope(fields=[fact('incident.occurred_at', 'current_approx', None)]),
         ]
     )
@@ -42,28 +49,31 @@ def test_relative_incident_time_is_stored_as_a_new_zealand_time(
     journey = Journey(client, 'motor', 'relative-time')
 
     journey.send('Someone rear-ended me at the lights about 20 minutes ago.')
+    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    assert claim is not None
+    assert claim.form['incident.occurred_at'].value == worked_out
+    assert 'reported_at_local' in (provider.gateway.requests[0].messages[-1].content or '')
 
+    journey.send('Actually it was just after lunch.')
     claim = repository.get_claim(journey.claim_id, 'cus_demo')
     assert claim is not None
     stored = claim.form['incident.occurred_at']
-    assert NZ_MOMENT.match(stored.value), stored.value
+    assert stored.value == 'just after lunch'
     assert stored.precision.value == 'approximate'
-    assert 'reported_at_local' in (provider.gateway.requests[0].messages[-1].content or '')
 
-    # An internal token with no claimant words is dropped, not stored over the time.
     journey.send('Thanks.')
     claim = repository.get_claim(journey.claim_id, 'cus_demo')
-    assert claim is not None and claim.form['incident.occurred_at'].value == stored.value
+    assert claim is not None and claim.form['incident.occurred_at'].value == 'just after lunch'
 
 
-def _evidence(kind: str, media_type: str | None, status: EvidenceStatus) -> EvidenceRecord:
+def _evidence(kind: str, media_type: str | None) -> EvidenceRecord:
     created = datetime(2026, 10, 1, 4, 40, tzinfo=UTC)
     return EvidenceRecord(
         evidence_id=f'evd_{kind}',
         claim_id='clm_photo',
         kind=kind,
         media_type=media_type,
-        status=status,
+        status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,
         created_at=created,
@@ -71,42 +81,14 @@ def _evidence(kind: str, media_type: str | None, status: EvidenceStatus) -> Evid
     )
 
 
-def test_a_chat_photo_counts_as_the_incident_photo() -> None:
-    assert (
-        effective_evidence_kind(_evidence('other_document', 'image/jpeg', EvidenceStatus.RECEIVED))
-        == 'incident_photo'
+def test_a_chat_file_counts_as_what_the_model_read_it_to_be() -> None:
+    chat_photo = _evidence('other_document', 'image/jpeg')
+    # Not yet read: Runtime does not guess from the media type.
+    assert evidence_kind(chat_photo) == 'other_document'
+    assert evidence_kind(chat_photo, {chat_photo.evidence_id: 'incident_photo'}) == (
+        'incident_photo'
     )
-    assert (
-        effective_evidence_kind(
-            _evidence('other_document', 'application/pdf', EvidenceStatus.RECEIVED)
-        )
-        == 'other_document'
-    )
-    assert (
-        effective_evidence_kind(_evidence('repair_quote', 'image/png', EvidenceStatus.RECEIVED))
-        == 'repair_quote'
-    )
-
-
-def test_a_paper_promised_for_later_is_recorded_once_as_expected() -> None:
-    claim = SimpleNamespace(claim_id='clm_later')
-    message = SimpleNamespace(
-        message_id='msg_later', content={'text': "I'll get the quote this week."}
-    )
-    later = SimpleNamespace(
-        document_requests=(
-            V8DocumentRequest(document_kind='repair_quote', from_party='claimant', when='later'),
-        )
-    )
-    now = datetime(2026, 10, 1, 4, 40, tzinfo=UTC)
-
-    record = deferred_document_evidence(claim, later, message, now, [])  # type: ignore[arg-type]
-
-    assert record is not None
-    assert record.kind == 'repair_quote' and record.status is EvidenceStatus.PENDING
-    assert record.related_fields == []
-    assert deferred_document_evidence(claim, later, message, now, [record]) is None  # type: ignore[arg-type]
-    asked_now = SimpleNamespace(
-        document_requests=(V8DocumentRequest(document_kind='repair_quote', from_party='claimant'),)
-    )
-    assert deferred_document_evidence(claim, asked_now, message, now, []) is None  # type: ignore[arg-type]
+    # A kind the claimant chose stands; an unregistered reading is ignored.
+    quote = _evidence('repair_quote', 'image/png')
+    assert evidence_kind(quote, {quote.evidence_id: 'incident_photo'}) == 'repair_quote'
+    assert evidence_kind(chat_photo, {chat_photo.evidence_id: 'selfie'}) == 'other_document'

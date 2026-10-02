@@ -351,6 +351,20 @@ def document_stance_evidence(
     return None
 
 
+def _value_sources(field: StructuredFormField) -> list[str]:
+    """Where the stored value came from.
+
+    A "yes" or a repeat adds sources to a field but leaves its value with the
+    message that stated it, so only the current assertion's sources count.
+    """
+
+    current = next(
+        (item for item in field.assertions if item.assertion_id == field.current_assertion_id),
+        None,
+    )
+    return current.source_refs if current is not None else field.source_refs
+
+
 def build_turn_record(
     *,
     form_changes: Mapping[str, StructuredFormField],
@@ -373,7 +387,8 @@ def build_turn_record(
             'precision': field.precision.value,
         }
         for code, field in form_changes.items()
-        if code not in CLAIMANT_HIDDEN_FIELDS and claimant_message.message_id in field.source_refs
+        if code not in CLAIMANT_HIDDEN_FIELDS
+        and claimant_message.message_id in _value_sources(field)
     ]
     record: dict[str, Any] = {'recorded_facts': recorded}
     if validated is None:

@@ -2,10 +2,15 @@
 
 Runtime does not edit the model's words. When the words contradict the ledger,
 the whole turn goes back to the model once with the ruling attached so it can
-say the same thing truthfully. The checks are structural, not semantic: they
-look for named services Runtime refused, arrangement or escalation claims the
-turn does not back, a service asked about in words instead of offered as a
-card, and a claimant sent to "their insurer" (Northwind is the insurer).
+say the same thing truthfully.
+
+Two kinds of check run. Structural checks compare the turn's own parts (a
+declared ending with nothing behind it, a summary with no fields). Wording
+checks -- a refused service named, an arrangement or escalation claimed, a
+service asked about in words, the claimant sent to "their insurer", an answer
+promised with no question passed on -- are made by the review model
+(``reply_judge``) when one is configured; the English patterns below are the
+fallback when it is not, or when its call fails.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import re
 from dataclasses import dataclass, field
 
 from backend.domain.external_service_registry import SERVICE_REGISTRY
+from backend.services.reply_judge import ReplyJudge
 from backend.services.turn_proposal_validation import _EXECUTION_CLAIM, ValidatedTurn
 
 _GENERIC_SERVICE_WORDS = frozenset(
@@ -38,6 +44,11 @@ _SERVICE_QUESTION = re.compile(
 _OTHER_INSURER = re.compile(
     r'\b(?:contact|ask|check with|speak (?:to|with)|reach out to|call)\b[^.?!]{0,40}'
     r'\b(?:your|the)\s+(?:insurer|insurance (?:company|provider))\b',
+    re.IGNORECASE,
+)
+_PROMISED_ANSWER = re.compile(
+    r'\b(?:claims team|team|we|someone|a claims (?:handler|professional))\b[^.?!]{0,30}?'
+    r"(?:\bwill|'ll|’ll)\s+(?:\S+\s+){0,2}?(?:confirm|answer|check|get back|let you know)\b",  # noqa: RUF001
     re.IGNORECASE,
 )
 _ESCALATION_CLAIM = re.compile(
@@ -76,9 +87,11 @@ class ConsistencyReview:
                     'Rewrite the reply so it matches what was actually recorded: do not name or '
                     'promise the rejected services, and do not say anything was arranged, '
                     'booked, escalated or submitted. Offer a service only with offer_service, '
-                    "never by asking in words. Northwind is the claimant's insurer: when a "
-                    'clause is not in the supplied excerpts, say the claims team will confirm. '
-                    'Keep every accepted fact and question. Return the full envelope again.'
+                    "never by asking in words. Northwind is the claimant's insurer: a question "
+                    'you cannot answer goes into northwind_questions before the reply says the '
+                    'claims team will answer it. The reply must leave the claimant the one thing '
+                    'turn_ending names. Keep every accepted fact and question. Return the full '
+                    'envelope again.'
                 ),
             }
         }
@@ -93,8 +106,51 @@ def _service_terms(identity: str) -> set[str]:
     return {name, *words}
 
 
-def review_reply(validated: ValidatedTurn) -> ConsistencyReview:
+def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
+    """Checks on the turn's own parts; no wording is read."""
+
+    problems: list[ReplyInconsistency] = []
+    if validated.action == 'summarize' and not validated.summary_fields:
+        problems.append(
+            ReplyInconsistency(
+                kind='summary_without_fields',
+                detail='summarize was chosen but summary_fields did not name any current field',
+            )
+        )
+    ending = validated.turn_ending
+    asks_for_documents = any(item.stance == 'asking' for item in validated.document_requests)
+    if ending == 'card' and not (
+        validated.service_identities or asks_for_documents or validated.northwind_questions
+    ):
+        problems.append(
+            ReplyInconsistency(
+                kind='ending_mismatch',
+                detail='turn_ending is card but no service, document request or question was made',
+            )
+        )
+    if ending == 'summary' and validated.action != 'summarize':
+        problems.append(
+            ReplyInconsistency(
+                kind='ending_mismatch', detail='turn_ending is summary but action is not summarize'
+            )
+        )
+    return problems
+
+
+def review_reply(validated: ValidatedTurn, judge: ReplyJudge | None = None) -> ConsistencyReview:
     """Compare the reply against the services and claims Runtime accepted."""
+
+    problems = _structural_problems(validated)
+    found = judge.problems(validated) if judge is not None else None
+    if found is not None:
+        problems.extend(ReplyInconsistency(kind=kind, detail=detail) for kind, detail in found)
+        return ConsistencyReview(tuple(problems))
+    problems.extend(_wording_problems(validated))
+    return ConsistencyReview(tuple(problems))
+
+
+def _wording_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
+    """English patterns used when no review model is available."""
 
     problems: list[ReplyInconsistency] = []
     lowered = validated.reply.casefold()
@@ -148,11 +204,14 @@ def review_reply(validated: ValidatedTurn) -> ConsistencyReview:
                     ReplyInconsistency(kind='claims_escalation_without_one', detail=match.group(0))
                 )
                 break
-    if validated.action == 'summarize' and not validated.summary_fields:
-        problems.append(
-            ReplyInconsistency(
-                kind='summary_without_fields',
-                detail='summarize was chosen but summary_fields did not name any current field',
-            )
-        )
-    return ConsistencyReview(tuple(problems))
+    if not validated.northwind_questions:
+        for sentence in sentences:
+            match = _PROMISED_ANSWER.search(sentence)
+            if match is not None and not sentence.rstrip().endswith('?'):
+                problems.append(
+                    ReplyInconsistency(
+                        kind='promises_answer_without_question', detail=match.group(0)
+                    )
+                )
+                break
+    return problems

@@ -108,6 +108,7 @@ from backend.services.model_request_planner import (
 )
 from backend.services.prompt_composer import load_response_schema
 from backend.services.reply_consistency import review_reply
+from backend.services.reply_judge import ReplyJudge
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -563,10 +564,24 @@ class GatewayAgent:
         gateway: ModelGateway,
         instruction_provider: Callable[[], str | None] | None = None,
         operations: ModelOperationsRecorder | None = None,
+        reply_judge: ReplyJudge | None = None,
+        turn_time_limit_seconds: float | None = None,
     ) -> None:
         self._gateway = gateway
         self._instruction_provider = instruction_provider
         self._operations = operations
+        self._reply_judge = reply_judge
+        self._turn_time_limit_seconds = turn_time_limit_seconds
+
+    def _require_turn_time(self, started_at: datetime) -> None:
+        """Stop before another model call once the whole turn is over its limit.
+
+        Each call has its own provider timeout; this caps the turn, so a slow
+        first answer is not followed by a second slow call the claimant waits on.
+        """
+        limit = self._turn_time_limit_seconds
+        if limit is not None and (datetime.now(UTC) - started_at).total_seconds() >= limit:
+            raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True)
 
     def _complete(self, request: ModelRequest, context: AgentTurnContext) -> ModelResponse:
         snapshot = context.runtime_configuration_snapshot
@@ -1406,6 +1421,7 @@ class GatewayAgent:
                 )
                 request_budgets.append(continuation_budget)
                 plan = plan.model_copy(update={'request_budget': continuation_budget})
+                self._require_turn_time(started_at)
                 response = self._observed_complete(
                     continuation,
                     context,
@@ -1450,7 +1466,11 @@ class GatewayAgent:
                     request_budgets=request_budgets,
                 )
                 validated_turn = result.validated_turn
-                review = review_reply(validated_turn) if validated_turn is not None else None
+                review = (
+                    review_reply(validated_turn, self._reply_judge)
+                    if validated_turn is not None
+                    else None
+                )
                 if review is not None and validated_turn is not None and not review.consistent:
                     # The words contradict the ledger. Hand the ruling back to
                     # the model once; Runtime never rewrites the reply itself.
@@ -1501,6 +1521,7 @@ class GatewayAgent:
                         prior_turn_tokens=plan.request_budget.raw_input_tokens,
                     )
                     request_budgets.append(recall_budget)
+                    self._require_turn_time(started_at)
                     response = self._observed_complete(
                         recall,
                         context,
@@ -1529,7 +1550,7 @@ class GatewayAgent:
                     )
                     if (
                         result.validated_turn is not None
-                        and not review_reply(result.validated_turn).consistent
+                        and not review_reply(result.validated_turn, self._reply_judge).consistent
                     ):
                         # Twice inconsistent: the saved message enters the
                         # existing persist-first recovery path unchanged.

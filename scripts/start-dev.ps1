@@ -153,6 +153,7 @@ function Split-CredentialEnvironments {
         'NORTHWIND_ENVIRONMENT', 'NORTHWIND_IDENTITY_MODE', 'NORTHWIND_CONTROL_PLANE_DB_PATH',
         'AGENT_RUNTIME_PROFILE', 'DATA_RUNTIME_PROFILE',
         'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
+        'REPLY_JUDGE_MODEL', 'TURN_TIME_LIMIT_SECONDS',
         'NORTHWIND_OBJECT_STORAGE_ADAPTER', 'NORTHWIND_OBJECT_STORAGE_ENDPOINT',
         'NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY',
         'NORTHWIND_OBJECT_STORAGE_REGION', 'NORTHWIND_OBJECT_STORAGE_BUCKET', 'NORTHWIND_KNOWLEDGE_BUCKET',
@@ -263,8 +264,13 @@ $backendEnv.MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
 # A turn makes up to two model calls (reply, and one rewrite if the reply
 # contradicts the record); a hung provider must not leave the claimant waiting
-# minutes. Typical calls take 3-6 seconds.
-$backendEnv.MODEL_TIMEOUT_SECONDS = '60'
+# minutes. Typical calls take 3-6 seconds. No further call starts once the turn
+# has run for TURN_TIME_LIMIT_SECONDS.
+$backendEnv.MODEL_TIMEOUT_SECONDS = '30'
+$backendEnv.TURN_TIME_LIMIT_SECONDS = '40'
+# A second, smaller model on the same OpenRouter connection reviews each reply
+# against what the turn actually did. Leave empty to use the built-in rules.
+$backendEnv.REPLY_JUDGE_MODEL = 'anthropic/claude-haiku-4.5'
 
 # 6. Start the backend. The log config prints the structured diagnostic fields the runtime
 #    attaches to model-turn events, which is what you want to see while testing a journey.

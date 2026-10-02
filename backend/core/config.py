@@ -168,6 +168,12 @@ class Settings:
     model_structured_output_method: str = 'json_schema'
     model_reasoning_mode: str = 'provider_default'
     model_runtime_bindings: tuple[ModelRuntimeBinding, ...] = ()
+    # The provider model that reviews each reply against its turn, on the same
+    # provider connection as the turn model (e.g. anthropic/claude-haiku-4.5).
+    # Empty: replies are reviewed by the built-in rules only.
+    reply_judge_model: str = ''
+    # Upper bound on one claimant turn across all its model calls; 0 = none.
+    turn_time_limit_seconds: float = 0.0
     object_storage_adapter: ObjectStorageAdapter = ObjectStorageAdapter.FIXTURE
 
     def __post_init__(self) -> None:
@@ -389,6 +395,8 @@ class Settings:
             ),
             model_api_key_env=credential_environment_variable,
             model_timeout_seconds=_float_setting('MODEL_TIMEOUT_SECONDS', 130.0),
+            reply_judge_model=os.getenv('REPLY_JUDGE_MODEL', '').strip(),
+            turn_time_limit_seconds=_float_setting('TURN_TIME_LIMIT_SECONDS', 0.0),
             model_supports_structured_output=(
                 selected_binding.structured_output
                 if selected_binding

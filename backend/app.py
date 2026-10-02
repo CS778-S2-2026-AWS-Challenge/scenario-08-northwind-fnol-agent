@@ -71,6 +71,7 @@ from backend.domain.configuration import (
     IntegrationSourceValue,
 )
 from backend.domain.model_gateway import (
+    CLAIMANT_AGENT_PRIVACY_CLASS,
     STAFF_AGENT_PRIVACY_CLASS,
     STAFF_AGENT_PURPOSE,
     ModelEvidenceContentResolver,
@@ -132,6 +133,11 @@ from backend.services.protected_values import (
     protected_value_adapter_for,
 )
 from backend.services.realtime import RealtimeDispatcher
+from backend.services.reply_judge import (
+    REPLY_REVIEW_PROMPT_VERSION,
+    REPLY_REVIEW_PURPOSE,
+    ReplyJudge,
+)
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -403,9 +409,46 @@ def create_app(
             value = record.values.get('system_prompt', record.values.get('instructions'))
             return value if isinstance(value, str) and value.strip() else None
 
+        def reply_judge_gateway() -> ModelGateway:
+            # The review model shares the turn model's provider connection; only
+            # the model identifier, purpose and a short timeout differ.
+            try:
+                configuration = model_configuration(
+                    SimpleNamespace(app=app), resolved_settings.model_profile_id
+                )
+            except (RuntimeConfigurationResolutionError, ValueError):
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
+            if configuration is None:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            return build_scoped_model_gateway(
+                resolved_settings,
+                purpose=REPLY_REVIEW_PURPOSE,
+                privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
+                prompt_version=REPLY_REVIEW_PROMPT_VERSION,
+                profile_suffix='reply-review',
+                registry=model_gateway_registry,
+                runtime_configuration=configuration.model_copy(
+                    update={
+                        'model_identifier': resolved_settings.reply_judge_model,
+                        'timeout_seconds': min(configuration.timeout_seconds, 20.0),
+                        'image_input': False,
+                        'document_input': False,
+                    }
+                ),
+            )
+
+        reply_judge = (
+            ReplyJudge(reply_judge_gateway) if resolved_settings.reply_judge_model else None
+        )
         base_agent_turn_provider: AgentTurnProvider = FeatureControlledAgent(
             KnowledgeGroundedAgent(
-                GatewayAgent(model_gateway, published_instruction, model_operations),
+                GatewayAgent(
+                    model_gateway,
+                    published_instruction,
+                    model_operations,
+                    reply_judge,
+                    resolved_settings.turn_time_limit_seconds or None,
+                ),
                 bundle.knowledge_retrieval,
                 app.state.knowledge_admin_repository,
                 app.state.runtime_configuration_resolver,
