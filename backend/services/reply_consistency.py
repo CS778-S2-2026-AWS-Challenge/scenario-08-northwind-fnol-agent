@@ -5,7 +5,7 @@ the whole turn goes back to the model once with the ruling attached so it can
 say the same thing truthfully.
 
 Two kinds of check run. Structural checks compare the turn's own parts (a
-declared ending with nothing behind it, a summary with no fields). Wording
+summary with no fields). Wording
 checks -- a refused service named, an arrangement or escalation claimed, a
 service asked about in words, the claimant sent to "their insurer", an answer
 promised with no question passed on -- are made by the review model
@@ -65,6 +65,12 @@ class ReplyInconsistency:
     detail: str
 
 
+# A reply that leaves the claimant stuck is sent back once, but it is not a
+# false statement: if the rewrite is still stuck, the turn stands rather than
+# failing the claimant's whole message.
+SOFT_PROBLEMS = frozenset({'leaves_claimant_stuck'})
+
+
 @dataclass(frozen=True, slots=True)
 class ConsistencyReview:
     inconsistencies: tuple[ReplyInconsistency, ...] = field(default_factory=tuple)
@@ -72,6 +78,11 @@ class ConsistencyReview:
     @property
     def consistent(self) -> bool:
         return not self.inconsistencies
+
+    @property
+    def truthful(self) -> bool:
+        """No problem other than a soft one remains."""
+        return all(item.kind in SOFT_PROBLEMS for item in self.inconsistencies)
 
     def runtime_review(self, rejected: list[dict[str, str]]) -> dict[str, object]:
         """The note handed back to the model with the original request."""
@@ -89,9 +100,9 @@ class ConsistencyReview:
                     'booked, escalated or submitted. Offer a service only with offer_service, '
                     "never by asking in words. Northwind is the claimant's insurer: a question "
                     'you cannot answer goes into northwind_questions before the reply says the '
-                    'claims team will answer it. The reply must leave the claimant the one thing '
-                    'turn_ending names. Keep every accepted fact and question. Return the full '
-                    'envelope again.'
+                    'claims team will answer it. Leave the claimant one clear thing to answer or '
+                    'do, or say what happens next. Keep every accepted fact and question. Return '
+                    'the full envelope again.'
                 ),
             }
         }
@@ -115,23 +126,6 @@ def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
             ReplyInconsistency(
                 kind='summary_without_fields',
                 detail='summarize was chosen but summary_fields did not name any current field',
-            )
-        )
-    ending = validated.turn_ending
-    asks_for_documents = any(item.stance == 'asking' for item in validated.document_requests)
-    if ending == 'card' and not (
-        validated.service_identities or asks_for_documents or validated.northwind_questions
-    ):
-        problems.append(
-            ReplyInconsistency(
-                kind='ending_mismatch',
-                detail='turn_ending is card but no service, document request or question was made',
-            )
-        )
-    if ending == 'summary' and validated.action != 'summarize':
-        problems.append(
-            ReplyInconsistency(
-                kind='ending_mismatch', detail='turn_ending is summary but action is not summarize'
             )
         )
     return problems

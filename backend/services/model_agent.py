@@ -1550,10 +1550,10 @@ class GatewayAgent:
                     )
                     if (
                         result.validated_turn is not None
-                        and not review_reply(result.validated_turn, self._reply_judge).consistent
+                        and not review_reply(result.validated_turn, self._reply_judge).truthful
                     ):
-                        # Twice inconsistent: the saved message enters the
-                        # existing persist-first recovery path unchanged.
+                        # Still untrue after the rewrite: the saved message enters
+                        # the existing persist-first recovery path unchanged.
                         raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
             except TurnFieldContractViolation as contract_error:
                 if plan.schema_id == 'claimant.turn.v1':

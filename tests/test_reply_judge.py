@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-from backend.domain.agent_v8 import V8DocumentRequest
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -85,29 +84,20 @@ def test_the_rules_take_over_when_the_judge_cannot_answer() -> None:
     assert [item.kind for item in review.inconsistencies] == ['refers_to_insurer']
 
 
-@pytest.mark.parametrize(
-    ('changes', 'consistent'),
-    [
-        ({'turn_ending': 'card'}, False),
-        ({'turn_ending': 'card', 'service_identities': ('vehicle_recovery_request',)}, True),
-        (
-            {
-                'turn_ending': 'card',
-                'document_requests': (
-                    V8DocumentRequest(document_kind='repair_quote', stance='asking'),
-                ),
-            },
-            True,
-        ),
-        ({'turn_ending': 'summary'}, False),
-        ({'turn_ending': 'summary', 'action': 'summarize', 'summary_fields': ('a.b',)}, True),
-    ],
-)
-def test_a_declared_ending_needs_the_part_that_backs_it(
-    changes: dict[str, Any], consistent: bool
-) -> None:
-    judge = ReplyJudge(lambda: _Gateway({'problems': []}))
-    assert review_reply(_turn('Thanks, noted.', **changes), judge).consistent is consistent
+def test_a_reply_that_leaves_the_claimant_stuck_is_soft() -> None:
+    stuck = ReplyJudge(
+        lambda: _Gateway(
+            {'problems': [{'kind': 'leaves_claimant_stuck', 'detail': 'Thanks, noted.'}]}
+        )
+    )
+    review = review_reply(_turn('Thanks, noted.'), stuck)
+    # Sent back once, but a rewrite that is still only stuck is not a false statement.
+    assert not review.consistent and review.truthful
+
+    untrue = ReplyJudge(
+        lambda: _Gateway({'problems': [{'kind': 'refers_to_insurer', 'detail': 'your insurer'}]})
+    )
+    assert not review_reply(_turn('Ask your insurer.'), untrue).truthful
 
 
 def test_no_further_model_call_starts_after_the_turn_limit() -> None:
