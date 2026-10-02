@@ -474,13 +474,13 @@ describe('WorkbenchPage queue routing', () => {
 
     expect(await screen.findByRole('heading', { name: 'Active claims' })).toBeVisible()
     expect(screen.getByText('Claims needing continued attention')).toBeVisible()
-    expect(api.claims).toHaveBeenCalledWith(
+    await waitFor(() => expect(api.claims).toHaveBeenCalledWith(
       'staff-token',
       expect.objectContaining({
         view: 'active_claims',
         active_status: 'urgent',
       }),
-    )
+    ))
 
     await user.click(await screen.findByText('NW-900'))
 
