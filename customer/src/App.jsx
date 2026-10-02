@@ -91,6 +91,7 @@ import { profilePathForSection, profileSectionFromPath } from './profileRoutes.j
 import { historyClaimIdFromPath, pageForPath, routeForPage as routeForAppPage } from './appRoutes.js'
 import { claimHeading, claimStartedLabel } from './claimHeading.js'
 import { claimantModelChoices } from './modelProducts.js'
+import { continueClaimCard } from './continueClaim.js'
 import { captureComposerRect, playComposerHandoff } from './composerHandoff.js'
 import ClaimEntryPage from './components/ClaimEntryPage.jsx'
 import ClaimantAvatar from './components/ClaimantAvatar.jsx'
@@ -109,6 +110,8 @@ import { ConversationEvent } from './components/ConversationContext.jsx'
 // decides whether it goes on the waiting list or straight to a person.
 const HELP_MESSAGE = "I'd like to talk to someone at Northwind."
 
+// From this width the case panel docks beside the conversation instead of floating.
+const DOCKED_PANEL_QUERY = '(min-width: 1440px)'
 const PANEL_SECTIONS_KEY = 'northwind.casePanelSections'
 const DEFAULT_PANEL_SECTIONS = { openItems: true, facts: true, files: true }
 
@@ -875,6 +878,27 @@ function App() {
     setDetailsOpen(true)
     setPinned({ kind: 'submit' })
   }, [visibleConversationActionKind, conversationAction?.identity])
+
+  useEffect(() => {
+    // Below the docked width the panel floats: Esc or a click outside closes it.
+    if (!detailsOpen) return undefined
+    const floating = () => !globalThis.matchMedia?.(DOCKED_PANEL_QUERY).matches
+    function closeOnEscape(event) {
+      if (event.key === 'Escape' && floating()) setDetailsOpen(false)
+    }
+    function closeOnOutsideClick(event) {
+      if (!floating()) return
+      const target = event.target
+      if (target.closest?.('.intake-details-panel, .case-status, .turn-chips, .open-items-bar, dialog')) return
+      setDetailsOpen(false)
+    }
+    globalThis.document?.addEventListener('keydown', closeOnEscape)
+    globalThis.document?.addEventListener('mousedown', closeOnOutsideClick)
+    return () => {
+      globalThis.document?.removeEventListener('keydown', closeOnEscape)
+      globalThis.document?.removeEventListener('mousedown', closeOnOutsideClick)
+    }
+  }, [detailsOpen])
 
   useEffect(() => {
     // Once the claim is lodged, the submitted page replaces the pinned flow.
@@ -3960,6 +3984,8 @@ function App() {
               <p className="message-failure-detail">{failedMessage.message}</p>
             </article>
           )}
+          continueCard={continueClaimCard(homepageConversationReports)}
+          onContinue={resumeHomepageConversation}
           onOpenHowItWorks={() => setPage('how-it-works')}
         />
       ) : (

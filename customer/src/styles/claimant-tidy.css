@@ -345,3 +345,24 @@
 /* Message times sit centred over the conversation. */
 .workspace-shell .message-list .message-timestamp { display: block; width: 100%; margin-inline: auto; text-align: center; }
 .case-panel-section .next-steps-panel { margin-top: var(--space-4); }
+
+/* A returning claimant sees the claim to continue under the landing composer. */
+.entry-continue-card {
+  display: grid;
+  width: 100%;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-component);
+  border-left: var(--space-1) solid var(--claimant-open-items-accent);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: var(--font-size-caption);
+  text-align: left;
+  cursor: pointer;
+}
+.entry-continue-card:hover, .entry-continue-card:focus-visible { border-color: var(--color-accent); }
+.entry-continue-card strong { color: var(--color-text-primary); font-size: var(--font-size-body); }
+.entry-continue-kicker { color: var(--color-accent-strong); font-size: var(--font-size-micro); font-weight: var(--font-weight-semibold); letter-spacing: var(--claimant-kicker-tracking); text-transform: uppercase; }

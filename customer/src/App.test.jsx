@@ -1560,6 +1560,22 @@ describe('claimant intake projection', () => {
       .not.toBeInTheDocument()
   })
 
+  it('closes the floating case panel with Esc or a click outside it', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    render(<App />)
+    await startActiveClaim(user)
+
+    const panel = await openCasePanel(user)
+    expect(panel).toHaveClass('is-open')
+    await user.keyboard('{Escape}')
+    expect(panel).toHaveClass('is-collapsed')
+
+    await openCasePanel(user)
+    await user.click(screen.getByText(agentMessage.content.text))
+    expect(panel).toHaveClass('is-collapsed')
+  })
+
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage
