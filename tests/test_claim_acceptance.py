@@ -3,7 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from threading import Barrier
+from threading import Barrier, RLock
 from typing import Any
 
 import mongomock
@@ -80,8 +80,15 @@ def acceptance_repository(request: pytest.FixtureRequest) -> PersistenceReposito
     if request.param == 'fixture':
         return FixtureRepository()
     repository = MongoDBRepository(mongomock.MongoClient(), 'claim_acceptance_parity')
-    # Adapter parity only: mongomock cannot establish real Mongo transaction evidence.
-    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    transaction_lock = RLock()
+
+    def run_mock_transaction(operation: Any) -> Any:
+        with transaction_lock:
+            return operation(None)
+
+    # Adapter parity only: the lock preserves atomic visibility between racing
+    # mock operations, but mongomock cannot establish real Mongo transaction evidence.
+    repository._atomic = run_mock_transaction  # type: ignore[method-assign]
     return repository
 
 
