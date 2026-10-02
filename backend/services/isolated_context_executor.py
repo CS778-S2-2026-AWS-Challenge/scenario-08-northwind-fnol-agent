@@ -1,7 +1,8 @@
 """Least-privilege execution for large, read-only Agent context tasks."""
 
 import json
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -35,6 +36,28 @@ from backend.services.context_budget import build_request_budget
 from backend.services.context_resolver import resolver_for_turn
 
 _SUMMARY_ADAPTER = TypeAdapter(V7SourcedSummaryProposal)
+
+
+def _validation_path(errors: Iterable[object]) -> str | None:
+    """Return only a bounded structural path, never provider validation text."""
+
+    first = next(iter(errors), None)
+    if not isinstance(first, dict):
+        return None
+    location = first.get('loc')
+    if not isinstance(location, tuple | list):
+        return None
+    parts: list[str] = []
+    for item in location:
+        if isinstance(item, int):
+            parts.append(f'[{item}]')
+        elif isinstance(item, str) and re.fullmatch(r'[A-Za-z0-9_-]+', item):
+            parts.append(item)
+        else:
+            return None
+    return '.'.join(parts) or None
+
+
 _ISOLATED_INSTRUCTION = (
     'Perform only the bounded read-only review in the supplied task. Return a sourced summary. '
     'Do not propose or perform Claim mutation, consent action, or an external side effect. '
@@ -165,11 +188,19 @@ def execute_isolated_context_plan(
         raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
     try:
         parsed = _SUMMARY_ADAPTER.validate_python(response.structured_output)
-    except ValidationError:
-        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+    except ValidationError as error:
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+            diagnostic_code='output_schema_validation',
+            diagnostic_path=_validation_path(error.errors()),
+        ) from None
     allowed_refs = {item.ref for item in task.input_refs}
     if not set(parsed.source_refs).issubset(allowed_refs):
-        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+            diagnostic_code='source_reference_scope',
+            diagnostic_path='source_refs',
+        )
     result = IsolatedContextResult(
         task_id=task.task_id,
         summary=parsed.summary,

@@ -10729,6 +10729,7 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         *,
         agent_message: MessageRecord | None = None,
+        runtime_trace: RuntimeTraceRecord | None = None,
     ) -> None:
         def write(mongo_session: Any) -> None:
             self._ensure_claim_access_open(
@@ -10786,6 +10787,30 @@ class MongoDBRepository:
                     'message',
                     agent_message.message_id,
                     agent_message,
+                    customer_id=idempotency.actor_id,
+                    claim_id=message.claim_id,
+                    session=mongo_session,
+                )
+            if runtime_trace is not None:
+                if (
+                    runtime_trace.claim_id != message.claim_id
+                    or runtime_trace.session_id != message.session_id
+                    or runtime_trace.trigger_message_id != message.message_id
+                    or runtime_trace.status == 'succeeded'
+                    or self._get(
+                        'runtime_trace',
+                        runtime_trace.trace_id,
+                        RuntimeTraceRecord,
+                        customer_id=idempotency.actor_id,
+                        session=mongo_session,
+                    )
+                    is not None
+                ):
+                    raise IdempotencyConflict(runtime_trace.trace_id)
+                self._put(
+                    'runtime_trace',
+                    runtime_trace.trace_id,
+                    runtime_trace,
                     customer_id=idempotency.actor_id,
                     claim_id=message.claim_id,
                     session=mongo_session,

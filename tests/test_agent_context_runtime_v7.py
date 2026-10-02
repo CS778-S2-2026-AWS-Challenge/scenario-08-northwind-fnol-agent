@@ -1783,6 +1783,8 @@ def test_v7_isolated_review_rejects_an_unscoped_source_reference() -> None:
             _context('Compare these damage photos.', evidence=evidence)
         )
     assert error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert error.value.diagnostic_code == 'source_reference_scope'
+    assert error.value.diagnostic_path == 'source_refs'
 
 
 @pytest.mark.parametrize(
@@ -1829,6 +1831,8 @@ def test_v7_isolated_review_rejects_tools_incomplete_and_unsourced_results(
         )
 
     assert error.value.code is expected_code
+    if expected_code is ModelGatewayErrorCode.MALFORMED_RESPONSE:
+        assert error.value.diagnostic_code == 'output_schema_validation'
 
 
 def test_v7_authority_budget_overflow_returns_model_free_safe_clarification() -> None:

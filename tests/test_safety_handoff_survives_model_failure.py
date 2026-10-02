@@ -236,6 +236,14 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
         failed = client.post(url, headers=failed_headers, json=payload)
         assert failed.status_code == 200, failed.text
         assert failed.json()['agent_message']['recovery'] is not None
+        failed_trace = repository.find_runtime_trace_for_trigger(
+            claim_id,
+            failed.json()['claimant_message']['message_id'],
+            'cus_demo',
+        )
+        assert failed_trace is not None
+        assert failed_trace.status == 'failed'
+        assert failed_trace.failure_diagnostic is not None
         gateway.fail = False
         retry_headers = {
             **owner,
