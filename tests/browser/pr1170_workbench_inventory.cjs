@@ -172,7 +172,8 @@ async function main() {
   })
 
   try {
-    currentStep = 'sign-in/presence heartbeat'\n    console.log('[1/10] Sign in and verify presence renewal')
+    currentStep = 'sign-in/presence heartbeat'
+    console.log('[1/10] Sign in and verify presence renewal')
     await page.goto(`${WORKBENCH}/workbench/login`, { waitUntil: 'domcontentloaded' })
     await page.getByLabel('Work email').waitFor({ state: 'visible', timeout: 30000 })
     await captureSurface(page, 'sign-in')
@@ -209,7 +210,8 @@ async function main() {
     }
     if (await stopAfter(1)) return
 
-    currentStep = 'demo seed'\n    console.log('[2/10] Seed the bounded Workbench scenarios')
+    currentStep = 'demo seed'
+    console.log('[2/10] Seed the bounded Workbench scenarios')
     const seeded = await api(page, '/api/v1/workbench/demo/seed-scenarios', { method: 'POST' })
     assert(seeded.status === 200, `Demo seed failed with ${seeded.status}: ${JSON.stringify(seeded.payload)}`)
     assert(seeded.payload?.claim_ids?.includes(AT02), 'AT-02 is missing from the seed response.')
@@ -217,7 +219,8 @@ async function main() {
     result.checks.demo_seed_loaded = true
     if (await stopAfter(2)) return
 
-    currentStep = 'desktop shell/queue'\n    console.log('[3/10] Enumerate the desktop shell and queue')
+    currentStep = 'desktop shell/queue'
+    console.log('[3/10] Enumerate the desktop shell and queue')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
     await page.getByLabel('Search claims').waitFor({ state: 'visible', timeout: 30000 })
     const queueControls = await captureSurface(page, 'desktop-claim-queue')
@@ -244,7 +247,8 @@ async function main() {
     await captureSurface(page, 'conversations-page')
     if (await stopAfter(3)) return
 
-    currentStep = 'AT-02 Claim surfaces'\n    console.log('[4/10] Enumerate representative Claim surfaces on AT-02')
+    currentStep = 'AT-02 Claim surfaces'
+    console.log('[4/10] Enumerate representative Claim surfaces on AT-02')
     const claimSections = [
       ['summary', 'claim-overview'],
       ['fields', 'claim-information'],
@@ -264,7 +268,8 @@ async function main() {
     await screenshot(page, '02-at02-conversation')
     if (await stopAfter(4)) return
 
-    currentStep = 'AT-02 own/foreign realtime revisions'\n    console.log('[5/10] Verify own versus foreign realtime revision notices in two Workbench pages')
+    currentStep = 'AT-02 own/foreign realtime revisions'
+    console.log('[5/10] Verify own versus foreign realtime revision notices in two Workbench pages')
     await page.goto(`${WORKBENCH}/workbench/claims/${AT02}/summary`, { waitUntil: 'domcontentloaded' })
     const reviewAcceptance = page.getByRole('button', { name: 'Review acceptance', exact: true })
     await reviewAcceptance.waitFor({ state: 'visible', timeout: 30000 })
@@ -308,7 +313,8 @@ async function main() {
     await otherPage.close()
     if (await stopAfter(5)) return
 
-    currentStep = 'AT-10 presence/Take Claim/decision'\n    console.log('[6/10] Exercise presence failure, Take Claim, and Claim decision on AT-10')
+    currentStep = 'AT-10 presence/Take Claim/decision'
+    console.log('[6/10] Exercise presence failure, Take Claim, and Claim decision on AT-10')
     await page.goto(`${WORKBENCH}/workbench/claims/${AT10}/summary`, { waitUntil: 'domcontentloaded' })
     const reviewOwnership = page.getByRole('button', { name: 'Review ownership', exact: true })
     await reviewOwnership.waitFor({ state: 'visible', timeout: 30000 })
@@ -365,7 +371,8 @@ async function main() {
     await screenshot(page, '03-at10-approved')
     if (await stopAfter(6)) return
 
-    currentStep = 'Staff Agent fail-closed'\n    console.log('[7/10] Verify Staff Agent fail-closed behavior')
+    currentStep = 'Staff Agent fail-closed'
+    console.log('[7/10] Verify Staff Agent fail-closed behavior')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
     const openAgent = page.getByRole('button', { name: 'Staff Agent', exact: true }).first()
     await openAgent.waitFor({ state: 'visible', timeout: 30000 })
@@ -387,7 +394,8 @@ async function main() {
     await page.getByRole('button', { name: 'Close Staff Agent', exact: true }).click()
     if (await stopAfter(7)) return
 
-    currentStep = 'staff-scoped tab persistence'\n    console.log('[8/10] Verify staff-scoped Claim-tab persistence')
+    currentStep = 'staff-scoped tab persistence'
+    console.log('[8/10] Verify staff-scoped Claim-tab persistence')
     const tabKeys = await page.evaluate(() => (
       Object.keys(localStorage).filter((key) => key.startsWith('northwind.workbench.tabs.v1'))
     ))
@@ -396,7 +404,8 @@ async function main() {
     result.checks.staff_scoped_tab_storage = tabKeys
     if (await stopAfter(8)) return
 
-    currentStep = 'settings/phone layout'\n    console.log('[9/10] Enumerate settings and phone-width behavior')
+    currentStep = 'settings/phone layout'
+    console.log('[9/10] Enumerate settings and phone-width behavior')
     for (const section of ['profile', 'security', 'notifications', 'appearance', 'help']) {
       await page.goto(`${WORKBENCH}/workbench/settings/${section}`, { waitUntil: 'domcontentloaded' })
       await page.getByRole('heading').first().waitFor({ state: 'visible', timeout: 30000 })
@@ -422,7 +431,8 @@ async function main() {
     await screenshot(page, '05-phone-agent')
     if (await stopAfter(9)) return
 
-    currentStep = 'complete'\n    console.log('[10/10] Exact-head Workbench inventory evidence passed')
+    currentStep = 'complete'
+    console.log('[10/10] Exact-head Workbench inventory evidence passed')
     result.status = 'PASS'
     fs.writeFileSync(
       path.join(ARTIFACT_DIR, 'pr1170-workbench-inventory-PASS.json'),
