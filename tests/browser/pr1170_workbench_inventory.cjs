@@ -12,6 +12,7 @@ const AT02 = 'clm_fixture_at02'
 const AT10 = 'clm_fixture_at10'
 
 const DIAGNOSTIC_STATUS_CONTEXT = 'ci/pr1170-browser-detail'
+const STOP_AFTER = Number.parseInt(process.env.WORKBENCH_INVENTORY_STOP_AFTER || '10', 10)
 let currentStep = 'startup'
 
 async function reportGitHubStatus(state, description) {
@@ -138,6 +139,19 @@ async function waitForNodeCondition(check, message, timeoutMs = 15000) {
   throw new Error(message)
 }
 
+async function stopAfter(stage) {
+  if (STOP_AFTER !== stage) return false
+  result.status = 'PASS_PARTIAL'
+  result.stopped_after = stage
+  fs.writeFileSync(
+    path.join(ARTIFACT_DIR, `pr1170-workbench-inventory-stage-${stage}-PASS.json`),
+    JSON.stringify(result, null, 2),
+    'utf8',
+  )
+  console.log(`PR1170_WORKBENCH_INVENTORY_STAGE_${stage}_OK`)
+  return true
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true })
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
@@ -176,6 +190,7 @@ async function main() {
       30000,
     )
     result.checks.presence_heartbeat_after_login = true
+    if (await stopAfter(1)) return
 
     currentStep = 'demo seed'\n    console.log('[2/10] Seed the bounded Workbench scenarios')
     const seeded = await api(page, '/api/v1/workbench/demo/seed-scenarios', { method: 'POST' })
@@ -183,6 +198,7 @@ async function main() {
     assert(seeded.payload?.claim_ids?.includes(AT02), 'AT-02 is missing from the seed response.')
     assert(seeded.payload?.claim_ids?.includes(AT10), 'AT-10 is missing from the seed response.')
     result.checks.demo_seed_loaded = true
+    if (await stopAfter(2)) return
 
     currentStep = 'desktop shell/queue'\n    console.log('[3/10] Enumerate the desktop shell and queue')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
@@ -209,6 +225,7 @@ async function main() {
     await page.locator('.workbench-stage').waitFor({ state: 'visible', timeout: 30000 })
     await page.waitForTimeout(200)
     await captureSurface(page, 'conversations-page')
+    if (await stopAfter(3)) return
 
     currentStep = 'AT-02 Claim surfaces'\n    console.log('[4/10] Enumerate representative Claim surfaces on AT-02')
     const claimSections = [
@@ -228,6 +245,7 @@ async function main() {
       await captureSurface(page, name)
     }
     await screenshot(page, '02-at02-conversation')
+    if (await stopAfter(4)) return
 
     currentStep = 'AT-02 own/foreign realtime revisions'\n    console.log('[5/10] Verify own versus foreign realtime revision notices in two Workbench pages')
     await page.goto(`${WORKBENCH}/workbench/claims/${AT02}/summary`, { waitUntil: 'domcontentloaded' })
@@ -271,6 +289,7 @@ async function main() {
     result.checks.own_mutation_notice_suppressed = true
     result.checks.foreign_mutation_notice_visible = true
     await otherPage.close()
+    if (await stopAfter(5)) return
 
     currentStep = 'AT-10 presence/Take Claim/decision'\n    console.log('[6/10] Exercise presence failure, Take Claim, and Claim decision on AT-10')
     await page.goto(`${WORKBENCH}/workbench/claims/${AT10}/summary`, { waitUntil: 'domcontentloaded' })
@@ -327,6 +346,7 @@ async function main() {
     result.mutations.claim_decision = 'approved and authoritative success rendered'
     await captureSurface(page, 'at10-after-decision')
     await screenshot(page, '03-at10-approved')
+    if (await stopAfter(6)) return
 
     currentStep = 'Staff Agent fail-closed'\n    console.log('[7/10] Verify Staff Agent fail-closed behavior')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
@@ -348,6 +368,7 @@ async function main() {
     await captureSurface(page, 'staff-agent-desktop')
     await screenshot(page, '04-staff-agent-unavailable')
     await page.getByRole('button', { name: 'Close Staff Agent', exact: true }).click()
+    if (await stopAfter(7)) return
 
     currentStep = 'staff-scoped tab persistence'\n    console.log('[8/10] Verify staff-scoped Claim-tab persistence')
     const tabKeys = await page.evaluate(() => (
@@ -356,6 +377,7 @@ async function main() {
     assert(!tabKeys.includes('northwind.workbench.tabs.v1'), 'Legacy unscoped Workbench tab key still exists.')
     assert(tabKeys.some((key) => key.startsWith('northwind.workbench.tabs.v1:')), `No staff-scoped tab key found: ${JSON.stringify(tabKeys)}`)
     result.checks.staff_scoped_tab_storage = tabKeys
+    if (await stopAfter(8)) return
 
     currentStep = 'settings/phone layout'\n    console.log('[9/10] Enumerate settings and phone-width behavior')
     for (const section of ['profile', 'security', 'notifications', 'appearance', 'help']) {
@@ -381,6 +403,7 @@ async function main() {
     result.checks.phone_staff_agent_panel = true
     await captureSurface(page, 'phone-workbench-agent')
     await screenshot(page, '05-phone-agent')
+    if (await stopAfter(9)) return
 
     currentStep = 'complete'\n    console.log('[10/10] Exact-head Workbench inventory evidence passed')
     result.status = 'PASS'
