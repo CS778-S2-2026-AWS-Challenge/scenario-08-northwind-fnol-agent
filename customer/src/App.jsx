@@ -37,6 +37,7 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
+import { developerModeEnabled } from './runtimeConfig.js'
 import {
   AgentMessageRow,
   ClaimantMessageAttachments,
@@ -47,18 +48,22 @@ import {
 import RecordedFactsCard from './components/RecordedFactsCard.jsx'
 import { fieldLabel, fieldSourceLabel, fieldStatusLabel, fieldValueText } from './claimFieldPresentation.js'
 import { evidenceFileStatusLabel, messageText } from './messagePresentation.js'
-import { factCardsByAgentMessage, notedProgress } from './recordedFacts.js'
+import {
+  factCardsByAgentMessage,
+  fileReadings,
+  notedProgress,
+  progressLabel,
+  turnRecord,
+} from './recordedFacts.js'
+import { receiptsByMessage } from './openItems.js'
+import { OpenItemsBar, OpenItemsSection, TurnReceipts } from './components/OpenItems.jsx'
 import { modelAttachmentCompatibility } from './attachmentModelCompatibility.js'
 import ExternalServiceAction from './components/ExternalServiceAction.jsx'
 import ExternalServicesPage from './components/ExternalServicesPage.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
-import ClaimReviewPanel, {
-  ClaimNextStepsPanel,
-  ClaimSummaryProgress,
-} from './components/ClaimReviewPanel.jsx'
-import { claimReviewRequirements } from './claimReviewProjection.js'
+import ClaimReviewPanel, { ClaimNextStepsPanel } from './components/ClaimReviewPanel.jsx'
 import AgreementConfirmationPanel from './components/AgreementConfirmationPanel.jsx'
 import PayoutContactPanel from './components/PayoutContactPanel.jsx'
 import {
@@ -79,6 +84,7 @@ import './styles/profile-records.css'
 import './styles/profile-assets.css'
 import './styles/profile-responsive.css'
 import './styles/claim-history.css'
+import './styles/case-panel.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
 import { historyClaimIdFromPath, pageForPath, routeForPage as routeForAppPage } from './appRoutes.js'
 import { claimHeading, claimStartedLabel } from './claimHeading.js'
@@ -339,8 +345,11 @@ function App() {
   const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => (
     historyClaimIdFromPath(globalThis.location?.pathname)
   ))
-  const [detailsOpen, setDetailsOpen] = useState(true)
-  const [detailsTab, setDetailsTab] = useState('summary')
+  // The case panel opens on demand; it opens by itself only for the summary check.
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [panelFocus, setPanelFocus] = useState(null)
+  const [queuedText, setQueuedText] = useState('')
+  const [sendQueuedText, setSendQueuedText] = useState(false)
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
   const [workspaceActive, setWorkspaceActive] = useState(initialDraftWorkspaceActive)
@@ -419,7 +428,8 @@ function App() {
   const attachmentsRef = useRef(attachments)
   const cancelledAttachmentIds = useRef(new Set())
   const dismissedComposerEvidenceIds = useRef(new Set())
-  const detailsTabRefs = useRef({})
+  const composerFormRef = useRef(null)
+  const autoOpenedReview = useRef(null)
   const conversationPanelRef = useRef(null)
   const messageListRef = useRef(null)
   const externalCapabilitiesDialogRef = useRef(null)
@@ -647,6 +657,16 @@ function App() {
     selectedModelId: selectedModel,
     defaultModelId: runtimeCapabilities.default_model_profile_id,
   }), [runtimeCapabilities, selectedModel])
+  // Which service handles this conversation, named as the claimant chose it and
+  // as the provider runs it (for example "Northwind Assist (openai/gpt-4o)").
+  const processedBy = useMemo(() => {
+    const product = claimantModels.find((model) => model?.id === selectedModel)
+    if (!product) return null
+    const runtime = runtimeCapabilities.models.find((model) => model.id === selectedModel)
+    return runtime?.label && runtime.label !== product.label
+      ? `${product.label} (${runtime.label})`
+      : product.label
+  }, [claimantModels, runtimeCapabilities, selectedModel])
 
   function routeForPage(nextPage) {
     return routeForAppPage(nextPage, {
@@ -804,6 +824,56 @@ function App() {
   )
     ? null
     : conversationActionKind
+  const openItems = useMemo(() => claim?.open_items || [], [claim?.open_items])
+  const receipts = useMemo(() => receiptsByMessage(openItems), [openItems])
+  const readings = useMemo(() => fileReadings(messages), [messages])
+  const missingNowLabels = (dynamicForm?.requirements?.missing_required_now || []).map(fieldLabel)
+
+  useEffect(() => {
+    // The summary check is the one moment the panel opens by itself, once per check.
+    const identity = conversationActionKind === 'review-details' ? conversationAction?.identity : null
+    if (!identity || autoOpenedReview.current === identity) return
+    autoOpenedReview.current = identity
+    setDetailsOpen(true)
+    setPanelFocus('facts')
+  }, [conversationActionKind, conversationAction?.identity])
+
+  useEffect(() => {
+    if (!panelFocus || !detailsOpen) return
+    globalThis.requestAnimationFrame?.(() => {
+      globalThis.document?.getElementById(`case-panel-${panelFocus}`)?.scrollIntoView?.({ block: 'start' })
+    })
+  }, [panelFocus, detailsOpen])
+
+  useEffect(() => {
+    // Text typed while a reply was on its way is sent once the turn is over.
+    if (isBusy || !queuedText) return
+    setDraft((current) => (current.trim() ? `${queuedText}\n${current}` : queuedText))
+    setQueuedText('')
+    setSendQueuedText(true)
+  }, [isBusy, queuedText])
+
+  useEffect(() => {
+    if (!sendQueuedText) return
+    setSendQueuedText(false)
+    composerFormRef.current?.requestSubmit()
+  }, [sendQueuedText, draft])
+
+  function queueDraft() {
+    const text = draft.trim()
+    if (!text) return
+    setQueuedText((current) => (current ? `${current}\n${text}` : text))
+    setDraft('')
+  }
+
+  function uploadForOpenItem(item, file) {
+    handleFileSelected(file, null, item.subject, item.item_id)
+  }
+
+  function openCasePanel(section = null) {
+    setDetailsOpen(true)
+    setPanelFocus(section)
+  }
   const accountCustomerId = account?.customer_id || null
   const accountRevision = account?.revision || null
 
@@ -884,7 +954,7 @@ function App() {
         const trigger = externalCapabilitiesTriggerRef.current
         const focusTarget = trigger && !trigger.closest('[hidden]')
           ? trigger
-          : detailsTabRefs.current.documents
+          : null
         focusTarget?.focus()
       })
     }
@@ -1497,7 +1567,7 @@ function App() {
       dismissedComposerEvidenceIds.current.clear()
       setEvidenceItems([])
       setEvidenceLoadStatus('loading')
-      setDetailsTab('summary')
+      setPanelFocus('facts')
     }
     let active = true
     getClaimEvidence(claim.claim_id)
@@ -2278,7 +2348,7 @@ function App() {
     })
     setSelectedHistoryClaimId(null)
     setDetailsOpen(true)
-    setDetailsTab('summary')
+    setPanelFocus('facts')
     setWorkspaceView('chat')
     setMobileView('chat')
     setDraftWorkspaceActive(stayInWorkspace)
@@ -3172,23 +3242,8 @@ function App() {
   function openCurrentClaimDocuments() {
     setWorkspaceView('chat')
     setDetailsOpen(true)
-    setDetailsTab('documents')
+    setPanelFocus('files')
     setMobileView('details')
-  }
-
-  function handleDetailsTabKeyDown(event, currentTab) {
-    const tabs = ['summary', 'documents']
-    const currentIndex = tabs.indexOf(currentTab)
-    let nextIndex
-    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
-    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
-    else if (event.key === 'Home') nextIndex = 0
-    else if (event.key === 'End') nextIndex = tabs.length - 1
-    else return
-    event.preventDefault()
-    const nextTab = tabs[nextIndex]
-    setDetailsTab(nextTab)
-    detailsTabRefs.current[nextTab]?.focus()
   }
 
   function leaveWorkspaceUtility() {
@@ -3556,11 +3611,6 @@ function App() {
 
   const showsClaimDetails = !isFocusedClaimMessages
     && (workspaceView === 'chat' || workspaceView === 'external-services')
-  const reviewRequirements = claimReviewRequirements(dynamicForm)
-  const toProvideCount = new Set([
-    ...reviewRequirements.missingRequiredNow,
-    ...reviewRequirements.pendingLater,
-  ]).size
   const claimDetailsExpanded = detailsOpen && showsClaimDetails
 
   return (
@@ -3896,20 +3946,10 @@ function App() {
             if (event.target.classList?.contains('message-list')) setArrivingFromEntry(false)
           }}
         >
-          {!isFocusedClaimMessages && (
-            <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
-              {[
-                ['history', 'History'],
-                ['chat', 'Chat'],
-                ['details', 'Details'],
-              ].map(([view, label]) => (
-                <button key={view} type="button" aria-selected={mobileView === view} onClick={() => setMobileView(view)}>
-                  {label}
-                </button>
-              ))}
-            </nav>
-          )}
           {!isFocusedClaimMessages && <aside className={`intake-history mobile-view-${mobileView}`} aria-label="Conversation history">
+            <button className="mobile-history-back" type="button" onClick={() => setMobileView('chat')}>
+              Back to conversation
+            </button>
             <div className="history-actions" aria-label="Claim tools">
               <button
                 type="button"
@@ -4071,7 +4111,7 @@ function App() {
                   onSubmit={submitAgreementAndCreate}
                   onReviewInformation={() => {
                     setDetailsOpen(true)
-                    setDetailsTab('summary')
+                    setPanelFocus('facts')
                     setWorkspaceView('chat')
                   }}
                   onReturnToConversation={() => setWorkspaceView('chat')}
@@ -4105,6 +4145,9 @@ function App() {
               )}
             </div>
             <div className={`conversation-heading ${claim ? '' : 'is-empty'}`}>
+              <button className="mobile-history-toggle" type="button" onClick={() => setMobileView('history')}>
+                History
+              </button>
               {claim && (
                 <div className="conversation-heading-main">
                   <div className="claim-heading-identity">
@@ -4119,10 +4162,34 @@ function App() {
                   </div>
                 </div>
               )}
-              {claim && (
-                <div className="claim-status">{claim.external_claim?.creation_status === 'created'
-                  ? 'Claim created'
-                  : handoff ? 'Staff assistance active' : 'In progress'}</div>
+              {claim && claim.external_claim?.creation_status === 'created' ? (
+                <ol className="claim-stage-line" aria-label="Claim progress">
+                  <li className="is-done">Lodged</li>
+                  <li className={claim.claim_decision ? 'is-done' : 'is-current'}>With a claims handler</li>
+                  <li className={claim.claim_decision ? 'is-done' : ''}>Decision</li>
+                </ol>
+              ) : claim && (
+                <div className="claim-status">{handoff ? 'Staff assistance active' : 'In progress'}</div>
+              )}
+              {claim && showsClaimDetails && (
+                <span className="case-panel-toggle-wrap">
+                  <button
+                    className="case-panel-toggle"
+                    type="button"
+                    aria-expanded={claimDetailsExpanded}
+                    aria-controls="claim-details-body"
+                    aria-describedby={missingNowLabels.length > 0 ? 'case-panel-toggle-detail' : undefined}
+                    onClick={() => setDetailsOpen((open) => !open)}
+                  >
+                    <span>{recordedProgress ? `Noted ${recordedProgress.noted}/${recordedProgress.total}` : 'Your claim'}</span>
+                    <span aria-hidden="true">{claimDetailsExpanded ? '›' : '‹'}</span>
+                  </button>
+                  {missingNowLabels.length > 0 && (
+                    <span className="case-panel-toggle-detail" id="case-panel-toggle-detail" role="tooltip">
+                      Still needed: {missingNowLabels.join(', ')}
+                    </span>
+                  )}
+                </span>
               )}
             </div>
 
@@ -4160,10 +4227,14 @@ function App() {
                       displayName={account?.profile?.display_name}
                       evidenceItems={evidenceItems}
                       previewFiles={evidencePreviewFiles.current}
+                      readings={readings}
                     >
                       {message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                         <div className="message-recovery" role="status">
                           <p>{message.recovery.claimant_projection}</p>
+                          {developerModeEnabled() && (
+                            <small className="message-recovery-code">{message.recovery.rule_id}</small>
+                          )}
                           {recoveryFailure?.messageId === message.message_id && (
                             <p className="message-state" role="alert">{recoveryFailure.message}</p>
                           )}
@@ -4204,6 +4275,12 @@ function App() {
                             onSave={(fact, value) => saveFieldValue(fact.fieldCode, fact.field, value)}
                           />
                         )}
+                        <TurnReceipts
+                          items={receipts.get(message.message_id)}
+                          scopeNote={turnRecord(message)?.scope_note}
+                          onUpload={uploadForOpenItem}
+                          busy={isBusy}
+                        />
                         {(message.message_actions || []).map((action) => (
                           <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
                             <ExternalServiceAction
@@ -4397,23 +4474,24 @@ function App() {
               attachments={attachments}
               onFileSelected={handleFileSelected}
               onRemoveAttachment={removeComposerAttachment}
-            />
+              onQueue={claim ? queueDraft : undefined}
+              formRef={composerFormRef}
+            >
+              {queuedText && (
+                <p className="composer-queued" role="status">
+                  <span>Sends after this reply: {queuedText}</span>
+                  <button type="button" className="text-button" onClick={() => setQueuedText('')}>Cancel</button>
+                </p>
+              )}
+              <OpenItemsBar
+                items={openItems}
+                onUpload={uploadForOpenItem}
+                onOpenPanel={() => openCasePanel('open-items')}
+                busy={isBusy}
+              />
+            </MessageComposer>
           </section>
 
-          {!detailsOpen && showsClaimDetails && (
-            <button
-              className="details-reopen"
-              type="button"
-              onClick={() => setDetailsOpen(true)}
-              aria-label="Open claim details panel"
-              title="Open claim details panel"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3.5" y="4" width="17" height="16" rx="2" />
-                <path d="M15 4v16m-1-12-4 4 4 4" />
-              </svg>
-            </button>
-          )}
           <aside
             className={`claim-panel intake-details-panel mobile-view-${mobileView} ${claimDetailsExpanded ? 'is-open' : 'is-collapsed'}`}
             aria-label="Claim details"
@@ -4422,12 +4500,13 @@ function App() {
           >
             <div className="claim-details-sticky-header">
               <div className="claim-details-toolbar">
-                <h2>Claim details</h2>
+                <h2>Your claim</h2>
+                {recordedProgress && <span className="case-panel-progress">{progressLabel(recordedProgress)}</span>}
                 <button
                   className="claim-details-collapse"
                   type="button"
-                  aria-label="Collapse panel"
-                  title="Collapse panel"
+                  aria-label="Close panel"
+                  title="Close panel"
                   aria-expanded={claimDetailsExpanded}
                   aria-controls="claim-details-body"
                   onClick={() => setDetailsOpen(false)}
@@ -4438,45 +4517,12 @@ function App() {
                   </svg>
                 </button>
               </div>
-              <div className="claim-details-tabs" role="tablist" aria-label="Claim detail views">
-                {[
-                  ['summary', 'Overview'],
-                  ['documents', 'Next steps'],
-                ].map(([tab, label]) => (
-                  <button
-                    ref={(node) => { detailsTabRefs.current[tab] = node }}
-                    id={`claim-details-${tab}-tab`}
-                    key={tab}
-                    type="button"
-                    role="tab"
-                    aria-selected={detailsTab === tab}
-                    aria-controls={`claim-details-${tab}-panel`}
-                    tabIndex={detailsTab === tab ? 0 : -1}
-                    onClick={() => setDetailsTab(tab)}
-                    onKeyDown={(event) => handleDetailsTabKeyDown(event, tab)}
-                  >
-                    <span>{label}</span>
-                    {tab === 'documents' && (
-                      <span className="claim-details-tab-count" aria-hidden="true">{toProvideCount}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <ClaimSummaryProgress
-                form={form}
-                contentsItems={contentsItems}
-                dynamicForm={dynamicForm}
-              />
             </div>
             <div id="claim-details-body" hidden={!detailsOpen}>
-            <div
-              id="claim-details-summary-panel"
-              role="tabpanel"
-              aria-labelledby="claim-details-summary-tab"
-              tabIndex="0"
-              hidden={detailsTab !== 'summary'}
-            >
-              {detailsTab === 'summary' && (
+              {detailsOpen && (
+              <>
+              <OpenItemsSection items={openItems} onUpload={uploadForOpenItem} busy={isBusy} />
+              <section className="case-panel-section" id="case-panel-facts" aria-label="What we have so far">
                 <ClaimReviewPanel
                   form={form}
                   contentsItems={contentsItems}
@@ -4498,18 +4544,10 @@ function App() {
                   status={status}
                   stepActive={conversationActionKind === 'review-details'}
                   conversationEmpty={isNewConversationEmpty}
-                  onViewNextSteps={() => setDetailsTab('documents')}
+                  onViewNextSteps={() => setPanelFocus('files')}
                 />
-              )}
-            </div>
-            <div
-              id="claim-details-documents-panel"
-              role="tabpanel"
-              aria-labelledby="claim-details-documents-tab"
-              tabIndex="0"
-              hidden={detailsTab !== 'documents'}
-            >
-              {detailsTab === 'documents' && (
+              </section>
+              <section className="case-panel-section" id="case-panel-files" aria-label="Files and next steps">
                 <ClaimNextStepsPanel
                   form={form}
                   dynamicForm={dynamicForm}
@@ -4523,43 +4561,45 @@ function App() {
                   busy={isBusy}
                   status={status}
                 />
+                {showsClaimDetails && (
+                  <ClaimDocuments
+                    items={evidenceItems}
+                    loadStatus={evidenceLoadStatus}
+                    onUpload={(item, file) => handleFileSelected(
+                      file,
+                      null,
+                      item.kind,
+                      item.evidence_id,
+                    )}
+                    compact
+                  />
+                )}
+                {claim?.external_capabilities?.length > 0 && (
+                  <details className="next-steps-more-options">
+                    <summary>
+                      <span>More options</span>
+                      <span>{claim.external_capabilities.length}</span>
+                    </summary>
+                    <button
+                      ref={externalCapabilitiesTriggerRef}
+                      className="external-capabilities-trigger"
+                      type="button"
+                      aria-haspopup="dialog"
+                      onClick={() => setExternalCapabilitiesOpen(true)}
+                    >
+                      <strong>Use a third-party service</strong>
+                      <span>
+                        View {claim.external_capabilities.length}{' '}
+                        {claim.external_capabilities.length === 1 ? 'option' : 'options'}
+                        <span aria-hidden="true">›</span>
+                      </span>
+                    </button>
+                  </details>
+                )}
+              </section>
+              {processedBy && <p className="case-panel-processed-by">Handled by {processedBy}</p>}
+              </>
               )}
-              {detailsTab === 'documents' && showsClaimDetails && (
-                <ClaimDocuments
-                  items={evidenceItems}
-                  loadStatus={evidenceLoadStatus}
-                  onUpload={(item, file) => handleFileSelected(
-                    file,
-                    null,
-                    item.kind,
-                    item.evidence_id,
-                  )}
-                  compact
-                />
-              )}
-              {detailsTab === 'documents' && claim?.external_capabilities?.length > 0 && (
-                <details className="next-steps-more-options">
-                  <summary>
-                    <span>More options</span>
-                    <span>{claim.external_capabilities.length}</span>
-                  </summary>
-                  <button
-                    ref={externalCapabilitiesTriggerRef}
-                    className="external-capabilities-trigger"
-                    type="button"
-                    aria-haspopup="dialog"
-                    onClick={() => setExternalCapabilitiesOpen(true)}
-                  >
-                    <strong>Use a third-party service</strong>
-                    <span>
-                      View {claim.external_capabilities.length}{' '}
-                      {claim.external_capabilities.length === 1 ? 'option' : 'options'}
-                      <span aria-hidden="true">›</span>
-                    </span>
-                  </button>
-                </details>
-              )}
-            </div>
             </div>
           </aside>
           {claim?.external_capabilities?.length > 0 && (

@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-02.1'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-02.2'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -25,6 +25,7 @@ class WorkbenchActionTargetType(StrEnum):
     COLLABORATION_REQUEST = 'collaboration_request'
     EXTERNAL_TASK = 'external_task'
     RETENTION_HOLD = 'retention_hold'
+    CLAIMANT_QUESTION = 'claimant_question'
 
 
 class WorkbenchActionPermission(StrEnum):
@@ -260,6 +261,25 @@ WORKBENCH_ACTION_REGISTRY = {
                 ),
             ),
             ('message.append',),
+        ),
+        RegisteredWorkbenchAction(
+            'conversation.answer_claimant_question',
+            WorkbenchActionTargetType.CLAIMANT_QUESTION,
+            'Answer question',
+            'Answer a question the Agent passed to the claims team.',
+            WorkbenchActionPermission.CLAIM_COLLABORATOR,
+            ConfirmationLevel.EXPLICIT,
+            'This answer will be visible to the claimant.',
+            ('customer_update.append', 'claim.revision.advance', 'audit.append'),
+            (_input('answer', 'Answer for the claimant', WorkbenchActionInputControl.TEXTAREA),),
+            ('customer_update.append',),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'QUESTION_NOT_OPEN',
+                'REVISION_CONFLICT',
+                'IDEMPOTENCY_CONFLICT',
+                'VALIDATION_ERROR',
+            ),
         ),
         RegisteredWorkbenchAction(
             'human.resolve_handoff',

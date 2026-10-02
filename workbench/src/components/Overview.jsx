@@ -6,13 +6,14 @@ import OwnershipActions from './OwnershipActions.jsx'
 import { findPrimaryProjectedAction, findProjectedAction } from '../projected-action.js'
 import { HandoffResolution } from './ReviewActions.jsx'
 import MissingInformation from './MissingInformation.jsx'
+import OpenItems from './OpenItems.jsx'
 import PrimaryAction from './PrimaryAction.jsx'
 import SignalsSummary from './SignalsSummary.jsx'
 import SourceSummary from './SourceSummary.jsx'
 import { TagList } from './TagList.jsx'
 import { ClaimDecisionSummary } from './ClaimDecision.jsx'
 
-export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, readOnly = false, onAccept, onAcceptClaim, onResolve, onOwnershipAction, onReopen, onClaimDecision, onSection, onRetry }) {
+export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, readOnly = false, onAccept, onAcceptClaim, onResolve, onOwnershipAction, onReopen, onClaimDecision, onAnswerQuestion, onSection, onRetry }) {
   const [handoffState, collaborationState] = supportingState
   const allowedActions = (detail.allowed_actions || []).filter((action) => {
     if (action.target_type === 'handoff' && actionContextUnavailable(handoffState)) return false
@@ -45,6 +46,7 @@ export default function Overview({ detail, handoffs, collaborationRequests, supp
       <IntegrationSummary summary={detail.integration_summary} />
       <SourceSummary summary={detail.source_summary} />
       <MissingInformation items={detail.work_summary?.missing_information || []} />
+      <OpenItems items={detail.open_items || []} actions={allowedActions} readOnly={readOnly} onAnswer={onAnswerQuestion} />
 
       {!readOnly && <details className="purpose-disclosure">
         <summary>{t('Ownership and handoff actions')}</summary>

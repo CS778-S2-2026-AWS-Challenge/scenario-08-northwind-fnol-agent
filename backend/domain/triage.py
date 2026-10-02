@@ -11,12 +11,12 @@ matched reason so staff can see why a Claim was placed where it is:
 Anything unknown, unavailable or not looked up never yields fast-track.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
 
 from backend.domain.branch_registry import BranchRegistrySnapshot
 from backend.domain.currency import to_nzd
-from backend.domain.evidence import canonical_evidence_kind, effective_evidence_kind
+from backend.domain.evidence import canonical_evidence_kind, evidence_kind
 from backend.domain.field_registry import parse_registered_number
 from backend.domain.models import (
     AssessorRoutingStatus,
@@ -112,6 +112,7 @@ def triage_claim(
     requirements: RequirementResolution,
     registry: BranchRegistrySnapshot,
     amount_threshold: float = DEFAULT_AMOUNT_THRESHOLD,
+    interpreted_kinds: Mapping[str, str] | None = None,
 ) -> ClaimTriage | None:
     """Return the staff-only triage of a created Claim, or None before creation."""
     if not claim_is_created(claim):
@@ -125,6 +126,7 @@ def triage_claim(
         requirements=requirements,
         registry=registry,
         amount_threshold=amount_threshold,
+        interpreted_kinds=interpreted_kinds,
     )
     return ClaimTriage(
         severity=max(
@@ -148,6 +150,7 @@ def _matched_reasons(
     requirements: RequirementResolution,
     registry: BranchRegistrySnapshot,
     amount_threshold: float,
+    interpreted_kinds: Mapping[str, str] | None = None,
 ) -> list[TriageReason]:
     checks: list[tuple[TriageReason, bool]] = []
     other_party = _confirmed(claim, 'parties.other_parties') is True
@@ -181,7 +184,9 @@ def _matched_reasons(
             ),
             (
                 TriageReason.DOCUMENT_OUTSTANDING,
-                bool(_outstanding_documents(active_branches, evidence, registry)),
+                bool(
+                    _outstanding_documents(active_branches, evidence, registry, interpreted_kinds)
+                ),
             ),
             (
                 TriageReason.FACT_UNRESOLVED,
@@ -249,6 +254,7 @@ def _outstanding_documents(
     active_branches: Sequence[str],
     evidence: Sequence[EvidenceRecord],
     registry: BranchRegistrySnapshot,
+    interpreted_kinds: Mapping[str, str] | None = None,
 ) -> set[str]:
     wanted: set[str] = set()
     for branch_id in active_branches:
@@ -256,7 +262,9 @@ def _outstanding_documents(
         if branch is not None:
             wanted.update(canonical_evidence_kind(kind) for kind in branch.document_requirements)
     received = {
-        effective_evidence_kind(item) for item in evidence if item.status is EvidenceStatus.RECEIVED
+        evidence_kind(item, interpreted_kinds)
+        for item in evidence
+        if item.status is EvidenceStatus.RECEIVED
     }
     return {
         kind for kind in wanted if not (_SATISFYING_KINDS.get(kind, frozenset({kind})) & received)

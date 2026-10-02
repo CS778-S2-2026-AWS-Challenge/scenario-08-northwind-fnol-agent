@@ -72,6 +72,11 @@ from backend.domain.workbench import (
 from backend.repositories.assets import AssetRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.claim_acceptance import accept_claim
+from backend.services.claimant_questions import (
+    AnswerClaimantQuestionRequest,
+    AnswerClaimantQuestionResponse,
+    answer_claimant_question,
+)
 from backend.services.ownership import (
     create_cowork_request,
     create_transfer_request,
@@ -236,6 +241,30 @@ def take_claim(
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> WorkbenchClaimDetail:
     return accept_claim(repository_for(request), principal, claim_id, idempotency_key, if_match)
+
+
+@router.post(
+    '/{claim_id}/questions/{question_id}/answer',
+    response_model=AnswerClaimantQuestionResponse,
+)
+def answer_question(
+    claim_id: str,
+    question_id: str,
+    payload: AnswerClaimantQuestionRequest,
+    request: Request,
+    principal: Principal = Depends(require_workbench_write),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> AnswerClaimantQuestionResponse:
+    return answer_claimant_question(
+        repository_for(request),
+        principal,
+        claim_id,
+        question_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
 
 
 @router.get('/filter-metadata', response_model=WorkbenchClaimFilterMetadata)

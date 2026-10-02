@@ -38,6 +38,7 @@ from backend.domain.models import (
     PageInfo,
     PolicyholderProjection,
     StaffActionRecord,
+    StaffOpenItem,
     StateChange,
     StructuredFormField,
     WitnessProjection,
@@ -527,6 +528,11 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     section_summaries: WorkbenchSectionSummaries
     customer_next_step: CustomerNextStep
     external_capabilities: list[ExternalCapabilityProjection] = Field(default_factory=list)
+    # What the claimant, Northwind or a third party still owes, with the model's
+    # reading of each claimant question.
+    open_items: list[StaffOpenItem] = Field(default_factory=list)
+    # What the assistant read each claimant file to be, by Evidence id.
+    file_readings: dict[str, str] = Field(default_factory=dict)
 
 
 class WorkbenchFieldItem(ContractModel):

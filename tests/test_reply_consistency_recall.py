@@ -1,13 +1,14 @@
 """D12: a reply that contradicts the ledger goes back to the model, never gets edited."""
 
 import json
+from dataclasses import replace
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.domain.agent_v8 import V8Escalation
+from backend.domain.agent_v8 import V8Escalation, V8NorthwindQuestion
 from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import InvariantGuardedAgent
@@ -198,6 +199,35 @@ def test_review_allows_fact_questions_offers_by_card_and_real_escalation() -> No
     assert review_reply(
         _validated("I've passed this to a claims specialist.", escalated=True)
     ).consistent
-    assert review_reply(
-        _validated('That clause is not in the wording I have; our claims team will confirm.')
-    ).consistent
+    # Promising an answer is only true once the question was passed on.
+    promise = 'That clause is not in the wording I have; our claims team will confirm.'
+    assert [item.kind for item in review_reply(_validated(promise)).inconsistencies] == [
+        'promises_answer_without_question'
+    ]
+    passed_on = replace(
+        _validated(promise),
+        northwind_questions=(
+            V8NorthwindQuestion(
+                question='Is my hire car covered?',
+                claimant_wording='is a hire car covered',
+                model_view='Not in the excerpts.',
+            ),
+        ),
+    )
+    assert review_reply(passed_on).consistent
+
+
+def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    # The rewrite is about the words; facts the first answer recorded stay.
+    words_only = {**HONEST_REWRITE, 'field_changes': []}
+    provider = _provider(NAMES_REFUSED_SERVICE, words_only)
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'recall-keeps-facts')
+
+    turn = journey.send('The water is still dripping through the ceiling.')
+
+    assert turn['agent_message']['content']['text'] == HONEST_REWRITE['reply']
+    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    assert claim is not None and claim.form['property.ongoing_risk'].value == 'active_leak'

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 import { translate as t } from '../i18n.js'
 
-export default function EvidenceRecords({ claimId, records, onLoadEvidence }) {
+export default function EvidenceRecords({ claimId, records, readings = {}, onLoadEvidence }) {
   const [preview, setPreview] = useState(null)
   const [loadingId, setLoadingId] = useState(null)
   const [error, setError] = useState('')
@@ -48,6 +48,7 @@ export default function EvidenceRecords({ claimId, records, onLoadEvidence }) {
                 <dl>
                   <dt>{t('File status')}</dt><dd>{words(item.file_status)}</dd>
                   <dt>{t('Source')}</dt><dd>{words(item.source)}</dd>
+                  {readings[item.evidence_id] && <><dt>{t('Assistant read it as')}</dt><dd>{words(readings[item.evidence_id])}</dd></>}
                   <dt>{t('Responsible party')}</dt><dd>{words(item.responsible_party)}</dd>
                   <dt>{t('Needed for')}</dt><dd>{joinValues(item.needed_for)}</dd>
                   <dt>{t('Related fields')}</dt><dd>{joinValues(item.related_fields)}</dd>

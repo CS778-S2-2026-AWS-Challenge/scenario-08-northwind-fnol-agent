@@ -505,6 +505,12 @@ async function openAgreementForFailureTest(user, agreement) {
   await user.click(screen.getByRole('checkbox', { name: 'I confirm this submission.' }))
 }
 
+async function openCasePanel(user) {
+  const toggle = await screen.findByRole('button', { name: /^(Noted \d+\/\d+|Your claim)/ })
+  if (toggle.getAttribute('aria-expanded') !== 'true') await user.click(toggle)
+  return screen.findByRole('complementary', { name: 'Claim details' })
+}
+
 describe('claimant intake projection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -1310,11 +1316,10 @@ describe('claimant intake projection', () => {
     expect(container.querySelector('.message-list .service-capability-list')).not.toBeInTheDocument()
     expect(container.querySelector('.message-list .external-capabilities-trigger')).not.toBeInTheDocument()
 
-    const documentsTab = screen.getByRole('tab', { name: 'Next steps' })
-    await user.click(documentsTab)
+    await openCasePanel(user)
     await user.click(screen.getByText('More options').closest('summary'))
     const trigger = screen.getByRole('button', { name: /Use a third-party service/ })
-    expect(trigger.closest('[role="tabpanel"]')).toHaveAccessibleName('Next steps')
+    expect(trigger.closest('section')).toHaveAccessibleName('Files and next steps')
     expect(trigger).toHaveTextContent('View 2 options')
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
@@ -1361,7 +1366,7 @@ describe('claimant intake projection', () => {
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
     expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Next steps' }))
+    await openCasePanel(user)
     await user.click(screen.getByText('More options').closest('summary'))
     await user.click(screen.getByRole('button', { name: /Use a third-party service/ }))
     expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
@@ -1560,7 +1565,7 @@ describe('claimant intake projection', () => {
     const claimShell = container.querySelector('.intake-page')
     const claimNavigation = screen.getByRole('complementary', { name: 'Conversation history' })
     const conversationPanel = container.querySelector('.conversation-panel')
-    const claimDetails = screen.getByRole('complementary', { name: 'Claim details' })
+    const claimDetails = await openCasePanel(user)
 
     await user.click(within(claimNavigation).getByRole('button', { name: 'External services' }))
     expect(await screen.findByRole('heading', { level: 1, name: 'External services' })).toBeVisible()
@@ -1573,16 +1578,14 @@ describe('claimant intake projection', () => {
     expect(claimDetails).toHaveClass('is-open')
     expect(within(claimNavigation).getByRole('button', { name: 'External services' }))
       .toHaveAttribute('aria-current', 'page')
-    expect(within(claimDetails).getByRole('heading', { name: 'Claim details' })).toBeVisible()
+    expect(within(claimDetails).getByRole('heading', { name: 'Your claim' })).toBeVisible()
     expect(within(claimDetails).queryByText(/^Revision /)).not.toBeInTheDocument()
-    expect(within(claimDetails).getByRole('button', { name: 'Collapse panel' })).toBeVisible()
-    expect(within(claimDetails).getByRole('tab', { name: 'Overview' })).toBeVisible()
-    expect(within(claimDetails).getByRole('tab', { name: 'Next steps' })).toBeVisible()
+    expect(within(claimDetails).getByRole('region', { name: 'What we have so far' })).toBeVisible()
+    expect(within(claimDetails).getByRole('region', { name: 'Files and next steps' })).toBeVisible()
 
-    await user.click(within(claimDetails).getByRole('button', { name: 'Collapse panel' }))
+    await user.click(within(claimDetails).getByRole('button', { name: 'Close panel' }))
     expect(claimDetails).toHaveClass('is-collapsed')
-    const reopenDetails = screen.getByRole('button', { name: 'Open claim details panel' })
-    await user.click(reopenDetails)
+    await openCasePanel(user)
     expect(claimDetails).toHaveClass('is-open')
   })
 
@@ -2648,8 +2651,8 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()
     expect(screen.getByText(/Your information stays private/)).toBeVisible()
-    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeVisible()
-    expect(screen.getByText('Tell us what happened and the Agent will build this overview as you chat.')).toBeVisible()
+    // The case panel stays closed until there is a claim to look at.
+    expect(screen.queryByText('Claim overview', { selector: '.overview-eyebrow' })).not.toBeInTheDocument()
 
     const composer = screen.getByPlaceholderText('Write what happened, or choose a prompt above…')
     const send = screen.getByRole('button', { name: 'Send' })
@@ -3838,7 +3841,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    await screen.findByRole('complementary', { name: 'Claim details' })
+    await openCasePanel(user)
     await user.click(screen.getByRole('button', { name: /^Incident details/ }))
     await user.click(screen.getByRole('button', { name: /^Safety and ongoing risk/ }))
 
@@ -4068,21 +4071,15 @@ describe('claimant intake projection', () => {
     await user.click(await screen.findByRole('button', { name: /Review claim details/i }))
     expect(screen.getByText('2 to review')).toBeInTheDocument()
 
-    const historyView = screen.getByRole('button', { name: 'History' })
-    const chatView = screen.getByRole('button', { name: 'Chat' })
-    const detailsView = screen.getByRole('button', { name: 'Details' })
-    expect(detailsView).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
-
-    await user.click(screen.getByRole('tab', { name: 'Next steps' }))
-    expect(screen.getByRole('tabpanel', { name: 'Next steps' })).toBeInTheDocument()
-
-    await user.click(chatView)
-    expect(chatView).toHaveAttribute('aria-selected', 'true')
+    // The summary check opens the case panel by itself; the conversation stays in place.
+    const panel = await screen.findByRole('complementary', { name: 'Claim details' })
+    expect(panel).toHaveClass('is-open')
+    expect(within(panel).getByRole('region', { name: 'What we have so far' })).toBeInTheDocument()
+    expect(within(panel).getByRole('region', { name: 'Files and next steps' })).toBeInTheDocument()
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
 
-    await user.click(historyView)
-    expect(historyView).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByRole('button', { name: 'History' }))
+    expect(screen.getByRole('button', { name: 'Back to conversation' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument()
     const signedOutProfile = screen.getByRole('button', { name: 'Open Profile and preferences' })
     expect(signedOutProfile).toBeInTheDocument()
@@ -4109,6 +4106,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
+    await openCasePanel(user)
     await user.click(await screen.findByRole('button', { name: /^Incident details/ }))
     const incidentType = screen.getByRole('button', { name: 'Edit Incident type' })
     expect(within(incidentType).getByText('Incident type')).toBeVisible()
@@ -4157,9 +4155,8 @@ describe('claimant intake projection', () => {
     await user.type(input, 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
+    await openCasePanel(user)
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
-    const toProvideTab = screen.getByRole('tab', { name: 'Next steps' })
-    expect(within(toProvideTab).getByText('2')).toBeVisible()
     expect(screen.queryByRole('button', { name: /Review claim details/i })).not.toBeInTheDocument()
     // Progress now lives only on the "Just noted" card.
     expect(screen.queryByRole('button', { name: /Claim progress/i })).not.toBeInTheDocument()
@@ -4192,7 +4189,21 @@ describe('claimant intake projection', () => {
     return {
       ...initialTurn(),
       claimant_message: { ...claimantMessage, message_id: claimantMessage.message_id },
-      agent_message: { ...agentMessage, in_reply_to: claimantMessage.message_id },
+      agent_message: {
+        ...agentMessage,
+        in_reply_to: claimantMessage.message_id,
+        // The server stores which facts this turn recorded with the reply.
+        content: {
+          ...agentMessage.content,
+          turn_record: {
+            recorded_facts: [
+              { field_code: 'incident.location' },
+              { field_code: 'vehicle.drivable' },
+              { field_code: 'incident.occurred_at' },
+            ],
+          },
+        },
+      },
       form_changes: [
         { field_code: 'incident.location', field: recorded('Queen Street lights') },
         { field_code: 'vehicle.drivable', field: recorded(false) },
@@ -4437,7 +4448,7 @@ describe('claimant intake projection', () => {
       expect(screen.queryByText(/We could not confirm delivery/)).not.toBeInTheDocument()
     }
     expect(screen.queryByText('Permission needed')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Details' }))
+    await openCasePanel(user)
 
     expect(screen.getAllByText('9pm').length).toBeGreaterThan(0)
     expect(screen.getByText('Corrected laptop description')).toBeInTheDocument()
@@ -4830,7 +4841,7 @@ describe('claimant intake projection', () => {
     unmount()
   })
 
-  it('shows Next steps from the Evidence projection and supports keyboard tab navigation', async () => {
+  it('shows files from the Evidence projection in the case panel', async () => {
     const user = userEvent.setup()
     let pushEvidenceUpdate
     api.streamRealtimeEvents.mockImplementation(({ onEvent }) => {
@@ -4895,32 +4906,15 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const summaryTab = await screen.findByRole('tab', { name: 'Overview' })
-    const documentsTab = screen.getByRole('tab', { name: 'Next steps' })
-    expect(summaryTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeInTheDocument()
+    const panel = await openCasePanel(user)
+    expect(within(panel).getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /What to provide/ })).not.toBeInTheDocument()
-
-    summaryTab.focus()
-    await user.keyboard('{ArrowRight}')
-    expect(documentsTab).toHaveFocus()
-    expect(documentsTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('heading', { name: 'Documents and evidence' })).toBeInTheDocument()
-    expect(screen.getByText('Repair quote')).toBeInTheDocument()
-    expect(screen.getByText('0 of 1 provided')).toBeInTheDocument()
+    const documentsPanel = within(panel).getByRole('region', { name: 'Files and next steps' })
+    expect(within(documentsPanel).getByRole('heading', { name: 'Documents and evidence' })).toBeInTheDocument()
+    expect(within(documentsPanel).getByText('Repair quote')).toBeInTheDocument()
+    expect(within(documentsPanel).getByText('0 of 1 provided')).toBeInTheDocument()
     expect(screen.queryByText(/needs your attention/)).not.toBeInTheDocument()
-
-    await user.keyboard('{Home}')
-    expect(summaryTab).toHaveFocus()
-    expect(summaryTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeInTheDocument()
-
-    await user.click(documentsTab)
-    expect(documentsTab).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Repair quote')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Evidence history' })).not.toBeInTheDocument()
-
-    const documentsPanel = screen.getByRole('tabpanel', { name: 'Next steps' })
     const uploadInput = documentsPanel.querySelector('input[type="file"]')
     await user.upload(
       uploadInput,
@@ -4941,8 +4935,95 @@ describe('claimant intake projection', () => {
     expect(within(documentsPanel).getByText('PDF · Upload complete')).toBeInTheDocument()
     expect(within(documentsPanel).getByText('1 of 1 provided')).toBeInTheDocument()
     expect(within(documentsPanel).queryByRole('button', { name: /Replace|Remove/ })).not.toBeInTheDocument()
-    expect(documentsTab).toBeVisible()
+    expect(documentsPanel).toBeVisible()
     expect(screen.queryByRole('button', { name: /What to provide/ })).not.toBeInTheDocument()
+  })
+
+  it('shows what the claimant still owes under the reply and above the composer', async () => {
+    const user = userEvent.setup()
+    const quote = {
+      item_id: 'evd_quote_later',
+      kind: 'document',
+      owner: 'claimant',
+      state: 'open',
+      subject: 'repair_quote',
+      opened_in_message_id: agentMessage.message_id,
+      created_at: '2026-09-10T01:00:01Z',
+    }
+    const hireCar = {
+      item_id: 'nwq_hire',
+      kind: 'question',
+      owner: 'northwind',
+      state: 'open',
+      subject: 'Is my hire car covered?',
+      opened_in_message_id: agentMessage.message_id,
+      created_at: '2026-09-10T01:00:01Z',
+    }
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      agent_message: {
+        ...agentMessage,
+        content: {
+          ...agentMessage.content,
+          turn_record: { recorded_facts: [], scope_note: 'Because someone was hurt, two more details are needed.' },
+        },
+      },
+      current_claim: { ...initialClaim, revision: 2, open_items: [quote, hireCar] },
+    })
+
+    render(<App />)
+    await startActiveClaim(user)
+
+    const reply = screen.getByText(agentMessage.content.text).closest('.msg-agent')
+    expect(within(reply).getByText('Added to your to-do: Repair quote')).toBeVisible()
+    expect(within(reply).getByText('Passed to the claims team: Is my hire car covered?')).toBeVisible()
+    expect(within(reply).getByText('Because someone was hurt, two more details are needed.')).toBeVisible()
+    expect(within(reply).getByRole('button', { name: 'Upload now' })).toBeVisible()
+
+    const bar = screen.getByText(/Still to send: Repair quote/).closest('.open-items-bar')
+    expect(bar).toHaveTextContent('Waiting on Northwind: Is my hire car covered?')
+    await user.click(within(bar).getByRole('button', { name: 'View' }))
+    const panel = screen.getByRole('complementary', { name: 'Claim details' })
+    const stillToDo = within(panel).getByRole('region', { name: 'Still to do' })
+    expect(stillToDo).toHaveTextContent('You said you will send this later')
+    expect(stillToDo).toHaveTextContent('Waiting for Northwind to answer')
+  })
+
+  it('keeps typing while a reply is on its way and sends it after the reply', async () => {
+    const user = userEvent.setup()
+    const firstReply = deferredRequest()
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockReturnValueOnce(firstReply.promise)
+      .mockResolvedValueOnce({
+        ...initialTurn(),
+        claimant_message: { ...claimantMessage, message_id: 'msg_claimant_3', content: { type: 'text', text: 'It was about 8pm.' } },
+        agent_message: { ...agentMessage, message_id: 'msg_agent_3', content: { type: 'text', text: 'Got the time, thanks.' } },
+        claim_revision: 4,
+      })
+
+    render(<App />)
+    await startActiveClaim(user)
+    const composer = screen.getByPlaceholderText('Write the details you know...')
+    await user.type(composer, 'Nobody was hurt.')
+    await user.click(screen.getByRole('button', { name: /^Send/ }))
+
+    await user.type(composer, 'It was about 8pm.')
+    expect(composer).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: /^Send after reply/ }))
+    expect(screen.getByText(/Sends after this reply: It was about 8pm\./)).toBeVisible()
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(2)
+
+    firstReply.resolve({
+      ...initialTurn(),
+      claimant_message: { ...claimantMessage, message_id: 'msg_claimant_2', content: { type: 'text', text: 'Nobody was hurt.' } },
+      agent_message: { ...agentMessage, message_id: 'msg_agent_2', content: { type: 'text', text: 'Glad everyone is safe.' } },
+      claim_revision: 3,
+    })
+
+    expect(await screen.findByText('Got the time, thanks.')).toBeInTheDocument()
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(3)
+    expect(api.submitClaimMessage.mock.calls[2][0]).toEqual(expect.objectContaining({ text: 'It was about 8pm.' }))
   })
 
   it('aborts an in-flight draft upload when its remove control is used', async () => {

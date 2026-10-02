@@ -17,6 +17,7 @@ from backend.domain.agent_v8 import (
     V8EvidenceInterpretation,
     V8FieldChange,
     V8NextQuestion,
+    V8NorthwindQuestion,
     V8PolicyJudgmentProposal,
     V8ServiceSuggestion,
     V8StateProposal,
@@ -39,7 +40,7 @@ from backend.domain.models import (
     StateChange,
 )
 from backend.domain.safety_vocabulary import WEAK_SAFETY_PATTERN
-from backend.domain.temporal_resolution import resolve_reported_time
+from backend.domain.temporal_resolution import check_reported_time
 from backend.domain.turn_field_contract import TurnFieldContract, TurnFieldViolation
 from backend.services.turn_field_contract import validate_field_changes
 
@@ -109,6 +110,9 @@ class ValidatedTurn:
     summary_fields: tuple[str, ...] = ()
     document_requests: tuple[V8DocumentRequest, ...] = ()
     evidence_interpretations: tuple[V8EvidenceInterpretation, ...] = ()
+    northwind_questions: tuple[V8NorthwindQuestion, ...] = ()
+    turn_ending: str | None = None
+    scope_note: str | None = None
     # Service identities the model proposed but Runtime refused this turn.
     rejected_services: tuple[str, ...] = ()
     # Structural proposals only; the reducer validates them against the final
@@ -575,15 +579,21 @@ def validate_turn_proposal(
             # so the report carries the gap instead of a fabricated value.
             disposition = 'claimant_will_supply'
         if disposition == 'value' and selected.value_type == 'temporal':
-            # The model does not know the current time; resolve the claimant's
-            # words against the moment they reported, never store its invention.
-            resolved = resolve_reported_time(
+            # The model works the time out from turn_focus.reported_at_local;
+            # Runtime only checks its shape and range. A failed value keeps the
+            # claimant's own words, which are approximate by nature.
+            checked = check_reported_time(
                 change.value, change.reported_text, reported_at or datetime.now(UTC)
             )
-            if resolved is None:
+            if checked is None:
                 reject('field_change', change.field_code, 'unresolved_time')
                 continue
-            change = change.model_copy(update={'value': resolved})
+            if checked != change.value and checked == (change.reported_text or '').strip():
+                change = change.model_copy(
+                    update={'value': checked, 'precision': FactPrecision.APPROXIMATE}
+                )
+            else:
+                change = change.model_copy(update={'value': checked})
         if (
             disposition == 'claimant_will_supply'
             and change.value is not None
@@ -707,7 +717,7 @@ def validate_turn_proposal(
             service_ids.append(identity)
     document_requests: list[V8DocumentRequest] = []
     for request in proposal.document_requests:
-        if request.from_party == 'third_party' and (
+        if request.stance == 'third_party' and (
             services_suppressed or request.service_identity not in eligible_service_ids
         ):
             reject('document_request', request.document_kind, 'service_not_eligible')
@@ -757,6 +767,9 @@ def validate_turn_proposal(
         summary_fields=summary_fields,
         document_requests=tuple(document_requests),
         evidence_interpretations=tuple(interpretations),
+        northwind_questions=tuple(proposal.northwind_questions),
+        turn_ending=proposal.turn_ending,
+        scope_note=proposal.scope_note,
         rejected_services=tuple(rejected_services),
         policy_judgment_proposals=tuple(proposal.policy_judgment_proposals),
         policy_judgment_sources=tuple(authorized_policy_sources),

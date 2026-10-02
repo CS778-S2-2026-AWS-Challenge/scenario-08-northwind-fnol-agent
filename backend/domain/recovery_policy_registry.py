@@ -426,7 +426,7 @@ LEGACY_CLAIMANT_TURN_MODEL_FAILURE_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'Your message is saved, but I could not respond just now. You can try again.'
+        'Sorry, something tripped me up on my side. Your message is saved, so please send it again.'
     ),
     resume_triggers=frozenset({'claimant_reply', 'explicit_retry_request'}),
     resume_entrypoint='submit_message',
@@ -455,7 +455,7 @@ MODEL_TIMEOUT_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'Your message is saved, but I could not respond just now. You can try again.'
+        "Sorry, that took me too long. Your message is saved; send it again and I'll pick it up."
     ),
     staff_projection='The model timed out before an approved Claim mutation was committed.',
     resume_triggers=frozenset({'claimant_reply', 'explicit_retry_request'}),
@@ -488,7 +488,8 @@ MODEL_INVALID_RESPONSE_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'Your message is saved, but I could not produce a safe response. You can try again.'
+        "I couldn't put together a proper answer that time. Your message is saved, so please "
+        'try sending it again.'
     ),
     staff_projection=(
         'The model result was incomplete, refused or malformed and no proposed fact was accepted.'
@@ -517,7 +518,8 @@ MODEL_RATE_LIMIT_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'Your message is saved, but the service is temporarily busy. You can try again.'
+        "A lot of people are reporting right now, so I'm a little behind. Your message is "
+        'saved; try again in a moment.'
     ),
     staff_projection='The model provider rate-limited this turn before Claim mutation.',
     resume_triggers=frozenset({'claimant_reply', 'explicit_retry_request'}),
@@ -545,7 +547,7 @@ MODEL_PROVIDER_RETRYABLE_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'Your message is saved, but the service is temporarily unavailable. You can try again.'
+        'I lost my connection for a moment. Your message is saved, so please send it again.'
     ),
     staff_projection='A retryable model-provider failure occurred before Claim mutation.',
     resume_triggers=frozenset({'claimant_reply', 'explicit_retry_request'}),
@@ -579,7 +581,10 @@ MODEL_TERMINAL_DEPENDENCY_RULE = RecoveryRule(
         'claim.preserve_revision',
         'audit.append',
     ),
-    claimant_projection=('Your message is saved, but this step is currently unavailable.'),
+    claimant_projection=(
+        "I can't carry on with this step right now. Your message is saved; please come back "
+        'to it a little later.'
+    ),
     staff_projection=('The model dependency cannot safely continue without system remediation.'),
     resume_entrypoint='submit_message',
     audit_event_type='AGENT_TURN_RECOVERY',
@@ -605,7 +610,10 @@ MODEL_PROVIDER_TERMINAL_RULE = RecoveryRule(
         'claim.preserve_revision',
         'audit.append',
     ),
-    claimant_projection=('Your message is saved, but this step is currently unavailable.'),
+    claimant_projection=(
+        'My assistant service is down at the moment. Your message is saved; please come back '
+        'to it a little later.'
+    ),
     staff_projection='The provider returned a non-retryable model failure.',
     resume_entrypoint='submit_message',
     audit_event_type='AGENT_TURN_RECOVERY',
@@ -627,7 +635,7 @@ TOOL_UNAVAILABLE_NON_BLOCKING_RULE = RecoveryRule(
     authoritative_records=frozenset({'claim', 'audit'}),
     required_actions=('claim.preserve_revision', 'audit.append'),
     claimant_projection=(
-        'One supporting capability is unavailable, but the safe parts of your Claim can continue.'
+        "One of my helper tools isn't available right now, so I'll carry on without it."
     ),
     staff_projection='A non-blocking tool dependency is unavailable.',
     resume_entrypoint='reload_authoritative_state',
@@ -656,7 +664,8 @@ TOOL_UNAVAILABLE_BLOCKING_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'A required capability is unavailable, so this step cannot safely continue yet.'
+        "A tool I need for this step isn't available right now. Your details are saved; "
+        'please try again a little later.'
     ),
     staff_projection='A blocking tool dependency requires recovery before continuation.',
     resume_triggers=frozenset({'system_recovered', 'staff_retry'}),
@@ -680,7 +689,8 @@ RETRIEVAL_UNAVAILABLE_NON_BLOCKING_RULE = RecoveryRule(
     authoritative_records=frozenset({'claim', 'audit'}),
     required_actions=('claim.preserve_revision', 'audit.append'),
     claimant_projection=(
-        'Some supporting information is unavailable, but the safe parts of your Claim can continue.'
+        "I can't look up some background information right now, so I'll carry on with what "
+        "you've told me."
     ),
     staff_projection='A non-blocking retrieval dependency is unavailable.',
     resume_entrypoint='reload_authoritative_state',
@@ -709,7 +719,8 @@ RETRIEVAL_UNAVAILABLE_BLOCKING_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'Required supporting information is unavailable, so this step cannot safely continue yet.'
+        "I can't look up the information this step needs right now. Your details are saved; "
+        'please try again a little later.'
     ),
     staff_projection='A blocking retrieval dependency requires recovery before continuation.',
     resume_triggers=frozenset({'system_recovered', 'staff_retry'}),
@@ -732,7 +743,8 @@ REVISION_CONFLICT_RULE = RecoveryRule(
     authoritative_records=frozenset({'claim', 'session', 'audit'}),
     required_actions=('claim.reload', 'audit.append'),
     claimant_projection=(
-        'Your Claim changed while this step was being processed. The latest state must be reloaded.'
+        'Your claim was updated somewhere else while I was working. Refresh to see the latest '
+        'version, then carry on.'
     ),
     staff_projection=(
         'Discard the stale proposal and recompute from the current authoritative revision.'
@@ -758,7 +770,9 @@ EXTERNAL_NOT_SUBMITTED_RETRYABLE_RULE = RecoveryRule(
     requires_operation_identity=True,
     authoritative_records=frozenset({'claim', 'external_task', 'audit'}),
     required_actions=('external.retry_same_operation', 'audit.append'),
-    claimant_projection=('The request was not submitted. You can retry the same request safely.'),
+    claimant_projection=(
+        "That request didn't go through and nothing was sent. You can safely try it again."
+    ),
     staff_projection='Retry is permitted only under the existing external operation identity.',
     resume_triggers=frozenset({'claimant_retry', 'staff_retry'}),
     resume_entrypoint='external_retry',
@@ -789,8 +803,8 @@ EXTERNAL_SUBMITTED_UNKNOWN_RULE = RecoveryRule(
         'audit.append',
     ),
     claimant_projection=(
-        'The provider may already have received the request. Northwind is '
-        'checking the existing request before anything is sent again.'
+        "That request may already have reached the service. We're checking before sending "
+        'anything again, so nothing is doubled up.'
     ),
     staff_projection=(
         'Reconcile the existing external operation. Blind resubmission is prohibited.'
@@ -827,8 +841,8 @@ EXTERNAL_TERMINAL_FAILURE_RULE = RecoveryRule(
     authoritative_records=frozenset({'claim', 'external_task', 'work_item', 'audit'}),
     required_actions=('work_item.ensure', 'audit.append'),
     claimant_projection=(
-        'The external service could not complete this request. Northwind '
-        'needs to review the next step.'
+        "The service couldn't complete that request. Someone from the claims team will look "
+        'at what to do next.'
     ),
     staff_projection='The external operation ended terminally and requires authorised review.',
     resume_triggers=frozenset({'staff_decision'}),
@@ -854,7 +868,9 @@ HIGH_IMPACT_REVIEW_RULE = RecoveryRule(
         'handoff.ensure',
         'audit.append',
     ),
-    claimant_projection=('This step needs authorised staff review before it can continue.'),
+    claimant_projection=(
+        'This step needs a member of the claims team to check it before it goes ahead.'
+    ),
     staff_projection='Review the proposed high-impact action and its supporting evidence.',
     resume_triggers=frozenset({'staff_approved', 'staff_rejected'}),
     resume_entrypoint='staff_review',
@@ -887,7 +903,9 @@ P17_FOLLOW_UP_DUE_RULE = RecoveryRule(
     responsibility='system',
     authoritative_records=frozenset({'claim', 'session', 'follow_up', 'audit'}),
     required_actions=('follow_up.execute', 'audit.append'),
-    claimant_projection='Your incomplete Claim can still be resumed.',
+    claimant_projection=(
+        "Your claim is still saved. You can pick up where you left off whenever you're ready."
+    ),
     staff_projection='The published P17 follow-up obligation is due.',
     resume_triggers=frozenset({'claimant_resumed', 'next_policy_due'}),
     resume_entrypoint='follow_up_worker',
@@ -908,7 +926,7 @@ P17_CONTACT_WITHDRAWAL_RULE = RecoveryRule(
     responsibility='claimant',
     authoritative_records=frozenset({'claim', 'session', 'follow_up', 'audit'}),
     required_actions=('follow_up.block', 'audit.append'),
-    claimant_projection='Automatic follow-up contact is no longer authorised.',
+    claimant_projection=("We won't send you any more reminders about this claim."),
     staff_projection='The recovery obligation remains open but automatic contact is blocked.',
     resume_entrypoint='start_session',
     audit_event_type='permission.rejected',
@@ -928,7 +946,10 @@ P17_ATTEMPT_EXHAUSTION_RULE = RecoveryRule(
     responsibility='claimant',
     authoritative_records=frozenset({'claim', 'session', 'follow_up', 'audit'}),
     required_actions=('follow_up.block', 'audit.append'),
-    claimant_projection='Automatic follow-up has stopped, but the Claim may still be resumed.',
+    claimant_projection=(
+        "We've stopped sending reminders, but your claim is still saved and you can come back "
+        'to it.'
+    ),
     staff_projection='Automatic contact attempts are exhausted; the Claim is not abandoned.',
     resume_triggers=frozenset({'claimant_resumed', 'staff_abandoned'}),
     resume_entrypoint='start_session',
@@ -949,7 +970,9 @@ P17_RECOVERY_EXPIRY_RULE = RecoveryRule(
     responsibility='system',
     authoritative_records=frozenset({'claim', 'session', 'follow_up', 'audit'}),
     required_actions=('claim.expire', 'audit.append'),
-    claimant_projection='This recovery window has expired.',
+    claimant_projection=(
+        'This unfinished claim has expired. Please start a new report if you still need to claim.'
+    ),
     staff_projection='Recovery expiry must use the existing terminal-disposition contract.',
     resume_triggers=frozenset({'claim_reopened'}),
     resume_entrypoint='claim.reopen',
@@ -1015,7 +1038,7 @@ RETENTION_ELIGIBLE_RULE = _retention_rule(
     retry_mode='none',
     responsibility='system',
     work_item_kind='system',
-    claimant_projection='This Claim is no longer available through the previous recovery session.',
+    claimant_projection=('This earlier claim can no longer be opened from this link.'),
     staff_projection='Retention is eligible only from the authoritative expiry/terminal source.',
     permitted_events=frozenset({'retention_execute', 'retention_hold'}),
     resume_entrypoint='retention_worker',
@@ -1031,7 +1054,7 @@ RETENTION_HOLD_RULE = _retention_rule(
     retry_mode='staff_decision',
     responsibility='staff',
     work_item_kind='system',
-    claimant_projection='This Claim is not available through the previous recovery session.',
+    claimant_projection=("This claim can't be opened from this link right now."),
     staff_projection='A source-linked retention hold blocks destructive cleanup.',
     permitted_events=frozenset({'retention_hold_released'}),
     resume_entrypoint='retention_worker',
@@ -1048,7 +1071,10 @@ RETENTION_FAILURE_RULE = _retention_rule(
     reconciliation_required=True,
     responsibility='system',
     work_item_kind='system',
-    claimant_projection='This Claim is not available through the previous recovery session.',
+    claimant_projection=(
+        "We're finishing some record keeping on this claim, so it can't be opened from this "
+        'link yet.'
+    ),
     staff_projection='Retention is incomplete; reconcile and retry only unfinished steps.',
     permitted_events=frozenset({'scheduled_reconciliation', 'staff_action'}),
     resume_entrypoint='retention_reconcile',
@@ -1063,7 +1089,7 @@ OLD_SESSION_DENIED_RULE = _retention_rule(
     continuation='runtime.fail_safe',
     retry_mode='none',
     responsibility='system',
-    claimant_projection='This previous recovery session is no longer available.',
+    claimant_projection=('This link has expired. Please sign in to see your claims.'),
     staff_projection='Retention access closure denied the stale session or recovery credential.',
     permitted_events=frozenset({'access_denied'}),
     resume_entrypoint='none',

@@ -1,0 +1,186 @@
+/* Case panel, open items and turn receipts. Every value comes from
+   frontend/shared/design-tokens.css. The panel is docked from 1440 px, an
+   overlay between 641 and 1439 px, and a bottom sheet on phones. */
+
+.intake-page { position: relative; }
+
+/* Heading: quiet progress that opens the panel, and the stage line once lodged. */
+.conversation-heading { display: flex; align-items: center; gap: var(--space-3); }
+.conversation-heading-main { flex: 1 1 auto; }
+.case-panel-toggle-wrap { position: relative; flex: 0 0 auto; }
+.case-panel-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-control-touch);
+  padding: 0 var(--space-3);
+  border: var(--border-component);
+  border-radius: var(--radius-round);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+.case-panel-toggle:hover, .case-panel-toggle:focus-visible { border: var(--border-focus); color: var(--color-text-primary); }
+.case-panel-toggle-detail {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: var(--claimant-case-panel-layer);
+  width: max-content;
+  max-width: var(--claimant-case-tooltip-width);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-popover);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-body);
+  text-align: left;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--duration-standard) var(--ease-standard);
+}
+.case-panel-toggle:hover + .case-panel-toggle-detail,
+.case-panel-toggle:focus-visible + .case-panel-toggle-detail { visibility: visible; opacity: 1; }
+
+.claim-stage-line { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; font-size: var(--font-size-caption); }
+.claim-stage-line li { color: var(--color-text-muted); }
+.claim-stage-line li + li::before { content: '›'; margin-right: var(--space-2); color: var(--color-text-faint); }
+.claim-stage-line li.is-done { color: var(--color-accent-strong); }
+.claim-stage-line li.is-current { color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
+
+/* Panel contents: one column of sections. */
+.claim-details-toolbar { display: flex; align-items: center; gap: var(--space-3); }
+.claim-details-toolbar h2 { flex: 1 1 auto; }
+.case-panel-progress { color: var(--color-text-muted); font-size: var(--font-size-caption); }
+.case-panel-section { padding-block: var(--space-4); border-bottom: var(--border-component); border-color: var(--claimant-workspace-divider-color); scroll-margin-top: var(--space-4); }
+.case-panel-section:last-of-type { border-bottom: 0; }
+.case-panel-section h3 { margin: 0 0 var(--space-3); font-size: var(--font-size-body); }
+.case-panel-processed-by { margin: var(--space-4) 0 0; color: var(--color-text-muted); font-size: var(--font-size-micro); }
+
+.open-item-group + .open-item-group { margin-top: var(--space-4); }
+.open-item-group h4 { margin: 0 0 var(--space-2); color: var(--color-text-muted); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
+.open-item-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.open-item { display: grid; grid-template-columns: var(--space-5) minmax(0, 1fr) auto; align-items: start; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-lg); background: var(--color-surface); }
+.open-item.is-open { background: var(--claimant-open-items-surface); }
+.open-item-mark { color: var(--claimant-open-items-accent); }
+.open-item.is-done .open-item-mark, .open-item.is-not_available .open-item-mark { color: var(--color-accent-strong); }
+.open-item-copy { display: grid; gap: var(--space-1); min-width: 0; }
+.open-item-copy small { color: var(--color-text-secondary); font-size: var(--font-size-caption); }
+.open-item-answer { color: var(--color-text-primary); line-height: var(--line-height-body); }
+.open-item-upload {
+  min-height: var(--size-control-touch);
+  padding: 0 var(--space-3);
+  border: var(--border-action);
+  border-radius: var(--radius-md);
+  color: var(--color-accent-strong);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+.open-item-upload:disabled { opacity: var(--opacity-disabled); cursor: default; }
+
+/* Above the composer: always in view while anything is outstanding. */
+.open-items-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--space-1) solid var(--claimant-open-items-accent);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  background: var(--claimant-open-items-surface);
+  font-size: var(--font-size-caption);
+}
+.open-items-bar-mark { color: var(--claimant-open-items-accent); }
+.open-items-bar-text { flex: 1 1 0; min-width: 0; overflow: hidden; font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.open-items-bar .open-item-upload { min-height: auto; padding-block: var(--space-1); }
+.open-items-bar-view { border: 0; color: var(--color-accent-strong); background: transparent; font: inherit; font-weight: var(--font-weight-semibold); cursor: pointer; }
+.composer-queued { display: flex; align-items: center; gap: var(--space-3); margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-caption); }
+.composer-queued span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Under a reply: what this turn opened, and why the report now needs more. */
+.turn-receipts { display: grid; min-width: 0; max-width: 100%; gap: var(--space-2); margin-top: var(--space-2); }
+.turn-scope-note { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-caption); font-style: italic; }
+.turn-receipt { display: flex; min-width: 0; flex-wrap: nowrap; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--claimant-receipt-surface); font-size: var(--font-size-caption); }
+.turn-receipt.is-claimant { background: var(--claimant-open-items-surface); }
+.turn-receipt-mark { color: var(--claimant-receipt-accent); font-weight: var(--font-weight-bold); }
+.turn-receipt-text { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-receipt .open-item-upload { min-height: auto; padding-block: var(--space-1); }
+
+/* Below 1440 the panel floats over the conversation instead of squeezing it. */
+@media (max-width: 1439px) and (min-width: 641px) {
+  .intake-page, .intake-page.details-closed, .intake-page.details-open {
+    grid-template-columns: minmax(var(--claimant-workspace-nav-min), var(--claimant-workspace-nav-max)) minmax(0, 1fr);
+  }
+  .intake-details-panel {
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    z-index: var(--claimant-case-panel-layer);
+    width: min(var(--claimant-details-panel-width), 100%);
+    overflow-y: auto;
+    border-left: var(--border-region);
+    box-shadow: var(--claimant-case-panel-shadow);
+  }
+  .intake-details-panel.is-collapsed { visibility: hidden; opacity: 0; transform: translateX(100%); }
+}
+
+@media (max-width: 980px) and (min-width: 641px) {
+  .intake-page, .intake-page.details-closed, .intake-page.details-open {
+    grid-template-columns: var(--claimant-workspace-nav-compact) minmax(0, 1fr);
+  }
+  .intake-details-panel { grid-column: auto; border-top: 0; }
+}
+
+/* Conversation history is a column on wider screens; on phones it replaces the
+   conversation until the claimant goes back. */
+.mobile-history-toggle, .mobile-history-back { display: none; }
+
+/* Phones: the conversation is the page; the panel is a bottom sheet. */
+@media (max-width: 640px) {
+  .conversation-panel { display: flex; }
+  .conversation-panel.mobile-view-history, .intake-history { display: none; }
+  .intake-history.mobile-view-history { display: flex; }
+  .mobile-history-toggle, .mobile-history-back {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--size-control-touch);
+    padding: 0 var(--space-3);
+    border: var(--border-component);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    background: var(--color-surface);
+    font: inherit;
+    font-size: var(--font-size-caption);
+  }
+  .intake-details-panel, .intake-details-panel.mobile-view-details:not(.is-collapsed) {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: var(--claimant-case-panel-layer);
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 0;
+    max-height: var(--claimant-case-sheet-max-height);
+    overflow-y: auto;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 0;
+    border-left: 0;
+    border-radius: var(--claimant-case-sheet-radius) var(--claimant-case-sheet-radius) 0 0;
+    box-shadow: var(--claimant-case-panel-shadow);
+  }
+  .intake-details-panel.is-collapsed { visibility: hidden; transform: translateY(100%); }
+  .conversation-heading { flex-wrap: wrap; }
+}
+
+/* Development builds name the recovery reason under its plain sentence. */
+.message-recovery-code { display: block; margin-top: var(--space-1); color: var(--color-text-muted); font-family: var(--font-family-mono); font-size: var(--font-size-micro); }

@@ -111,15 +111,34 @@ class V8PolicyJudgmentProposal(ContractModel):
         return self
 
 
+# Where a document stands after this turn, as the model reads the conversation.
+#   asking           - the reply asks the claimant for it now.
+#   will_send_later  - the claimant said they will send it later.
+#   does_not_have    - the claimant said they do not have it and cannot get it.
+#   third_party      - Northwind will get it from the named service.
+DocumentStance = Literal['asking', 'will_send_later', 'does_not_have', 'third_party']
+
+
 class V8DocumentRequest(ContractModel):
-    """The model asks for a document this kind of report should carry."""
+    """A document this report should carry, and where it stands."""
 
     document_kind: str = Field(min_length=1, max_length=100)
-    from_party: Literal['claimant', 'third_party']
+    stance: DocumentStance = 'asking'
+    # Present only for third_party: the registered service that supplies it.
     service_identity: str | None = Field(default=None, max_length=100)
-    # 'later' when the claimant has said they will send it later; Runtime then
-    # records it as expected and it is no longer asked for.
-    when: Literal['now', 'later'] = 'now'
+
+
+class V8NorthwindQuestion(ContractModel):
+    """A claimant question the model cannot answer with authority.
+
+    It becomes an open question for the claims team; the claimant sees that
+    Northwind owes an answer, and the staff answer returns to the conversation.
+    """
+
+    question: str = Field(min_length=1, max_length=200)
+    claimant_wording: str = Field(min_length=1, max_length=300)
+    # The model's own reading for staff; never shown to the claimant.
+    model_view: str = Field(min_length=1, max_length=300)
 
 
 class V8EvidenceInterpretation(ContractModel):
@@ -127,6 +146,10 @@ class V8EvidenceInterpretation(ContractModel):
 
     evidence_id: str = Field(min_length=1, max_length=100)
     document_kind: str = Field(min_length=1, max_length=100)
+
+
+# How the reply leaves the claimant with something to do.
+TurnEnding = Literal['question', 'card', 'summary', 'nothing_needed']
 
 
 class V8StateProposal(ContractModel):
@@ -164,6 +187,11 @@ class V8TurnProposal(ContractModel):
     evidence_interpretations: list[V8EvidenceInterpretation] = Field(
         default_factory=list, max_length=4
     )
+    northwind_questions: list[V8NorthwindQuestion] = Field(default_factory=list, max_length=2)
+    # The model's choice; None only from callers that predate the field.
+    turn_ending: TurnEnding | None = None
+    # One sentence, shown when this turn makes the report need more facts.
+    scope_note: str | None = Field(default=None, max_length=150)
     # Required when action == 'summarize': the fields the reply read back to the
     # claimant. Runtime binds the confirmation request to exactly this set.
     summary_fields: list[Annotated[str, Field(min_length=1, max_length=100)]] | None = Field(

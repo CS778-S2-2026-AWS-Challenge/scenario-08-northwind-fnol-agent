@@ -172,6 +172,11 @@ export default function MessageComposer({
   attachments = [],
   onFileSelected,
   onRemoveAttachment,
+  // While a reply is on its way the claimant can keep typing; a submit then
+  // hands the text to onQueue, which sends it once the turn has finished.
+  onQueue,
+  formRef,
+  children,
 }) {
   const isWorkspace = variant === 'workspace'
   const shouldShowModelControl = showModelControl ?? isWorkspace
@@ -341,13 +346,23 @@ export default function MessageComposer({
       )
   ))
   const hasUploadingAttachment = attachments.some((attachment) => attachment.status === 'uploading')
+  const queueing = Boolean(busy && onQueue)
   const sendDisabled = (
     (!draft.trim() && !hasSendableAttachment)
     || hasUploadingAttachment
     || !selectedModelCompatibility.compatible
-    || busy
+    || (busy && !(queueing && draft.trim() && attachments.length === 0))
     || disabled
   )
+
+  function handleSubmit(event) {
+    if (queueing) {
+      event.preventDefault()
+      onQueue()
+      return
+    }
+    onSubmit(event)
+  }
 
   // Enter sends and Shift+Enter starts a new line. Enter that confirms an
   // input-method composition (for example Chinese or Japanese) never sends.
@@ -359,7 +374,12 @@ export default function MessageComposer({
   }
 
   return (
-    <form className={`composer ${isWorkspace ? 'workspace-composer' : ''}`} onSubmit={onSubmit}>
+    <form
+      ref={formRef}
+      className={`composer ${isWorkspace ? 'workspace-composer' : ''}`}
+      onSubmit={handleSubmit}
+    >
+      {children}
       <label className="sr-only" htmlFor={isWorkspace ? 'workspace-incident-input' : 'incident-input'}>{inputLabel}</label>
       <div
         className={`${isWorkspace ? 'composer-input-surface' : 'entry-composer-surface'} ${attachments.length > 0 ? 'has-attachments' : ''}`.trim()}
@@ -428,7 +448,7 @@ export default function MessageComposer({
           enterKeyHint="send"
           placeholder={placeholder}
           rows="2"
-          disabled={busy || disabled}
+          disabled={(busy && !onQueue) || disabled}
         />
         <div className="input-toolbar">
         <div className="toolbar-left">
@@ -483,7 +503,7 @@ export default function MessageComposer({
           )}
         </div>
         <button className="send-btn" type="submit" disabled={sendDisabled}>
-          {buttonLabel}
+          {queueing ? 'Send after reply' : buttonLabel}
           <span aria-hidden="true">→</span>
         </button>
         </div>

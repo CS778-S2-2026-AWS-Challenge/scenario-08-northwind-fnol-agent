@@ -1562,6 +1562,51 @@
         "title": "AgreementAcceptanceResponse",
         "type": "object"
       },
+      "AnswerClaimantQuestionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Answer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer"
+        ],
+        "title": "AnswerClaimantQuestionRequest",
+        "type": "object"
+      },
+      "AnswerClaimantQuestionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          },
+          "update": {
+            "$ref": "#/components/schemas/CustomerUpdateRecord"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_revision",
+          "question_id",
+          "update"
+        ],
+        "title": "AnswerClaimantQuestionResponse",
+        "type": "object"
+      },
       "ApplyRetentionHoldRequest": {
         "additionalProperties": false,
         "description": "Staff request to stop destructive retention cleanup for one Claim.",
@@ -3404,6 +3449,13 @@
               }
             ]
           },
+          "open_items": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantOpenItem"
+            },
+            "title": "Open Items",
+            "type": "array"
+          },
           "payment_destination_id": {
             "anyOf": [
               {
@@ -4521,6 +4573,89 @@
           "created_at"
         ],
         "title": "ClaimantMessage",
+        "type": "object"
+      },
+      "ClaimantOpenItem": {
+        "additionalProperties": false,
+        "description": "One item still owed on a Claim, and by whom (``backend.domain.open_items``).",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "item_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "document",
+              "question"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "opened_in_message_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened In Message Id"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/OpenItemOwner"
+          },
+          "service_identity": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Identity"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OpenItemState"
+          },
+          "subject": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "kind",
+          "owner",
+          "state",
+          "subject",
+          "created_at"
+        ],
+        "title": "ClaimantOpenItem",
         "type": "object"
       },
       "ClaimantPrimaryAction": {
@@ -11305,6 +11440,24 @@
         "title": "NeededFor",
         "type": "string"
       },
+      "OpenItemOwner": {
+        "enum": [
+          "claimant",
+          "northwind",
+          "third_party"
+        ],
+        "title": "OpenItemOwner",
+        "type": "string"
+      },
+      "OpenItemState": {
+        "enum": [
+          "open",
+          "done",
+          "not_available"
+        ],
+        "title": "OpenItemState",
+        "type": "string"
+      },
       "OperationKind": {
         "enum": [
           "configuration_validation",
@@ -14601,6 +14754,113 @@
         "title": "StaffMessageResponse",
         "type": "object"
       },
+      "StaffOpenItem": {
+        "additionalProperties": false,
+        "description": "The same item with what only the claims team reads.",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "claimant_wording": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimant Wording"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "item_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "document",
+              "question"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_view": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model View"
+          },
+          "opened_in_message_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened In Message Id"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/OpenItemOwner"
+          },
+          "service_identity": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Identity"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OpenItemState"
+          },
+          "subject": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "kind",
+          "owner",
+          "state",
+          "subject",
+          "created_at"
+        ],
+        "title": "StaffOpenItem",
+        "type": "object"
+      },
       "StaffPresencePage": {
         "properties": {
           "items": {
@@ -16213,6 +16473,13 @@
             "title": "External Capabilities",
             "type": "array"
           },
+          "file_readings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "File Readings",
+            "type": "object"
+          },
           "incident": {
             "$ref": "#/components/schemas/WorkbenchIncidentSummary"
           },
@@ -16231,6 +16498,13 @@
                 "type": "null"
               }
             ]
+          },
+          "open_items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffOpenItem"
+            },
+            "title": "Open Items",
+            "type": "array"
           },
           "ownership": {
             "$ref": "#/components/schemas/WorkbenchOwnershipProjection"
@@ -27891,6 +28165,115 @@
           }
         },
         "summary": "Create Staff Message",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/questions/{question_id}/answer": {
+      "post": {
+        "operationId": "answer_question_api_v1_workbench_claims__claim_id__questions__question_id__answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "title": "Question Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerClaimantQuestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerClaimantQuestionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Question",
         "tags": [
           "workbench"
         ]

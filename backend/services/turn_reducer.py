@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
 from backend.core.errors import ApiError
-from backend.domain.branch_registry import BranchRuleEvaluator
-from backend.domain.evidence import canonical_evidence_kind, effective_evidence_kind
+from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS, BranchRuleEvaluator
+from backend.domain.evidence import (
+    REGISTERED_EVIDENCE_KINDS,
+    canonical_evidence_kind,
+    evidence_kind,
+)
 from backend.domain.external_service_registry import ExternalLifecycleStatus
 from backend.domain.field_registry import trusted_origin_assertion
 from backend.domain.ids import new_id
@@ -43,6 +47,7 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     NeededFor,
+    OpenItemState,
     ProposedFormChange,
     ResponsibleParty,
     SessionRecord,
@@ -51,6 +56,11 @@ from backend.domain.models import (
     Urgency,
     WorkflowState,
     WorkingClaim,
+)
+from backend.domain.open_items import (
+    TURN_RECORD_KEY,
+    interpreted_evidence_kinds,
+    staff_open_items,
 )
 from backend.domain.recovery_policy_registry import RecoveryTrigger, classify_recovery
 from backend.domain.retrieval import PolicyRetrievalRecord, ReviewSignalRecord
@@ -67,6 +77,7 @@ from backend.domain.runtime import (
 )
 from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.protocols import IdempotencyRecord
+from backend.services.claim_conversation import claim_messages
 from backend.services.claim_participants import synchronize_participants
 from backend.services.external_service_offers import (
     build_offer_metadata,
@@ -273,47 +284,160 @@ def detect_pending_evidence(
     )
 
 
-def deferred_document_evidence(
+_STANCE_RECORDS: dict[str, tuple[EvidenceStatus, ResponsibleParty, str, str]] = {
+    'will_send_later': (
+        EvidenceStatus.PENDING,
+        ResponsibleParty.CLAIMANT,
+        'claimant',
+        'The claimant will send this document later; intake can continue.',
+    ),
+    'does_not_have': (
+        EvidenceStatus.UNAVAILABLE,
+        ResponsibleParty.CLAIMANT,
+        'claimant',
+        'The claimant does not have this document; it is not asked for again.',
+    ),
+    'third_party': (
+        EvidenceStatus.PENDING,
+        ResponsibleParty.EXTERNAL_PARTY,
+        'external_agency',
+        'Northwind will obtain this document from the named service.',
+    ),
+}
+
+
+def document_stance_evidence(
     claim: WorkingClaim,
     validated: Any,
     message: MessageRecord,
     timestamp: datetime,
     existing: Sequence[EvidenceRecord],
+    interpreted: Mapping[str, str] | None = None,
 ) -> EvidenceRecord | None:
-    """Record a document the claimant said they will send later.
+    """Record where a document stands after the claimant's answer.
 
-    The model marks such a request ``when='later'``. Runtime keeps one expected
-    record per kind, so the document is reported as expected instead of missing
-    and is not asked for again. A kind already received or expected is skipped.
+    The model reads the claimant's stance (will send it later, does not have it,
+    or Northwind gets it from a service); Runtime keeps one record per kind so the
+    document is owed by someone and is not asked for again. A kind that is already
+    received, owed or unavailable is skipped.
     """
 
     known = {canonical_evidence_kind(item.kind) for item in existing} | {
-        effective_evidence_kind(item) for item in existing
+        evidence_kind(item, interpreted) for item in existing
     }
     for request in getattr(validated, 'document_requests', ()):
-        if request.from_party != 'claimant' or request.when != 'later':
+        shape = _STANCE_RECORDS.get(request.stance)
+        if shape is None:
             continue
         kind = canonical_evidence_kind(request.document_kind)
-        if kind in known or kind == 'police_report':
+        if kind in known or kind not in REGISTERED_EVIDENCE_KINDS:
             continue
+        status, party, wait_type, summary = shape
+        provenance: dict[str, Any] = {'reported_in_message_id': message.message_id}
+        if request.stance == 'third_party' and request.service_identity:
+            provenance['service_identity'] = request.service_identity
         return EvidenceRecord(
             evidence_id=new_id('evd'),
             claim_id=claim.claim_id,
             kind=kind,
-            status=EvidenceStatus.PENDING,
+            status=status,
             file_status=EvidenceFileStatus.NOT_AVAILABLE,
             source=EvidenceSource.CLAIMANT,
             related_fields=[],
             needed_for=['later_action'],
-            provenance={'reported_in_message_id': message.message_id},
+            provenance=provenance,
             claimant_note=str(message.content.get('text') or ''),
-            wait_type='claimant',
-            responsible_party='claimant',
-            context_summary='The claimant will send this document later; intake can continue.',
+            wait_type=wait_type,
+            responsible_party=party,
+            context_summary=summary,
             created_at=timestamp,
             updated_at=timestamp,
         )
     return None
+
+
+def _value_sources(field: StructuredFormField) -> list[str]:
+    """Where the stored value came from.
+
+    A "yes" or a repeat adds sources to a field but leaves its value with the
+    message that stated it, so only the current assertion's sources count.
+    """
+
+    current = next(
+        (item for item in field.assertions if item.assertion_id == field.current_assertion_id),
+        None,
+    )
+    return current.source_refs if current is not None else field.source_refs
+
+
+def _question_key(text: str) -> str:
+    return ' '.join(re.sub(r'[^\w\s]', ' ', text.casefold()).split())
+
+
+def build_turn_record(
+    *,
+    form_changes: Mapping[str, StructuredFormField],
+    claimant_message: MessageRecord,
+    validated: Any,
+    opened_evidence: EvidenceRecord | None,
+    open_questions: Collection[str] = (),
+) -> dict[str, Any]:
+    """What this turn recorded, stored with the Agent message in the same save.
+
+    The claimant's "just noted" receipt, the staff view and later projections read
+    this record instead of reconstructing it from the Claim afterwards.
+    """
+
+    recorded = [
+        {
+            'field_code': code,
+            'value': field.value,
+            'status': field.status.value,
+            'source': field.source.value,
+            'precision': field.precision.value,
+        }
+        for code, field in form_changes.items()
+        if code not in CLAIMANT_HIDDEN_FIELDS
+        and claimant_message.message_id in _value_sources(field)
+    ]
+    record: dict[str, Any] = {'recorded_facts': recorded}
+    if validated is None:
+        return record
+    # A question already waiting for the claims team is not passed on twice.
+    asked = {_question_key(text) for text in open_questions}
+    questions = []
+    for item in getattr(validated, 'northwind_questions', ()):
+        if _question_key(item.question) in asked:
+            continue
+        asked.add(_question_key(item.question))
+        questions.append(
+            {
+                'question_id': new_id('nwq'),
+                'question': item.question,
+                'claimant_wording': item.claimant_wording,
+                'model_view': item.model_view,
+            }
+        )
+    opened = [item['question_id'] for item in questions]
+    if opened_evidence is not None:
+        opened.insert(0, opened_evidence.evidence_id)
+    record.update(
+        {
+            'file_reads': [
+                {
+                    'evidence_id': item.evidence_id,
+                    'kind': canonical_evidence_kind(item.document_kind),
+                }
+                for item in getattr(validated, 'evidence_interpretations', ())
+                if canonical_evidence_kind(item.document_kind) in REGISTERED_EVIDENCE_KINDS
+            ],
+            'northwind_questions': questions,
+            'opened_items': opened,
+            'ending': getattr(validated, 'turn_ending', None),
+            'scope_note': getattr(validated, 'scope_note', None),
+        }
+    )
+    return record
 
 
 def recompute_progress(
@@ -697,12 +821,19 @@ def reduce_turn(
     session_after_questions = session
     pending_evidence = (
         detect_pending_evidence(claim, claimant_message, timestamp)
-        or deferred_document_evidence(
+        or document_stance_evidence(
             claim,
             validated,
             claimant_message,
             timestamp,
             repository.list_evidence(claim_id, principal.subject),
+            {
+                **interpreted_evidence_kinds(claim_messages(repository, claim)),
+                **{
+                    item.evidence_id: item.document_kind
+                    for item in validated.evidence_interpretations
+                },
+            },
         )
         if validated is not None
         else _pending_evidence_for_proposal(claim_id, proposal, claimant_message, timestamp)
@@ -1053,7 +1184,21 @@ def reduce_turn(
         session_id=session_id,
         actor=ActorType.AGENT,
         visibility=MessageVisibility.CLAIMANT_VISIBLE,
-        content={'type': 'text', 'text': effective_customer_response},
+        content={
+            'type': 'text',
+            'text': effective_customer_response,
+            TURN_RECORD_KEY: build_turn_record(
+                form_changes=form_changes,
+                claimant_message=claimant_message,
+                validated=validated,
+                opened_evidence=pending_evidence,
+                open_questions=[
+                    item.subject
+                    for item in staff_open_items((), claim_messages(repository, claim))
+                    if item.kind == 'question' and item.state is OpenItemState.OPEN
+                ],
+            ),
+        },
         in_reply_to=claimant_message.message_id,
         created_at=timestamp,
     )

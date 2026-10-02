@@ -1,52 +1,20 @@
 import { fieldLabel, fieldValueText } from './claimFieldPresentation.js'
 
-// What the "Just noted" card under an assistant reply shows, read straight from
-// the Claim form so it never differs from what is stored.
+// What the "Just noted" card under an assistant reply shows. The server stores,
+// with each Agent message, which facts that turn recorded
+// (content.turn_record.recorded_facts); the card lists those fields with their
+// current stored value, so a later correction shows the corrected value.
 //
-// A fact belongs to the claimant message behind its current assertion: the one
-// whose words set the stored value. A typed "yes", a repeat of the same value or
-// a conflicting answer adds sources but does not change the value, so the fact
-// stays where it is. A correction made on the card or in the details panel has
-// no message source; the fact stays with the message that last stated it.
-//
-// Only suggested ("proposed") and confirmed facts appear. A fact with two
-// conflicting answers is settled through the details panel, which the review
-// prompt in the conversation keeps open for it.
+// A field recorded again by a later turn appears only under the latest one.
+// Only suggested ("proposed") and confirmed facts appear; a fact with two
+// conflicting answers is settled in the case panel.
 
 const CARD_STATUSES = new Set(['proposed', 'confirmed'])
-const HIDDEN_FIELDS = new Set(['claimant.client_number'])
 
 function hasValue(field) {
   const { value } = field
   if (value === null || value === undefined || value === '') return false
   return !(Array.isArray(value) && value.length === 0)
-}
-
-function claimantMessageIn(refs, claimantOrder) {
-  let latest = null
-  let latestIndex = -1
-  for (const ref of refs || []) {
-    const index = claimantOrder.get(ref)
-    if (index !== undefined && index > latestIndex) {
-      latest = ref
-      latestIndex = index
-    }
-  }
-  return latest
-}
-
-function statedIn(field, claimantOrder) {
-  const assertions = field.assertions || []
-  if (assertions.length === 0) return claimantMessageIn(field.source_refs, claimantOrder)
-  const currentIndex = field.current_assertion_id
-    ? assertions.findIndex((item) => item.assertion_id === field.current_assertion_id)
-    : -1
-  const start = currentIndex >= 0 ? currentIndex : assertions.length - 1
-  for (let index = start; index >= 0; index -= 1) {
-    const messageId = claimantMessageIn(assertions[index].source_refs, claimantOrder)
-    if (messageId) return messageId
-  }
-  return null
 }
 
 function fact(fieldCode, field) {
@@ -59,39 +27,41 @@ function fact(fieldCode, field) {
   }
 }
 
-// One card per claimant message, under the latest reply to it (a retried turn
-// can answer the same message twice). Map order follows the conversation.
+export function turnRecord(message) {
+  const record = message?.content?.turn_record
+  return record && typeof record === 'object' ? record : null
+}
+
 export function factCardsByAgentMessage(messages, form) {
-  const claimantOrder = new Map()
-  const replyByClaimantMessage = new Map()
-  ;(messages || []).forEach((message, index) => {
-    if (message.actor === 'claimant') claimantOrder.set(message.message_id, index)
-    if (message.actor === 'agent' && message.in_reply_to) {
-      replyByClaimantMessage.set(message.in_reply_to, message.message_id)
-    }
-  })
-
-  const factsByClaimantMessage = new Map()
-  for (const [fieldCode, field] of Object.entries(form || {})) {
-    if (HIDDEN_FIELDS.has(fieldCode) || !field || !CARD_STATUSES.has(field.status) || !hasValue(field)) {
-      continue
-    }
-    const claimantMessageId = statedIn(field, claimantOrder)
-    if (!claimantMessageId) continue
-    const facts = factsByClaimantMessage.get(claimantMessageId) || []
-    facts.push(fact(fieldCode, field))
-    factsByClaimantMessage.set(claimantMessageId, facts)
-  }
-
   const cards = new Map()
-  for (const message of messages || []) {
-    if (message.actor !== 'agent' || replyByClaimantMessage.get(message.in_reply_to) !== message.message_id) {
-      continue
+  const placed = new Set()
+  const agentMessages = (messages || []).filter((message) => message.actor === 'agent')
+  for (let index = agentMessages.length - 1; index >= 0; index -= 1) {
+    const message = agentMessages[index]
+    const facts = []
+    for (const item of turnRecord(message)?.recorded_facts || []) {
+      const field = form?.[item.field_code]
+      if (placed.has(item.field_code) || !field || !CARD_STATUSES.has(field.status) || !hasValue(field)) {
+        continue
+      }
+      placed.add(item.field_code)
+      facts.push(fact(item.field_code, field))
     }
-    const facts = factsByClaimantMessage.get(message.in_reply_to)
-    if (facts) cards.set(message.message_id, facts)
+    if (facts.length > 0) cards.set(message.message_id, facts)
   }
   return cards
+}
+
+// What the model read each file to be, by evidence id (latest reading wins).
+export function fileReadings(messages) {
+  const readings = new Map()
+  for (const message of messages || []) {
+    if (message.actor !== 'agent') continue
+    for (const read of turnRecord(message)?.file_reads || []) {
+      if (read?.evidence_id && read?.kind) readings.set(read.evidence_id, read.kind)
+    }
+  }
+  return readings
 }
 
 // Required details already given (checked or not) out of those this step needs.

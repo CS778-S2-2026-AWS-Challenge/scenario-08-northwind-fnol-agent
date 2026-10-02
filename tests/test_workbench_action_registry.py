@@ -22,11 +22,12 @@ from backend.services.support import now_utc
 
 
 def test_action_registry_owns_every_projected_action_contract_dimension() -> None:
-    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-10-02.1'
+    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-10-02.2'
     assert set(WORKBENCH_ACTION_REGISTRY) == {
         'claim.abandon',
         'claim.record_decision',
         'claim.reopen',
+        'conversation.answer_claimant_question',
         'conversation.send_claimant_message',
         'external.accept_review',
         'external.reconcile_response',

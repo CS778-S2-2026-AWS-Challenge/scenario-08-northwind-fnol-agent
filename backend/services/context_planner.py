@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from functools import cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -15,9 +16,28 @@ from backend.domain.agent_context_runtime import (
     TurnRoute,
     VerifiedConversationSummary,
 )
-from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS
+from backend.domain.branch_registry import (
+    CLAIMANT_HIDDEN_FIELDS,
+    FAMILY_NAMES,
+    BranchRuleEvaluator,
+    build_default_registry,
+)
 from backend.domain.external_service_registry import ExternalLifecycleStatus
-from backend.domain.models import MessageRecord, MessageVisibility, NeededFor
+from backend.domain.models import (
+    ActorReference,
+    ActorType,
+    Channel,
+    CustomerNextStep,
+    FormSource,
+    FormStatus,
+    MessageRecord,
+    MessageVisibility,
+    NeededFor,
+    ResponsibleParty,
+    StructuredFormField,
+    WorkingClaim,
+)
+from backend.domain.open_items import model_message_content
 from backend.domain.turn_field_contract import TurnFieldContract
 from backend.services.agent import AgentTurnContext
 from backend.services.context_budget import estimate_json_tokens
@@ -28,7 +48,46 @@ class ContextBudgetExceeded(ValueError):
 
 
 def _message_projection(message: MessageRecord) -> dict[str, object]:
-    return {'actor': message.actor.value, 'content': message.content}
+    return {'actor': message.actor.value, 'content': model_message_content(message.content)}
+
+
+@cache
+def lodging_needs_by_family() -> dict[str, list[str]]:
+    """Fields lodging needs for each product family, from the default registry."""
+
+    evaluator = BranchRuleEvaluator(build_default_registry())
+    now = datetime.now(UTC)
+    needs: dict[str, list[str]] = {}
+    for family in sorted(FAMILY_NAMES):
+        claim = WorkingClaim(
+            claim_id='clm_requirements',
+            customer_id='requirements',
+            channel=Channel.WEB_AGENT,
+            locale='en-NZ',
+            customer_next_step=CustomerNextStep(
+                status='collecting',
+                summary='Requirements only.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+            ),
+            form={
+                'claim.product_family': StructuredFormField(
+                    value=family,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                    needed_for=NeededFor.CURRENT_ACTION,
+                    updated_at=now,
+                    updated_by=ActorReference(
+                        actor_type=ActorType.CLAIMANT, actor_id='requirements'
+                    ),
+                )
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        needs[family] = list(
+            evaluator.evaluate(claim, recomputation_reason='lodging_needs').requirements.unresolved
+        )
+    return needs
 
 
 def _claim_projection(
@@ -86,9 +145,17 @@ def _claim_projection(
             if branch is not None
             else None
         ),
+        # Before the family is known the unresolved list is only what every
+        # report needs; these are what lodging needs once the family is set.
+        'lodging_needs_by_family': (
+            lodging_needs_by_family()
+            if branch is not None and 'claim.product_family' in branch.requirements.unresolved
+            else None
+        ),
         'last_question': getattr(context, 'last_question', None),
         'remaining_questions': getattr(context, 'remaining_questions', None),
         'documents': list(getattr(context, 'documents', ())),
+        'northwind_questions': list(getattr(context, 'northwind_questions', ())),
         # Files received this turn that this provider cannot open. They are
         # saved for the claims team; the model acknowledges them by kind.
         'received_but_unreadable': [

@@ -1554,6 +1554,28 @@ export default function WorkbenchPage() {
     return { mutationResult, claimReadback }
   }
 
+  async function answerQuestion(action, answer) {
+    await runClaimMutation('Sending the answer to the claimant', (current) => {
+      const projected = findProjectedAction(
+        current.allowed_actions,
+        'conversation.answer_claimant_question',
+        action?.target_ref,
+      )
+      if (!canSubmitProjectedAction(projected)) {
+        const error = new Error('This question has already been answered or is no longer yours to answer. Refresh the Claim.')
+        error.code = 'STALE_PROJECTED_ACTION'
+        throw error
+      }
+      return workbenchApi.answerClaimantQuestion(
+        token,
+        current.claim_id,
+        projected.target_ref,
+        current.revision,
+        answer,
+      )
+    })
+  }
+
   async function acceptHandoff(handoff) {
     await runClaimMutation('Accepting the handoff', (current) => (
       workbenchApi.acceptHandoff(
@@ -2429,6 +2451,7 @@ export default function WorkbenchPage() {
                   onRetryExternalActionContext={refreshExternalActionContext}
                   onAccept={isDraftQueue ? undefined : acceptHandoff}
                   onAcceptClaim={isDraftQueue ? undefined : acceptClaim}
+                  onAnswerQuestion={isDraftQueue ? undefined : answerQuestion}
                   onResolve={isDraftQueue ? undefined : resolveHandoff}
                   onSignalDecision={isDraftQueue ? undefined : decideSignal}
                   onCreateAction={isDraftQueue ? undefined : createStaffAction}

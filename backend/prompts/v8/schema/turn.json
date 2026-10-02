@@ -306,9 +306,12 @@
             "minLength": 1,
             "type": "string"
           },
-          "from_party": {
+          "stance": {
+            "description": "asking: the reply asks for it now. will_send_later / does_not_have: what the claimant said. third_party: Northwind gets it from service_identity.",
             "enum": [
-              "claimant",
+              "asking",
+              "will_send_later",
+              "does_not_have",
               "third_party"
             ],
             "type": "string"
@@ -323,21 +326,12 @@
                 "type": "null"
               }
             ]
-          },
-          "when": {
-            "description": "later when the claimant said they will send it later; now otherwise.",
-            "enum": [
-              "now",
-              "later"
-            ],
-            "type": "string"
           }
         },
         "required": [
           "document_kind",
-          "from_party",
-          "service_identity",
-          "when"
+          "stance",
+          "service_identity"
         ],
         "type": "object"
       },
@@ -366,6 +360,36 @@
         "type": "object"
       },
       "maxItems": 4,
+      "type": "array"
+    },
+    "northwind_questions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "claimant_wording": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "model_view": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "claimant_wording",
+          "model_view"
+        ],
+        "type": "object"
+      },
+      "maxItems": 2,
       "type": "array"
     },
     "summary_fields": {
@@ -453,11 +477,34 @@
     },
     "confirms_batch": {
       "type": "boolean"
+    },
+    "turn_ending": {
+      "description": "How the reply leaves the claimant something to do.",
+      "enum": [
+        "question",
+        "card",
+        "summary",
+        "nothing_needed"
+      ],
+      "type": "string"
+    },
+    "scope_note": {
+      "anyOf": [
+        {
+          "maxLength": 150,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
     "action",
-    "reply"
+    "reply",
+    "turn_ending"
   ],
   "type": "object"
 }

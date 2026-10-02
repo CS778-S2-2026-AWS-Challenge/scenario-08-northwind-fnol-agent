@@ -940,6 +940,23 @@ Messages MUST NOT be accepted for a closed or paused session.
 
 Claimant text content uses `{ "type": "text", "text": "..." }`. File bytes are evidence resources, not embedded base64 message fields. Staff notes use `internal_only` and MUST NOT appear through claimant message endpoints.
 
+An Agent message produced by a model turn also carries `content.turn_record`, written in the same
+atomic save as the turn. It is the authoritative record of what that turn did; clients read it
+instead of reconstructing it from the Claim afterwards:
+
+| Field | Meaning |
+|---|---|
+| `recorded_facts` | Fields whose current value this turn stated: `field_code`, `value`, `status`, `source`, `precision`. A "yes" or a repeat does not move a fact to a later turn. Claimant-hidden fields are omitted. |
+| `file_reads` | What the model read each file received this turn to be: `evidence_id`, `kind` (a registered Evidence kind). A file with no stated kind counts as the latest reading. |
+| `opened_items` | Open item ids (Evidence or question ids) this turn created. |
+| `ending` | How the reply leaves the claimant something to do: `question`, `card`, `summary`, or `nothing_needed`. |
+| `scope_note` | One plain sentence, present when this turn made the report need more facts. |
+| `northwind_questions` | Questions passed to the claims team: `question_id`, `question`, `claimant_wording`, `model_view`. Never projected to the claimant. |
+
+Claimant message projections keep only `type`, `text`, `parts`, and the claimant-safe
+`turn_record` keys (`recorded_facts`, `file_reads`, `opened_items`, `ending`, `scope_note`).
+Model context receives message words only.
+
 `actor` defines the sender and `visibility` defines the persisted audience boundary. A message
 returned by a successful mutation or list response is durably stored and therefore has delivery
 state `delivered` in the clients. This means durable in-app persistence, not email, SMS, or push
@@ -1681,10 +1698,32 @@ Response `200`:
   "customer_next_step": {},
   "handoff": null,
   "resolved_support_handoff": null,
+  "open_items": [
+    {
+      "item_id": "evd_01J4Y7V9QZ",
+      "kind": "document",
+      "owner": "claimant",
+      "state": "open",
+      "subject": "repair_quote",
+      "service_identity": null,
+      "answer": null,
+      "opened_in_message_id": "msg_01J4Y7T9AB",
+      "created_at": "2026-08-10T03:45:00Z"
+    }
+  ],
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`open_items` lists what is still owed on the Claim and by whom, oldest first. It is read from
+stored records only. `owner` is `claimant` (a document the claimant said they will send later, or
+said they do not have), `northwind` (a question the Agent passed to the claims team), or
+`third_party` (a document Northwind gets from a registered service, named in
+`service_identity`). `state` is `open`, `done` (the document arrived, by its stated kind or the
+model's reading, or staff answered the question; the answer is in `answer`), or `not_available`.
+`subject` is a registered Evidence kind for documents and the question in plain words for
+questions. `opened_in_message_id` is the Agent message whose turn opened the item.
 
 `resolved_support_handoff` is present only on Claim detail, and is otherwise `null`. It is
 claimant-safe completion evidence containing exactly `handoff_id`, `type`, `status`,
@@ -2842,6 +2881,7 @@ item, signal, or external task exists.
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
 | `POST` | `/workbench/claims/{claim_id}/accept` | Take an unassigned Claim after successful FNOL creation |
+| `POST` | `/workbench/claims/{claim_id}/questions/{question_id}/answer` | Answer a question the Agent passed to the claims team |
 | `POST` | `/workbench/claims/{claim_id}/assignments` | Assign or reassign ownership |
 | `POST` | `/workbench/claims/{claim_id}/cowork-requests` | Request or invite cowork access through a projected ownership action |
 | `POST` | `/workbench/claims/{claim_id}/transfer-requests` | Request a primary-owner transfer through a projected ownership action |
@@ -3173,10 +3213,18 @@ large resources are loaded from the dedicated sub-resources below:
   "allowed_actions": [],
   "section_summaries": {"fields": {}, "conversation": {}, "evidence": {}, "reference_checks": {}, "external_services": {}, "activity": {}},
   "customer_next_step": {},
+  "open_items": [],
+  "file_readings": {"evd_01J4Y7V2KD": "incident_photo"},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`open_items` is the claimant open-item projection (see `GET /api/v1/claims/{claim_id}`) plus,
+for each item, `claimant_wording` and, for questions, the model's `model_view`. `file_readings`
+maps Evidence ids to the kind the model last read each file to be. While a question is open and
+the current staff member is the primary owner or a coworker, `allowed_actions` contains
+`conversation.answer_claimant_question` targeting the question id.
 
 `work_summary.missing_information` carries one `external_service` item per recorded external task.
 A terminal external failure is classified `required_now` with `claims_professional` responsibility
@@ -3487,6 +3535,23 @@ other filters, and view counts. Omit `view` to include completed FNOL Claims; an
 see the list, but cannot take a Claim. Existing `assignee_id=unassigned` keeps its broader
 meaning and is not changed. After acceptance, other staff refetch detail or the list on the
 existing realtime hint; the Claim disappears from this unassigned filter.
+
+### `POST /api/v1/workbench/claims/{claim_id}/questions/{question_id}/answer`
+
+Answers a claimant question the Agent recorded in `turn_record.northwind_questions` when it could
+not answer with authority (for example, whether a hire car is covered). The request body is
+`{"answer": "..."}` (1-1000 characters). Required headers are `If-Match` and `Idempotency-Key`. The
+current projection must offer `conversation.answer_claimant_question` for this question, which
+requires primary-owner or coworker access; no handoff is needed.
+
+The answer is saved as a claimant-visible customer update whose `related_refs` contains the
+question id, with `responsible_party=claims_professional`. The Claim revision advances once and an
+internal `action.completed` audit is written in the same staff mutation. The claimant sees the
+question as `done` with the answer in `open_items`, whether or not their session is still open.
+
+Response `200` is `{claim_id, claim_revision, question_id, update}`. A question that is already
+answered or does not belong to the Claim returns `409 QUESTION_NOT_OPEN`; a stale revision returns
+`409 REVISION_CONFLICT`; an exact retry returns the original response.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/staff-actions`
 

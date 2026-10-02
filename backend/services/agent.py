@@ -327,6 +327,9 @@ class AgentTurnContext:
     # Documents this kind of report normally carries and which have arrived,
     # so the model can ask for, recognise, or source the missing ones.
     documents: tuple[dict[str, object], ...] = ()
+    # Questions already passed to the claims team, answered or not, so the model
+    # neither passes them on twice nor leaves an answer unmentioned.
+    northwind_questions: tuple[dict[str, object], ...] = ()
     # Files the claimant attached this turn that the selected provider cannot
     # read. They stay saved and listed; the model is told they arrived.
     unattached_evidence: tuple[AgentEvidenceReference, ...] = ()

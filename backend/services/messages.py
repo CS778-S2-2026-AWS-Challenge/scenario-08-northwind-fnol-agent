@@ -23,7 +23,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
-from backend.domain.evidence import canonical_evidence_kind, effective_evidence_kind
+from backend.domain.evidence import canonical_evidence_kind, evidence_kind
 from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -67,6 +67,11 @@ from backend.domain.models import (
     StructuredFormField,
     WorkflowState,
     WorkingClaim,
+)
+from backend.domain.open_items import (
+    claimant_message_content,
+    interpreted_evidence_kinds,
+    staff_open_items,
 )
 from backend.domain.realtime import AgentTurnProgressStage
 from backend.domain.recovery_policy_registry import (
@@ -119,6 +124,7 @@ from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
 )
+from backend.services.claim_conversation import claim_messages
 from backend.services.claim_participants import reject_unprotected_participant_fields
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.claimant_form_projection import project_claimant_form_fields
@@ -364,7 +370,7 @@ def _claimant_message(
     return ClaimantMessage(
         message_id=message.message_id,
         actor=message.actor,
-        content=message.content,
+        content=claimant_message_content(message.content),
         evidence_refs=message.evidence_refs,
         in_reply_to=message.in_reply_to,
         client_message_id=message.client_message_id,
@@ -1672,8 +1678,9 @@ def _document_projection(
     """Which documents this report should carry and which have arrived.
 
     Kinds come from the active branches' registry entries; arrival is read from
-    the claim's evidence. The model decides whether to ask the claimant, wait,
-    or source a document from a third party; Runtime only reports the state.
+    the claim's evidence and the model's own reading of each file. The model
+    decides whether to ask the claimant, wait, or source a document from a third
+    party; Runtime only reports the state. Documents never block lodging.
     """
 
     wanted: dict[str, str] = {}
@@ -1685,28 +1692,46 @@ def _document_projection(
             wanted.setdefault(kind, branch_id)
     if not wanted:
         return ()
+    interpreted = interpreted_evidence_kinds(claim_messages(repository, claim))
     received: dict[str, list[str]] = {}
-    expected_later: set[str] = set()
+    settled: dict[str, str] = {}
     for item in repository.list_evidence(claim.claim_id, claim.customer_id):
+        kind = evidence_kind(item, interpreted)
         if item.status is EvidenceStatus.RECEIVED:
-            received.setdefault(effective_evidence_kind(item), []).append(item.evidence_id)
+            received.setdefault(kind, []).append(item.evidence_id)
         elif item.status is EvidenceStatus.PENDING:
-            # The claimant said they will send it later; do not ask again.
-            expected_later.add(canonical_evidence_kind(item.kind))
+            # Recorded as owed by the claimant or a third party; not asked again.
+            settled.setdefault(
+                canonical_evidence_kind(item.kind),
+                'with_third_party'
+                if item.responsible_party is ResponsibleParty.EXTERNAL_PARTY
+                else 'claimant_sends_later',
+            )
+        elif item.status is EvidenceStatus.UNAVAILABLE:
+            settled.setdefault(canonical_evidence_kind(item.kind), 'claimant_does_not_have')
     return tuple(
         {
             'kind': kind,
             'branch': branch_id,
-            'status': (
-                'received'
-                if kind in received
-                else 'expected_later'
-                if kind in expected_later
-                else 'not_received'
-            ),
+            'status': 'received' if kind in received else settled.get(kind, 'not_received'),
+            'blocks_lodging': False,
             'evidence_ids': received.get(kind, []),
         }
         for kind, branch_id in wanted.items()
+    )
+
+
+def _northwind_question_projection(
+    repository: PersistenceRepository, claim: WorkingClaim
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {'question': item.subject, 'state': item.state.value, 'answer': item.answer}
+        for item in staff_open_items(
+            (),
+            claim_messages(repository, claim),
+            repository.list_customer_updates(claim.claim_id),
+        )
+        if item.kind == 'question'
     )
 
 
@@ -2750,6 +2775,7 @@ def submit_message(
         documents=_document_projection(
             repository, claim, branch_evaluation, branch_evaluator.registry
         ),
+        northwind_questions=_northwind_question_projection(repository, claim),
     )
     agent_context = replace(agent_context, safety_interrupt=safety_interrupt)
     turn_route = route_turn(agent_context)

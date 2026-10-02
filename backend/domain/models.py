@@ -2749,6 +2749,40 @@ class AgreementAcceptanceResponse(ContractModel):
     primary_action: ClaimantPrimaryAction
 
 
+class OpenItemOwner(str, Enum):
+    CLAIMANT = 'claimant'
+    NORTHWIND = 'northwind'
+    THIRD_PARTY = 'third_party'
+
+
+class OpenItemState(str, Enum):
+    OPEN = 'open'
+    DONE = 'done'
+    NOT_AVAILABLE = 'not_available'
+
+
+class ClaimantOpenItem(ContractModel):
+    """One item still owed on a Claim, and by whom (``backend.domain.open_items``)."""
+
+    item_id: str = Field(min_length=1, max_length=120)
+    kind: Literal['document', 'question']
+    owner: OpenItemOwner
+    state: OpenItemState
+    # A registered document kind, or the question in plain words.
+    subject: str = Field(min_length=1, max_length=200)
+    service_identity: str | None = Field(default=None, max_length=100)
+    answer: str | None = Field(default=None, max_length=4000)
+    opened_in_message_id: str | None = Field(default=None, max_length=120)
+    created_at: datetime
+
+
+class StaffOpenItem(ClaimantOpenItem):
+    """The same item with what only the claims team reads."""
+
+    claimant_wording: str | None = Field(default=None, max_length=300)
+    model_view: str | None = Field(default=None, max_length=300)
+
+
 class ClaimantClaim(ContractModel):
     claim_id: str
     revision: int
@@ -2774,6 +2808,7 @@ class ClaimantClaim(ContractModel):
     incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
     resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
+    open_items: list[ClaimantOpenItem] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

@@ -14,6 +14,7 @@ from backend.domain.models import (
     MessageVisibility,
     PageInfo,
 )
+from backend.domain.open_items import claimant_message_content
 from backend.domain.recovery_policy_registry import claimant_recovery_projection
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.external_service_offers import message_external_actions
@@ -40,7 +41,7 @@ def _claimant_message(message: MessageRecord) -> ClaimantMessage:
     return ClaimantMessage(
         message_id=message.message_id,
         actor=message.actor,
-        content=message.content,
+        content=claimant_message_content(message.content),
         evidence_refs=message.evidence_refs,
         in_reply_to=message.in_reply_to,
         client_message_id=message.client_message_id,
