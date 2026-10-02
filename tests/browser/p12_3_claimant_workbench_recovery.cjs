@@ -363,11 +363,7 @@ async function main() {
   }
 }
 
-module.exports = { STAFF_EMAIL, STAFF_PASSWORD }
-
-if (require.main === module) {
-  main().catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
-}
+main().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
