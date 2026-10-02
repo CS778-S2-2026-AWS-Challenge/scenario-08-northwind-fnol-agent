@@ -314,7 +314,25 @@ WORKBENCH_ACTION_REGISTRY = {
             ConfirmationLevel.EXPLICIT,
             'Document checks will count this file as the type you choose.',
             ('staff_action.complete', 'claim.revision.advance', 'audit.append'),
-            (_input('kind', 'File type', WorkbenchActionInputControl.SELECT),),
+            (
+                _input(
+                    'kind',
+                    'File type',
+                    WorkbenchActionInputControl.SELECT,
+                    choices=(
+                        ('incident_photo', 'Photo of the incident or damage'),
+                        ('item_photo', 'Photo of an item'),
+                        ('repair_quote', 'Repair quote'),
+                        ('receipt', 'Receipt or invoice'),
+                        ('police_report', 'Police report'),
+                        ('proof_of_ownership', 'Proof of ownership'),
+                        ('assessment_report', 'Assessment report'),
+                        ('claimant_statement', 'Written statement'),
+                        ('policy', 'Policy document'),
+                        ('other_document', 'Other document'),
+                    ),
+                ),
+            ),
             failure_codes=(
                 'ACCESS_DENIED',
                 'REVISION_CONFLICT',

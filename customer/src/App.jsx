@@ -45,6 +45,7 @@ import {
   StaffMessageRow,
 } from './components/ConversationMessages.jsx'
 import TurnAttachments from './components/TurnAttachments.jsx'
+import PanelSection from './components/PanelSection.jsx'
 import CaseStatus from './components/CaseStatus.jsx'
 import { caseStatus } from './caseStatus.js'
 import { PinnedCard, PinnedClause, PinnedFile, SubmitSteps } from './components/PinnedCard.jsx'
@@ -107,6 +108,18 @@ import { ConversationEvent } from './components/ConversationContext.jsx'
 // The claimant's help button sends this as an ordinary message; the assistant
 // decides whether it goes on the waiting list or straight to a person.
 const HELP_MESSAGE = "I'd like to talk to someone at Northwind."
+
+const PANEL_SECTIONS_KEY = 'northwind.casePanelSections'
+const DEFAULT_PANEL_SECTIONS = { openItems: true, facts: true, files: true }
+
+function readPanelSections() {
+  try {
+    const stored = JSON.parse(globalThis.localStorage?.getItem(PANEL_SECTIONS_KEY) || 'null')
+    return stored && typeof stored === 'object' ? { ...DEFAULT_PANEL_SECTIONS, ...stored } : DEFAULT_PANEL_SECTIONS
+  } catch {
+    return DEFAULT_PANEL_SECTIONS
+  }
+}
 
 // How far a pull on the phone sheet's handle must travel to change its height.
 const SHEET_DISMISS_DISTANCE = 48
@@ -362,7 +375,9 @@ function App() {
   const [panelFocus, setPanelFocus] = useState(null)
   // One pinned item at the top of the case panel: { kind, id }.
   const [pinned, setPinned] = useState(null)
-  const [railOpen, setRailOpen] = useState(false)
+  const [railOpen, setRailOpen] = useState(true)
+  // Which case-panel sections are open; the claimant's choice is remembered.
+  const [panelSections, setPanelSections] = useState(readPanelSections)
   const [autoFillPresent, setAutoFillPresent] = useState(false)
   // Phones: the case sheet rests at half height and can be pulled to full.
   const [sheetFull, setSheetFull] = useState(false)
@@ -870,6 +885,8 @@ function App() {
 
   useEffect(() => {
     if (!panelFocus || !detailsOpen) return
+    const sectionKey = { 'open-items': 'openItems', facts: 'facts', files: 'files' }[panelFocus]
+    if (sectionKey) setPanelSections((current) => (current[sectionKey] ? current : { ...current, [sectionKey]: true }))
     globalThis.requestAnimationFrame?.(() => {
       globalThis.document?.getElementById(`case-panel-${panelFocus}`)?.scrollIntoView?.({ block: 'start' })
     })
@@ -903,6 +920,18 @@ function App() {
   function openCasePanel(section = null) {
     setDetailsOpen(true)
     setPanelFocus(section)
+  }
+
+  function togglePanelSection(key) {
+    setPanelSections((current) => {
+      const next = { ...current, [key]: !current[key] }
+      try {
+        globalThis.localStorage?.setItem(PANEL_SECTIONS_KEY, JSON.stringify(next))
+      } catch {
+        // Storage can be unavailable; the choice then lasts for this visit.
+      }
+      return next
+    })
   }
 
   function pinToPanel(item) {
@@ -3660,7 +3689,7 @@ function App() {
             )}
             {!handoff && (
               <button className="support-button" type="button" onClick={askForHelp} disabled={isBusy}>
-                Help
+                Staff assistance
               </button>
             )}
           </div>
@@ -4474,8 +4503,20 @@ function App() {
               )}
               {detailsOpen && (
               <>
-              <OpenItemsSection items={openItems} onUpload={uploadForOpenItem} busy={isBusy} />
-              <section className="case-panel-section" id="case-panel-facts" aria-label="What we have so far">
+              <OpenItemsSection
+                items={openItems}
+                onUpload={uploadForOpenItem}
+                busy={isBusy}
+                open={panelSections.openItems}
+                onToggle={() => togglePanelSection('openItems')}
+              />
+              <PanelSection
+                id="facts"
+                title="What we know"
+                label="What we have so far"
+                open={panelSections.facts}
+                onToggle={() => togglePanelSection('facts')}
+              >
                 <ClaimReviewPanel
                   form={form}
                   contentsItems={contentsItems}
@@ -4497,6 +4538,7 @@ function App() {
                   status={status}
                   conversationEmpty={isNewConversationEmpty}
                   onViewNextSteps={() => setPanelFocus('facts')}
+                  showHeading={false}
                 />
                 <ClaimNextStepsPanel
                   form={form}
@@ -4511,8 +4553,13 @@ function App() {
                   busy={isBusy}
                   status={status}
                 />
-              </section>
-              <section className="case-panel-section" id="case-panel-files" aria-label="Files">
+              </PanelSection>
+              <PanelSection
+                id="files"
+                title="Files"
+                open={panelSections.files}
+                onToggle={() => togglePanelSection('files')}
+              >
                 {showsClaimDetails && (
                   <ClaimDocuments
                     items={evidenceItems}
@@ -4537,7 +4584,7 @@ function App() {
                     <span aria-hidden="true">›</span>
                   </button>
                 )}
-              </section>
+              </PanelSection>
               {processedBy && <p className="case-panel-processed-by">Handled by {processedBy}</p>}
               </>
               )}

@@ -402,6 +402,7 @@ export default function ClaimReviewPanel({
   status,
   conversationEmpty = false,
   onViewNextSteps,
+  showHeading = true,
 }) {
   const requirements = claimReviewRequirements(dynamicForm)
   const capturedForm = Object.fromEntries(
@@ -458,7 +459,7 @@ export default function ClaimReviewPanel({
       {sections.length === 0 && <p className="overview-known-summary">{overviewCopy}</p>}
       {sections.length > 0 && (
         <section className="overview-known" aria-labelledby="what-we-know-title">
-          <h2 id="what-we-know-title">What we know</h2>
+          <h2 id="what-we-know-title" className={showHeading ? undefined : 'sr-only'}>What we know</h2>
           <p className="overview-known-summary">{overviewCopy}</p>
           <div className="claim-known-list">
             {sections.map((section) => {

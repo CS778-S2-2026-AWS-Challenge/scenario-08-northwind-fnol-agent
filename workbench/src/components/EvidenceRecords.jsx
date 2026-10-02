@@ -2,11 +2,58 @@ import { Download, Eye, FileWarning, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 import { translate as t } from '../i18n.js'
+import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 
-export default function EvidenceRecords({ claimId, records, readings = {}, onLoadEvidence }) {
+// A handler changes how a claimant file is read with an explicit Change button;
+// their reading then wins over the assistant's wherever files are counted.
+function ReadingEditor({ item, action, onCorrect }) {
+  const choices = action.inputs?.find((input) => input.field_code === 'kind')?.choices || []
+  const [kind, setKind] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [open, setOpen] = useState(false)
+  if (!open) {
+    return <button className="button button--quiet" type="button" onClick={() => setOpen(true)}>{t('Change')}</button>
+  }
+  return (
+    <form
+      className="reading-editor"
+      onSubmit={async (event) => {
+        event.preventDefault()
+        if (!kind) return
+        setBusy(true)
+        setError('')
+        try {
+          await onCorrect(action, kind)
+          setOpen(false)
+        } catch (failure) {
+          setError(failure?.message || t('The file type was not saved. Refresh the Claim and try again.'))
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      <label htmlFor={`reading-${item.evidence_id}`}>{t('File type')}</label>
+      <select id={`reading-${item.evidence_id}`} value={kind} onChange={(event) => setKind(event.target.value)}>
+        <option value="">{t('Choose…')}</option>
+        {choices.map((choice) => <option key={choice.value} value={choice.value}>{t(choice.label)}</option>)}
+      </select>
+      <button className="button" type="submit" disabled={busy || !kind}>{t('Save')}</button>
+      <button className="button button--quiet" type="button" disabled={busy} onClick={() => setOpen(false)}>{t('Cancel')}</button>
+      {error && <p className="form-error" role="alert">{error}</p>}
+    </form>
+  )
+}
+
+export default function EvidenceRecords({ claimId, records, readings = {}, staffReadings = [], actions = [], onLoadEvidence, onCorrectReading }) {
   const [preview, setPreview] = useState(null)
   const [loadingId, setLoadingId] = useState(null)
   const [error, setError] = useState('')
+
+  function readingAction(item) {
+    const action = findProjectedAction(actions, 'evidence.correct_reading', item.evidence_id)
+    return canSubmitProjectedAction(action) ? action : null
+  }
 
   async function load(item) {
     setLoadingId(item.evidence_id)
@@ -48,7 +95,15 @@ export default function EvidenceRecords({ claimId, records, readings = {}, onLoa
                 <dl>
                   <dt>{t('File status')}</dt><dd>{words(item.file_status)}</dd>
                   <dt>{t('Source')}</dt><dd>{words(item.source)}</dd>
-                  {readings[item.evidence_id] && <><dt>{t('Assistant read it as')}</dt><dd>{words(readings[item.evidence_id])}</dd></>}
+                  {(readings[item.evidence_id] || readingAction(item)) && (
+                    <>
+                      <dt>{t(staffReadings.includes(item.evidence_id) ? 'Set by a handler as' : 'Assistant read it as')}</dt>
+                      <dd className="reading-value">
+                        <span>{readings[item.evidence_id] ? words(readings[item.evidence_id]) : t('Not read yet')}</span>
+                        {onCorrectReading && readingAction(item) && <ReadingEditor item={item} action={readingAction(item)} onCorrect={onCorrectReading} />}
+                      </dd>
+                    </>
+                  )}
                   <dt>{t('Responsible party')}</dt><dd>{words(item.responsible_party)}</dd>
                   <dt>{t('Needed for')}</dt><dd>{joinValues(item.needed_for)}</dd>
                   <dt>{t('Related fields')}</dt><dd>{joinValues(item.related_fields)}</dd>

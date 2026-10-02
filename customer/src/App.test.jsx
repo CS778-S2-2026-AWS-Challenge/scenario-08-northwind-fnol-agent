@@ -1633,7 +1633,7 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(messageList.scrollTop).toBe(960))
   })
 
-  it('sends Help as an ordinary message for the assistant to judge, not a direct handoff', async () => {
+  it('sends Staff assistance as an ordinary message for the assistant to judge, not a direct handoff', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue({
       ...initialTurn(),
@@ -1647,7 +1647,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    await user.click(screen.getByRole('button', { name: 'Help' }))
+    await user.click(screen.getByRole('button', { name: 'Staff assistance' }))
 
     await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(2))
     expect(api.submitClaimMessage.mock.calls[1][0]).toEqual(expect.objectContaining({
@@ -1853,7 +1853,7 @@ describe('claimant intake projection', () => {
     expect(await screen.findByRole('status', { name: /Staff assistance completed/ })).toBeInTheDocument()
     expect(screen.getByText(/You can continue your claim below\./)).toBeInTheDocument()
     expect(screen.getAllByText('Staff assistance completed')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Help' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Staff assistance' })).toBeEnabled()
     expect(screen.queryByText('Claim created')).not.toBeInTheDocument()
   })
 
@@ -1968,7 +1968,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    expect(await screen.findByRole('button', { name: 'Help' })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: 'Staff assistance' })).toBeEnabled()
     expect(screen.queryByRole('status', { name: /Staff assistance completed/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Staff assistance completed')).not.toBeInTheDocument()
   })

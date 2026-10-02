@@ -318,3 +318,30 @@
   .turn-fact-list, .pinned-card, .agent-turn-pulse { animation: none; }
   .agent-message-menu, .case-status-tip, .intake-details-panel { transition: none; }
 }
+
+/* Case panel sections fold from their title; a thin line separates them. */
+.case-panel-section.is-collapsible { padding-block: var(--space-2); }
+.case-panel-section-title { margin: 0; }
+.case-panel-section-title button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+.case-panel-section-title button:hover, .case-panel-section-title button:focus-visible { color: var(--color-accent-strong); }
+.case-panel-section-chevron { color: var(--color-text-muted); font-weight: var(--font-weight-regular); }
+.case-panel-section.is-collapsible > div { padding-bottom: var(--space-2); }
+
+/* Message times sit centred over the conversation. */
+.workspace-shell .message-list .message-timestamp { display: block; width: 100%; margin-inline: auto; text-align: center; }
+.case-panel-section .next-steps-panel { margin-top: var(--space-4); }

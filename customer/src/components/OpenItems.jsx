@@ -84,12 +84,26 @@ export function OpenItemsBar({ items, onUpload, onOpenPanel, busy }) {
   )
 }
 
-export function OpenItemsSection({ items, onUpload, busy }) {
+// open/onToggle make the title a button that folds the list (case panel);
+// without them the list always shows (submitted page).
+export function OpenItemsSection({ items, onUpload, busy, open = true, onToggle = null }) {
   const groups = openItemGroups(items)
   if (groups.length === 0) return null
   return (
-    <section className="case-panel-section" id="case-panel-open-items" aria-labelledby="case-open-items-title">
-      <h3 id="case-open-items-title">Still to do</h3>
+    <section
+      className={`case-panel-section ${onToggle ? 'is-collapsible' : ''} ${open ? 'is-open' : ''}`}
+      id="case-panel-open-items"
+      aria-labelledby="case-open-items-title"
+    >
+      <h3 id="case-open-items-title" className={onToggle ? 'case-panel-section-title' : undefined}>
+        {onToggle ? (
+          <button type="button" aria-expanded={open} aria-controls="case-open-items-body" onClick={onToggle}>
+            <span>Still to do</span>
+            <span className="case-panel-section-chevron" aria-hidden="true">{open ? '−' : '+'}</span>
+          </button>
+        ) : 'Still to do'}
+      </h3>
+      <div id="case-open-items-body" hidden={!open}>
       {groups.map((group) => (
         <div className="open-item-group" key={group.key}>
           <h4>{group.title}</h4>
@@ -112,6 +126,7 @@ export function OpenItemsSection({ items, onUpload, busy }) {
           </ul>
         </div>
       ))}
+      </div>
     </section>
   )
 }
