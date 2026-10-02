@@ -1295,6 +1295,9 @@ export default function WorkbenchPage() {
       && window.matchMedia(COMPACT_WORKBENCH_QUERY).matches
     )
     if (compactAtActivation && claimId) {
+      // This is an explicit return to the queue, not an initial Workbench load
+      // that should reopen the persisted active Claim.
+      rootRestoreAttemptedRef.current = true
       setQueueVisible(true)
       navigate(queueRoute(queueBasePath, queueFilters))
       return

@@ -323,6 +323,16 @@ describe('WorkbenchPage queue routing', () => {
   it('returns to the queue when the viewport becomes compact before the media-query subscription settles', async () => {
     const user = userEvent.setup()
     let compact = false
+    tabs.tabs = [{
+      claimId: 'clm_route_1',
+      label: 'NW-900',
+      section: 'conversation',
+      sessionId: 'ses_saved',
+      draft: '',
+      expandedRecords: [],
+      pendingAction: null,
+    }]
+    tabs.activeId = 'clm_route_1'
     vi.stubGlobal('matchMedia', vi.fn(() => ({
       get matches() { return compact },
       addEventListener: vi.fn(),
