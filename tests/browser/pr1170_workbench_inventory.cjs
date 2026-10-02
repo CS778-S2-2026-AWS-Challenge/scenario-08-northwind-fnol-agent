@@ -208,7 +208,15 @@ async function main() {
     await confirmAccept.waitFor({ state: 'visible', timeout: 10000 })
     await confirmAccept.click()
 
-    await page.goto(`${WORKBENCH}/workbench/claims/${AT02}/conversation`, { waitUntil: 'domcontentloaded' })
+    // Follow the same authoritative journey as the Workbench handoff tests:
+    // wait for the accepted projection before leaving the summary surface.
+    const openConversation = page.getByRole('button', { name: 'Open conversation', exact: true })
+    await openConversation.waitFor({ state: 'visible', timeout: 30000 })
+    await openConversation.click()
+    await page.waitForURL(
+      (url) => url.pathname === `/workbench/claims/${AT02}/conversation`,
+      { timeout: 30000 },
+    )
     const composer = page.getByLabel('Message to claimant')
     await composer.waitFor({ state: 'visible', timeout: 30000 })
     const ownMessage = 'Exact-head own mutation check.'
