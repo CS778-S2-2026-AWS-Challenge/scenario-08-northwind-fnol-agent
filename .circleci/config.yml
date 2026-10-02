@@ -389,6 +389,7 @@ jobs:
             wait_for_url http://127.0.0.1:8001/
             wait_for_url http://127.0.0.1:8002/workbench/
 
+            node tests/browser/pr1170_workbench_inventory.cjs
             node tests/browser/p12_3_claimant_workbench_recovery.cjs
             node tests/browser/pr975_claimant_profile.cjs
       - store_artifacts:
