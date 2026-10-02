@@ -2752,6 +2752,7 @@ class AgreementAcceptanceResponse(ContractModel):
 class ClaimantClaim(ContractModel):
     claim_id: str
     revision: int
+    conversation_session_id: str | None = None
     incident_type: str | None = None
     workflow_state: WorkflowState
     form: dict[str, StructuredFormField]
@@ -2791,6 +2792,7 @@ class ClaimantChangeEvent(ContractModel):
 class ClaimListItem(ContractModel):
     claim_id: str
     revision: int
+    conversation_session_id: str | None = None
     incident_type: str | None = None
     workflow_state: WorkflowState
     external_claim: ExternalClaimResult | None = None

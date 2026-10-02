@@ -1,10 +1,13 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from fastapi.testclient import TestClient
 
+from backend.domain.audit import AuditSubject, AuditSubjectType
 from backend.domain.models import ActorType, MessageRecord, MessageVisibility, SessionStatus
+from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.fixture import FixtureRepository
+from tests.test_claim_decisions import _created_claim
 
 
 def _accepted_handoff(
@@ -53,6 +56,85 @@ def _accepted_handoff(
     accepted_body = accepted.json()
     assert accepted_body['handoff']['assigned_to'] == 'stf_demo'
     return claim_id, session_id, handoff_id, cast(int, accepted_body['revision'])
+
+
+def test_primary_owner_can_message_completed_claim_without_creating_handoff(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim, session = _created_claim('clm_owned_conversation')
+    claim = claim.model_copy(update={'assignee_id': None})
+    repository.create_claim(claim, session)
+    route = f'/api/v1/workbench/claims/{claim.claim_id}/messages'
+    now = datetime.now(UTC)
+    current_presence = repository.get_staff_presence('stf_demo')
+    repository.save_staff_presence(
+        StaffPresenceRecord(
+            staff_id='stf_demo',
+            online=True,
+            available=True,
+            last_seen_at=now,
+            expires_at=now + timedelta(minutes=5),
+            updated_at=now,
+            revision=current_presence.revision + 1 if current_presence is not None else 1,
+        ),
+        current_presence.revision if current_presence is not None else None,
+    )
+
+    accepted = client.post(
+        f'/api/v1/workbench/claims/{claim.claim_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'owned-conversation-accept',
+            'If-Match': str(claim.revision),
+        },
+        json={},
+    )
+    assert accepted.status_code == 200
+    message_action = next(
+        item
+        for item in accepted.json()['allowed_actions']
+        if item['action_code'] == 'conversation.send_claimant_message'
+    )
+    assert message_action['target_ref'] == session.session_id
+    assert message_action['availability'] == 'confirmation_required'
+    assert repository.list_handoffs(claim.claim_id, claim.customer_id) == []
+
+    sent = client.post(
+        route,
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'owned-conversation-send',
+            'If-Match': str(accepted.json()['revision']),
+        },
+        json={'content': {'type': 'text', 'text': 'I am reviewing your completed report.'}},
+    )
+
+    assert sent.status_code == 200
+    assert sent.json()['session_id'] == session.session_id
+    assert sent.json()['message']['actor'] == 'staff'
+    assert sent.json()['message']['visibility'] == 'shared'
+    stored = repository.get_claim_internal(claim.claim_id)
+    assert stored is not None and stored.revision == claim.revision + 2
+    assert repository.list_handoffs(claim.claim_id, claim.customer_id) == []
+    idempotency = repository.find_idempotency('stf_demo', route, 'owned-conversation-send')
+    assert idempotency is not None
+    assert idempotency.handoff_id is None
+    audits = repository.list_audit_events_internal(
+        AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim.claim_id,
+            claim_id=claim.claim_id,
+        )
+    )
+    message_audit = next(
+        audit
+        for audit in audits
+        if audit.permission is not None
+        and audit.permission.required_permission == 'conversation.send_claimant_message'
+    )
+    assert sent.json()['message']['message_id'] in message_audit.source_refs
 
 
 def test_staff_message_fails_closed_without_authoritative_active_session(

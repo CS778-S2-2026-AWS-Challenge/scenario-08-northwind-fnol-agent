@@ -229,7 +229,7 @@ export default function Conversation({
     onDraft?.(nextDraft)
   }
 
-  const placeholder = historicalSession
+  const placeholder = readOnly || historicalSession
     ? 'This conversation is read-only'
     : handoff && assistanceState.key === 'completed'
       ? 'Staff assistance is complete'
@@ -285,16 +285,16 @@ export default function Conversation({
             </li>
           )}
         </ol>
-        {readOnly ? (
-          <div className="staff-composer__notice" role="status">
-            <Info size={16} aria-hidden="true" />
-            <span>
-              <strong>{t('Draft conversation is read only')}</strong>
-              <small>{t('Customer messages remain available for context. Staff messaging starts after the Claim is submitted.')}</small>
-            </span>
-          </div>
-        ) : <form className="staff-composer" onSubmit={submit}>
-          {handoff && waitingForTakeover ? (
+        <form className="staff-composer" onSubmit={submit}>
+          {readOnly ? (
+            <div className="staff-composer__notice" id="staff-message-status" role="status">
+              <Info size={16} aria-hidden="true" />
+              <span>
+                <strong>{t('Draft conversation is read only')}</strong>
+                <small>{t('Customer messages remain available for context. Staff messaging starts after the Claim is submitted.')}</small>
+              </span>
+            </div>
+          ) : handoff && waitingForTakeover ? (
             <AssistanceStatus
               action={acceptAction}
               compact
@@ -330,8 +330,8 @@ export default function Conversation({
             sendDisabled={!canSend || !draft.trim() || sending || readbackBlocksResend}
             sending={sending}
           />
-          {visibleSendError && <p className="form-error" id="staff-message-error" role="alert">{visibleSendError}</p>}
-        </form>}
+          {!readOnly && visibleSendError && <p className="form-error" id="staff-message-error" role="alert">{visibleSendError}</p>}
+        </form>
       </section>
     </ResourceBoundary>
   )
@@ -367,21 +367,17 @@ const StaffComposerInput = forwardRef(function StaffComposerInput({
       {({ attachmentsPending, describedBy: attachmentDescription, preview, trigger }) => (
         <>
           {preview}
-          <div className={`staff-composer__input compact-composer__input${canSend ? ' staff-composer__input--voice' : ''}`}>
-            {canSend && (
-              <>
-                {trigger}
-                <VoiceInputControl
-                  key={`${conversationKey}:${voiceInputAvailable}`}
-                  ref={voiceControllerRef}
-                  available={voiceInputAvailable}
-                  draft={draft}
-                  onDraft={onDraft}
-                  statusId="staff-claimant-voice-status"
-                  textareaRef={textareaRef}
-                />
-              </>
-            )}
+          <div className="staff-composer__input compact-composer__input">
+            {trigger}
+            <VoiceInputControl
+              key={`${conversationKey}:${voiceInputAvailable}`}
+              ref={voiceControllerRef}
+              available={voiceInputAvailable}
+              draft={draft}
+              onDraft={onDraft}
+              statusId="staff-claimant-voice-status"
+              textareaRef={textareaRef}
+            />
             <CompactComposerTextarea
               ref={textareaRef}
               id="staff-reply"

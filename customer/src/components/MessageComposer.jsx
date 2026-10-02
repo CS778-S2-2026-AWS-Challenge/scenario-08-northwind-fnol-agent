@@ -165,7 +165,7 @@ export default function MessageComposer({
   error,
   placeholder = 'Write the details you know...',
   variant = 'default',
-  showModelControl = false,
+  showModelControl,
   models = [],
   selectedModel = '',
   setSelectedModel,
@@ -174,6 +174,7 @@ export default function MessageComposer({
   onRemoveAttachment,
 }) {
   const isWorkspace = variant === 'workspace'
+  const shouldShowModelControl = showModelControl ?? isWorkspace
   const fileInput = useRef(null)
   const textareaRef = useRef(null)
   const recognitionRef = useRef(null)
@@ -467,7 +468,7 @@ export default function MessageComposer({
               <path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" />
             </svg>
           </button>
-          {(isWorkspace || showModelControl) && setSelectedModel && (
+          {shouldShowModelControl && setSelectedModel && (
             <div className="model-control">
               <OptionMenu
                 value={selectedModel}

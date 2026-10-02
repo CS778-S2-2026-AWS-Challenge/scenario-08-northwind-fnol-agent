@@ -371,6 +371,7 @@ def claimant_claim(
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
+        conversation_session_id=claim.active_session_id,
         incident_type=claim.incident_type,
         workflow_state=claim.claim_state.workflow_state,
         form=_claimant_form(repository, claim),
@@ -411,6 +412,7 @@ def _claim_list_item(
     return ClaimListItem(
         claim_id=claim.claim_id,
         revision=claim.revision,
+        conversation_session_id=claim.active_session_id,
         incident_type=claim.incident_type,
         workflow_state=claim.claim_state.workflow_state,
         external_claim=claim.external_claim,

@@ -959,6 +959,16 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .send-btn:disabled, .primary-button:disabled, .secondary-button:disabled { opacity: .55; cursor: not-allowed; }
 
 .intake-page { min-height: calc(100svh - 64px); display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) var(--claimant-details-panel-width); background: var(--claimant-workspace-background-wash); }
+.intake-page.claim-messages-focus,
+.intake-page.claim-messages-focus.details-closed { grid-template-columns: minmax(0, 1fr); }
+.claim-messages-focus .conversation-heading,
+.claim-messages-focus .message-list,
+.claim-messages-focus .workspace-composer {
+  width: min(100%, var(--measure-reading));
+  align-self: center;
+}
+.claim-message-heading-copy { display: grid; gap: var(--space-1); }
+.claim-message-heading-copy p { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-caption); line-height: var(--line-height-body); }
 .mobile-intake-tabs { display: none; }
 .intake-history {
   padding: var(--space-5) var(--space-4) 0;

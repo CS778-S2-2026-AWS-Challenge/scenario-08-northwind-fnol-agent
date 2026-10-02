@@ -3,7 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from threading import Barrier
+from threading import Barrier, RLock
 from typing import Any
 
 import mongomock
@@ -20,6 +20,7 @@ from backend.domain.models import (
     HandoffStatus,
     HandoffTrigger,
     HandoffType,
+    SessionStatus,
     TerminalDispositionReasonCode,
     TerminalDispositionValue,
     WorkflowState,
@@ -79,12 +80,19 @@ def acceptance_repository(request: pytest.FixtureRequest) -> PersistenceReposito
     if request.param == 'fixture':
         return FixtureRepository()
     repository = MongoDBRepository(mongomock.MongoClient(), 'claim_acceptance_parity')
-    # Adapter parity only: mongomock cannot establish real Mongo transaction evidence.
-    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    transaction_lock = RLock()
+
+    def run_mock_transaction(operation: Any) -> Any:
+        with transaction_lock:
+            return operation(None)
+
+    # Adapter parity only: the lock preserves atomic visibility between racing
+    # mock operations, but mongomock cannot establish real Mongo transaction evidence.
+    repository._atomic = run_mock_transaction  # type: ignore[method-assign]
     return repository
 
 
-def test_acceptance_persists_owner_replays_once_and_unlocks_decision(
+def test_acceptance_persists_owner_replays_once_and_unlocks_decision_and_conversation(
     acceptance_repository: PersistenceRepository,
 ) -> None:
     repository = acceptance_repository
@@ -100,6 +108,14 @@ def test_acceptance_persists_owner_replays_once_and_unlocks_decision(
     assert result.ownership.primary_assignee.staff_id == 'stf_demo'
     assert result.ownership.accept_claim is False
     assert any(action.action_code == 'claim.record_decision' for action in result.allowed_actions)
+    message_action = next(
+        action
+        for action in result.allowed_actions
+        if action.action_code == 'conversation.send_claimant_message'
+    )
+    assert message_action.target_ref == claim.active_session_id
+    assert message_action.availability.value == 'confirmation_required'
+    assert message_action.based_on_revision == 2
     assert all(action.action_code != 'ownership.accept_claim' for action in result.allowed_actions)
     stored = repository.get_claim_internal(claim.claim_id)
     assert stored is not None and stored.assignee_id == 'stf_demo'
@@ -116,6 +132,31 @@ def test_acceptance_persists_owner_replays_once_and_unlocks_decision(
     with pytest.raises(ApiError) as error:
         accept_claim(repository, _staff(), claim.claim_id, 'second-action', '2')
     assert error.value.code == 'CLAIM_ALREADY_ASSIGNED'
+
+
+def test_acceptance_keeps_conversation_blocked_without_active_claimant_session(
+    acceptance_repository: PersistenceRepository,
+) -> None:
+    repository = acceptance_repository
+    claim = _claim(repository, 'clm_accept_closed_session')
+    session = repository.get_session(
+        claim.claim_id, claim.active_session_id or '', claim.customer_id
+    )
+    assert session is not None
+    repository.save_session(
+        session.model_copy(update={'status': SessionStatus.CLOSED, 'closed_at': datetime.now(UTC)})
+    )
+    _presence(repository)
+
+    result = accept_claim(repository, _staff(), claim.claim_id, 'take-closed-session', '1')
+
+    message_action = next(
+        action
+        for action in result.allowed_actions
+        if action.action_code == 'conversation.send_claimant_message'
+    )
+    assert message_action.availability.value == 'blocked'
+    assert message_action.blocked_reason == 'No active claimant session is available.'
 
 
 @pytest.mark.parametrize('presence_state', ['missing', 'offline', 'unavailable', 'expired'])

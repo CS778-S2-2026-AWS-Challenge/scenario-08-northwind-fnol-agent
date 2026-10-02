@@ -191,6 +191,24 @@ it('shows the selected Claim status summary and opens Evidence history', async (
   expect(onOpenEvidence).toHaveBeenCalledOnce()
 })
 
+it('opens the Claim conversation when a conversation session is available', async () => {
+  const user = userEvent.setup()
+  const onOpenMessages = vi.fn()
+  render(
+    <ClaimFeatureDirectory
+      claim={{ ...newerClaim, conversation_session_id: 'ses_claim_messages' }}
+      onOpenEvidence={vi.fn()}
+      onOpenMessages={onOpenMessages}
+    />,
+  )
+
+  const messages = screen.getByRole('button', { name: /Messages with Northwind/ })
+  expect(messages).toHaveTextContent('Read updates from Northwind staff and reply about this Claim.')
+  await user.click(messages)
+
+  expect(onOpenMessages).toHaveBeenCalledOnce()
+})
+
 it('shows the final decision, explanation, and time in the read-only Claim record', () => {
   render(<ClaimFeatureDirectory claim={rejectedClaim} onOpenEvidence={vi.fn()} />)
 

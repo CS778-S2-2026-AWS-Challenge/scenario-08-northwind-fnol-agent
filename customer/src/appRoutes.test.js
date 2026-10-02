@@ -9,6 +9,7 @@ describe('claimant app routes', () => {
     ['/profile/policies', 'account', 'login'],
     ['/account/claims', 'claim-history', 'login'],
     ['/account/claims/clm_1', 'claim-features', 'login'],
+    ['/account/claims/clm_1/messages', 'claim-messages', 'login'],
     ['/account/claims/clm_1/evidence', 'claim-evidence', 'login'],
     ['/files', 'files', 'login'],
     ['/how-it-works', 'how-it-works', 'how-it-works'],
@@ -23,6 +24,7 @@ describe('claimant app routes', () => {
   it('reads and writes the history Claim id with encoding', () => {
     expect(historyClaimIdFromPath('/account/claims/clm%2Fa/evidence')).toBe('clm/a')
     expect(historyClaimIdFromPath('/claims/clm_1')).toBeNull()
+    expect(routeForPage('claim-messages', { historyClaimId: 'clm/a' })).toBe('/account/claims/clm%2Fa/messages')
     expect(routeForPage('claim-evidence', { historyClaimId: 'clm/a' })).toBe('/account/claims/clm%2Fa/evidence')
   })
 
