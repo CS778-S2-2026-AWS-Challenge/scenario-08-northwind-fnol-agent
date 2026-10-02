@@ -481,14 +481,17 @@ workflows:
       - workbench-quality
       - admin-quality
       - workbench-control-inventory-evidence:
+          name: workbench-inventory-through-signin
+          stop_after: 1
+      - workbench-control-inventory-evidence:
+          name: workbench-inventory-through-seed
+          stop_after: 2
+      - workbench-control-inventory-evidence:
+          name: workbench-inventory-through-shell
+          stop_after: 3
+      - workbench-control-inventory-evidence:
           name: workbench-inventory-through-surfaces
           stop_after: 4
-      - workbench-control-inventory-evidence:
-          name: workbench-inventory-through-realtime
-          stop_after: 5
-      - workbench-control-inventory-evidence:
-          name: workbench-inventory-through-claim
-          stop_after: 6
       - workbench-control-inventory-evidence:
           name: workbench-control-inventory-evidence
           stop_after: 10
