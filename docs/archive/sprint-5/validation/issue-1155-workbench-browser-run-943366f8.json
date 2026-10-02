@@ -1,0 +1,917 @@
+{
+  "tested_commit": "943366f82d3ed190122b88bddb0ac01e5506276b",
+  "runtime_identical_to": "ae2e65bd2d501da360a261d02d678744e920e125",
+  "runtime_equivalence": "git diff ae2e65bd 943366f8 -- workbench backend is empty; the commit that adds this file changes only docs/",
+  "started": "2026-10-02T02:59:09.381Z",
+  "finished": "2026-10-02T03:19:35.675Z",
+  "clock": {
+    "browser_at_start": "2026-10-02T02:59:09.349Z",
+    "server_date_header_at_start": "Fri, 02 Oct 2026 02:59:09 GMT",
+    "browser_at_finish": "2026-10-02T03:19:35.675Z",
+    "server_date_header_at_finish": "Fri, 02 Oct 2026 03:19:35 GMT"
+  },
+  "environment": {
+    "data_runtime": "fixture",
+    "object_storage": "fixture",
+    "agent_runtime": "controlled",
+    "identity_mode": "normal",
+    "environment": "development",
+    "backend": "uvicorn backend.main:app on 127.0.0.1:8000, started from a clean working tree at 943366f8",
+    "workbench": "vite dev on 127.0.0.1:5174, base /workbench/",
+    "browser": "Claude desktop built-in browser (Chromium)",
+    "viewports": [
+      "1440x900",
+      "1024x768",
+      "390x844"
+    ],
+    "accounts": [
+      "primary claims_professional",
+      "second claims_professional",
+      "operations"
+    ]
+  },
+  "phases": {
+    "A": "02:59:09 to 03:12:09 UTC on the first seed",
+    "B": "backend restarted at 943366f8 (Claim store recreated, staff accounts kept), signed in, reseeded at 03:13:28 UTC; AT-10 taken and rejected",
+    "C": "supplementary blocks on the phase B data for controls whose click was not recorded in phases A and B"
+  },
+  "blocks": [
+    {
+      "name": "A1 sign-in, presence, seed",
+      "started": "2026-10-02T02:59:09.381Z",
+      "finished": "2026-10-02T02:59:16.536Z",
+      "data": {
+        "wrongCredentials": "The email or password was not recognised.",
+        "pathAfterLogin": "/workbench",
+        "presence": {
+          "online": true,
+          "available": true,
+          "revision": 4
+        },
+        "seedStatus": 200,
+        "seeded": [
+          "clm_fixture_at01",
+          "clm_fixture_at06",
+          "clm_fixture_at04",
+          "clm_fixture_at02",
+          "clm_fixture_at05",
+          "clm_fixture_at10"
+        ]
+      }
+    },
+    {
+      "name": "A2 queue and shell at 1440 px",
+      "started": "2026-10-02T02:59:31.478Z",
+      "finished": "2026-10-02T02:59:44.712Z",
+      "data": {
+        "controls": [
+          "Workbench",
+          "0 Draft claims",
+          "Claim conversations",
+          "Staff Agent",
+          "Account menu for Claims Professional",
+          "Hide Claim queue",
+          "Refresh Workbench projection",
+          "Search claims",
+          "Filters",
+          "The insured vehicle was rear-ended while",
+          "Open Staff Agent"
+        ],
+        "unnamed": 0,
+        "noMatch": true,
+        "cleared": true,
+        "searchHit": 1,
+        "filtersExpanded": "true",
+        "filterSelects": [
+          "Claim status",
+          "Claim priority",
+          "Staff tag"
+        ],
+        "injectedListFailure": {
+          "staleMarker": true,
+          "alert": true
+        },
+        "retryRecovered": true,
+        "menuItems": [
+          "Profile",
+          "Account & Security",
+          "Notifications",
+          "Language & Display",
+          "Help & Feedback",
+          "Sign out"
+        ],
+        "menuFocusFirst": "Profile",
+        "menuArrow": "Account & Security",
+        "menuEscapeReturnsFocus": true,
+        "queueCardClick": "/workbench/claims/clm_fixture_at10"
+      }
+    },
+    {
+      "name": "A3 workspace header, sections, tab close, injected retries",
+      "started": "2026-10-02T02:59:55.171Z",
+      "finished": "2026-10-02T03:00:12.186Z",
+      "data": {
+        "recordReferences": "Record references for The insured vehicle was rear-ended whi",
+        "sectionTabs": [
+          "Overview",
+          "Conversation",
+          "Claim information",
+          "Evidence",
+          "Reference checks",
+          "External services",
+          "Signals",
+          "Activity"
+        ],
+        "sectionArrow": [
+          "Conversation",
+          "/workbench/claims/clm_fixture_at10/conversation"
+        ],
+        "closeButton": [
+          2,
+          1
+        ],
+        "retryClaimFailure": "could not be opened",
+        "retryClaimRecovered": "Revision 3",
+        "retrySectionFailure": "unavailable",
+        "retrySectionRecovered": "Evidence 3 records",
+        "claimInformation": "Claim information 4 fields"
+      }
+    },
+    {
+      "name": "A4 AT-04 accept, own and foreign revisions, resolve",
+      "started": "2026-10-02T03:00:27.498Z",
+      "finished": "2026-10-02T03:00:54.367Z",
+      "data": {
+        "opens": 4,
+        "accept": {
+          "owner": "Assigned to you",
+          "revision": "Revision 4"
+        },
+        "ownSend": {
+          "noticeSeenIn25Polls": false,
+          "delivered": true,
+          "listPaddingBottom": "72px"
+        },
+        "foreign": {
+          "status": 200,
+          "notice": "This Claim changed in another session (revision 6). Review the latest ",
+          "reviewCleared": true,
+          "reloaded": true
+        },
+        "resolveEmptyBlocked": true,
+        "resolve": {
+          "before": "Revision 6",
+          "after": "Revision 7",
+          "auditHandoffResolved": true
+        },
+        "activityDisclosuresExpanded": 9
+      }
+    },
+    {
+      "name": "A5 AT-10 Take Claim, Approve, decision notice Dismiss",
+      "started": "2026-10-02T03:01:05.180Z",
+      "finished": "2026-10-02T03:01:19.927Z",
+      "data": {
+        "takeDialog": {
+          "text": "Take ownership of this Claim? Take this Claim as its primary owner? Cancel Take ",
+          "initialFocus": "Cancel"
+        },
+        "take": {
+          "noticeSeen": false,
+          "owner": "Assigned to you",
+          "revision": "Revision 9"
+        },
+        "decisionControls": [
+          "Approve Claim",
+          "Reject Claim"
+        ],
+        "approveDialog": {
+          "text": "Approve this Claim? This final Claim decision cannot be changed in this version. Public approval explanation (optional) ",
+          "initialFocus": "Cancel"
+        },
+        "approve": {
+          "noticeSeen": false,
+          "decisionNotice": "Claim NW-AT10-001 was approved and the authoritative projection is now shown at revision 10. ×",
+          "revision": "Revision 10",
+          "dismissCleared": true
+        }
+      }
+    },
+    {
+      "name": "A6 AT-02 accept, signals, evidence, references, external, ownership, notice Dismiss",
+      "started": "2026-10-02T03:01:39.177Z",
+      "finished": "2026-10-02T03:02:24.058Z",
+      "data": {
+        "accept": "Assigned to you",
+        "openWorkActivity": "/workbench/claims/clm_fixture_at02/activity",
+        "reviewSignals": "/workbench/claims/clm_fixture_at02/signals",
+        "signalEmptyBlocked": true,
+        "signal": "sig_at02_policy_cause Confirmed",
+        "secondOpen": "/workbench/claims/clm_fixture_at02/evidence",
+        "viewFile": "The evidence file is not available to view.",
+        "referenceRecords": [
+          "POL-MVP-HOME-2048Policy · synt",
+          "HIST-MVP-2024-017Claim History"
+        ],
+        "externalLink": [
+          "Official information",
+          "_blank",
+          "noreferrer"
+        ],
+        "Invite coworker submitDisabledEmpty": true,
+        "Invite coworker": [
+          "Revision 6",
+          "Revision 7"
+        ],
+        "Request transfer submitDisabledEmpty": true,
+        "Request transfer": [
+          "Revision 7",
+          "Revision 8"
+        ],
+        "foreignNotice": [
+          200,
+          "This Claim changed in another session (revision 9). Review t"
+        ],
+        "foreignDismissed": true
+      }
+    },
+    {
+      "name": "A7 Claim tabs and Staff Agent",
+      "started": "2026-10-02T03:02:42.968Z",
+      "finished": "2026-10-02T03:03:04.994Z",
+      "data": {
+        "tabCount": 6,
+        "overflow": [
+          "true",
+          6
+        ],
+        "overflowPick": [
+          "/workbench/claims/clm_fixture_at01",
+          false
+        ],
+        "arrow": [
+          "open-claim-tab-clm_fixture_at06",
+          "/workbench/claims/clm_fixture_at06"
+        ],
+        "deleteKey": [
+          6,
+          5,
+          "BODY"
+        ],
+        "railOpen": {
+          "role": "dialog",
+          "ariaModal": null,
+          "focus": "staff-agent-message",
+          "notice": "Staff Agent cannot answer right now No Staff Agent model is published for this Workbench environment",
+          "sendDisabled": true,
+          "sendDisabledWithDraft": true
+        },
+        "scope": "2 of 5",
+        "firstEscape": {
+          "scopeOpen": false,
+          "focusOnToggle": true
+        },
+        "secondEscape": {
+          "dialogOpen": false,
+          "focusOnRail": true
+        },
+        "bubbleOpenFocus": "staff-agent-message",
+        "newSession": "New conversation ready Your draft is still here. This conversation will be saved when you ",
+        "doneClosesScope": {
+          "scopeOpen": false,
+          "focusOnToggle": true
+        },
+        "closeReturnsToBubble": {
+          "dialogOpen": false,
+          "focusOnBubble": false
+        },
+        "injectedCapabilityFailure": {
+          "notice": "Staff Agent cannot answer right now Staff Agent model availability could not be checked. Close and reopen the ",
+          "sendDisabled": true,
+          "agentPostsAfterEnter": 0
+        }
+      }
+    },
+    {
+      "name": "A7b bubble-opened panel close with the bubble focused first",
+      "started": "2026-10-02T03:03:16.240Z",
+      "finished": "2026-10-02T03:03:18.746Z",
+      "data": {
+        "focusAfterPreviousClose": "Staff Agent",
+        "opened": [
+          true,
+          "staff-agent-message"
+        ],
+        "closeReturnsToBubble": {
+          "dialogOpen": false,
+          "focusOnBubble": true
+        }
+      }
+    },
+    {
+      "name": "A8 Conversations page at 1440 px",
+      "started": "2026-10-02T03:03:31.937Z",
+      "finished": "2026-10-02T03:03:52.323Z",
+      "data": {
+        "categories": [
+          "Action needed, 1 conversations",
+          "My conversations, 3 conversations",
+          "Staff Agent, 0 conversations"
+        ],
+        "categoryArrow": "My conversations, 3 conversations",
+        "queueToggle": [
+          "Show conversation queue",
+          "false"
+        ],
+        "queueToggleBack": "Hide conversation queue",
+        "takeOver": [
+          "/workbench/conversations/ses_fixture_at05",
+          []
+        ],
+        "reply": {
+          "delivered": true,
+          "noticeSeen": false
+        },
+        "openClaim": "/workbench/claims/clm_fixture_at05/summary",
+        "conversationRow": "/workbench/conversations/ses_fixture_at05",
+        "closeTab": "/workbench/conversations"
+      }
+    },
+    {
+      "name": "A9 Account settings, all five links clicked",
+      "started": "2026-10-02T03:04:02.967Z",
+      "finished": "2026-10-02T03:04:13.006Z",
+      "data": {
+        "navLinks": [
+          "profile",
+          "security",
+          "notifications",
+          "appearance",
+          "help"
+        ],
+        "profile": [
+          "Profile changes are saved on this browser. Account-wide profile sync still requires backend support."
+        ],
+        "securityPath": "/workbench/settings/security",
+        "security": [
+          [
+            "Change password",
+            true
+          ],
+          [
+            "Set up",
+            true
+          ],
+          [
+            "Manage devices",
+            true
+          ],
+          [
+            "Remove",
+            true
+          ]
+        ],
+        "notifications": [
+          "/workbench/settings/notifications",
+          "Notification preferences are saved on this browser. Account sync still requires backend support."
+        ],
+        "appearance": [
+          "/workbench/settings/appearance",
+          "Language and display preferences are saved on this browser. Account sync still requires backend support."
+        ],
+        "helpDisabledTargets": 2,
+        "feedback": [
+          "/workbench/settings/help",
+          "Thank you. Your feedback was submitted."
+        ],
+        "backToProfile": "/workbench/settings/profile"
+      }
+    },
+    {
+      "name": "A10 1024 px: rail names, AT-06 composer, bubble clearance",
+      "started": "2026-10-02T03:05:42.737Z",
+      "finished": "2026-10-02T03:05:55.187Z",
+      "data": {
+        "viewport": [
+          1024,
+          768
+        ],
+        "railNames": [
+          [
+            "Workbench",
+            "none"
+          ],
+          [
+            "0 Draft claims",
+            "none"
+          ],
+          [
+            "Claim conversations",
+            "none"
+          ],
+          [
+            "Staff Agent",
+            "none"
+          ],
+          [
+            "Account menu for Claims Professional",
+            "none"
+          ]
+        ],
+        "unavailableComposer": [
+          true,
+          567,
+          ""
+        ],
+        "bubble": {
+          "/overview": 0,
+          "/activity": 2,
+          "/conversation": 0
+        }
+      }
+    },
+    {
+      "name": "A10b 1024 px: bubble overlap of visible text only; AT-06 composer text",
+      "started": "2026-10-02T03:06:18.138Z",
+      "finished": "2026-10-02T03:06:28.253Z",
+      "data": {
+        "bubble": {
+          "/overview": 0,
+          "/activity": 0,
+          "/conversation": 0
+        },
+        "srOnlyOverlaps": {
+          "/overview": 0,
+          "/activity": 1,
+          "/conversation": 0
+        },
+        "unavailableComposer": [
+          true,
+          567,
+          true,
+          "Staff messaging not available yet Messaging is not available for this claim yet."
+        ]
+      }
+    },
+    {
+      "name": "A11 390 px: queue toggle, Staff Agent panel, conversation back",
+      "started": "2026-10-02T03:06:40.261Z",
+      "finished": "2026-10-02T03:06:56.202Z",
+      "data": {
+        "viewport": [
+          390,
+          844
+        ],
+        "compact": true,
+        "noClaimOpen": [
+          "/workbench/",
+          "visible",
+          "Hide Claim queue",
+          "true"
+        ],
+        "claimOpen": [
+          "hidden",
+          "visible",
+          "Show Claim queue",
+          "false"
+        ],
+        "toQueue": [
+          "/workbench/claims/clm_fixture_at04",
+          "hidden",
+          "Show Claim queue",
+          "false"
+        ],
+        "toQueueFromAt01": [
+          "/workbench",
+          "visible",
+          "Hide Claim queue"
+        ],
+        "scrollWidth": 390,
+        "agent": [
+          [
+            390,
+            734
+          ],
+          "staff-agent-message"
+        ],
+        "agentClosed": [
+          false,
+          true
+        ],
+        "backPresent": false,
+        "conversationBack": "/workbench/conversations/ses_fixture_at05",
+        "scrollWidthEnd": 390
+      }
+    },
+    {
+      "name": "A11b 390 px: conversation back button; toggle replication summary",
+      "started": "2026-10-02T03:09:19.463Z",
+      "finished": "2026-10-02T03:09:23.479Z",
+      "data": {
+        "viewport": [
+          390,
+          844
+        ],
+        "compact": true,
+        "back": [
+          true,
+          "flex",
+          "Conversations"
+        ],
+        "conversationBack": "/workbench/conversations",
+        "scrollWidth": 390,
+        "toggleReplication": {
+          "note": "A11 first toggle from AT-04 Overview stayed on /workbench/claims/clm_fixture_at04 with queue hidden. Later attempts on this page, all returned to /workbench with the queue visible:",
+          "fromAt01": 1,
+          "freshNavigationFourStarts": 4,
+          "delayedClicks20to1000ms": 5,
+          "afterViewportSwitchFromWorkbench": 1,
+          "afterViewportSwitchFromAt06Conversation": 1,
+          "syntheticClickAt0msBeforeReactRender": "stayed on Claim (stale /workbench render; harness timing, not user-reachable)"
+        }
+      }
+    },
+    {
+      "name": "A12a Sign out of the primary account",
+      "started": "2026-10-02T03:09:33.663Z",
+      "finished": "2026-10-02T03:09:39.486Z",
+      "data": {
+        "storageKeys": [
+          "northwind.workbench.tabs.v1:stf_1443d481a48592e2"
+        ],
+        "previousStaffTabs": 6,
+        "visibleTabs": 6,
+        "signOutDialog": "Sign out of your account? After signing out, you will need to enter your account details again to continue working. Canc",
+        "signOutConfirmInitialFocus": "Cancel",
+        "afterPath": "/workbench/login",
+        "storageKeysAfter": [
+          "northwind.workbench.tabs.v1:stf_1443d481a48592e2"
+        ]
+      }
+    },
+    {
+      "name": "A12b Sign in as the second staff account",
+      "started": "2026-10-02T03:09:52.365Z",
+      "finished": "2026-10-02T03:09:55.876Z",
+      "data": {
+        "path": "/workbench",
+        "tabsVisible": 0,
+        "storageKeys": [
+          "northwind.workbench.tabs.v1:stf_114bc773cd1ee05a",
+          "northwind.workbench.tabs.v1:stf_1443d481a48592e2"
+        ],
+        "profile": "Account menu for Second Claims Professional"
+      }
+    },
+    {
+      "name": "A12c Second staff: AT-02 signals (no decision action) and accept cowork",
+      "started": "2026-10-02T03:10:27.805Z",
+      "finished": "2026-10-02T03:10:31.737Z",
+      "data": {
+        "revBefore": "Revision 9",
+        "noticeSeen": false,
+        "decisionDefault": "accepted",
+        "confirm": null,
+        "result": [],
+        "revAfter": "Revision 10",
+        "focusAfterSubmit": "BODY",
+        "confirmationDialog": "none; the decision select defaults to Accept and submits directly",
+        "signalsObservedBeforeBlock": "Read in an unrecorded call shortly before this block started: both AT-02 signals showed \"No signal-decision action is projected for this signal.\" and no Record decision control"
+      }
+    },
+    {
+      "name": "A12d Second staff: decline transfer with injected stale If-Match, then resubmit",
+      "started": "2026-10-02T03:10:49.583Z",
+      "finished": "2026-10-02T03:10:55.408Z",
+      "data": {
+        "revBefore": "Revision 10",
+        "injected": {
+          "url": "/api/v1/workbench/claims/clm_fixture_at02/collaboration-requests/col_6a59c24e7c9f13574ec2",
+          "method": "PATCH",
+          "originalIfMatch": "10"
+        },
+        "inputKept": "rejected",
+        "revAfterStale": "Revision 10",
+        "formClosed": true,
+        "revAfterResubmit": "Revision 11",
+        "transferActionStillProjected": false,
+        "networkStatuses": [
+          "PATCH 409 Conflict (injected If-Match: 2)",
+          "PATCH 200 OK (resubmit with the kept Decline selection)"
+        ],
+        "staleMessageText": "not captured: the script read only role=alert/status regions and the form message is outside them; the 409, kept selection, and unchanged revision were captured"
+      }
+    },
+    {
+      "name": "A13 Operations account: no tabs, no Workbench access, no Retry",
+      "started": "2026-10-02T03:11:24.068Z",
+      "finished": "2026-10-02T03:11:31.289Z",
+      "data": {
+        "staff2Tabs": 1,
+        "signedOut": "/workbench/login",
+        "path": "/workbench",
+        "profile": "Account menu for Operations Analyst",
+        "tabs": 0,
+        "queue": "MY WORK Claim queue No Workbench access This staff account is not authorised to read Workbench Claims, so retrying will not help. Ask your administrator to review your staff role. Request reference: r",
+        "retry": false
+      }
+    },
+    {
+      "name": "A14 Primary: return AT-02 to the queue (submit disabled while empty)",
+      "started": "2026-10-02T03:12:04.536Z",
+      "finished": "2026-10-02T03:12:09.658Z",
+      "data": {
+        "tabsOnReturn": 6,
+        "revBefore": "Revision 11",
+        "noticeSeen": false,
+        "fields": [
+          [
+            "TEXTAREA",
+            "reason",
+            true
+          ]
+        ],
+        "submitLabel": "Return to queue",
+        "requeueEmptyDisabled": true,
+        "enabledAfterReason": true,
+        "confirm": null,
+        "confirmFocus": null,
+        "revAfter": "Revision 12",
+        "ownership": "Unassigned",
+        "status": []
+      }
+    },
+    {
+      "name": "B1 Phase B: restart, sign in as primary, seed",
+      "started": "2026-10-02T03:12:57.088Z",
+      "finished": "2026-10-02T03:13:28.768Z",
+      "data": {
+        "note": "Backend restarted at 943366f8 without -Fresh: Claim store recreated, staff accounts kept",
+        "oldSessionStatus": 404,
+        "atLogin": "/workbench/login",
+        "seedStatus": 200,
+        "seedFirstAttempt": "401: script sent no Authorization header (harness error)",
+        "seeded": [
+          "clm_fixture_at01",
+          "clm_fixture_at06",
+          "clm_fixture_at04",
+          "clm_fixture_at02",
+          "clm_fixture_at05",
+          "clm_fixture_at10"
+        ],
+        "seededAt": "2026-10-02T03:13:28.768Z",
+        "pathAfterLogin": "/workbench/claims/clm_fixture_at02 (tab restored from this staff member's stored tabs)"
+      }
+    },
+    {
+      "name": "B2 Phase B: Take AT-10",
+      "started": "2026-10-02T03:13:51.566Z",
+      "finished": "2026-10-02T03:13:54.571Z",
+      "data": {
+        "revBefore": "Revision 8",
+        "noticeSeen": false,
+        "takeDialogFocus": "Cancel",
+        "owner": "Assigned to you",
+        "revAfterTake": "Revision 9",
+        "status": [
+          "Claim assigned to you. Review started. ×"
+        ],
+        "decisionButtons": []
+      }
+    },
+    {
+      "name": "B3 Phase B: Reject AT-10 with explanation; dismiss the decision notice",
+      "started": "2026-10-02T03:15:04.435Z",
+      "finished": "2026-10-02T03:15:10.663Z",
+      "data": {
+        "continueReview": "Continue review revealed Approve Claim and Reject Claim at Revision 9",
+        "revBefore": "Revision 9",
+        "noticeSeen": false,
+        "dialog": "Reject this Claim? This final Claim decision cannot be changed in this version. Public rejection explanation This text may be shown to the claimant. Cancel Reject Claim",
+        "initialFocus": "Cancel",
+        "confirmLabel": "Reject Claim",
+        "emptyExplanationError": "Enter a public rejection explanation.",
+        "revAfterEmpty": "Revision 9",
+        "dialogClosed": true,
+        "result": [
+          "Claim NW-AT10-001 was rejected and the authoritative projection is now shown at revision 10. ×"
+        ],
+        "revAfter": "Revision 10",
+        "decisionButtonsAfter": [],
+        "focusAfter": "BODY (the Reject Claim trigger is removed once the decision is recorded)",
+        "dismissLabel": "Dismiss Claim decision notice",
+        "dismissed": true
+      }
+    },
+    {
+      "name": "C1a Supplementary: rail links, desktop queue toggle, Refresh, account menu item",
+      "started": "2026-10-02T03:16:19.066Z",
+      "finished": "2026-10-02T03:16:29.221Z",
+      "data": {
+        "viewport": [
+          1440,
+          900
+        ],
+        "draftsLink": [
+          "/workbench/drafts",
+          ""
+        ],
+        "conversationsLink": "/workbench/conversations",
+        "workbenchLink": "/workbench",
+        "desktopToggle": [
+          [
+            "Hide Claim queue",
+            true
+          ],
+          [
+            "Show Claim queue",
+            "false",
+            null
+          ],
+          [
+            "Hide Claim queue",
+            "true",
+            true
+          ]
+        ],
+        "refreshListRequests": [
+          "/api/v1/workbench/claims?view=created_routed&limit=25"
+        ],
+        "menuItemNotifications": "/workbench/settings/notifications"
+      }
+    },
+    {
+      "name": "C1b Supplementary: injected filter-metadata failure and Retry; status filter; Clear filters",
+      "started": "2026-10-02T03:16:39.497Z",
+      "finished": "2026-10-02T03:16:47.831Z",
+      "data": {
+        "injectedMetadataFailure": "/api/v1/workbench/claims/filter-metadata",
+        "retryPresent": "not shown after one failure (client retried)",
+        "selects": [
+          [
+            "Claim status",
+            [
+              "",
+              "collecting",
+              "ready_for_next",
+              "awaiting_evidence",
+              "professional_review",
+              "created"
+            ]
+          ],
+          [
+            "Claim priority",
+            [
+              "",
+              "routine",
+              "standard",
+              "high",
+              "urgent",
+              "immediate"
+            ]
+          ],
+          [
+            "Staff tag",
+            [
+              "",
+              "safety.accessibility_support",
+              "evidence.assessment_report",
+              "progress.assessor_assigned",
+              "stakeholder.assessor",
+              "progress.assessor_requested"
+            ]
+          ]
+        ],
+        "statusFilter": [
+          "collecting",
+          "?workflow_state=collecting",
+          [
+            "/api/v1/workbench/claims?view=created_routed&workflow_state=collecting&limit=25"
+          ],
+          0
+        ],
+        "clearFilters": [
+          true,
+          ""
+        ],
+        "metadataNote": "One injected metadata failure was absorbed by the client retry, so no error state or Retry appeared; C1c repeats the check with every metadata request failing",
+        "selectsNote": "First six option values of each select"
+      }
+    },
+    {
+      "name": "C1c Supplementary: injected filter-metadata failure until shown, then Retry",
+      "started": "2026-10-02T03:17:08.240Z",
+      "finished": "2026-10-02T03:17:12.613Z",
+      "data": {
+        "injectedMetadataFailures": 2,
+        "errorState": "MY WORK Claim queue Claim queue unavailable The Workbench could not load the server-published queue controls. The current URL has been preserved; retry when the service is available. The Workbench service could not be re",
+        "retryLabel": "Retry",
+        "afterRetry": "MY WORK Submitted claims 1 total Search claims Filters The insured vehicle was rear-ended while stopped at traffic light",
+        "path": "/workbench/claims/clm_fixture_at10"
+      }
+    },
+    {
+      "name": "C1d Supplementary: AT-02 disclosures clicked (Overview, Evidence, External services, Signals, Activity)",
+      "started": "2026-10-02T03:17:28.346Z",
+      "finished": "2026-10-02T03:17:38.808Z",
+      "data": {
+        "overviewDisclosureGroups": {
+          "Accept Claim": 1,
+          "Source": 18,
+          "Gap": 2
+        },
+        "overviewClicked": [
+          35,
+          25
+        ],
+        "showMoreAfter": null,
+        "evidence": [
+          4,
+          3
+        ],
+        "external": [
+          3,
+          2
+        ],
+        "signals": [
+          3,
+          2
+        ],
+        "reviewHandoffContextPresent": "not on AT-02 in phase B: its handoff was not accepted after the reseed; see C1e",
+        "activity": [
+          8,
+          7
+        ],
+        "countsNote": "Each pair is [summaries, opened by click]; the first summary in every section is the already-open Record references header"
+      }
+    },
+    {
+      "name": "C1e Supplementary: accept AT-04 handoff on reseeded data; Review handoff context disclosure",
+      "started": "2026-10-02T03:17:53.165Z",
+      "finished": "2026-10-02T03:18:23.852Z",
+      "data": {
+        "revBefore": "Revision 3",
+        "confirmLabel": "Confirm Accept Claim",
+        "revAfter": "Revision 4",
+        "owner": "Assigned to you",
+        "reviewHandoffContextPresent": "not on Overview after acceptance; present on Activity",
+        "handoffPacket": "Activity: Review handoff context opened: \"Reason The claimant reported an injured, trapped passenger and an unsafe roadside location during intake. Priority Urgent Incident A rear...\"",
+        "reviewHandoffContextOpen": true
+      }
+    },
+    {
+      "name": "C1f Supplementary: Reference checks disclosures; AT-10 after rejection has no retention-hold control",
+      "started": "2026-10-02T03:19:14.405Z",
+      "finished": "2026-10-02T03:19:22.746Z",
+      "data": {
+        "referenceChecksOpened": [
+          3,
+          3,
+          [
+            "Record references for Water entered the ",
+            "POL-MVP-HOME-2048Policy · synthetic-poli",
+            "HIST-MVP-2024-017Claim History · synthet"
+          ]
+        ],
+        "at10": [
+          "Revision 10",
+          "STAFF NEXT ACTION Review in progress You now own this claim. Continue reviewing the claim information and evidence. Continue review"
+        ],
+        "holdControls": [],
+        "holdText": null,
+        "referenceChecksNote": "[summaries clicked, opened, labels]; the Record references header was closed here and is one of the three"
+      }
+    },
+    {
+      "name": "C1g Supplementary: AT-10 next action after the rejection",
+      "started": "2026-10-02T03:19:33.858Z",
+      "finished": "2026-10-02T03:19:35.675Z",
+      "data": {
+        "decisionSummary": [
+          "Claim rejected",
+          "Recorded 2 Oct 2026, 4:15 pm · Rejected"
+        ],
+        "afterContinue": [
+          "/workbench/claims/clm_fixture_at10/fields",
+          null,
+          []
+        ],
+        "revision": "Revision 10"
+      }
+    }
+  ],
+  "notes": [
+    "Timestamps: every block records started and finished with new Date().toISOString() in the page at the start and end of the block script. The browser clock was compared with the backend HTTP Date header at the start and the finish of the run and agreed to the second. This file was written and committed after the run finished.",
+    "Navigation between routes used history.pushState with a popstate event unless a block names the control it clicked. Sign-in used the form. Seeding used POST /api/v1/workbench/demo/seed-scenarios with the signed-in staff token, as there is no seed control in the UI.",
+    "Injected failures (queue list, Claim detail, section resource, Staff Agent capabilities, filter metadata, stale If-Match) overrode window.fetch in the page and restored it immediately afterwards.",
+    "A7 closeReturnsToBubble.focusOnBubble is false because the scripted .click() on the bubble does not move focus to it. A7b focuses the bubble first, as a keyboard or pointer user would, and focus returns to it.",
+    "A10 counted one intersection on Activity from a visually hidden (.sr-only) text node. A10b repeats the measurement counting only rendered text: none intersects the bubble.",
+    "A11 backPresent false and conversationBack staying on the conversation came from a selector that did not match the button. A11b clicks the Conversations back button and returns to /workbench/conversations.",
+    "A11 toQueue: the first compact toggle from AT-04 Overview stayed on the Claim with the queue hidden. The same result occurred once in the earlier run on ae2e65bd. It was not reproduced in 12 later attempts on this head, including two that repeated the viewport switch. A click dispatched in the same tick as the route change reproduces the result against the previous render, which a user cannot do. The cause is not identified; the inventory record lists it as an open question.",
+    "A12c and B3: after a collaboration decision and after a Claim decision, focus is on <body> because the control that opened the form or dialog is removed. The inventory record routes this with the Delete-key finding.",
+    "A12d: the on-page stale message text was not captured; the 409 response, the kept Decline selection, and the unchanged revision were.",
+    "B1: the first seed call returned 401 because the script sent no Authorization header; the second call with the staff token returned 200.",
+    "C1b: one injected metadata failure was absorbed by the client retry. C1c fails every metadata request until the error state appears, then restores the network and clicks Retry.",
+    "A full page load of /workbench without a trailing slash is answered by the Vite dev server with its base-path notice; in-app navigation is unaffected. All runs entered at /workbench/."
+  ]
+}
