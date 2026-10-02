@@ -1,80 +1,83 @@
 import { describe, expect, it } from 'vitest'
 
-import { choiceLabel, factCardsByAgentMessage, notedProgress, progressLabel } from './recordedFacts.js'
+import {
+  choiceLabel,
+  factCardsByAgentMessage,
+  fileReadings,
+  notedProgress,
+  progressLabel,
+} from './recordedFacts.js'
 
-const messages = [
-  { message_id: 'm1', actor: 'claimant' },
-  { message_id: 'a1', actor: 'agent', in_reply_to: 'm1' },
-  { message_id: 'm2', actor: 'claimant' },
-  { message_id: 'a2-retry', actor: 'agent', in_reply_to: 'm2' },
-  { message_id: 'a2', actor: 'agent', in_reply_to: 'm2' },
-]
-
-const said = (value, refs, status = 'proposed', assertionRefs = []) => ({
-  value,
-  status,
-  source_refs: refs,
-  assertions: assertionRefs.map((sourceRefs) => ({ source_refs: sourceRefs })),
+const reply = (id, recorded = [], fileReads = []) => ({
+  message_id: id,
+  actor: 'agent',
+  content: {
+    type: 'text',
+    text: 'Thanks.',
+    turn_record: {
+      recorded_facts: recorded.map((code) => ({ field_code: code })),
+      file_reads: fileReads,
+    },
+  },
 })
 
+const field = (value, status = 'proposed') => ({ value, status })
 const codes = (cards, id) => (cards.get(id) || []).map((fact) => fact.fieldCode)
 
 describe('Just noted cards', () => {
-  it('puts each fact under the reply to the message that last stated it', () => {
+  it('lists the facts each turn recorded, with their current value', () => {
+    const messages = [
+      { message_id: 'm1', actor: 'claimant' },
+      reply('a1', ['incident.location']),
+      { message_id: 'm2', actor: 'claimant' },
+      reply('a2', ['incident.occurred_at']),
+    ]
     const cards = factCardsByAgentMessage(messages, {
-      'incident.location': said('Queen St', ['m1']),
-      'incident.occurred_at': said('8pm', ['m2'], 'confirmed', [['m1'], ['m2']]),
+      'incident.location': field('Queen St'),
+      'incident.occurred_at': field('8pm', 'confirmed'),
     })
 
     expect(codes(cards, 'a1')).toEqual(['incident.location'])
     expect(codes(cards, 'a2')).toEqual(['incident.occurred_at'])
-    expect(cards.has('a2-retry')).toBe(false)
     expect(cards.get('a2')[0].toCheck).toBe(false)
   })
 
-  it('keeps a corrected fact on its original card', () => {
-    const cards = factCardsByAgentMessage(messages, {
-      'vehicle.drivable': said(true, ['claim:c:revision:4:field:vehicle.drivable'], 'confirmed', [['m1']]),
-    })
+  it('shows a field recorded twice only under the later reply', () => {
+    const cards = factCardsByAgentMessage(
+      [reply('a1', ['incident.location']), reply('a2', ['incident.location'])],
+      { 'incident.location': field('Queen Street') },
+    )
 
-    expect(codes(cards, 'a1')).toEqual(['vehicle.drivable'])
+    expect(cards.has('a1')).toBe(false)
+    expect(codes(cards, 'a2')).toEqual(['incident.location'])
+    expect(cards.get('a2')[0].value).toBe('Queen Street')
   })
 
-  it('keeps a fact where its value was stated when a later "yes" or repeat adds sources', () => {
-    const cards = factCardsByAgentMessage(messages, {
-      'incident.location': {
-        value: 'Queen St',
-        status: 'confirmed',
-        source_refs: ['m1', 'm2'],
-        current_assertion_id: 'as1',
-        assertions: [
-          { assertion_id: 'as1', source_refs: ['m1'] },
-          { assertion_id: 'as2', source_refs: ['m2'] },
-        ],
+  it('leaves out conflicting, empty and superseded facts, and replies with no record', () => {
+    const cards = factCardsByAgentMessage(
+      [
+        reply('a1', ['incident.occurred_at', 'incident.description', 'incident.location']),
+        { message_id: 'a0', actor: 'agent', content: { type: 'text', text: 'Hi' } },
+      ],
+      {
+        'incident.occurred_at': field('Monday', 'disputed'),
+        'incident.description': field(''),
+        'incident.location': field('Queen St', 'superseded'),
       },
-    })
-
-    expect(codes(cards, 'a1')).toEqual(['incident.location'])
-    expect(cards.has('a2')).toBe(false)
-  })
-
-  it('leaves a fact with conflicting answers off the cards', () => {
-    const cards = factCardsByAgentMessage(messages, {
-      'incident.occurred_at': said('Monday', ['m1', 'm2'], 'disputed', [['m1'], ['m2']]),
-    })
+    )
 
     expect(cards.size).toBe(0)
   })
+})
 
-  it('leaves out hidden, empty and unsourced fields', () => {
-    const cards = factCardsByAgentMessage(messages, {
-      'claimant.client_number': said('C-1', ['m1']),
-      'incident.description': said('', ['m1']),
-      'policy.number': said('P-1', ['policy:1']),
-      'incident.location': { value: 'Queen St', status: 'superseded', source_refs: ['m1'] },
-    })
+describe('file readings', () => {
+  it('keeps the latest reading of each file', () => {
+    const readings = fileReadings([
+      reply('a1', [], [{ evidence_id: 'e1', kind: 'other_document' }]),
+      reply('a2', [], [{ evidence_id: 'e1', kind: 'incident_photo' }]),
+    ])
 
-    expect(cards.size).toBe(0)
+    expect(readings.get('e1')).toBe('incident_photo')
   })
 })
 

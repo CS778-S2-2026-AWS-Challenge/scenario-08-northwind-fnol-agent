@@ -2,6 +2,7 @@ import { AgentTurnDisclosure } from './AgentTurnActivity.jsx'
 import AttachmentPreview from './AttachmentPreview.jsx'
 import ClaimantAvatar from './ClaimantAvatar.jsx'
 import { developerModeEnabled } from '../runtimeConfig.js'
+import { documentTaskTitle } from '../claimDocumentProjection.js'
 import { evidenceFileStatusLabel, messageText } from '../messagePresentation.js'
 
 // Conversation building blocks: the opening prompts, one row per message, and
@@ -113,7 +114,18 @@ function localAttachmentFile(attachment) {
   return attachment?.previewFile || attachment?.stagedFile || attachment?.retryFile || null
 }
 
-export function ClaimantMessageAttachments({ message, evidenceItems, attachments, previewFiles }) {
+const UNSPECIFIED_KINDS = new Set(['other_document', 'other'])
+
+// A file sent in the chat has no kind until the assistant reads it; say what it
+// was read as, or that it is still being looked at.
+function attachmentStatus(evidence, readings) {
+  const status = evidenceFileStatusLabel(evidence.file_status, evidence.status)
+  if (!UNSPECIFIED_KINDS.has(evidence.kind) || evidence.status !== 'received') return status
+  const read = readings?.get(evidence.evidence_id)
+  return read ? `Read as: ${documentTaskTitle({ kind: read })}` : 'Received · being checked'
+}
+
+export function ClaimantMessageAttachments({ message, evidenceItems, attachments, previewFiles, readings }) {
   const presentedAttachments = Array.isArray(attachments)
     ? attachments.map((attachment) => ({
       ...attachment,
@@ -126,9 +138,7 @@ export function ClaimantMessageAttachments({ message, evidenceItems, attachments
         id: evidenceId,
         name: evidence?.original_filename || evidence?.kind || `Attached file ${index + 1}`,
         previewFile: previewFiles?.get(evidenceId),
-        statusLabel: evidence
-          ? evidenceFileStatusLabel(evidence.file_status, evidence.status)
-          : 'Attached',
+        statusLabel: evidence ? attachmentStatus(evidence, readings) : 'Attached',
       }
     })
 
@@ -153,7 +163,7 @@ export function ClaimantMessageAttachments({ message, evidenceItems, attachments
   )
 }
 
-export function ClaimantMessageRow({ message, displayName, evidenceItems, previewFiles, children }) {
+export function ClaimantMessageRow({ message, displayName, evidenceItems, previewFiles, readings, children }) {
   const text = messageText(message)
   return (
     <article className="msg-user">
@@ -165,6 +175,7 @@ export function ClaimantMessageRow({ message, displayName, evidenceItems, previe
               message={message}
               evidenceItems={evidenceItems}
               previewFiles={previewFiles}
+              readings={readings}
             />
           </div>
           {children}
