@@ -60,6 +60,7 @@ const waitingConversation = {
     claim_id: 'clm_2002',
     display_reference: 'NW-2002',
     claimant: { display_name: 'Jamie Lee' },
+    active_session_id: 'ses_waiting',
     work_summary: { unread_claimant_messages: 0 },
     customer_next_step: { responsible_party: 'claimant' },
   },
@@ -148,24 +149,26 @@ it('uses counted category tabs with Action needed selected by default and keyboa
   const user = userEvent.setup()
   renderPage()
 
-  const attention = screen.getByRole('tab', { name: 'Action needed, 2 conversations' })
-  const assigned = screen.getByRole('tab', { name: 'My conversations, 3 conversations' })
+  const attention = screen.getByRole('tab', { name: 'Action needed, 1 conversations' })
+  const assigned = screen.getByRole('tab', { name: 'My conversations, 2 conversations' })
   const agent = screen.getByRole('tab', { name: 'Staff Agent, 7 conversations' })
   expect(attention).toHaveAttribute('aria-selected', 'true')
-  expect(screen.getByRole('list', { name: 'Conversation queue' })).toHaveTextContent('Alex Morgan')
   expect(screen.getByRole('list', { name: 'Conversation queue' })).toHaveTextContent('Morgan Chen')
+  expect(screen.getByRole('list', { name: 'Conversation queue' })).not.toHaveTextContent('Alex Morgan')
 
   attention.focus()
   await user.keyboard('{ArrowRight}')
   expect(assigned).toHaveAttribute('aria-selected', 'true')
   expect(assigned).toHaveFocus()
-  expect(screen.getByRole('list', { name: 'Conversation queue' })).toHaveTextContent('Taylor Singh')
+  expect(screen.getByRole('list', { name: 'Conversation queue' })).toHaveTextContent('Alex Morgan')
+  expect(screen.getByRole('list', { name: 'Conversation queue' })).toHaveTextContent('Jamie Lee')
+  expect(screen.getByRole('list', { name: 'Conversation queue' })).not.toHaveTextContent('Taylor Singh')
 
   await user.keyboard('{End}')
   expect(agent).toHaveAttribute('aria-selected', 'true')
 })
 
-it('keeps an unassigned unread customer reply in Action needed without adding it to My conversations', async () => {
+it('does not treat an unassigned unread customer reply as an unclaimed assistance request', async () => {
   const user = userEvent.setup()
   const unassignedConversation = {
     ...claimConversation,
@@ -184,16 +187,72 @@ it('keeps an unassigned unread customer reply in Action needed without adding it
   }
   renderPage({ conversations: [unassignedConversation], assistanceRequests: [] })
 
-  expect(screen.getByRole('tab', { name: 'Action needed, 1 conversations' })).toHaveAttribute('aria-selected', 'true')
-  expect(screen.getByRole('list', { name: 'Conversation queue' })).toHaveTextContent('Robin Patel')
+  expect(screen.getByRole('tab', { name: 'Action needed, 0 conversations' })).toHaveAttribute('aria-selected', 'true')
+  expect(screen.getByRole('status')).toHaveTextContent('Nothing needs attention')
+  expect(screen.getByRole('status')).toHaveTextContent('New unassigned staff assistance requests will appear here.')
 
   await user.click(screen.getByRole('tab', { name: 'My conversations, 0 conversations' }))
   expect(screen.getByRole('status')).toHaveTextContent('No assigned conversations')
 })
 
+it('keeps the one current owned session and removes historical or resolved work from My conversations', async () => {
+  const user = userEvent.setup()
+  const completedClaimConversation = {
+    ...claimConversation,
+    conversation_id: 'claim:ses_completed_claim',
+    claim_id: 'clm_completed_claim',
+    session_id: 'ses_completed_claim',
+    detail: {
+      ...claimDetail,
+      claim_id: 'clm_completed_claim',
+      active_session_id: 'ses_completed_claim',
+      terminal_disposition: { value: 'completed' },
+      claimant: { display_name: 'Casey Brown' },
+    },
+  }
+  const historicalSession = {
+    ...claimConversation,
+    conversation_id: 'claim:ses_historical',
+    session_id: 'ses_historical',
+    status: 'closed',
+  }
+  const pausedSession = {
+    ...waitingConversation,
+    conversation_id: 'claim:ses_paused',
+    claim_id: 'clm_paused',
+    session_id: 'ses_paused',
+    status: 'paused',
+    detail: {
+      ...waitingConversation.detail,
+      claim_id: 'clm_paused',
+      active_session_id: null,
+      claimant: { display_name: 'Parker Jones' },
+    },
+  }
+  renderPage({
+    conversations: [
+      claimConversation,
+      historicalSession,
+      pausedSession,
+      resolvedConversation,
+      completedClaimConversation,
+    ],
+    assistanceRequests: [],
+  })
+
+  await user.click(screen.getByRole('tab', { name: 'My conversations, 2 conversations' }))
+  const queue = screen.getByRole('list', { name: 'Conversation queue' })
+  expect(queue).toHaveTextContent('Alex Morgan')
+  expect(queue).toHaveTextContent('Casey Brown')
+  expect(queue).not.toHaveTextContent('Parker Jones')
+  expect(queue).not.toHaveTextContent('Taylor Singh')
+  expect(within(queue).getAllByRole('button')).toHaveLength(2)
+})
+
 it('opens queue summaries without expanding full messages in the list', async () => {
   const user = userEvent.setup()
   const { props } = renderPage()
+  await user.click(screen.getByRole('tab', { name: 'My conversations, 2 conversations' }))
   const queue = screen.getByRole('list', { name: 'Conversation queue' })
   const alex = within(queue).getByRole('button', { name: /Alex Morgan/ })
 
