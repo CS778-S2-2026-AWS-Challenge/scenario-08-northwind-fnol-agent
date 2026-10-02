@@ -1286,7 +1286,15 @@ export default function WorkbenchPage() {
   const claimQueueShown = queueVisible && !(compactLayout && claimId)
 
   function toggleClaimQueue() {
-    if (compactLayout && claimId) {
+    // A viewport change can update CSS before React has processed the media-query
+    // subscription. Re-check the live query at activation so the first phone-width
+    // click cannot be misclassified as the desktop "hide queue" action.
+    const compactAtActivation = compactLayout || (
+      typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia(COMPACT_WORKBENCH_QUERY).matches
+    )
+    if (compactAtActivation && claimId) {
       setQueueVisible(true)
       navigate(queueRoute(queueBasePath, queueFilters))
       return

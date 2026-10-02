@@ -320,6 +320,33 @@ describe('WorkbenchPage queue routing', () => {
     }
   })
 
+  it('returns to the queue when the viewport becomes compact before the media-query subscription settles', async () => {
+    const user = userEvent.setup()
+    let compact = false
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      get matches() { return compact },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    try {
+      const { container } = renderPage('/workbench/claims/clm_route_1')
+      await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+
+      expect(screen.getByRole('button', { name: 'Hide Claim queue' })).toHaveAttribute('aria-expanded', 'true')
+
+      // CSS can already be at phone width while React still has the previous media-query
+      // snapshot. The activation path must use the current viewport, not that stale snapshot.
+      compact = true
+      await user.click(screen.getByRole('button', { name: 'Hide Claim queue' }))
+
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/workbench$/))
+      expect(container.querySelector('.workbench-layout')).not.toHaveClass('has-open-claim')
+      expect(await screen.findByText('NW-900')).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('explains a staff account without Workbench access instead of offering a retry', async () => {
     api.claimFilterMetadata.mockRejectedValue(Object.assign(new Error('Access denied for the staff boundary.'), {
       status: 403,
