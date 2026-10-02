@@ -799,7 +799,10 @@ the append-only audit collection through a bounded, filterable projection.
   model-processing provenance are internal. Claimant and staff Evidence projections continue to
   expose only their role-safe lifecycle and file metadata. Replacing material archives the old
   generation through the existing typed history and starts a new operation identity; an obsolete
-  callback or recovery attempt cannot overwrite the current generation.
+  callback or recovery attempt cannot overwrite the current generation. If a live processor loses
+  the Claim compare-and-set at completion because another Claim mutation won the race, it returns
+  the unchanged material generation to `queued` against the current Claim revision for prompt
+  retry; the five-minute lease remains the recovery path for a worker that actually stops.
 
 - JPEG/PNG upload completion validates final object bytes before one atomic Evidence mutation.
   A valid image records `image_validation=decoded-v1` and `processing_state=completed` in internal

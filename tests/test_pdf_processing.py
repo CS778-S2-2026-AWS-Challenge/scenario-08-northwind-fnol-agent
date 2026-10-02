@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any, cast
@@ -26,6 +27,7 @@ from backend.domain.model_gateway import (
 )
 from backend.domain.models import CompleteEvidenceProcessingRequest, EvidenceFileStatus
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.protocols import IdempotencyRecord
 from backend.services.evidence import complete_evidence_processing, reserve_evidence_processing
 from backend.services.pdf_processing import (
     PDF_MODEL_PROFILE_ID,
@@ -40,12 +42,21 @@ PDF = b'%PDF-1.4\nNorthwind simulated police reference NZP-1042\n%%EOF\n'
 class Gateway:
     capabilities = ModelCapabilities(structured_output=True, document_input=True)
 
-    def __init__(self, response: ModelResponse | ModelGatewayError) -> None:
+    def __init__(
+        self,
+        response: ModelResponse | ModelGatewayError,
+        on_complete: Callable[[], None] | None = None,
+    ) -> None:
         self.response = response
+        self.on_complete = on_complete
         self.requests: list[ModelRequest] = []
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
+        if self.on_complete is not None:
+            callback = self.on_complete
+            self.on_complete = None
+            callback()
         if isinstance(self.response, ModelGatewayError):
             raise self.response
         return self.response
@@ -545,6 +556,58 @@ def test_duplicate_dispatch_with_stale_revision_cannot_call_provider_twice() -> 
 
     assert conflict.value.code == 'REVISION_CONFLICT'
     assert len(gateway.requests) == 1
+
+
+def test_completion_revision_race_requeues_pdf_without_committing_stale_facts() -> None:
+    repository, storage, claim_id, evidence_id, revision = _uploaded_pdf()
+
+    def mutate_claim() -> None:
+        current = cast(Any, repository.get_claim_internal(claim_id))
+        repository.save_claim_mutation(
+            current.model_copy(update={'revision': current.revision + 1}),
+            current.revision,
+            IdempotencyRecord(
+                actor_id=current.customer_id,
+                route=f'/api/v1/claims/{claim_id}/test-revision-race',
+                key='revision-race',
+                request_fingerprint='revision-race-v1',
+                claim_id=claim_id,
+                session_id=current.active_session_id or '',
+            ),
+        )
+
+    gateway = Gateway(
+        ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output={
+                'facts': [
+                    {
+                        'field_code': 'authorities.police_report_reference',
+                        'value': 'NZP-RACE',
+                    }
+                ]
+            },
+        ),
+        on_complete=mutate_claim,
+    )
+    processor, _ = _processor(repository, storage, gateway)
+
+    processor.process(_evidence(repository, claim_id, evidence_id), revision)
+
+    queued = _evidence(repository, claim_id, evidence_id)
+    assert queued.file_status is EvidenceFileStatus.PROCESSING
+    assert queued.provenance['processing_state'] == 'queued'
+    assert queued.provenance['processing_last_failure'] == 'CLAIM_REVISION_CONFLICT'
+    assert cast(Any, repository.get_claim_internal(claim_id)).form == {}
+
+    current_revision = cast(Any, repository.get_claim_internal(claim_id)).revision
+    processor.process(queued, current_revision)
+
+    stored = _evidence(repository, claim_id, evidence_id)
+    claim = cast(Any, repository.get_claim_internal(claim_id))
+    assert stored.file_status is EvidenceFileStatus.READY
+    assert claim.form['authorities.police_report_reference'].value == 'NZP-RACE'
+    assert len(gateway.requests) == 2
 
 
 def test_claimant_projection_never_exposes_processing_operation_or_provider_metadata() -> None:

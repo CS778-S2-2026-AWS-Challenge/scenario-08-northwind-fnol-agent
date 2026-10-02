@@ -9,6 +9,7 @@ from hashlib import sha256
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageError
+from backend.core.errors import ApiError
 from backend.domain.branch_registry import (
     SYSTEM_OWNED_FIELDS,
     build_default_registry,
@@ -252,23 +253,28 @@ class PdfEvidenceProcessor:
             except ValidationError:
                 raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
             facts = _normalised_facts(result, contracts)
-            complete_evidence_processing(
-                self._repository,
-                reserved.claim_id,
-                reserved.evidence_id,
-                CompleteEvidenceProcessingRequest(outcome='ready', facts=facts),
-                operation_id,
-                str(claim.revision),
-                expected_material_version=reserved.material_version,
-                processor_id=PDF_PROCESSOR_ID,
-                processing_provenance={
-                    'processing_model_profile_id': PDF_MODEL_PROFILE_ID,
-                    'processing_prompt_version': PDF_PROCESSING_PROMPT_VERSION,
-                    'processing_provider_model': response.provider_model,
-                    'processing_provider_request_id': response.provider_request_id,
-                    'processing_completed_at': now_utc().isoformat(),
-                },
-            )
+            try:
+                complete_evidence_processing(
+                    self._repository,
+                    reserved.claim_id,
+                    reserved.evidence_id,
+                    CompleteEvidenceProcessingRequest(outcome='ready', facts=facts),
+                    operation_id,
+                    str(claim.revision),
+                    expected_material_version=reserved.material_version,
+                    processor_id=PDF_PROCESSOR_ID,
+                    processing_provenance={
+                        'processing_model_profile_id': PDF_MODEL_PROFILE_ID,
+                        'processing_prompt_version': PDF_PROCESSING_PROMPT_VERSION,
+                        'processing_provider_model': response.provider_model,
+                        'processing_provider_request_id': response.provider_request_id,
+                        'processing_completed_at': now_utc().isoformat(),
+                    },
+                )
+            except ApiError as error:
+                if error.code != 'REVISION_CONFLICT':
+                    raise
+                self._requeue_after_revision_conflict(reserved)
         except PdfObjectValidationError as error:
             self._settle_terminal(reserved, claim.revision, operation_id, error.code)
         except ModelGatewayError as error:
@@ -288,6 +294,34 @@ class PdfEvidenceProcessor:
                     operation_id,
                     f'MODEL_{error.code.value.upper()}',
                 )
+
+    def _requeue_after_revision_conflict(self, evidence: EvidenceRecord) -> None:
+        """Return a live PDF attempt to the queue after its Claim changed.
+
+        A completion race is different from a stopped worker: the processor is still
+        alive and has reached the CAS boundary, so waiting for the five-minute lease
+        would turn a recoverable conflict into an avoidable delay. The defer operation
+        reads the current Claim revision and preserves the existing evidence operation
+        identity/material generation, so the stale result cannot be committed or replayed.
+        """
+
+        for _ in range(3):
+            current = self._repository.get_claim_internal(evidence.claim_id)
+            if current is None:
+                return
+            try:
+                defer_evidence_processing(
+                    self._repository,
+                    evidence.claim_id,
+                    evidence.evidence_id,
+                    current.revision,
+                    evidence.material_version,
+                    'CLAIM_REVISION_CONFLICT',
+                )
+                return
+            except ApiError as error:
+                if error.code != 'REVISION_CONFLICT':
+                    raise
 
     def _settle_terminal(
         self,
