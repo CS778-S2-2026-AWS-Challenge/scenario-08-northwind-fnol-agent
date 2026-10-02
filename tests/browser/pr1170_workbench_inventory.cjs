@@ -11,6 +11,36 @@ fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
 const AT02 = 'clm_fixture_at02'
 const AT10 = 'clm_fixture_at10'
 
+const DIAGNOSTIC_STATUS_CONTEXT = 'ci/pr1170-browser-detail'
+let currentStep = 'startup'
+
+async function reportGitHubStatus(state, description) {
+  const token = process.env.GITHUB_TOKEN
+  const owner = process.env.CIRCLE_PROJECT_USERNAME
+  const repo = process.env.CIRCLE_PROJECT_REPONAME
+  if (!token || !owner || !repo || HEAD === 'unknown') return
+  const payload = {
+    state,
+    context: DIAGNOSTIC_STATUS_CONTEXT,
+    description: String(description).replace(/\\s+/g, ' ').slice(0, 140),
+  }
+  if (process.env.CIRCLE_BUILD_URL) payload.target_url = process.env.CIRCLE_BUILD_URL
+  try {
+    await fetch(`https://api.github.com/repos/${owner}/${repo}/statuses/${HEAD}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify(payload),
+    })
+  } catch {
+    // Diagnostic reporting must never replace the browser result.
+  }
+}
+
 const result = {
   head: HEAD,
   browser: 'Playwright Chromium',
@@ -132,7 +162,7 @@ async function main() {
   })
 
   try {
-    console.log('[1/9] Sign in and verify presence renewal')
+    currentStep = 'sign-in/presence heartbeat'\n    console.log('[1/10] Sign in and verify presence renewal')
     await page.goto(`${WORKBENCH}/workbench/login`, { waitUntil: 'domcontentloaded' })
     await page.getByLabel('Work email').waitFor({ state: 'visible', timeout: 30000 })
     await captureSurface(page, 'sign-in')
@@ -147,14 +177,14 @@ async function main() {
     )
     result.checks.presence_heartbeat_after_login = true
 
-    console.log('[2/9] Seed the bounded Workbench scenarios')
+    currentStep = 'demo seed'\n    console.log('[2/10] Seed the bounded Workbench scenarios')
     const seeded = await api(page, '/api/v1/workbench/demo/seed-scenarios', { method: 'POST' })
     assert(seeded.status === 200, `Demo seed failed with ${seeded.status}: ${JSON.stringify(seeded.payload)}`)
     assert(seeded.payload?.claim_ids?.includes(AT02), 'AT-02 is missing from the seed response.')
     assert(seeded.payload?.claim_ids?.includes(AT10), 'AT-10 is missing from the seed response.')
     result.checks.demo_seed_loaded = true
 
-    console.log('[3/10] Enumerate the desktop shell and queue')
+    currentStep = 'desktop shell/queue'\n    console.log('[3/10] Enumerate the desktop shell and queue')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
     await page.getByLabel('Search claims').waitFor({ state: 'visible', timeout: 30000 })
     const queueControls = await captureSurface(page, 'desktop-claim-queue')
@@ -180,7 +210,7 @@ async function main() {
     await page.waitForTimeout(200)
     await captureSurface(page, 'conversations-page')
 
-    console.log('[4/10] Enumerate representative Claim surfaces on AT-02')
+    currentStep = 'AT-02 Claim surfaces'\n    console.log('[4/10] Enumerate representative Claim surfaces on AT-02')
     const claimSections = [
       ['summary', 'claim-overview'],
       ['fields', 'claim-information'],
@@ -199,7 +229,7 @@ async function main() {
     }
     await screenshot(page, '02-at02-conversation')
 
-    console.log('[5/10] Verify own versus foreign realtime revision notices in two Workbench pages')
+    currentStep = 'AT-02 own/foreign realtime revisions'\n    console.log('[5/10] Verify own versus foreign realtime revision notices in two Workbench pages')
     await page.goto(`${WORKBENCH}/workbench/claims/${AT02}/summary`, { waitUntil: 'domcontentloaded' })
     const reviewAcceptance = page.getByRole('button', { name: 'Review acceptance', exact: true })
     await reviewAcceptance.waitFor({ state: 'visible', timeout: 30000 })
@@ -242,7 +272,7 @@ async function main() {
     result.checks.foreign_mutation_notice_visible = true
     await otherPage.close()
 
-    console.log('[6/10] Exercise presence failure, Take Claim, and Claim decision on AT-10')
+    currentStep = 'AT-10 presence/Take Claim/decision'\n    console.log('[6/10] Exercise presence failure, Take Claim, and Claim decision on AT-10')
     await page.goto(`${WORKBENCH}/workbench/claims/${AT10}/summary`, { waitUntil: 'domcontentloaded' })
     const reviewOwnership = page.getByRole('button', { name: 'Review ownership', exact: true })
     await reviewOwnership.waitFor({ state: 'visible', timeout: 30000 })
@@ -298,7 +328,7 @@ async function main() {
     await captureSurface(page, 'at10-after-decision')
     await screenshot(page, '03-at10-approved')
 
-    console.log('[7/10] Verify Staff Agent fail-closed behavior')
+    currentStep = 'Staff Agent fail-closed'\n    console.log('[7/10] Verify Staff Agent fail-closed behavior')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
     const openAgent = page.getByRole('button', { name: 'Staff Agent', exact: true }).first()
     await openAgent.waitFor({ state: 'visible', timeout: 30000 })
@@ -319,7 +349,7 @@ async function main() {
     await screenshot(page, '04-staff-agent-unavailable')
     await page.getByRole('button', { name: 'Close Staff Agent', exact: true }).click()
 
-    console.log('[8/10] Verify staff-scoped Claim-tab persistence')
+    currentStep = 'staff-scoped tab persistence'\n    console.log('[8/10] Verify staff-scoped Claim-tab persistence')
     const tabKeys = await page.evaluate(() => (
       Object.keys(localStorage).filter((key) => key.startsWith('northwind.workbench.tabs.v1'))
     ))
@@ -327,7 +357,7 @@ async function main() {
     assert(tabKeys.some((key) => key.startsWith('northwind.workbench.tabs.v1:')), `No staff-scoped tab key found: ${JSON.stringify(tabKeys)}`)
     result.checks.staff_scoped_tab_storage = tabKeys
 
-    console.log('[9/10] Enumerate settings and phone-width behavior')
+    currentStep = 'settings/phone layout'\n    console.log('[9/10] Enumerate settings and phone-width behavior')
     for (const section of ['profile', 'security', 'notifications', 'appearance', 'help']) {
       await page.goto(`${WORKBENCH}/workbench/settings/${section}`, { waitUntil: 'domcontentloaded' })
       await page.getByRole('heading').first().waitFor({ state: 'visible', timeout: 30000 })
@@ -352,7 +382,7 @@ async function main() {
     await captureSurface(page, 'phone-workbench-agent')
     await screenshot(page, '05-phone-agent')
 
-    console.log('[10/10] Exact-head Workbench inventory evidence passed')
+    currentStep = 'complete'\n    console.log('[10/10] Exact-head Workbench inventory evidence passed')
     result.status = 'PASS'
     fs.writeFileSync(
       path.join(ARTIFACT_DIR, 'pr1170-workbench-inventory-PASS.json'),
@@ -362,6 +392,7 @@ async function main() {
     console.log('PR1170_WORKBENCH_INVENTORY_OK')
     console.log(`HEAD=${HEAD}`)
     console.log(`SURFACES=${Object.keys(result.surfaces).length}`)
+    await reportGitHubStatus('success', 'Exact-head Workbench inventory passed')
   } catch (error) {
     result.status = 'FAIL'
     result.error = error?.stack || String(error)
@@ -374,6 +405,10 @@ async function main() {
       path.join(ARTIFACT_DIR, 'pr1170-workbench-inventory-FAIL.json'),
       JSON.stringify(result, null, 2),
       'utf8',
+    )
+    await reportGitHubStatus(
+      'failure',
+      `${currentStep}: ${error?.message || String(error)}`,
     )
     throw error
   } finally {
