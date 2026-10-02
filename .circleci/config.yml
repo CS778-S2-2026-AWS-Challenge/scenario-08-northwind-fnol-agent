@@ -320,6 +320,76 @@ jobs:
             fi
             echo "Path coupling satisfied."
 
+  workbench-control-inventory-evidence:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Select Workbench inventory impact
+          command: |
+            git fetch origin main
+            mkdir -p browser-evidence
+            if [ "${CIRCLE_BRANCH:-}" = "main" ] || git diff --name-only origin/main...HEAD | grep -qE '^(workbench/|backend/api/|backend/services/|backend/domain/|tests/browser/pr1170_workbench_inventory\.cjs$|\.circleci/config\.yml$)'; then
+              echo "export WORKBENCH_INVENTORY_MODE=run" >> "$BASH_ENV"
+            else
+              echo "export WORKBENCH_INVENTORY_MODE=skip" >> "$BASH_ENV"
+              echo "Workbench inventory unaffected; job skipped." > browser-evidence/workbench-inventory-skip.txt
+            fi
+      - run:
+          name: Install Workbench inventory dependencies
+          command: |
+            if [ "$WORKBENCH_INVENTORY_MODE" = "skip" ]; then exit 0; fi
+            python -m pip install -r backend/requirements-dev.txt
+            npm ci --prefix workbench
+            npm install --prefix /tmp/workbench-inventory-playwright --no-save playwright@1.55.0
+            /tmp/workbench-inventory-playwright/node_modules/.bin/playwright install --with-deps chromium
+      - run:
+          name: Execute exact-head Workbench control inventory
+          no_output_timeout: 10m
+          command: |
+            if [ "$WORKBENCH_INVENTORY_MODE" = "skip" ]; then exit 0; fi
+            set -euo pipefail
+
+            export PR_HEAD_SHA="$CIRCLE_SHA1"
+            export BROWSER_EVIDENCE_DIR=browser-evidence
+            export NORTHWIND_ENVIRONMENT=test
+            export NORTHWIND_IDENTITY_MODE=developer
+            export DATA_RUNTIME_PROFILE=fixture
+            export AGENT_RUNTIME_PROFILE=controlled
+            export NODE_PATH=/tmp/workbench-inventory-playwright/node_modules
+
+            python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > browser-evidence/inventory-backend.log 2>&1 &
+            BACKEND_PID=$!
+            npm run dev --prefix workbench -- --host 127.0.0.1 --port 8002 > browser-evidence/inventory-workbench.log 2>&1 &
+            WORKBENCH_PID=$!
+
+            cleanup() {
+              kill "$BACKEND_PID" "$WORKBENCH_PID" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            wait_for_url() {
+              url="$1"
+              for attempt in $(seq 1 90); do
+                if curl --fail --silent --show-error "$url" > /dev/null; then
+                  return 0
+                fi
+                sleep 1
+              done
+              echo "Timed out waiting for $url"
+              return 1
+            }
+
+            wait_for_url http://127.0.0.1:8000/health
+            wait_for_url http://127.0.0.1:8002/workbench/
+
+            node tests/browser/pr1170_workbench_inventory.cjs
+      - store_artifacts:
+          path: browser-evidence
+          destination: workbench-control-inventory-evidence
+
   p12-browser-evidence:
     docker:
       - image: cimg/python:3.12-node
@@ -389,7 +459,6 @@ jobs:
             wait_for_url http://127.0.0.1:8001/
             wait_for_url http://127.0.0.1:8002/workbench/
 
-            node tests/browser/pr1170_workbench_inventory.cjs
             node tests/browser/p12_3_claimant_workbench_recovery.cjs
             node tests/browser/pr975_claimant_profile.cjs
       - store_artifacts:
@@ -406,4 +475,5 @@ workflows:
       - customer-quality
       - workbench-quality
       - admin-quality
+      - workbench-control-inventory-evidence
       - p12-browser-evidence
