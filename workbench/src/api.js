@@ -433,6 +433,19 @@ export const workbenchApi = {
       },
     )
   },
+  answerClaimantQuestion(token, claimId, questionId, revision, answer) {
+    return mutationRequest(
+      `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/questions/${encodeURIComponent(questionId)}/answer`,
+      {
+        method: 'POST',
+        token,
+        headers: {
+          'If-Match': String(revision),
+        },
+        body: JSON.stringify({ answer }),
+      },
+    )
+  },
   requestCowork(token, claimId, revision, payload) {
     return ownershipRequest(token, claimId, 'cowork-requests', revision, payload)
   },

@@ -37,6 +37,7 @@ import {
 import './App.css'
 import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
+import { developerModeEnabled } from './runtimeConfig.js'
 import {
   AgentMessageRow,
   ClaimantMessageAttachments,
@@ -4122,6 +4123,9 @@ function App() {
                       {message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                         <div className="message-recovery" role="status">
                           <p>{message.recovery.claimant_projection}</p>
+                          {developerModeEnabled() && (
+                            <small className="message-recovery-code">{message.recovery.rule_id}</small>
+                          )}
                           {recoveryFailure?.messageId === message.message_id && (
                             <p className="message-state" role="alert">{recoveryFailure.message}</p>
                           )}
