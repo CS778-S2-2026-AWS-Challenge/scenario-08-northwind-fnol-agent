@@ -154,7 +154,7 @@ async function main() {
     assert(seeded.payload?.claim_ids?.includes(AT10), 'AT-10 is missing from the seed response.')
     result.checks.demo_seed_loaded = true
 
-    console.log('[3/9] Enumerate the desktop shell and queue')
+    console.log('[3/10] Enumerate the desktop shell and queue')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
     await page.getByLabel('Search claims').waitFor({ state: 'visible', timeout: 30000 })
     const queueControls = await captureSurface(page, 'desktop-claim-queue')
@@ -164,7 +164,23 @@ async function main() {
     assert(queueControls.some((item) => /Staff Agent/i.test(item.name)), 'Staff Agent navigation is missing.')
     await screenshot(page, '01-desktop-queue')
 
-    console.log('[4/9] Enumerate representative Claim surfaces on AT-02')
+    const accountMenu = page.getByRole('button', { name: /Account menu for/i })
+    await accountMenu.click()
+    await page.getByRole('menu').waitFor({ state: 'visible', timeout: 10000 })
+    await captureSurface(page, 'account-menu')
+    await page.keyboard.press('Escape')
+
+    await page.goto(`${WORKBENCH}/workbench/drafts`, { waitUntil: 'domcontentloaded' })
+    await page.locator('.workbench-stage').waitFor({ state: 'visible', timeout: 30000 })
+    await page.waitForTimeout(200)
+    await captureSurface(page, 'draft-claims')
+
+    await page.goto(`${WORKBENCH}/workbench/conversations`, { waitUntil: 'domcontentloaded' })
+    await page.locator('.workbench-stage').waitFor({ state: 'visible', timeout: 30000 })
+    await page.waitForTimeout(200)
+    await captureSurface(page, 'conversations-page')
+
+    console.log('[4/10] Enumerate representative Claim surfaces on AT-02')
     const claimSections = [
       ['summary', 'claim-overview'],
       ['fields', 'claim-information'],
