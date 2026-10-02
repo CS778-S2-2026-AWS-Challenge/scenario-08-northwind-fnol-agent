@@ -212,6 +212,7 @@ Demonstration:
 ### Sprint 5
 
 - [Issue #1155 Workbench Control Inventory and Verification](archive/sprint-5/validation/issue-1155-workbench-control-inventory.md)
+- [Issue #1155 Workbench Browser Run Record at ae2e65bd](archive/sprint-5/validation/issue-1155-workbench-browser-run-ae2e65bd.json)
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
 evidence. They must not silently override current requirements or contracts.

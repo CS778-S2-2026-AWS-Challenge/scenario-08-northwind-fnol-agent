@@ -1,0 +1,411 @@
+{
+  "head": "ae2e65bd2d501da360a261d02d678744e920e125",
+  "started": "2026-10-02T02:30:20.095Z",
+  "finished": "2026-10-02T02:52:00Z",
+  "environment": {
+    "data_runtime": "fixture",
+    "object_storage": "fixture",
+    "agent_runtime": "controlled",
+    "identity_mode": "normal",
+    "environment": "development",
+    "backend": "uvicorn backend.main:app on 127.0.0.1:8000",
+    "workbench": "vite dev on 127.0.0.1:5174, base /workbench/",
+    "browser": "Claude desktop built-in browser (Chromium)",
+    "viewports": [
+      "1440x900",
+      "1024x768",
+      "390x844"
+    ],
+    "accounts": [
+      "primary claims_professional",
+      "second claims_professional",
+      "operations"
+    ]
+  },
+  "results": {
+    "signin": {
+      "wrongCredentials": "The email or password was not recognised.",
+      "path": "/workbench",
+      "presence": {
+        "online": true,
+        "available": true,
+        "revision": 2,
+        "expires_at": "2026-10-02T02:35:23.249530Z"
+      }
+    },
+    "seed": {
+      "status": 200,
+      "claims": [
+        "clm_fixture_at01",
+        "clm_fixture_at06",
+        "clm_fixture_at04",
+        "clm_fixture_at02",
+        "clm_fixture_at05",
+        "clm_fixture_at10"
+      ]
+    },
+    "queueShell1440": {
+      "controls": [
+        "Workbench",
+        "0 Draft claims",
+        "Claim conversations",
+        "Staff Agent",
+        "Account menu for Claims Professional",
+        "Hide Claim queue",
+        "Refresh Workbench projection",
+        "Search claims",
+        "Filters",
+        "The insured vehicle was rear-ended while",
+        "Open Staff Agent"
+      ],
+      "unnamed": 0,
+      "noMatch": true,
+      "cleared": true,
+      "searchHit": 1,
+      "filtersExpanded": "true",
+      "filterSelects": [
+        "Claim status",
+        "Claim priority",
+        "Staff tag"
+      ],
+      "injectedListFailure": [
+        true,
+        true
+      ],
+      "retryRecovered": true,
+      "menuItems": [
+        "Profile",
+        "Account & Security",
+        "Notifications",
+        "Language & Display",
+        "Help & Feedback",
+        "Sign out"
+      ],
+      "menuFocusFirst": "Profile",
+      "menuArrow": "Account & Security",
+      "menuEscapeReturnsFocus": true
+    },
+    "at04Owner": {
+      "opens": 4,
+      "accept": [
+        "Assigned to you",
+        "Revision 4",
+        []
+      ],
+      "ownSend": {
+        "noticeSeen": false,
+        "delivered": true,
+        "listPaddingBottom": "72px"
+      },
+      "foreign": {
+        "status": 200,
+        "notice": "This Claim changed in another session (revision 6). Review the latest ",
+        "afterReview": [
+          false,
+          true
+        ]
+      },
+      "resolve": {
+        "emptySubmitBlockedRevision": "Revision 6",
+        "after": "Revision 7",
+        "audit": true
+      }
+    },
+    "at10Take": {
+      "take": {
+        "noticeSeen": false,
+        "owner": "Assigned to you",
+        "revision": "Revision 9",
+        "status": "Claim assigned to you. Review started. ×"
+      },
+      "decisionButtons": []
+    },
+    "at10Decision": {
+      "dialog": "Approve this Claim? This final Claim decision cannot be changed in this version. Public approval explanation (optional) This text may be shown to the claimant. Cancel Approve Claim",
+      "initialFocus": "Cancel",
+      "confirmLabel": "Approve Claim",
+      "confirmEnabled": true,
+      "noticeSeen": false,
+      "result": [
+        "Claim NW-AT10-001 was approved and the authoritative projection is now shown at revision 10. ×"
+      ],
+      "revision": "Revision 10"
+    },
+    "at02Owner": {
+      "accept": "Assigned to you",
+      "signal": "sig_at02_policy_cause Confirmed",
+      "viewFile": "The evidence file is not available to view.",
+      "references": 3,
+      "externalLink": [
+        [
+          "Official information",
+          "_blank",
+          "noreferrer"
+        ]
+      ],
+      "Invite coworker": "Revision 7",
+      "Request transfer": "Revision 8"
+    },
+    "tabsAgent": {
+      "tabCount": 6,
+      "overflow": [
+        "true",
+        6
+      ],
+      "overflowPick": "/workbench/claims/clm_fixture_at04",
+      "arrow": [
+        "open-claim-tab-clm_fixture_at10",
+        "/workbench/claims/clm_fixture_at10"
+      ],
+      "deleteKey": [
+        6,
+        5,
+        "BODY"
+      ],
+      "agent": {
+        "focus": "staff-agent-message",
+        "notice": "Staff Agent cannot answer right now No Staff Agent model is published for this Workbench environment. Messages",
+        "sendDisabled": true,
+        "scope": "2 of 5",
+        "firstEscape": [
+          false,
+          true
+        ],
+        "secondEscape": [
+          false,
+          true
+        ],
+        "injectedCapabilityFailure": [
+          true,
+          true
+        ]
+      }
+    },
+    "conversations": {
+      "categories": [
+        "Action needed, 1 conversations",
+        "My conversations, 3 conversations",
+        "Staff Agent, 0 conversations"
+      ],
+      "categoryArrow": "My conversations3",
+      "queueToggle": [
+        "Show conversation queue",
+        "false"
+      ],
+      "takeOver": [
+        "/workbench/conversations/ses_fixture_at05",
+        []
+      ],
+      "reply": {
+        "delivered": true,
+        "noticeSeen": false
+      },
+      "openClaim": "/workbench/claims/clm_fixture_at05/summary",
+      "back": "/workbench/conversations/ses_fixture_at05",
+      "closeTab": "/workbench/conversations"
+    },
+    "settings": {
+      "profile": [
+        "Profile changes are saved on this browser. Account-wide profile sync still requires backend support."
+      ],
+      "security": [
+        [
+          "Change password",
+          true
+        ],
+        [
+          "Set up",
+          true
+        ],
+        [
+          "Manage devices",
+          true
+        ],
+        [
+          "Remove",
+          true
+        ]
+      ],
+      "notifications": [
+        "Notification preferences are saved on this browser. Account sync still requires backend support."
+      ],
+      "appearance": [
+        "Language and display preferences are saved on this browser. Account sync still requires backend support."
+      ],
+      "helpTargets": [
+        "Usage guideLearn the",
+        "Contact administrato"
+      ],
+      "feedback": [
+        "Thank you. Your feedback was submitted."
+      ]
+    },
+    "at1024": {
+      "railNames": [
+        [
+          "Workbench",
+          "none"
+        ],
+        [
+          "0 Draft claims",
+          "none"
+        ],
+        [
+          "Claim conversations",
+          "none"
+        ],
+        [
+          "Staff Agent",
+          "none"
+        ]
+      ],
+      "unavailableComposer": [
+        true,
+        566,
+        "Staff messaging not available yet Messaging is not available for this "
+      ],
+      "bubble": {
+        "/overview": 0,
+        "/activity": 0,
+        "/conversation": 0
+      }
+    },
+    "at390": {
+      "claimOpen": [
+        "hidden",
+        "visible",
+        "Show Claim queue",
+        "false"
+      ],
+      "toQueue": [
+        "/workbench/claims/clm_fixture_at04",
+        "hidden",
+        "visible",
+        "Show Claim queue"
+      ],
+      "toQueueRepeats": [
+        [
+          "/workbench/claims/clm_fixture_at01",
+          "/workbench",
+          "visible",
+          "Hide Claim queue"
+        ],
+        [
+          "/workbench/claims/clm_fixture_at04",
+          "/workbench",
+          "visible",
+          "Hide Claim queue"
+        ]
+      ],
+      "agent": [
+        [
+          390,
+          734
+        ],
+        "staff-agent-message"
+      ],
+      "agentClosed": [
+        false,
+        true
+      ],
+      "conversationBack": "/workbench/conversations",
+      "scrollWidth": 390
+    },
+    "signOut": {
+      "previousStaffTabs": 5,
+      "signOutConfirmInitialFocus": "Cancel"
+    },
+    "staff2Start": {
+      "path": "/workbench",
+      "tabsVisible": 0
+    },
+    "staff2": {
+      "cowork": [
+        "coworker",
+        9
+      ],
+      "staleInjected": [
+        "Review transfer request was not completed because the Claim changed after this action was opened. The latest server projection at revision 9 is now shown. Review the late"
+      ],
+      "inputKept": "rejected",
+      "transferDeclined": [
+        0,
+        10
+      ]
+    },
+    "staff2Signals": "No signal-decision action is projected for either AT-02 signal; no Record decision control",
+    "operations": {
+      "path": "/workbench",
+      "tabs": 0,
+      "queue": "MY WORK Claim queue No Workbench access This staff account is not authorised to read Workbench Claims, so retrying will not help. Ask your administrator to review your st",
+      "retry": false
+    },
+    "extraRows1": {
+      "queueCardClick": "/workbench/claims/clm_fixture_at10",
+      "recordReferences": "Record references for The insured vehicle was rear-ended while stopped at traffi",
+      "sectionArrow": [
+        "Conversation",
+        "/workbench/claims/clm_fixture_at10/conversation"
+      ],
+      "closeButton": [
+        6,
+        5
+      ],
+      "retryClaimFailure": "could not be opened",
+      "retryClaimRecovered": "Revision 3",
+      "retrySectionFailure": "unavailable",
+      "retrySectionRecovered": "Evidence 3 records"
+    },
+    "revisionNoticeDismiss": {
+      "outOfBandStatus": 200,
+      "notice": "This Claim changed in another session (revision 11). Review ",
+      "dismissed": true,
+      "supportingContextSecondOpen": "/workbench/claims/clm_fixture_at02/evidence"
+    },
+    "extraRows2": {
+      "openWorkActivityPresent": true,
+      "openWorkActivity": "/workbench/claims/clm_fixture_at02/activity",
+      "activityDisclosures": 11,
+      "reviewSignalsPresent": true,
+      "reviewSignals": "/workbench/claims/clm_fixture_at02/signals",
+      "requeuePresent": true,
+      "requeueEmptyDisabled": true,
+      "requeue": [
+        "unassigned",
+        12,
+        []
+      ]
+    },
+    "extraRows3": {
+      "claimInformation": "Claim information 4 fields",
+      "bubbleOpen": [
+        true,
+        "staff-agent-message"
+      ],
+      "newSession": "New conversation ready This conversation will be saved when you send the first message.",
+      "doneClosesScope": [
+        false,
+        true
+      ],
+      "closeReturnsToBubble": [
+        false,
+        true
+      ],
+      "settingsNav": [
+        "profile",
+        "security",
+        "notifications",
+        "appearance",
+        "help"
+      ]
+    }
+  },
+  "notes": [
+    "Values are copied from the browser run record. In `railNames` and `at1024`, the second value is the computed `display` of the visible text span, which the collapsed rail hides.",
+    "at390.toQueue: the first attempt ran immediately after the emulated viewport switched to 390 px and behaved as the desktop toggle (queue hidden in place, name \"Show Claim queue\"). The two repeats in toQueueRepeats, from AT-01 and from AT-04 after its conversation section, returned to /workbench with the queue visible and the name \"Hide Claim queue\".",
+    "conversations.back: the Conversations back button is compact-only; at 1440 px it is hidden, so the desktop entry stayed on the conversation. At 390 px it returned to /workbench/conversations (at390.conversationBack).",
+    "A full page load of /workbench without a trailing slash is answered by the Vite dev server with its base-path notice; in-app navigation is unaffected. All runs entered at /workbench/.",
+    "Injected failures (queue list, Staff Agent capabilities, stale If-Match) were made by overriding window.fetch in the page for one request and restoring it immediately.",
+    "extraRows1, revisionNoticeDismiss, extraRows2, and extraRows3 were run after the operations-account check by signing in again as the primary staff account on the same head and servers, to cover rows previously exercised only in development runs. A bare Claim URL reopens the tab's last section, so section-specific checks used explicit section routes."
+  ]
+}

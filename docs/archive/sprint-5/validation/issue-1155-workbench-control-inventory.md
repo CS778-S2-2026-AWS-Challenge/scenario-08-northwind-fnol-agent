@@ -8,9 +8,9 @@ owners. It is Sprint 5 stage B evidence for #1155, #771, and #1066.
 
 | Item | Value |
 | --- | --- |
-| Code head under test | The current PR head. `tests/browser/pr1170_workbench_inventory.cjs` runs in `p12-browser-evidence` on every head and writes the exact `PR_HEAD_SHA` into `pr1170-workbench-inventory-PASS.json` |
+| Code head under test | `ae2e65bd`, the PR head when the browser run took place. Later commits on the branch change only this record and its run file |
 | First round | `main@eb51fc02`, 2026-10-01, independently re-verified by the #1140 owner on #1155 |
-| Browser runs | The original full manual inventory was observed during development and the repair set was re-run manually at `f1e0d37b`. The current-head gate now reruns the Workbench in Playwright Chromium on every PR head, enumerates the committed inventory surfaces at 1440 and 390 px, and actively exercises presence renewal, own-vs-foreign revision notices, Take Claim, Claim decision, Staff Agent fail-closed behavior, tab scoping, the compact queue, and the phone-width Agent panel. The JSON artifact records the exact head |
+| Browser runs | One manual run on `ae2e65bd`, 2026-10-02 02:30 to 02:52 UTC, in the Chromium browser built into the Claude desktop app, with both servers started from a clean working tree at that commit. Observed values are in the [browser run record](issue-1155-workbench-browser-run-ae2e65bd.json). Earlier observations on `eb51fc02`, on development trees, and on `f1e0d37b` are superseded |
 | Date | 2026-10-02 |
 | Data runtime | `DATA_RUNTIME_PROFILE=fixture`, `NORTHWIND_OBJECT_STORAGE_ADAPTER=fixture` |
 | Agent runtime | `AGENT_RUNTIME_PROFILE=controlled`; no Staff Agent model is published |
@@ -26,14 +26,13 @@ another open issue is recorded as a limitation, not as a pass.
 ## Results at a glance
 
 The source scan found 172 control definitions in `workbench/src`; a mapped list renders one
-definition many times. The inventory groups them into 93 rows across 20 surfaces. The committed
-classification below is reconciled with current `main`; the exact-head browser artifact records the
-visible controls found on each exercised surface and the current-head mutation results.
+definition many times. The inventory groups them into 94 rows across 20 surfaces. Every row was exercised on
+`ae2e65bd` unless its result is `unreachable`, which states why.
 
 | Result | Meaning | Rows |
 | --- | --- | --- |
-| `works` | Real route or API behaviour with honest feedback | 63 |
-| `unreachable` | Present in code or projection but not reachable with the seeded data or current UI | 20 |
+| `works` | Real route or API behaviour with honest feedback | 65 |
+| `unreachable` | Present in code or projection but not reachable with the seeded data or current UI | 19 |
 | `honest-unavailable` | Disabled or unavailable with a stated reason | 6 |
 | `placeholder` | Visible control with no real effect | 3 |
 | `defect` | Misleading behaviour that remains | 1 |
@@ -43,27 +42,27 @@ input or a duplicate accessible name.
 
 ## Repairs delivered with this record
 
-Each repair has focused tests. `f1e0d37b` remains the manual repair baseline; the current PR head is also exercised automatically by `tests/browser/pr1170_workbench_inventory.cjs`, whose JSON artifact records the exact SHA.
+Each repair has focused tests. The browser evidence column comes from the `ae2e65bd` run.
 
 | Finding | Repair | Commit | Tests | Browser evidence |
 | --- | --- | --- | --- | --- |
-| Own mutation raised "This Claim changed in another session" | Remember the revision returned by the staff member's own revision-checked mutation and suppress a notice at or below it; hold notices while that mutation is in flight | `33c4946d`, `f1e0d37b`, `6c132a3e` | `revision.test.js`; `WorkbenchPage.test.jsx` own-mutation, decision, Staff Agent, and in-flight cases | Manual baseline: AT-04 own send produced no notice and an out-of-band change produced a revision notice. Exact-head CI repeats the distinction with two Workbench pages: the current page's send is suppressed and the second page's send raises the external-change notice |
-| Queue hidden at phone width; toggle label did not match | Compact layout shows the queue when no Claim is open; toggle name and `aria-expanded` follow the visible state and return to the queue | `1181774c` | `WorkbenchPage.test.jsx` phone-width case | 390 px: open Claim shows "Show Claim queue" (`aria-expanded=false`); toggle returns to `/workbench` with the queue visible |
+| Own mutation raised "This Claim changed in another session" | Remember the revision produced by the staff member's own revision-checked mutation, including Claim decisions and Staff Agent execution, and hold notices while that mutation is in flight | `33c4946d`, `f1e0d37b`, `6c132a3e` | `revision.test.js`; `WorkbenchPage.test.jsx` own-mutation, decision, Staff Agent, and in-flight cases | AT-04 own send: no notice in 25 polls at 200 ms; out-of-band change raised revision 6 and Review cleared it; Take Claim, AT-10 approval, and a Conversations reply raised no notice |
+| Queue hidden at phone width; toggle label did not match | Compact layout shows the queue when no Claim is open; toggle name and `aria-expanded` follow the visible state and return to the queue | `1181774c` | `WorkbenchPage.test.jsx` phone-width case | 390 px: an open Claim shows "Show Claim queue" (`aria-expanded=false`); the toggle returned to `/workbench` with the queue visible in two runs. A first attempt made immediately after switching the emulated viewport behaved as on desktop (see the run notes) |
 | Header menu button hidden at every width with no action | Removed | `1181774c` | Not applicable | Not applicable |
-| Collapsed rail controls had no accessible name | Explicit labels on Workbench, Claim conversations, Staff Agent | `105cc741` | `NavigationRail.test.jsx` | 1024 px: all four rail controls named |
-| Unavailable composer collapsed to 40 px | Explicit grid placement for textarea and send button | `49ca5bd4` | Not applicable (layout) | 1024 px AT-02, sending unavailable: textarea 566 px wide |
+| Collapsed rail controls had no accessible name | Explicit labels on Workbench, Claim conversations, Staff Agent | `105cc741` | `NavigationRail.test.jsx` | 1024 px: rail text hidden (`display: none`) and all four controls named |
+| Unavailable composer collapsed to 40 px | Explicit grid placement for textarea and send button | `49ca5bd4` | Not applicable (layout) | 1024 px AT-06, sending unavailable: textarea 566 px wide |
 | Staff Agent bubble could cover the end of content and messages | End space clears the bubble on layouts that show it | `18b31dc6` | Not applicable (layout) | 1024 px AT-04 Overview, Activity, Conversation scrolled to the end: no visible text intersects the bubble |
-| Staff Agent panel did not take focus; Escape did nothing | Non-modal dialog: focus to message box, Tab contained, Escape closes Claim Scope (focus to its toggle) then the panel, focus returns to opener or bubble | `13447e9f`, `9ee2ae53` | `StaffAgent.test.jsx` dialog, bubble, embedded, and scope-Escape cases | 1024 px: Escape on a scope checkbox kept focus on the toggle; second Escape closed the panel and focused the rail button |
-| Staff Agent sent and created a session with no available model | Readable reason from capabilities, applied independently of the session and Claim lists; a resumed session whose model is no longer published also fails closed | `13447e9f`, `9ee2ae53`, `6c132a3e` | `StaffAgent.test.jsx` unavailable, stale-model, reason, failed-list, and failed-capabilities cases | Manual baseline covered no-model and capabilities failure. Exact-head CI types into the unavailable composer, confirms Send stays disabled, and records that no Agent session/message POST occurred |
-| Open Claim tabs leaked across staff accounts on one browser | Tabs stored per staff identity; former browser-wide record removed | `1b506b93` | `usePersistentTabs.test.jsx` privacy, identity switch, legacy cases | Primary account had four tabs; the operations account signed in next saw none |
+| Staff Agent panel did not take focus; Escape did nothing | Non-modal dialog: focus to message box, Tab contained, Escape closes Claim Scope (focus to its toggle) then the panel, focus returns to opener or bubble | `13447e9f`, `9ee2ae53` | `StaffAgent.test.jsx` dialog, bubble, embedded, and scope-Escape cases | 1440 px: rail opener put focus in the message box; Escape on a scope checkbox kept focus on the toggle; a second Escape closed the panel and focused the rail button; Done returned focus to the toggle; Close returned focus to the bubble |
+| Staff Agent sent and created a session with no available model | Readable reason from capabilities, applied independently of the session and Claim lists; a session whose model is no longer published also fails closed | `13447e9f`, `9ee2ae53`, `6c132a3e` | `StaffAgent.test.jsx` unavailable, stale-model, reason, failed-list, and failed-capabilities cases | 1440 px: notice and disabled send with no published model; injected capabilities failure: "could not be checked" with send disabled. The stale-model case is covered by tests only |
+| Open Claim tabs leaked across staff accounts on one browser | Tabs stored per staff identity; former browser-wide record removed | `1b506b93` | `usePersistentTabs.test.jsx` privacy, identity switch, legacy cases | The primary account had five tabs; the second and operations accounts signed in next saw none |
 | Staff Agent rail button did nothing at phone width | Open panel fills the content area; bubble stays hidden; no dragging | `823fa07b` | `StaffAgent.test.jsx` compact case | 390 px: panel 390 x 734, focus in message box, Escape returns focus to the rail button |
 | Operations account told to "retry when the service is available" | Access denial explained without Retry | `80eaff92` | `WorkbenchPage.test.jsx` access-denied case | Operations account: "No Workbench access" without Retry |
 
-`#1167` is now part of the PR's `main` base. The current Workbench renews the staff presence lease on session restore, every 120 seconds, window focus, and visibility return; it also wires `ownership.accept_claim`, Claim decision, and specific `STAFF_NOT_AVAILABLE` guidance. This PR does not own those implementations, but its exact-head browser gate exercises their Workbench-visible behavior.
+Issue #1167 is part of this PR's base and owns presence renewal, Take Claim, and Claim decisions. On `ae2e65bd`, sign-in renewed presence to revision 2, Take over and handoff acceptance succeeded, Take Claim assigned AT-10 at revision 9, and its approval was recorded at revision 10.
 
 ## Findings routed to other owners
 
-These remain routed findings after reconciling the inventory with current `main`. Items delivered by #1167 were removed from this table and are recorded above as current behavior.
+These findings are confirmed on `ae2e65bd` unless the evidence says otherwise. Items delivered by #1167 are no longer listed.
 
 | Finding | Evidence | Owner or follow-up |
 | --- | --- | --- |
@@ -75,15 +74,17 @@ These remain routed findings after reconciling the inventory with current `main`
 | Closing a Claim tab with Delete drops focus to `<body>` | Keyboard check on the open-claims tab list | Workbench owner under #771 |
 | Four "Open" buttons in Supporting Claim context share one name | Accessible names are identical | Workbench owner under #771 |
 | Signal titles show the internal ID | "Review Signal sig_at02_policy_cause" | Workbench owner under #771 |
-| Realtime stream retries indefinitely after `403` | Operations account: about one `/realtime/events` request every 10 seconds | Workbench owner under #771 |
+| Realtime stream retries indefinitely after `403` | Operations account: about one `/realtime/events` request every 10 seconds (development run; not re-measured on `ae2e65bd`) | Workbench owner under #771 |
 | MinIO image cannot be pulled | `minio/minio` and `minio/mc` on Docker Hub and `quay.io/minio/minio` refuse anonymous pulls; `docker compose up` fails on a new machine | Repository deployment owner; affects every new local environment |
+| The backend cannot start on Windows without `tzdata` | `backend/domain/temporal_resolution.py:22` calls `ZoneInfo('Pacific/Auckland')` at import; `tzdata` is not a declared dependency, so startup fails with `ZoneInfoNotFoundError` on Windows | Backend owner under #769 |
+| A full page load of `/workbench` without a trailing slash shows the Vite base-path notice | The dev server base is `/workbench/`; in-app navigation is unaffected | Workbench owner under #771 |
 
 ## Open questions
 
 | Question | Status |
 | --- | --- |
 | After a resolved handoff, `conversation.send_claimant_message` is no longer projected for the primary owner | Pending owner decision |
-| Retention hold actions need a primary owner on a terminal Claim | Reachable only after #1167 lets staff take AT-10 |
+| Retention hold actions need a primary owner on a terminal Claim | Answered by the projection code: holds are offered only on abandoned or closed Claims. AT-10, owned and approved on `ae2e65bd`, projects none, and the seed has no abandoned or closed Claim |
 
 ## Control inventory
 
@@ -108,8 +109,9 @@ client route, or client-local state behind the control.
 | Hide or Show Claim queue | Queue routes | Client-local; compact layout returns to the queue route | `works` | Name and `aria-expanded` match what is visible |
 | Hide or Show conversation queue | Conversations routes | Client-local | `works` | Name and `aria-expanded` follow the state; hidden at 800 px and below by design |
 | Refresh Workbench projection | Signed in | Reloads queue or conversations | `works` | One list request per click |
-| Revision notice: Review the latest version, Dismiss | Another session changes the open Claim | Reloads detail | `works` | Out-of-band message by API raised "changed in another session (revision 10)"; Review reloaded and cleared it; not raised for the page's own mutation |
-| Movement and decision notices: Dismiss | After a reopen or decision | Client-local | `unreachable` | No reopenable or decidable Claim in the seed |
+| Revision notice: Review the latest version, Dismiss | Another session changes the open Claim | Reloads detail | `works` | Out-of-band messages raised revision 6 on AT-04 and revision 11 on AT-02; Review reloaded and cleared one, Dismiss cleared the other; not raised for the page's own mutations |
+| Decision notice | After a Claim decision | Client-local | `works` | "Claim NW-AT10-001 was approved and the authoritative projection is now shown at revision 10."; its Dismiss control was not clicked |
+| Movement notice: Dismiss | After a reopen | Client-local | `unreachable` | No abandoned or closed Claim in the seed |
 
 ### Account menu
 
@@ -117,7 +119,7 @@ client route, or client-local state behind the control.
 | --- | --- | --- | --- | --- |
 | Account menu trigger | Signed in | Opens menu | `works` | Focus moves to the first item; arrow keys move; Escape returns focus |
 | Profile, Account and Security, Notifications, Language and Display, Help and Feedback | Menu open | Client routes `/workbench/settings/*` | `works` | Items are named menu items |
-| Sign out | Menu open | Confirmation, then `DELETE /api/v1/staff/auth/session` | `works` | Initial focus on Cancel; Claim tabs no longer leak to the next account |
+| Sign out | Menu open | Confirmation, then `DELETE /api/v1/staff/auth/session` | `works` | Initial focus on Cancel; the next account sees no Claim tabs |
 
 ### Claim queue
 
@@ -127,7 +129,7 @@ client route, or client-local state behind the control.
 | Filters | Queue available | Client-local disclosure | `works` | `aria-expanded` reflects state |
 | Claim status, Claim priority, Staff tag | Filters open | Server filter metadata; list query parameters | `works` | Options come from `filter-metadata` |
 | Clear filters | Filters applied or no match | Client route | `works` | Returns to unfiltered list |
-| Claim card | Claims listed | Opens the Claim tab and route | `works` | Card shows reference, status, family, owner |
+| Claim card | Claims listed | Opens the Claim tab and route | `works` | Clicked AT-10 card opened `/workbench/claims/clm_fixture_at10` |
 | Load more Claims | Next cursor present | Cursor pagination | `unreachable` | Seed has one created Claim |
 | Refresh totals | Counts unavailable | Reloads counts | `unreachable` | Counts always available in the seed |
 | Retry (list error) | List request failed | Reloads the list | `works` | Injected network failure: alert, "stale" marker, Retry recovers |
@@ -145,28 +147,28 @@ client route, or client-local state behind the control.
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
 | Claim tab | Claims opened | Client route; per-staff persisted state | `works` | ArrowRight moves focus and route; Delete closes the tab but focus falls to `<body>` |
-| Close tab | Claims opened | Moves to a neighbour tab | `works` | Six tabs to five |
-| Show all open claims and list items | Claims opened | Client-local list | `works` | `aria-expanded` true; picking an item routes to that Claim and closes the list |
+| Close tab | Claims opened | Moves to a neighbour tab | `works` | The close button took six tabs to five |
+| Show all open claims and list items | Claims opened | Client-local list | `works` | `aria-expanded` true with six items; picking one routed to AT-04 and closed the list |
 
 ### Claim workspace header and sections
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
 | Record references | Claim open | Disclosure | `works` | Shows Claim and claimant references |
-| Section tabs (8) | Claim open | Client routes `/workbench/claims/{id}/{section}` | `works` | Arrow keys move and route |
-| Retry Claim, Refresh Claim | Detail failed or stale | Reloads detail | `works` | Injected AT-06 detail failure: "could not be opened"; Retry Claim loaded revision 3. Operations account sees "This Claim is not available" |
-| Retry section | Section resource failed | Reloads that resource | `works` | Injected Evidence failure: "Showing saved records" notice; Retry restored three records |
+| Section tabs (8) | Claim open | Client routes `/workbench/claims/{id}/{section}` | `works` | ArrowRight moved from Overview to Conversation and routed |
+| Retry Claim | Detail failed | Reloads detail | `works` | Injected AT-06 detail failure: "could not be opened"; Retry Claim loaded revision 3. The operations account sees "This Claim is not available" |
+| Retry section | Section resource failed | Reloads that resource | `works` | Injected AT-06 Evidence failure showed the unavailable state; Retry section loaded three records |
 | Retry external action context | External action recovery notice | Reloads external context | `unreachable` | No external task in the seed |
 
 ### Overview
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Review acceptance, Confirm Accept Claim | `human.accept_handoff` is primary | `POST .../handoffs/{id}/accept` with `If-Match` | `works` | AT-04 and AT-02: revision advanced, "Assigned to you" |
-| Action details, Provide action details | Projected primary action | Disclosure and form | `works` | AT-10 now exposes `Review ownership` / `Take Claim`. Exact-head CI first forces unavailable presence and verifies the explicit failure, then restores availability and successfully assigns the Claim |
-| Open work activity | Accepted handoff | Routes to Activity | `works` | AT-04 routed to `/activity` |
-| Open (four) | Supporting Claim context | Routes to the matching section | `works` | Names are not unique; see routed finding |
-| Source, gap, traceability, tag, and signal disclosures | Records present | Disclosures | `works` | Expanded; source, status, and freshness rendered |
+| Review acceptance, Confirm Accept Claim | `human.accept_handoff` is primary | `POST .../handoffs/{id}/accept` with `If-Match` | `works` | AT-04 and AT-02: "Assigned to you"; AT-04 at revision 4 |
+| Review ownership, Take Claim | `ownership.accept_claim` is primary | `POST .../claims/{id}/accept` (#1167) | `works` | AT-10: confirmation "Take ownership of this Claim?" with initial focus on Cancel; Take Claim assigned the Claim at revision 9 |
+| Open work activity | Accepted handoff | Routes to Activity | `works` | AT-02 routed to `/activity` |
+| Open (four) | Supporting Claim context | Routes to the matching section | `works` | The second Open routed AT-02 to `/evidence`; names are not unique, see routed finding |
+| Source, gap, traceability, tag, and signal disclosures | Records present | Disclosures | `works` | Expanded on AT-04 and AT-02 |
 | Show all gaps | More gaps than shown | Client-local | `unreachable` | No seeded Claim has more gaps than the summary shows |
 | Refresh Claim | Projection stale | Reloads detail | `unreachable` | No stale projection occurred during the run |
 | Review signals | Signals need review | Routes to Signals | `works` | AT-02 routed to `/signals` |
@@ -175,33 +177,33 @@ client route, or client-local state behind the control.
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Invite coworker | `ownership.invite_cowork` | `POST .../cowork-requests` | `works` | Revision 4 to 5; invitation visible in Activity; raw staff ID input |
-| Request transfer | `ownership.request_transfer` | `POST .../transfer-requests` | `works` | Revision 5 to 6; raw staff ID input |
-| Return to queue | `ownership.requeue` | `POST .../requeue` | `works` | AT-02 unassigned, revision 7 |
-| Review cowork request | Second staff, pending invitation | `PATCH .../collaboration-requests/{id}` | `works` | Second staff became coworker; could message the claimant |
-| Review transfer request | Second staff, pending transfer | `PATCH .../collaboration-requests/{id}` | `works` | Injected stale `If-Match: 2`: alert names revision 8 and keeps the selected decision; resubmission declined at revision 9 |
+| Invite coworker | `ownership.invite_cowork` | `POST .../cowork-requests` | `works` | AT-02: revision 6 to 7; raw staff ID input |
+| Request transfer | `ownership.request_transfer` | `POST .../transfer-requests` | `works` | AT-02: revision 7 to 8; raw staff ID input |
+| Return to queue | `ownership.requeue` | `POST .../requeue` | `works` | AT-02: submit disabled until a reason is entered; unassigned at revision 12 |
+| Review cowork request | Second staff, pending invitation | `PATCH .../collaboration-requests/{id}` | `works` | Second staff became coworker at revision 9 |
+| Review transfer request | Second staff, pending transfer | `PATCH .../collaboration-requests/{id}` | `works` | Injected stale `If-Match: 2`: alert names revision 9 and keeps the selected decision; resubmission declined the transfer at revision 10 |
 
 ### Conversation
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
 | Message to claimant, Send message | `conversation.send_claimant_message` | `POST .../messages` with readback | `works` | AT-04 and AT-05; no false revision notice |
-| Unavailable notice | No send action | Projection | `honest-unavailable` | Composer keeps full width after repair |
+| Unavailable notice | No send action | Projection | `honest-unavailable` | AT-06 at 1024 px: "Staff messaging not available yet"; composer 566 px wide |
 | Use voice input, Cancel | Send available and supported | Browser speech recognition | `unreachable` | The automated browser has no microphone; component tests cover the states |
 | Choose and Attach photos or files | Send available | Client-local preview | `placeholder` | Staff attachments cannot be sent; see routed finding |
-| Take over conversation, Confirm take over | Queued handoff | `POST .../handoffs/{id}/accept` | `works` | #1167 renews presence during an active session. `STAFF_NOT_AVAILABLE` is now reported as a definite not-completed outcome rather than an unconfirmed side effect |
+| Take over conversation, Confirm take over | Queued handoff | `POST .../handoffs/{id}/accept` | `works` | AT-05 taken over from Conversations; presence renewed by #1167 |
 
 ### Claim information
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| None | Not applicable | `GET .../fields` | `works` | Read-only fields with status and source |
+| None | Not applicable | `GET .../fields` | `works` | AT-04: four fields with status and source |
 
 ### Evidence
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Evidence record disclosure | Evidence exists | `GET .../evidence` | `works` | Expanded; status, source, related fields, claimant note |
+| Evidence record disclosure | Evidence exists | `GET .../evidence` | `works` | AT-02: expanded with status, source, and related fields |
 | View file | Completed evidence | `GET .../evidence/{id}/content-data` | `honest-unavailable` | Fixture storage has no bytes: "The evidence file is not available to view." |
 | Open file link | Preview loaded | Browser-safe content URL | `unreachable` | Needs object storage (Docker) |
 
@@ -209,14 +211,14 @@ client route, or client-local state behind the control.
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Policy and Claim history record disclosures | Retrievals exist | `GET .../retrievals` | `works` | AT-02: one policy and one history record with provenance |
+| Policy and Claim history record disclosures | Retrievals exist | `GET .../retrievals` | `works` | AT-02: policy and Claim history records expand with provenance |
 
 ### External services
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
 | Capability disclosures | Capabilities projected | Claim detail `external_capabilities` | `works` | Purpose, required fields, disclosure, limitation rendered |
-| Official information link | Capability has an official URL | External link with `rel="noreferrer"` | `works` | Opens in a new tab; external site not visited during the run |
+| Official information link | Capability has an official URL | External link | `works` | `target="_blank"`, `rel="noreferrer"`; the external site was not visited |
 | Request record disclosures, Review action, Confirm, Cancel | External requests exist | Registered external task actions | `unreachable` | No external request in the seed |
 
 ### Signals
@@ -224,47 +226,47 @@ client route, or client-local state behind the control.
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
 | Signal disclosure | Signals exist | `GET .../signals` | `works` | Internal ID shown in title |
-| Decision, Reason, Decision summary, Record decision | Primary owner with a projected decision | Signal decision action | `works` | Empty submit blocked by required fields; AT-02 signal recorded as Confirmed |
-| No-decision notice | Non-owner | Projection | `honest-unavailable` | "No signal-decision action is projected for this signal." |
+| Decision, Reason, Decision summary, Record decision | Primary owner with a projected decision | Signal decision action | `works` | AT-02 `sig_at02_policy_cause` recorded as Confirmed |
+| No-decision notice | Non-owner or coworker | Projection | `honest-unavailable` | Second staff (coworker): "No signal-decision action is projected for this signal." for both AT-02 signals |
 
 ### Activity
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
 | Review handoff context | Handoff present | Disclosure | `works` | Handoff packet rendered |
-| Record resolution, Resolve handoff | Accepted handoff | `POST .../handoffs/{id}/resolve` | `works` | Required fields enforced; audit entries Handoff.Resolved and Customer Update.Recorded |
+| Record resolution, Resolve handoff | Accepted handoff | `POST .../handoffs/{id}/resolve` | `works` | AT-04: empty submit blocked; resolved at revision 7 with a Handoff.Resolved audit entry |
 | Update action | Staff action exists | `PATCH .../staff-actions/{id}` | `unreachable` | No staff action can be created from the UI; see routed finding |
-| Technical details | Audit entries | Disclosure | `works` | Expanded per audit entry |
+| Technical details | Audit entries | Disclosure | `works` | AT-02 Activity: 11 disclosures expanded |
 
 ### Claim decision and reopen
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Approve Claim, Reject Claim, explanation, confirmation | Primary owner, `claim.record_decision` available | `POST .../decisions` | `works` | Exact-head CI takes AT-10, continues review, exposes both decision controls, submits an approval with claimant-visible explanation, and waits for the authoritative `Claim approved` projection |
+| Approve Claim, Reject Claim, explanation, confirmation | Primary owner, `claim.record_decision` available | `POST .../decisions` (#1167) | `works` | AT-10 after Continue review: both controls shown; Approve opened a confirmation with initial focus on Cancel and an optional explanation; approved at revision 10. Reject was not submitted |
 | Review reopen, Cancel, Reopen | `claim.reopen` available | `POST .../reopen` | `unreachable` | No abandoned or closed Claim in the seed |
 
 ### Conversations page
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Action needed, My conversations, Staff Agent tabs | Signed in | Client-local tabs over conversation lists | `works` | Arrow keys move between tabs |
-| Conversation row | Conversations listed | Routes to `/workbench/conversations/{session}` | `works` | Opened AT-04 conversation |
-| Take over, Confirm take over, Cancel | Unassigned human request | `POST .../handoffs/{id}/accept` | `works` | See presence routing |
+| Action needed, My conversations, Staff Agent tabs | Signed in | Client-local tabs over conversation lists | `works` | ArrowRight moved to My conversations |
+| Conversation row | Conversations listed | Routes to `/workbench/conversations/{session}` | `works` | Opened the AT-05 conversation |
+| Take over, Confirm take over | Unassigned human request | `POST .../handoffs/{id}/accept` | `works` | AT-05 taken over; a reply was delivered with no false notice |
 | Search, Clear search, Previous, Next | Staff Agent sessions listed | Client-local over sessions | `unreachable` | No Staff Agent session can be created without a model |
 | More open conversations menu | More open tabs than fit | Client-local menu | `unreachable` | Too few open conversations in the run |
 | Open conversation tab, Close current conversation tab | Conversation opened | Client-local | `works` | Close returned to `/workbench/conversations` |
-| Conversations (back) | Conversation opened | Client route to the list | `works` | Returned to `/workbench/conversations` |
-| Open claim | Conversation opened | Routes to the Claim | `works` | Routed to `/workbench/claims/clm_fixture_at04/summary` |
+| Conversations (back) | Compact layout, conversation opened | Client route to the list | `works` | Hidden at 1440 px by design; at 390 px it returned to `/workbench/conversations` |
+| Open claim | Conversation opened | Routes to the Claim | `works` | Routed to `/workbench/claims/clm_fixture_at05/summary` |
 | Refresh, Retry | Conversation detail stale or failed | Reloads | `unreachable` | No stale or failed conversation occurred during the run |
 
 ### Staff Agent
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Open Staff Agent bubble | Desktop, panel closed | Opens the panel | `works` | Hidden at phone width by design |
-| Close Staff Agent | Panel open | Closes and returns focus | `works` | Escape also closes |
+| Open Staff Agent bubble | Desktop, panel closed | Opens the panel | `works` | Focus moved to the message box; hidden at phone width by design |
+| Close Staff Agent | Panel open | Closes and returns focus | `works` | Returned focus to the bubble; Escape also closes |
 | Session, New session model, New | Panel open | `GET /workbench/agent/sessions`, capabilities | `works` | "No published model"; New shows "New conversation ready" |
-| Claim Scope, Claim checkboxes, Done | Panel open | Client-local scope, up to five Claims | `works` | Two selected: "2 of 5", composer chip "2 Claims selected"; Escape closes the list and keeps focus on its toggle |
+| Claim Scope, Claim checkboxes, Done | Panel open | Client-local scope, up to five Claims | `works` | Two selected: "2 of 5"; Escape and Done close the list and keep focus on its toggle |
 | Message Staff Agent, Send to Staff Agent | Panel open | `POST .../agent/sessions/{id}/messages` | `honest-unavailable` | No model published: notice shown, send disabled, no session created |
 | Choose and Attach photos or files, Use voice input | Panel open | Client-local | `placeholder` | Attachments cannot be sent; send is blocked while attached |
 | Copy, edit draft, Review action, Confirm and execute, Sources used | Agent answer with drafts | Registered draft execution | `unreachable` | Needs the `model_gateway` runtime |
@@ -274,7 +276,7 @@ client route, or client-local state behind the control.
 
 | Control | Appears when | Behaviour and source | Result | Observation |
 | --- | --- | --- | --- | --- |
-| Settings navigation (5) | Settings route | Client routes | `works` | All five pages load |
+| Settings navigation (5) | Settings route | Client routes | `works` | All five links routed |
 | Settings Retry | Settings failed to load | Reloads settings | `unreachable` | Settings never failed during the run |
 | Profile: avatar, name, email, phone, Save changes | Profile | Browser storage only | `defect` | Copy implies an account update; saved state stays in this browser; see routed finding |
 | Security: Change password, Set up, Manage devices, Remove | Security | Identity provider not configured | `honest-unavailable` | Disabled with "no staff identity-provider endpoint is configured" |
@@ -287,15 +289,15 @@ client route, or client-local state behind the control.
 
 | Mutation | Confirmation | Stale revision | Replay | Audit visible |
 | --- | --- | --- | --- | --- |
-| Accept handoff | Two-step | Covered by existing route tests | Round 1: after a `409`, the identical retry reused the idempotency key and succeeded once presence was restored | Activity |
+| Accept handoff | Two-step | Covered by existing route tests | Covered by existing route tests | Activity |
 | Resolve handoff | Form with required fields | Covered by existing route tests | Not exercised in the browser | Activity: Handoff.Resolved |
 | Send claimant message | Send button | Covered by existing journey tests | Not exercised in the browser | Conversation timeline |
 | Invite coworker, Request transfer | Expand, required reason | Not exercised in the browser | Not exercised in the browser | Activity |
 | Decide collaboration request | Required decision | Injected stale `If-Match`: alert with current revision, input kept | Not exercised in the browser | Revision advanced |
 | Return to queue | Required reason | Not exercised in the browser | Not exercised in the browser | Ownership became unassigned |
-| Signal decision | Required decision, reason, summary | Not exercised in the browser on the final-head automation | Not exercised in the browser | Signal state Confirmed |
-| Take Claim | Explicit confirmation | Route/component tests cover stale projection and ownership conflicts | Existing API/route tests cover idempotency; exact-head browser exercises unavailable then successful submission | Ownership readback shows the current staff member as primary owner |
-| Claim decision | High-impact confirmation and claimant-visible explanation | Workbench tests cover stale revision and ambiguous readback | Workbench/API tests cover same-key retry and conflict behavior | Exact-head browser submits AT-10 approval and renders the authoritative decision summary |
+| Signal decision | Required decision, reason, summary | Not exercised in the browser | Not exercised in the browser | Signal state Confirmed |
+| Take Claim | Explicit confirmation | Route and component tests cover stale projection and ownership conflicts | API and route tests cover idempotency | Browser on `ae2e65bd`: AT-10 assigned to the current staff member at revision 9 |
+| Claim decision | High-impact confirmation with optional claimant-visible explanation | Workbench tests cover stale revision and ambiguous readback | Workbench and API tests cover same-key retry and conflict | Browser on `ae2e65bd`: AT-10 approval at revision 10 |
 
 ## Excluded from the inventory
 
@@ -307,7 +309,8 @@ client route, or client-local state behind the control.
 - Evidence bytes, MongoDB transactions, and MinIO were not exercised: the `local_mvp` stack needs
   MinIO, whose images could not be pulled on this machine.
 - Staff Agent answers and draft execution need the `model_gateway` runtime and were not exercised.
-- Presence renewal, Take Claim, Claim decisions, and `STAFF_NOT_AVAILABLE` handling are present in current `main` via #1167 and are covered by the exact-head browser gate. Retention-hold coverage remains limited to the projections and tests available in the seeded environment.
+- Presence renewal, Take Claim, and Claim decisions come from #1167 and were exercised on `ae2e65bd`.
+  Retention holds are projected only for abandoned or closed Claims, which the seed does not contain.
 - A Workbench access policy that grants read without write could not be provisioned locally; the
   operations account covers the no-capability state, and the second staff account covers a
   non-owner with write capability.
@@ -315,11 +318,9 @@ client route, or client-local state behind the control.
 
 ## Reproduce the run
 
-Start the fixture backend and the Workbench from the repository root, then seed the scenarios with
-a signed-in staff token. For repeatable exact-head evidence, CI runs the browser inventory before
-the other browser journeys so the demo seed starts from an empty queue.
-
-`tests/browser/pr1170_workbench_inventory.cjs` writes `pr1170-workbench-inventory-PASS.json` plus screenshots under `browser-evidence/`. The JSON includes `head`, environment/profile fields, surface control snapshots, and mutation checks.
+Start the fixture backend and the Workbench from the repository root, open `/workbench/` with a
+trailing slash, sign in, and seed the scenarios with the signed-in staff token. On Windows, install
+`tzdata` first (see routed findings).
 
 ```powershell
 $env:NORTHWIND_ENVIRONMENT = 'development'
