@@ -61,6 +61,8 @@ from backend.domain.models import (
     ProposedFormChange,
     QuestionRecord,
     ResponsibleParty,
+    RuntimeTraceFailure,
+    RuntimeTraceRecord,
     SessionRecord,
     StructuredFormField,
     WorkflowState,
@@ -2105,6 +2107,13 @@ def submit_message(
         if existing_client_message is not None
         else None
     )
+    existing_failure_trace = (
+        repository.find_runtime_trace_for_trigger(
+            claim_id, existing_client_message.message_id, principal.subject
+        )
+        if existing_client_message is not None
+        else None
+    )
     declared_completed_turn = (
         existing_turn_result is not None
         and (existing_turn_result.response_status or 0) < 400
@@ -2125,10 +2134,10 @@ def submit_message(
             claim_id, existing_client_message.message_id, principal.subject
         )
         is None
-        and repository.find_runtime_trace_for_trigger(
-            claim_id, existing_client_message.message_id, principal.subject
+        and (
+            existing_failure_trace is None
+            or existing_failure_trace.status in {'rejected', 'failed', 'unavailable'}
         )
-        is None
     )
     if existing_client_message is not None and not retrying_saved_message:
         if existing_client_message.session_id != session_id:
@@ -2189,9 +2198,9 @@ def submit_message(
             and item.status == 'open'
             and item.confirmation_request is not None
         ),
-        key=lambda item: item.confirmation_request.claim_revision
-        if item.confirmation_request
-        else 0,
+        key=lambda item: (
+            item.confirmation_request.claim_revision if item.confirmation_request else 0
+        ),
         default=None,
     )
     confirmation_revision_before_message = claim.revision
@@ -2782,6 +2791,49 @@ def submit_message(
                 )
             }
         )
+        failure_code = model_error.diagnostic_code or (
+            'model_response_validation'
+            if model_error.code.value == 'malformed_response'
+            else 'model_gateway_failure'
+        )
+        failure_trace_timestamp = now_utc()
+        failure_trace = RuntimeTraceRecord(
+            trace_id=new_id('trc'),
+            claim_id=claim_id,
+            session_id=session_id,
+            model_profile_id=agent_context.model_profile_id,
+            trigger_message_id=claimant_message.message_id,
+            evidence=[
+                {
+                    'evidence_id': item.evidence_id,
+                    'media_type': item.media_type,
+                    'outcome': 'submitted',
+                }
+                for item in agent_context.evidence
+            ],
+            invocations=[],
+            action_code='runtime.fail_safe',
+            runtime_action_code='runtime.fail_safe',
+            reason_codes=[model_error.code.value],
+            release_set_id=(
+                agent_context.runtime_configuration_snapshot.release_set_id
+                if agent_context.runtime_configuration_snapshot is not None
+                else None
+            ),
+            route=f'{turn_route.product_family}:{turn_route.task.value}',
+            failure_diagnostic=RuntimeTraceFailure(
+                code=failure_code,
+                path=model_error.diagnostic_path,
+            ),
+            status=(
+                'rejected'
+                if model_error.code.value
+                in {'malformed_response', 'incomplete_response', 'refused_response'}
+                else 'failed'
+            ),
+            created_at=failure_trace_timestamp,
+            finished_at=failure_trace_timestamp,
+        )
         recovery_agent_message = None
         if safety_interrupt is not None and preprovider_handoff is not None:
             notice = compose_reply(
@@ -2829,7 +2881,10 @@ def submit_message(
             inbound_checkpoint=checkpoint_idempotency.inbound_checkpoint,
         )
         repository.save_message_recovery(
-            claimant_message, recovery_idempotency, agent_message=recovery_agent_message
+            claimant_message,
+            recovery_idempotency,
+            agent_message=recovery_agent_message,
+            runtime_trace=failure_trace,
         )
         repository.append_audit_event(
             AuditEventEnvelope(
