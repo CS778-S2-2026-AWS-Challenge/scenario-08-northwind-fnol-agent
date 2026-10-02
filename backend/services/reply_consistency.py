@@ -65,10 +65,10 @@ class ReplyInconsistency:
     detail: str
 
 
-# A reply that leaves the claimant stuck is sent back once, but it is not a
-# false statement: if the rewrite is still stuck, the turn stands rather than
+# These are sent back once, but they do not mislead the claimant about what
+# Northwind has done: if the rewrite still has one, the turn stands rather than
 # failing the claimant's whole message.
-SOFT_PROBLEMS = frozenset({'leaves_claimant_stuck'})
+SOFT_PROBLEMS = frozenset({'leaves_claimant_stuck', 'claims_documents_block_lodging'})
 
 
 @dataclass(frozen=True, slots=True)

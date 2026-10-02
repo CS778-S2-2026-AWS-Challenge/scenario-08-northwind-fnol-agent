@@ -115,7 +115,7 @@ def test_lookup_hard_limit_is_per_request_not_cumulative_input_plus_output() -> 
     )
     assert result.raw_input_tokens <= V8_INPUT_HARD_LIMIT
     assert result.turn_cumulative_tokens > V8_INPUT_HARD_LIMIT
-    assert result.reserved_output_tokens == 6500
+    assert result.reserved_output_tokens == 7500
 
 
 @pytest.mark.parametrize(

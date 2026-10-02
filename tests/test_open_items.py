@@ -330,3 +330,13 @@ def test_a_question_already_with_the_claims_team_is_not_passed_on_twice(
 
     questions = [item for item in journey.view()['open_items'] if item['kind'] == 'question']
     assert len(questions) == 1
+
+
+def test_before_the_family_is_known_the_model_sees_what_each_family_needs() -> None:
+    from backend.services.context_planner import lodging_needs_by_family
+
+    needs = lodging_needs_by_family()
+    assert set(needs) == {'motor', 'home', 'contents'}
+    assert 'vehicle.drivable' in needs['motor']
+    assert 'property.address' in needs['home']
+    assert 'contents.items' in needs['contents']

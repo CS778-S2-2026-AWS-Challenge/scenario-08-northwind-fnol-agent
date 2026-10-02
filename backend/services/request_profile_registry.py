@@ -26,7 +26,7 @@ _PROFILES = {
         input_hard_limit=V8_INPUT_HARD_LIMIT,
         # Dense envelope with every list at its cap estimates 6361 tokens
         # (tests/test_request_profile_budgets.py); operating cap, not a proof.
-        output_limit=6500,
+        output_limit=7500,
     ),
     'claimant.intake.v1': RequestProfile(
         profile_id='claimant.intake.v1',
@@ -53,7 +53,7 @@ _PROFILES = {
         max_model_invocations=1,
         max_model_selected_tools=0,
         input_hard_limit=V8_INPUT_HARD_LIMIT,
-        output_limit=7500,
+        output_limit=8000,
         requires_media_types=['image/*', 'application/pdf'],
     ),
     'claimant.lookup.v1': RequestProfile(
@@ -64,7 +64,7 @@ _PROFILES = {
         max_model_invocations=2,
         max_model_selected_tools=1,
         input_hard_limit=V8_INPUT_HARD_LIMIT,
-        output_limit=6500,
+        output_limit=7500,
         requires_tool_continuation=True,
     ),
     'claimant.evidence-history.v1': RequestProfile(
