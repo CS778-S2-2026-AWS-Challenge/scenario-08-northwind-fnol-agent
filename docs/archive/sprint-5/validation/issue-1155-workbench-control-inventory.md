@@ -23,6 +23,12 @@ owners. It is Sprint 5 stage B evidence for #1155, #771, and #1066.
 Injected failures are labelled as injected. A result that depends on Docker, a published model, or
 another open issue is recorded as a limitation, not as a pass.
 
+Post-review responsive regression: the manual inventory remains an immutable record of the run on
+`943366f8`. The compact queue failure it exposed was repaired in `19c7ed2f` and then exercised by
+the repository's existing browser-evidence journey on exact head `8567ba9f`; CircleCI
+`p12-browser-evidence` #17192 passed and stored the 390 px return-to-queue screenshot and JSON
+check in its browser-evidence artifact.
+
 ## Results at a glance
 
 The source scan found 172 control definitions in `workbench/src`; a mapped list renders one
@@ -48,7 +54,7 @@ Each repair has focused tests. The browser evidence column comes from the `94336
 | Finding | Repair | Commit | Tests | Browser evidence |
 | --- | --- | --- | --- | --- |
 | Own mutation raised "This Claim changed in another session" | Remember the revision produced by the staff member's own revision-checked mutation, including Claim decisions and Staff Agent execution, and hold notices while that mutation is in flight | `33c4946d`, `f1e0d37b`, `6c132a3e` | `revision.test.js`; `WorkbenchPage.test.jsx` own-mutation, decision, Staff Agent, and in-flight cases | AT-04 own send: no notice in 25 polls at 200 ms; out-of-band change raised revision 6 and Review cleared it; Take Claim, AT-10 approval and rejection, collaboration decisions, Return to queue, and a Conversations reply raised no notice |
-| Queue hidden at phone width; toggle label did not match | Compact layout shows the queue when no Claim is open; toggle name and `aria-expanded` follow the visible state and return to the queue | `1181774c` | `WorkbenchPage.test.jsx` phone-width case | 390 px: an open Claim shows "Show Claim queue" (`aria-expanded=false`); the toggle returned to `/workbench` with the queue visible in 13 of 14 attempts. The first attempt from AT-04 Overview stayed on the Claim; see open questions |
+| Queue hidden at phone width; toggle label did not match, and a desktop-to-phone resize could race the React media-query snapshot | Compact layout shows the queue when no Claim is open; toggle name and `aria-expanded` follow the visible state; activation re-checks the live media query so the first phone-width click returns to the queue even if React has not processed the resize yet | `1181774c`, `19c7ed2f` | `WorkbenchPage.test.jsx` phone-width case plus desktop-to-compact transition race; `tests/browser/p12_3_claimant_workbench_recovery.cjs` exact-head Chromium check | The manual run on `943366f8` exposed one first-click failure and 13 later successes. After the race fix, CircleCI `p12-browser-evidence` #17192 passed on exact head `8567ba9f`: Chromium opened a Claim at 1024 px, resized to 390 x 844, activated the live "Show Claim queue" control, returned to `/workbench`, and recorded the queue visible in the browser-evidence artifact |
 | Header menu button hidden at every width with no action | Removed | `1181774c` | Not applicable | Not applicable |
 | Collapsed rail controls had no accessible name | Explicit labels on Workbench, Claim conversations, Staff Agent | `105cc741` | `NavigationRail.test.jsx` | 1024 px: rail text hidden (`display: none`) and all five rail controls named |
 | Unavailable composer collapsed to 40 px | Explicit grid placement for textarea and send button | `49ca5bd4` | Not applicable (layout) | 1024 px AT-06, sending unavailable: textarea 567 px wide |
@@ -87,7 +93,7 @@ These findings are confirmed on `943366f8` unless the evidence says otherwise. I
 | --- | --- |
 | After a resolved handoff, `conversation.send_claimant_message` is no longer projected for the primary owner | Pending owner decision |
 | Retention hold actions need a primary owner on a terminal Claim | Answered by the projection code: holds are offered only on abandoned or closed Claims. AT-10, owned and then approved (phase A) or rejected (phase B), projects none, and the seed has no abandoned or closed Claim |
-| At 390 px the first queue toggle from AT-04 Overview stayed on the Claim | Seen once in this run and once in the earlier run on `ae2e65bd`; not reproduced in 12 later attempts, including two after the same viewport switch. Cause not identified; pending a reproduction outside the emulated viewport |
+| At 390 px the first queue toggle from AT-04 Overview stayed on the Claim | Resolved after review. The failure matched a resize race where CSS had crossed the compact breakpoint before React consumed the media-query update; the click could therefore take the desktop hide-queue branch. `19c7ed2f` re-checks the live media query at activation. The transition regression test covers the stale snapshot directly, and exact-head Chromium evidence passed in `p12-browser-evidence` #17192 on `8567ba9f` |
 
 ## Control inventory
 
