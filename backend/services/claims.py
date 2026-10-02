@@ -73,6 +73,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.open_items import claimant_open_items
 from backend.domain.recovery_policy_registry import (
     INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_ID,
     INCOMPLETE_CLAIM_FOLLOW_UP_POLICY_VERSION,
@@ -95,6 +96,7 @@ from backend.services.branching import (
     build_applied_branch_evaluation,
     claimant_dynamic_form_projection,
 )
+from backend.services.claim_conversation import claim_messages
 from backend.services.claim_data import (
     project_claim_participants,
     project_contents_item_evidence_association,
@@ -398,6 +400,11 @@ def claimant_claim(
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         resolved_support_handoff=resolved_support_handoff,
+        open_items=claimant_open_items(
+            repository.list_evidence(claim.claim_id, claim.customer_id),
+            claim_messages(repository, claim),
+            repository.list_customer_updates(claim.claim_id),
+        ),
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )

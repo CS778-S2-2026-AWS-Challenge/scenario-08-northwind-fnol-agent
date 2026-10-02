@@ -78,6 +78,7 @@ from backend.domain.models import (
     RuntimeInvocationTrace,
     RuntimeTraceRecord,
 )
+from backend.domain.open_items import model_message_content
 from backend.domain.realtime import AgentTurnProgressStage
 from backend.domain.turn_field_contract import RepairOutcome, TurnFieldContractViolation
 from backend.prompts import (
@@ -412,14 +413,20 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         knowledge_limitations=list(context.knowledge_limitations),
         tool_results=list(context.tool_results),
         provenance_messages=[
-            ModelProvenanceMessage(message_id=message.message_id, content=message.content)
+            ModelProvenanceMessage(
+                message_id=message.message_id,
+                content=model_message_content(message.content),
+            )
             for message in context.provenance_messages
         ],
         conversation_history=[
             ModelProvenanceMessage(
                 message_id=message.message_id,
                 content=json.dumps(
-                    {'actor': message.actor.value, 'content': message.content},
+                    {
+                        'actor': message.actor.value,
+                        'content': model_message_content(message.content),
+                    },
                     separators=(',', ':'),
                 ),
             )

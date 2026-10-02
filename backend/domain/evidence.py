@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
@@ -50,18 +50,22 @@ def canonical_evidence_kind(kind: str) -> str:
     return _LEGACY_EVIDENCE_KINDS.get(kind, kind)
 
 
-_UNSPECIFIED_EVIDENCE_KINDS = frozenset({'other_document', 'other'})
+# Files sent in the chat arrive without a kind; the model reads them and says
+# what each one is (``evidence_interpretations``).
+UNSPECIFIED_EVIDENCE_KINDS = frozenset({'other_document', 'other'})
 
 
-def effective_evidence_kind(record: EvidenceRecord) -> str:
-    """The kind a received file counts as when checking what a report carries.
+def evidence_kind(record: EvidenceRecord, interpreted: Mapping[str, str] | None = None) -> str:
+    """The kind a file counts as: its stated kind, else what the model read it to be.
 
-    Files sent in the chat arrive without a kind. An image with no stated kind is
-    an incident photo for this purpose; everything else keeps its own kind.
+    A file with no stated kind that the model has not read yet stays unspecified;
+    Runtime does not guess from the media type.
     """
     kind = canonical_evidence_kind(record.kind)
-    if kind in _UNSPECIFIED_EVIDENCE_KINDS and (record.media_type or '').startswith('image/'):
-        return INCIDENT_PHOTO_KIND
+    if kind in UNSPECIFIED_EVIDENCE_KINDS and interpreted:
+        read = interpreted.get(record.evidence_id)
+        if read and read in REGISTERED_EVIDENCE_KINDS:
+            return canonical_evidence_kind(read)
     return kind
 
 

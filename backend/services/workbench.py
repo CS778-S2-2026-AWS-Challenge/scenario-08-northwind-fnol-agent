@@ -53,6 +53,7 @@ from backend.domain.models import (
     HandoffType,
     MessageRecord,
     NeededFor,
+    OpenItemState,
     ResponsibleParty,
     SessionRecord,
     SignalDecisionRecord,
@@ -66,6 +67,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.open_items import interpreted_evidence_kinds, staff_open_items
 from backend.domain.retention import RetentionHoldRecord, RetentionOperationStatus
 from backend.domain.retrieval import PolicyRetrievalRecord
 from backend.domain.staff_agent import StaffAgentMessageRole
@@ -1908,6 +1910,7 @@ def _claim_triage(
     claim: WorkingClaim,
     evidence: Sequence[EvidenceRecord],
     handoffs: Sequence[HandoffRecord],
+    messages: Sequence[MessageRecord] = (),
 ) -> ClaimTriage | None:
     """Triage a created Claim from its current facts, Evidence and lookups."""
     if not claim_is_created(claim):
@@ -1929,6 +1932,7 @@ def _claim_triage(
         requirements=evaluation.requirements,
         registry=registry,
         amount_threshold=TRIAGE_AMOUNT_THRESHOLD.get(),
+        interpreted_kinds=interpreted_evidence_kinds(messages),
     )
 
 
@@ -2003,6 +2007,23 @@ def _build_projection(
                 result_state='pending_confirmation',
             ),
         )
+    open_items = staff_open_items(
+        evidence, messages, repository.list_customer_updates(claim.claim_id)
+    )
+    if ownership.current_staff_access in {
+        CurrentStaffAccess.PRIMARY,
+        CurrentStaffAccess.COWORKER,
+    }:
+        allowed_actions.extend(
+            _registered_action(
+                'conversation.answer_claimant_question',
+                item.item_id,
+                claim.revision,
+                source_refs=[item.opened_in_message_id or item.item_id],
+            )
+            for item in open_items
+            if item.kind == 'question' and item.state is OpenItemState.OPEN
+        )
     primary_action = _primary_action(
         allowed_actions,
         active_handoffs,
@@ -2051,7 +2072,7 @@ def _build_projection(
         ),
         external_wait_count=len(integration_summary.waiting_external_services),
     )
-    triage = _claim_triage(repository, claim, evidence, handoffs)
+    triage = _claim_triage(repository, claim, evidence, handoffs, messages)
     # The projected Claim carries the effective triage, so tags and the detail
     # state read one value; the stored severity keeps only a staff decision.
     claim = _with_effective_severity(claim, triage)
@@ -2148,6 +2169,7 @@ def _build_projection(
             external_limitation,
         ),
         allowed_actions=allowed_actions,
+        open_items=open_items,
         section_summaries=WorkbenchSectionSummaries(
             fields=WorkbenchSectionSummary(
                 status=ResourceAvailability.AVAILABLE,
