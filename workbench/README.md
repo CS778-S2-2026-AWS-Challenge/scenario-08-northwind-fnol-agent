@@ -5,7 +5,8 @@ static employee frontend.
 
 ## About this client
 
-Supported deep links include `/workbench/claims/{claim_id}`, `/workbench/drafts/{claim_id}`,
+Supported deep links include `/workbench/claims/{claim_id}`,
+`/workbench/active/claims/{claim_id}`, `/workbench/drafts/{claim_id}`,
 `/workbench/conversations/{session_id}`, and `/workbench/agent/sessions/{session_id}`.
 
 ## Current application boundary
@@ -16,6 +17,8 @@ Supported deep links include `/workbench/claims/{claim_id}`, `/workbench/drafts/
 - The queue uses the backend cursor and bounded page size rather than slicing a local database
   mirror.
 - The default Workbench route displays only the server-published submitted-Claim projection.
+  Active Claims use the separate `/workbench/active` route and its server-published status,
+  count, and ordering projections.
   Customer Draft Claims use the separate `/workbench/drafts` route and remain outside the formal
   queue count, search, and filter context.
 - Draft detail routes pass an explicit read-only mode through the shared Claim workspace. Staff can

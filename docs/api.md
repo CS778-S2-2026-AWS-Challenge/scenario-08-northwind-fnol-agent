@@ -3015,7 +3015,8 @@ Supported filters:
 |---|---|
 | `limit` | Page size from 1 to 100; defaults to 25 |
 | `cursor` | Opaque cursor returned by the preceding page |
-| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `completed`, `abandoned`, `closed`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `completed`, `abandoned`, `closed`, `active_claims`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `active_status` | `urgent`, `human_assistance`, `professional_review`, `pending_creation` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
@@ -3027,8 +3028,8 @@ Supported filters:
 Filters can be combined and are applied before queue ordering and cursor pagination.
 `search` matches only staff-list projection fields: Claim ID, display reference, incident family
 and summary, current requested outcome, and projected tag codes and labels. Claimant display name
-is not searchable until an authorised staff-safe identity projection populates it. Search does not
-inspect unprojected Claim fields or change the backend rank order.
+is intentionally not searchable, even when the authorised staff-safe identity projection populates
+it for display. Search does not inspect unprojected Claim fields or change the backend rank order.
 
 Each item includes claim ID, safe display reference, state dimensions, terminal disposition,
 priority, queue, route,
@@ -3037,12 +3038,32 @@ service timing, and update time. It is a projection of shared claim state, not a
 editable board record.
 
 The response is shaped as
-`{ "items": [...], "page": { "next_cursor": null }, "view_counts": { "status": "available", "items": [...], "limitation": null } }`.
+`{ "items": [...], "page": { "next_cursor": null }, "view_counts": { "status": "available", "items": [...], "limitation": null }, "active_claim_counts": { "status": "available", "total": 4, "navigation_total": 4, "items": [...], "limitation": null } }`.
 A non-null `next_cursor` is passed back through `cursor` to read the next ordered page. Invalid
 cursors return `422 VALIDATION_ERROR`. Each item contains the safe Claim, claimant and incident
 summaries; lifecycle and workflow state; ownership and priority projections; `work_summary`;
 integration status; tags; and creation and update times. It is a projection of shared Claim state,
 not a separately editable board record.
+
+`view=active_claims` is a mutually exclusive operational projection for work that needs continued
+attention. Each matching row has an `active_claim` object with `status` and nullable `entered_at`.
+The server assigns exactly one status using this explicit precedence, rather than sorting status
+names alphabetically:
+
+1. `urgent` when the projected priority is `immediate` or `urgent`;
+2. `human_assistance` when an active handoff has `support_need=human_requested`;
+3. `professional_review` when the projected lifecycle is `professional_review`;
+4. `pending_creation` when the projected lifecycle is `ready_to_create`.
+
+Active claims sort by that precedence, then oldest `entered_at`, then Claim ID. `entered_at` is the
+earliest relevant active-handoff creation time. Professional review without such a handoff and
+pending creation have no authoritative state-entry timestamp, so their `entered_at` is null and
+sorting falls back to the Claim's `updated_at`. The `active_status` filter applies after this
+classification. `active_claim_counts` is calculated after the other result filters but before
+`view`, `active_status`, cursor, and limit, so `total` and the status counts describe the current
+filter context. `navigation_total` is calculated before result filters and supplies the stable
+sidebar badge. A staff-safe claimant display name is included when the identity record is
+available; clients retain the opaque customer ID as a non-inferred fallback.
 
 `work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
 Claim. The server applies actionable staff work and an accepted provider wait before terminal

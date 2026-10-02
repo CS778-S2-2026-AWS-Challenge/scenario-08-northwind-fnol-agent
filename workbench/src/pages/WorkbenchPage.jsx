@@ -1,4 +1,4 @@
-import { PanelLeftClose, PanelLeftOpen, RefreshCw } from 'lucide-react'
+import { CircleAlert, PanelLeftClose, PanelLeftOpen, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { workbenchApi } from '../api.js'
@@ -31,6 +31,8 @@ export default function WorkbenchPage() {
   const syncTabIdentities = tabs.syncIdentities
   const [claims, setClaims] = useState([])
   const [viewCounts, setViewCounts] = useState(UNAVAILABLE_VIEW_COUNTS)
+  const [activeClaimCounts, setActiveClaimCounts] = useState(UNAVAILABLE_ACTIVE_CLAIM_COUNTS)
+  const [activeCount, setActiveCount] = useState(null)
   const [draftCount, setDraftCount] = useState(null)
   const [filterMetadata, setFilterMetadata] = useState(null)
   const [filterMetadataLoading, setFilterMetadataLoading] = useState(true)
@@ -88,11 +90,24 @@ export default function WorkbenchPage() {
   const isAgentRoute = Boolean(routeAgentSessionId)
   const isConversations = location.pathname === '/workbench/conversations' || location.pathname.startsWith('/workbench/conversations/')
   const isConversationWorkspace = isConversations || isAgentRoute
+  const isActiveQueue = location.pathname.startsWith('/workbench/active')
   const isDraftQueue = location.pathname.startsWith('/workbench/drafts')
-  const queueKind = isDraftQueue ? 'drafts' : 'submitted'
-  const activeQueueView = isDraftQueue ? 'incomplete_claims' : 'created_routed'
-  const queueBasePath = isDraftQueue ? '/workbench/drafts' : '/workbench'
-  const claimBasePath = isDraftQueue ? '/workbench/drafts' : '/workbench/claims'
+  const queueKind = isActiveQueue ? 'active' : isDraftQueue ? 'drafts' : 'submitted'
+  const activeQueueView = isActiveQueue
+    ? 'active_claims'
+    : isDraftQueue
+      ? 'incomplete_claims'
+      : 'created_routed'
+  const queueBasePath = isActiveQueue
+    ? '/workbench/active'
+    : isDraftQueue
+      ? '/workbench/drafts'
+      : '/workbench'
+  const claimBasePath = isActiveQueue
+    ? '/workbench/active/claims'
+    : isDraftQueue
+      ? '/workbench/drafts'
+      : '/workbench/claims'
   const selectedSessionId = new URLSearchParams(location.search).get('session')
   const selectedConversation = isConversations
     ? conversationRouteItem(
@@ -131,6 +146,7 @@ export default function WorkbenchPage() {
   const {
     view,
     viewAvailable,
+    activeStatus,
     workflowState,
     priority,
     assigneeId,
@@ -145,7 +161,7 @@ export default function WorkbenchPage() {
   const activeExternalActionRecoveries = activeClaimId
     ? Object.values(externalActionRecoveries[activeClaimId] || {})
     : []
-  const queueHasResultFilters = Boolean(
+  const queueHasCrossQueueFilters = Boolean(
     workflowState
     || priority
     || assigneeId
@@ -157,10 +173,17 @@ export default function WorkbenchPage() {
   )
 
   useEffect(() => {
-    if (queueHasResultFilters || viewCounts?.status !== 'available') return
+    if (activeClaimCounts?.status === 'available' && Number.isInteger(activeClaimCounts.total)) {
+      const count = Number.isInteger(activeClaimCounts.navigation_total)
+        ? activeClaimCounts.navigation_total
+        : activeClaimCounts.total
+      setActiveCount(count > 0 ? count : null)
+    }
+    if (queueHasCrossQueueFilters) return
+    if (viewCounts?.status !== 'available') return
     const count = viewCounts.items.find((item) => item.view === 'incomplete_claims')?.count
     if (Number.isInteger(count)) setDraftCount(count)
-  }, [queueHasResultFilters, viewCounts])
+  }, [activeClaimCounts, queueHasCrossQueueFilters, viewCounts])
   const openClaimConversationTabs = tabs.tabs
     .filter((tab) => tab.section === 'conversation' && tab.sessionId)
     .map((tab) => {
@@ -268,6 +291,7 @@ export default function WorkbenchPage() {
       if (!sameSnapshot) {
         setClaims([])
         setViewCounts(UNAVAILABLE_VIEW_COUNTS)
+        setActiveClaimCounts(UNAVAILABLE_ACTIVE_CLAIM_COUNTS)
       }
     }
     try {
@@ -278,6 +302,7 @@ export default function WorkbenchPage() {
       setQueueSnapshotKey(snapshotKey)
       setNextCursor(response.page?.next_cursor || null)
       setViewCounts(response.view_counts || UNAVAILABLE_VIEW_COUNTS)
+      setActiveClaimCounts(response.active_claim_counts || UNAVAILABLE_ACTIVE_CLAIM_COUNTS)
     } catch (error) {
       if (requestId !== queueRequestId.current) return
       if (append && error.code === 'VALIDATION_ERROR') {
@@ -289,6 +314,7 @@ export default function WorkbenchPage() {
           setQueueSnapshotKey(snapshotKey)
           setNextCursor(response.page?.next_cursor || null)
           setViewCounts(response.view_counts || UNAVAILABLE_VIEW_COUNTS)
+          setActiveClaimCounts(response.active_claim_counts || UNAVAILABLE_ACTIVE_CLAIM_COUNTS)
           setQueueNotice('The saved queue page was invalid or stale, so current work was reloaded from the start.')
           return
         } catch (recoveryError) {
@@ -2322,12 +2348,12 @@ export default function WorkbenchPage() {
 
   return (
     <div className="workbench-app">
-      <NavigationRail profile={profile} draftCount={draftCount} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
+      <NavigationRail profile={profile} activeCount={activeCount} draftCount={draftCount} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
       <div className="workbench-stage">
         <header className="workbench-topbar">
           <div>
             <strong>{t('Claims Workbench')}</strong>
-            <span>{t(isDraftQueue ? 'Customer drafts · Not yet submitted' : 'Source-linked operational view')}</span>
+            <span>{t(isActiveQueue ? 'Claims needing continued attention' : isDraftQueue ? 'Customer drafts · Not yet submitted' : 'Source-linked operational view')}</span>
           </div>
           <div className="topbar-actions">
             {isConversationWorkspace ? (
@@ -2426,8 +2452,8 @@ export default function WorkbenchPage() {
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}${claimId ? ' has-open-claim' : ''}`}>
             {queueVisible && (filterMetadata
               ? viewAvailable
-                ? <QueuePanel queueKind={queueKind} claims={visibleClaims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} view={view} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
-                : <QueueViewUnavailable queueKind={queueKind} view={view} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />
+                ? <QueuePanel queueKind={queueKind} claims={visibleClaims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} activeClaimCounts={activeClaimCounts} view={view} activeStatus={activeStatus} onActiveStatus={(value) => setQueueFilter('active_status', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
+                : <QueueViewUnavailable queueKind={queueKind} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />
               : <QueueMetadataState loading={filterMetadataLoading} error={filterMetadataError} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />)}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
@@ -2525,21 +2551,28 @@ function decisionReadbackError() {
   return error
 }
 
-function QueueViewUnavailable({ queueKind, view, onRetry }) {
+function QueueViewUnavailable({ queueKind, onRetry }) {
+  const isActiveQueue = queueKind === 'active'
   const isDraftQueue = queueKind === 'drafts'
+  const queueTitle = t(isActiveQueue ? 'Active claims' : isDraftQueue ? 'Draft claims' : 'Submitted claims')
   return (
     <aside className="queue-panel" aria-label={t('Claim queue')}>
       <header className="queue-panel__header">
         <div>
           <p className="eyebrow">{t('My work')}</p>
-          <h2>{t(isDraftQueue ? 'Draft claims' : 'Submitted claims')}</h2>
+          <h2>{queueTitle}</h2>
         </div>
       </header>
       <div className="queue-list">
-        <div className="queue-state" role="alert">
-          <strong>{t('This queue view is no longer available')}</strong>
-          <p>{t('The required view “{view}” is not published by the Workbench service. Refresh the server-owned queue contract before continuing.', { view })}</p>
-          <button className="button button--quiet" type="button" onClick={onRetry}>{t('Retry')}</button>
+        <div className="queue-state queue-state--unavailable" role="alert">
+          <span className="queue-state__icon" aria-hidden="true">
+            <CircleAlert size={20} />
+          </span>
+          <div className="queue-state__content">
+            <strong>{t('{queue} is unavailable', { queue: queueTitle })}</strong>
+            <p>{t('The Workbench service has not published this queue yet. Try again in a moment. If it remains unavailable, ask an administrator to update the service.')}</p>
+            <button className="button button--quiet" type="button" onClick={onRetry}>{t('Try again')}</button>
+          </div>
         </div>
       </div>
     </aside>
@@ -2854,6 +2887,7 @@ function isOlderClaimProjection(candidate, current) {
 function queueRequestFilters(filters, cursor = null) {
   return {
     ...(filters.view === 'all' ? {} : { view: filters.view }),
+    ...(filters.activeStatus ? { active_status: filters.activeStatus } : {}),
     ...(filters.workflowState ? { workflow_state: filters.workflowState } : {}),
     ...(filters.priority ? { priority: filters.priority } : {}),
     ...(filters.assigneeId ? { assignee_id: filters.assigneeId } : {}),
@@ -2996,6 +3030,12 @@ function readQueueFilters(searchParams, metadata, activeQueueView = 'created_rou
   return {
     view: requestedView,
     viewAvailable: metadata.views.some((option) => option.value === requestedView),
+    activeStatus: activeQueueView === 'active_claims'
+      ? validFilterValue(
+          searchParams.get('active_status'),
+          metadata.active_claim_statuses || [],
+        )
+      : '',
     workflowState: validFilterValue(
       searchParams.get('workflow_state'),
       metadata.workflow_states,
@@ -3018,6 +3058,7 @@ function normalizeQueueSearchParams(searchParams, metadata, activeQueueView = 'c
   const next = new URLSearchParams(searchParams)
   const filters = readQueueFilters(next, metadata, activeQueueView)
   next.delete('view')
+  setNormalizedParam(next, 'active_status', filters.activeStatus)
   setNormalizedParam(next, 'workflow_state', filters.workflowState)
   setNormalizedParam(next, 'priority', filters.priority)
   setNormalizedParam(next, 'tag', filters.tagFilter)
@@ -3033,6 +3074,7 @@ function setNormalizedParam(params, name, value) {
 
 function queueRoute(path, filters, sessionId = null) {
   const params = new URLSearchParams()
+  if (filters.activeStatus) params.set('active_status', filters.activeStatus)
   if (filters.workflowState) params.set('workflow_state', filters.workflowState)
   if (filters.priority) params.set('priority', filters.priority)
   if (filters.assigneeId) params.set('assignee_id', filters.assigneeId)
@@ -3048,6 +3090,7 @@ function queueRoute(path, filters, sessionId = null) {
 const EMPTY_QUEUE_FILTERS = Object.freeze({
   view: 'created_routed',
   viewAvailable: false,
+  activeStatus: '',
   workflowState: '',
   priority: '',
   assigneeId: '',
@@ -3064,7 +3107,16 @@ const UNAVAILABLE_VIEW_COUNTS = Object.freeze({
   limitation: 'Queue totals are temporarily unavailable.',
 })
 
+const UNAVAILABLE_ACTIVE_CLAIM_COUNTS = Object.freeze({
+  status: 'unavailable',
+  total: null,
+  navigation_total: null,
+  items: [],
+  limitation: 'Active claim totals are temporarily unavailable.',
+})
+
 const QUEUE_FILTER_PARAM_NAMES = Object.freeze([
+  'active_status',
   'workflow_state',
   'priority',
   'assignee_id',

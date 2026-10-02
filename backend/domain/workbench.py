@@ -94,6 +94,7 @@ class WorkbenchQueueView(StrEnum):
     COMPLETED = 'completed'
     ABANDONED = 'abandoned'
     CLOSED = 'closed'
+    ACTIVE_CLAIMS = 'active_claims'
     URGENT = 'urgent'
     HUMAN_REQUESTS = 'human_requests'
     INCOMPLETE_CLAIMS = 'incomplete_claims'
@@ -102,6 +103,13 @@ class WorkbenchQueueView(StrEnum):
     PROFESSIONAL_REVIEW = 'professional_review'
     READY_TO_CREATE = 'ready_to_create'
     CREATED_ROUTED = 'created_routed'
+
+
+class WorkbenchActiveClaimStatus(StrEnum):
+    URGENT = 'urgent'
+    HUMAN_ASSISTANCE = 'human_assistance'
+    PROFESSIONAL_REVIEW = 'professional_review'
+    PENDING_CREATION = 'pending_creation'
 
 
 class WorkbenchQueueKey(StrEnum):
@@ -453,6 +461,11 @@ class WorkbenchSectionSummaries(ContractModel):
     activity: WorkbenchSectionSummary
 
 
+class WorkbenchActiveClaimProjection(ContractModel):
+    status: WorkbenchActiveClaimStatus
+    entered_at: datetime | None = None
+
+
 class WorkbenchClaimListItem(ContractModel):
     claim_id: str
     display_reference: str
@@ -464,6 +477,7 @@ class WorkbenchClaimListItem(ContractModel):
     workflow_state: WorkflowState
     ownership: WorkbenchOwnershipProjection
     priority_projection: WorkbenchPriorityProjection
+    active_claim: WorkbenchActiveClaimProjection | None = None
     work_summary: WorkbenchWorkSummary
     integration_summary: WorkbenchIntegrationSummary
     tags: list[StaffTag] = Field(default_factory=list)
@@ -496,16 +510,31 @@ class WorkbenchViewCounts(ContractModel):
     limitation: str | None = None
 
 
+class WorkbenchActiveClaimStatusCount(ContractModel):
+    status: WorkbenchActiveClaimStatus
+    count: int = Field(ge=0)
+
+
+class WorkbenchActiveClaimCounts(ContractModel):
+    status: WorkbenchViewCountStatus
+    total: int | None = Field(default=None, ge=0)
+    navigation_total: int | None = Field(default=None, ge=0)
+    items: list[WorkbenchActiveClaimStatusCount] = Field(default_factory=list)
+    limitation: str | None = None
+
+
 class WorkbenchClaimListResponse(ContractModel):
     items: list[WorkbenchClaimListItem]
     page: PageInfo
     view_counts: WorkbenchViewCounts
+    active_claim_counts: WorkbenchActiveClaimCounts
 
 
 class WorkbenchClaimFilterMetadata(ContractModel):
     views: list[WorkbenchQueueFilterOption]
     workflow_states: list[WorkbenchFilterOption]
     priorities: list[WorkbenchFilterOption]
+    active_claim_statuses: list[WorkbenchFilterOption]
     tags: list[WorkbenchTagFilterOption]
     tag_registry_version: str
 
