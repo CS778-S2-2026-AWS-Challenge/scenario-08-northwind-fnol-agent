@@ -21,6 +21,10 @@ historical run evidence and were not rerun by this documentation change.
 - Real AWS migration and integration are Sprint 5 work. The historical `aws: unavailable`
   classification remains evidence for the named earlier environment, not a permanent product
   decision.
+- The latest successful EC2 application rehearsal is recorded below with its exact application
+  commit and date. It supersedes the earlier application-startup failure only for that pinned
+  rehearsal; it does not promote the repository `aws` runtime profile or prove the latest
+  `origin/main` release.
 - Third-party participant behavior is intentionally simulation-backed and is independent of the
   AWS data-profile migration.
 
@@ -28,7 +32,7 @@ The validation branch was synchronized with `main@4c90e2a` before the latest che
 containers use one image built from the final reviewed branch head; the pull-request evidence names
 that exact head after the configured remote quality checks pass.
 
-## Final AWS framework validation
+## Initial AWS framework capability validation (2026-10-01)
 
 On 1 October 2026, the school-provided team account was checked through the
 AWS console in the Sydney region (`ap-southeast-2`). This validation was
@@ -70,6 +74,36 @@ The existing billing view showed an already-existing `$200` budget with usage
 above that budget, while the Credits view showed no remaining credits. This
 must be treated as a cost warning, not as proof that the team has `$200` of
 available free usage.
+
+### Latest successful EC2 application rehearsal (2026-10-02)
+
+The later bounded rehearsal restored the approved test route and deployed the
+exact application commit
+`f1b897d76dbb3d5d854b6172c7cc49907e3f902a` on a Sydney `t3.small` without an
+instance profile. It used synthetic data and the original approved MinIO image
+archive. This is the latest successful application evidence; it is distinct
+from the initial account-capability check above and was not performed against
+the current unreconciled `origin/main` head.
+
+| Capability | Classification | Evidence observed | Boundary |
+| --- | --- | --- | --- |
+| Compose initialization | `validated` for the pinned rehearsal | Backend, MongoDB, and MinIO became healthy; database, storage, and knowledge initialization completed | The CLI worker required a deployment-only healthcheck override; no worker health endpoint is claimed |
+| Backend readiness | `validated` with `degraded` status | HTTP readiness returned 200; persistence and Evidence/knowledge services were available | Existing policy, claim-history, claims-service, and handoff-dispatch services remained fixture-backed |
+| External model gateway | `validated` for structured text | A live call returned success with a request ID and used the configured external GPT-4o gateway | This does not prove every modality or a newer release configuration |
+| CloudFront application routing | `validated` for the rehearsal | CloudFront served the private static frontend, rejected unauthenticated claims, and denied internal knowledge access | CloudFront to EC2 used the approved HTTP test origin |
+| Motor, home, and contents HTTP journeys | `validated` for bounded journeys | Each completed account/session, model turn, signed Evidence upload/completion, support request, staff reply, and claimant readback | Not an external insurer submission or complete browser coverage |
+| Claimant browser path | `validated` for bounded coverage | Registration, model reply, and synthetic JPEG upload reached `Ready` | Does not cover every browser route |
+| Staff Workbench | `validated` for bounded coverage | Staff login and all three product conversations displayed claimant, model, and staff messages | External-claim submission was not exercised |
+| Governed RAG | `validated` against MinIO | Each product returned three citations with document, chunk, version, checksum, and source metadata; missing evidence returned `no_evidence` | This is the MinIO knowledge boundary, not a different provider |
+| Restart and recovery | `validated` for bounded recovery | Backend/MinIO restart, MongoDB restart, EC2 reboot, and named-volume restore preserved revision, messages, Evidence checksum, and claim-creation replay | Same-host recovery, not replacement-host disaster recovery |
+| Cost guard | `configured` with readback | The validation cost guard and actual-cost thresholds were read back | Email delivery and automatic spending enforcement were not verified |
+| Failure handling | `validated` for bounded faults | Deliberate model timeout returned retryable timeout; stopped MinIO returned `unavailable` with zero citations; fixture fallback was refused | The controlled RAG read timeout still collapses to `unavailable` |
+
+This later record supersedes the initial `Docker Compose and EC2 application`
+`unreachable` result only for the pinned rehearsal above. The earlier result
+remains valid as historical evidence for the initial account check. No
+application data migration occurred, and the repository `aws` runtime profile
+remains unpromoted until the final frozen release is separately verified.
 
 ### Validation commands and evidence limits
 
@@ -130,9 +164,10 @@ automatic dispatch, durable processing state, idempotency, and recovery.
 
 ## Week 5 Day 4 cloud boundary revalidation
 
-## Issue #1139 final-framework validation
+## Issue #1139 initial-framework validation (historical)
 
-The bounded Sydney validation used the current framework and synthetic data
+This section records the initial Sydney validation, before the later successful
+application rehearsal above. It used the current framework and synthetic data
 only. EC2 launch/system checks, Docker installation, Docker Compose
 installation, bounded monitoring, and the private S3-to-CloudFront static path
 were recorded as evidence.
@@ -142,9 +177,10 @@ current `minio/mc` image reference could not be pulled in the checked EC2
 environment; temporary image substitutions were attempted only in the EC2
 copy and were not committed. Consequently, EC2 Backend liveness/readiness,
 MongoDB/MinIO restart readback, external model gateway, RAG, API HTTPS/CORS,
-and the full FNOL smoke remain unverified. These are the remaining framework
-blockers rather than local fixture successes. No application data migration was
-executed.
+and the full FNOL smoke remained unverified at that earlier checkpoint. These
+were historical framework blockers, not local fixture successes. The later
+successful pinned rehearsal is recorded above. No application data migration
+was executed.
 
 Issue #432 revalidated this boundary on 3 September 2026 against `main@8d4d4e5`. The local
 environment exposed no AWS or Cloudflare credential variable names, and the AWS CLI was not

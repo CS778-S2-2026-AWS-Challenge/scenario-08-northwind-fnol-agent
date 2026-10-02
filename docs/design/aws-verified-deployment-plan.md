@@ -58,9 +58,11 @@ boundaries.
 
 The course SSO identity is:
 
-- Account: `022499038031`
 - Role: `ICTGSStudentPermissionSet`
 - Regional resources: `ap-southeast-2`
+
+The account identity is retained only in the private operator evidence and is
+not committed here.
 
 The current identity can operate the bounded CloudFront, S3, EC2, networking,
 CloudShell, and budget resources used by this plan. It cannot pass an EC2 IAM
@@ -89,10 +91,13 @@ Secrets are supplied only through a protected operator-side deployment
 mechanism during a test run. They are not stored in GitHub, S3 static assets,
 CloudFront configuration, or frontend code.
 
-## Verified Results
+## Historical Application Rehearsal Evidence (2026-10-02)
 
-The bounded Sydney rehearsal used synthetic data and pinned application commit
-`f1b897d76dbb3d5d854b6172c7cc49907e3f902a`.
+This is the latest successful application rehearsal recorded for this plan. It
+used synthetic data and pinned application commit
+`f1b897d76dbb3d5d854b6172c7cc49907e3f902a` on a Sydney `t3.small`. It is
+historical evidence for that exact release, not evidence that the current
+`origin/main` or a future frozen release has already been deployed.
 
 | Check | Result | Boundary |
 | --- | --- | --- |
@@ -178,9 +183,10 @@ account-level cost information and is not treated as evidence that this
 validation deployment created the historical spend. The separate Northwind
 validation cost guard is the relevant monitor for this work.
 
-## Acceptance Boundary
+## Future Demonstration Acceptance Checklist
 
-This plan is accepted for the bounded demonstration when:
+This remains a future acceptance checklist. It is not a claim that every item
+is currently satisfied for the next frozen release:
 
 1. CloudFront serves the private S3 frontend and routes the required API and
    signed Evidence paths.
