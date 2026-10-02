@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from contextvars import ContextVar
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError, ErrorDetail
@@ -33,6 +33,7 @@ from backend.domain.external_services import (
 )
 from backend.domain.message import order_messages
 from backend.domain.models import (
+    ActorType,
     AgentAction,
     AssessorRoutingResult,
     AssessorRoutingStatus,
@@ -44,6 +45,7 @@ from backend.domain.models import (
     CollaborationRequestStatus,
     EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceSource,
     EvidenceState,
     EvidenceStatus,
     FormStatus,
@@ -52,6 +54,7 @@ from backend.domain.models import (
     HandoffStatus,
     HandoffType,
     MessageRecord,
+    MessageVisibility,
     NeededFor,
     OpenItemState,
     ResponsibleParty,
@@ -61,6 +64,7 @@ from backend.domain.models import (
     SignalDecisionValue,
     StaffActionRecord,
     StaffActionStatus,
+    StaffOpenItem,
     SupportNeed,
     TerminalDispositionValue,
     WorkbenchHandoff,
@@ -68,7 +72,11 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
-from backend.domain.open_items import interpreted_evidence_kinds, staff_open_items
+from backend.domain.open_items import (
+    interpreted_evidence_kinds,
+    staff_evidence_readings,
+    staff_open_items,
+)
 from backend.domain.retention import RetentionHoldRecord, RetentionOperationStatus
 from backend.domain.retrieval import PolicyRetrievalRecord
 from backend.domain.staff_agent import StaffAgentMessageRole
@@ -314,6 +322,42 @@ def workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
         resume_workflow_state=handoff.resume_workflow_state,
         resume_next_action=handoff.resume_next_action,
     )
+
+
+def _waiting_item_gaps(items: Sequence[StaffOpenItem]) -> list[WorkbenchMissingInformation]:
+    return [
+        WorkbenchMissingInformation(
+            kind='waiting_item',
+            code=item.item_id,
+            label=(
+                f'Contact request: {item.subject}'
+                if item.kind == 'contact_request'
+                else f'Customer asked: {item.subject}'
+            ),
+            status=WorkbenchGapStatus.PENDING,
+            attention=MissingInformationAttention.REQUIRED_NOW,
+            responsible_party=WorkbenchResponsibility.CLAIMS_PROFESSIONAL,
+            source_refs=[item.opened_in_message_id] if item.opened_in_message_id else [],
+        )
+        for item in items
+        if item.kind in {'question', 'contact_request'} and item.state is OpenItemState.OPEN
+    ]
+
+
+def _handler_conversation(
+    messages: Sequence[MessageRecord],
+) -> tuple[int, Literal['waiting_on_claimant', 'claimant_replied'] | None]:
+    """Unread claimant messages since the handler last wrote, and whose turn it is."""
+
+    shared = [item for item in messages if item.visibility is not MessageVisibility.INTERNAL_ONLY]
+    last_staff = max(
+        (index for index, item in enumerate(shared) if item.actor is ActorType.STAFF),
+        default=None,
+    )
+    if last_staff is None:
+        return 0, None
+    unread = sum(1 for item in shared[last_staff + 1 :] if item.actor is ActorType.CLAIMANT)
+    return unread, 'claimant_replied' if unread else 'waiting_on_claimant'
 
 
 def _claim_messages(
@@ -877,6 +921,7 @@ def _queue_key(
     active_handoffs: Sequence[HandoffRecord],
     has_external_staff_attention: bool = False,
     has_external_provider_wait: bool = False,
+    needs_handler: bool = False,
 ) -> WorkbenchQueueKey:
     # Claim creation remains terminal for the external-claim contract, but a later
     # claimant-requested handoff is active staff work and must remain actionable.
@@ -906,6 +951,10 @@ def _queue_key(
                 ],
                 retryable=False,
             )
+        if needs_handler and terminal.value is TerminalDispositionValue.COMPLETED:
+            # A lodged claim with an unanswered waiting item or a claimant reply
+            # to its handler is work, not a finished record.
+            return WorkbenchQueueKey.PROCESSING
         return WorkbenchQueueKey(terminal.value.value)
     return _active_queue_key(lifecycle, missing_information)
 
@@ -1982,7 +2031,9 @@ def _claim_triage(
         requirements=evaluation.requirements,
         registry=registry,
         amount_threshold=TRIAGE_AMOUNT_THRESHOLD.get(),
-        interpreted_kinds=interpreted_evidence_kinds(messages),
+        interpreted_kinds=interpreted_evidence_kinds(
+            messages, repository.list_staff_actions(claim.claim_id)
+        ),
     )
 
 
@@ -2062,8 +2113,12 @@ def _build_projection(
             ),
         )
     open_items = staff_open_items(
-        evidence, messages, repository.list_customer_updates(claim.claim_id)
+        evidence, messages, repository.list_customer_updates(claim.claim_id), actions
     )
+    # Waiting-list items are the handler's first job on a claim: they lead the
+    # missing information, so the first one becomes the primary blocker.
+    missing = [*_waiting_item_gaps(open_items), *missing]
+    unread, conversation_turn = _handler_conversation(messages)
     if ownership.current_staff_access in {
         CurrentStaffAccess.PRIMARY,
         CurrentStaffAccess.COWORKER,
@@ -2076,7 +2131,17 @@ def _build_projection(
                 source_refs=[item.opened_in_message_id or item.item_id],
             )
             for item in open_items
-            if item.kind == 'question' and item.state is OpenItemState.OPEN
+            if item.kind in {'question', 'contact_request'} and item.state is OpenItemState.OPEN
+        )
+        allowed_actions.extend(
+            _registered_action(
+                'evidence.correct_reading',
+                item.evidence_id,
+                claim.revision,
+                source_refs=[item.evidence_id],
+            )
+            for item in evidence
+            if item.status is EvidenceStatus.RECEIVED and item.source is EvidenceSource.CLAIMANT
         )
     primary_action = _primary_action(
         allowed_actions,
@@ -2105,6 +2170,11 @@ def _build_projection(
                 and all(result.task_id != task.task_id for result in external_results)
                 for task in external_tasks
             ),
+            needs_handler=bool(unread)
+            or any(
+                item.kind in {'question', 'contact_request'} and item.state is OpenItemState.OPEN
+                for item in open_items
+            ),
         ),
         current_work_item=current_work,
         primary_action_code=primary_action.action_code if primary_action else None,
@@ -2120,7 +2190,8 @@ def _build_projection(
         missing_information=missing,
         risk_signals=projected_risk_signals,
         incomplete_context=incomplete_context,
-        unread_claimant_messages=0,
+        unread_claimant_messages=unread,
+        conversation_turn=conversation_turn,
         last_claimant_activity_at=(
             max(item.created_at for item in claimant_messages) if claimant_messages else None
         ),
@@ -2224,7 +2295,8 @@ def _build_projection(
         ),
         allowed_actions=allowed_actions,
         open_items=open_items,
-        file_readings=interpreted_evidence_kinds(messages),
+        file_readings=interpreted_evidence_kinds(messages, actions),
+        staff_file_readings=sorted(staff_evidence_readings(actions)),
         section_summaries=WorkbenchSectionSummaries(
             fields=WorkbenchSectionSummary(
                 status=ResourceAvailability.AVAILABLE,

@@ -1564,16 +1564,33 @@
       },
       "AnswerClaimantQuestionRequest": {
         "additionalProperties": false,
+        "description": "approve sends the proposed answer; edit sends ``text``; decline gives ``text``\nas the reason the claimant reads; contacted settles a contact request, with an\noptional note in ``text``.",
         "properties": {
-          "answer": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Answer",
+          "decision": {
+            "enum": [
+              "approve",
+              "edit",
+              "decline",
+              "contacted"
+            ],
+            "title": "Decision",
             "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
           }
         },
         "required": [
-          "answer"
+          "decision"
         ],
         "title": "AnswerClaimantQuestionRequest",
         "type": "object"
@@ -1590,6 +1607,26 @@
             "title": "Claim Revision",
             "type": "integer"
           },
+          "decision": {
+            "enum": [
+              "approve",
+              "edit",
+              "decline",
+              "contacted"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "question_id": {
             "title": "Question Id",
             "type": "string"
@@ -1602,6 +1639,7 @@
           "claim_id",
           "claim_revision",
           "question_id",
+          "decision",
           "update"
         ],
         "title": "AnswerClaimantQuestionResponse",
@@ -3408,6 +3446,11 @@
             "title": "Form",
             "type": "object"
           },
+          "handler_assigned": {
+            "default": false,
+            "title": "Handler Assigned",
+            "type": "boolean"
+          },
           "handoff": {
             "anyOf": [
               {
@@ -4605,7 +4648,8 @@
           "kind": {
             "enum": [
               "document",
-              "question"
+              "question",
+              "contact_request"
             ],
             "title": "Kind",
             "type": "string"
@@ -5899,6 +5943,52 @@
           "rules_version"
         ],
         "title": "ControlledRulesConfiguration",
+        "type": "object"
+      },
+      "CorrectEvidenceReadingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "CorrectEvidenceReadingRequest",
+        "type": "object"
+      },
+      "CorrectEvidenceReadingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_revision",
+          "evidence_id",
+          "kind"
+        ],
+        "title": "CorrectEvidenceReadingResponse",
         "type": "object"
       },
       "Coverage": {
@@ -11453,7 +11543,8 @@
         "enum": [
           "open",
           "done",
-          "not_available"
+          "not_available",
+          "declined"
         ],
         "title": "OpenItemState",
         "type": "string"
@@ -14770,6 +14861,18 @@
             ],
             "title": "Answer"
           },
+          "basis": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
           "claimant_wording": {
             "anyOf": [
               {
@@ -14781,6 +14884,18 @@
               }
             ],
             "title": "Claimant Wording"
+          },
+          "contact_preference": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Preference"
           },
           "created_at": {
             "format": "date-time",
@@ -14796,22 +14911,11 @@
           "kind": {
             "enum": [
               "document",
-              "question"
+              "question",
+              "contact_request"
             ],
             "title": "Kind",
             "type": "string"
-          },
-          "model_view": {
-            "anyOf": [
-              {
-                "maxLength": 300,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model View"
           },
           "opened_in_message_id": {
             "anyOf": [
@@ -14827,6 +14931,18 @@
           },
           "owner": {
             "$ref": "#/components/schemas/OpenItemOwner"
+          },
+          "proposed_answer": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Answer"
           },
           "service_identity": {
             "anyOf": [
@@ -16532,6 +16648,13 @@
           },
           "source_summary": {
             "$ref": "#/components/schemas/WorkbenchSourceSummary"
+          },
+          "staff_file_readings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Staff File Readings",
+            "type": "array"
           },
           "tags": {
             "items": {
@@ -19316,6 +19439,21 @@
       "WorkbenchWorkSummary": {
         "additionalProperties": false,
         "properties": {
+          "conversation_turn": {
+            "anyOf": [
+              {
+                "enum": [
+                  "waiting_on_claimant",
+                  "claimant_replied"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Turn"
+          },
           "current_work_item": {
             "anyOf": [
               {
@@ -27379,6 +27517,115 @@
           }
         },
         "summary": "Read Workbench Evidence Content Data",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/reading": {
+      "post": {
+        "operationId": "correct_reading_api_v1_workbench_claims__claim_id__evidence__evidence_id__reading_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectEvidenceReadingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectEvidenceReadingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Correct Reading",
         "tags": [
           "workbench"
         ]

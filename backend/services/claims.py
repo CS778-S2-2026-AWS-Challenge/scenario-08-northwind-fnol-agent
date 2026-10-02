@@ -406,6 +406,7 @@ def claimant_claim(
             claim_messages(repository, claim),
             repository.list_customer_updates(claim.claim_id),
         ),
+        handler_assigned=claim.assignee_id is not None,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )

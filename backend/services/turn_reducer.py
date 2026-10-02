@@ -413,9 +413,12 @@ def build_turn_record(
         questions.append(
             {
                 'question_id': new_id('nwq'),
+                'kind': item.kind,
                 'question': item.question,
                 'claimant_wording': item.claimant_wording,
-                'model_view': item.model_view,
+                'proposed_answer': item.proposed_answer,
+                'basis': item.basis,
+                'contact_preference': item.contact_preference,
             }
         )
     opened = [item['question_id'] for item in questions]
@@ -435,6 +438,16 @@ def build_turn_record(
             'opened_items': opened,
             'ending': getattr(validated, 'turn_ending', None),
             'scope_note': getattr(validated, 'scope_note', None),
+            'cited_clauses': [
+                {
+                    'chunk_id': str(source.get('chunk_id') or ''),
+                    'title': str(source.get('title') or ''),
+                    'section_path': str(source.get('section_path') or ''),
+                    'version': str(source.get('version') or ''),
+                    'text': str(source.get('text') or '')[:1500],
+                }
+                for source in getattr(validated, 'cited_clauses', ())
+            ],
         }
     )
     return record
@@ -828,7 +841,9 @@ def reduce_turn(
             timestamp,
             repository.list_evidence(claim_id, principal.subject),
             {
-                **interpreted_evidence_kinds(claim_messages(repository, claim)),
+                **interpreted_evidence_kinds(
+                    claim_messages(repository, claim), repository.list_staff_actions(claim.claim_id)
+                ),
                 **{
                     item.evidence_id: item.document_kind
                     for item in validated.evidence_interpretations

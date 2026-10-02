@@ -366,7 +366,15 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "enum": [
+              "question",
+              "contact_request"
+            ],
+            "type": "string"
+          },
           "question": {
+            "description": "The claimant's question in their own voice, e.g. 'Will you pay for a hire car?'",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
@@ -376,16 +384,43 @@
             "minLength": 1,
             "type": "string"
           },
-          "model_view": {
+          "proposed_answer": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "basis": {
             "maxLength": 300,
             "minLength": 1,
             "type": "string"
+          },
+          "contact_preference": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
+          "kind",
           "question",
           "claimant_wording",
-          "model_view"
+          "proposed_answer",
+          "basis",
+          "contact_preference"
         ],
         "type": "object"
       },
@@ -499,6 +534,16 @@
           "type": "null"
         }
       ]
+    },
+    "cited_sources": {
+      "description": "chunk_id of each policy excerpt the reply relies on.",
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 3,
+      "type": "array"
     }
   },
   "required": [

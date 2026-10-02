@@ -77,7 +77,14 @@ def test_dense_new_item_response_fits_the_operating_cap_without_reducing_fact_co
             for _ in range(2)
         ],
         northwind_questions=[
-            {'question': 'x' * 200, 'claimant_wording': 'x' * 300, 'model_view': 'x' * 300}
+            {
+                'kind': 'question',
+                'question': 'x' * 200,
+                'claimant_wording': 'x' * 300,
+                'proposed_answer': 'x' * 500,
+                'basis': 'x' * 300,
+                'contact_preference': 'x' * 100,
+            }
             for _ in range(2)
         ],
         turn_ending='question',

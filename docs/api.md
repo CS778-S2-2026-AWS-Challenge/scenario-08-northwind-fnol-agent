@@ -2881,7 +2881,8 @@ item, signal, or external task exists.
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
 | `POST` | `/workbench/claims/{claim_id}/accept` | Take an unassigned Claim after successful FNOL creation |
-| `POST` | `/workbench/claims/{claim_id}/questions/{question_id}/answer` | Answer a question the Agent passed to the claims team |
+| `POST` | `/workbench/claims/{claim_id}/questions/{question_id}/answer` | Approve, edit, decline or mark contacted a waiting-list item |
+| `POST` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/reading` | Set what a claimant file is |
 | `POST` | `/workbench/claims/{claim_id}/assignments` | Assign or reassign ownership |
 | `POST` | `/workbench/claims/{claim_id}/cowork-requests` | Request or invite cowork access through a projected ownership action |
 | `POST` | `/workbench/claims/{claim_id}/transfer-requests` | Request a primary-owner transfer through a projected ownership action |
@@ -3538,20 +3539,42 @@ existing realtime hint; the Claim disappears from this unassigned filter.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/questions/{question_id}/answer`
 
-Answers a claimant question the Agent recorded in `turn_record.northwind_questions` when it could
-not answer with authority (for example, whether a hire car is covered). The request body is
-`{"answer": "..."}` (1-1000 characters). Required headers are `If-Match` and `Idempotency-Key`. The
-current projection must offer `conversation.answer_claimant_question` for this question, which
-requires primary-owner or coworker access; no handoff is needed.
+Settles one item on the claim's waiting list. Staff do not enter a conversation while it is being
+collected; the Agent records what needs them in `turn_record.northwind_questions`. Each item is a
+`question` (in the claimant's own voice, with the Agent's `proposed_answer` and `basis`) or a
+`contact_request` (with the claimant's `contact_preference`). Only `question`, `kind` and state
+reach the claimant; the proposal, basis and wording stay staff-side.
 
-The answer is saved as a claimant-visible customer update whose `related_refs` contains the
-question id, with `responsible_party=claims_professional`. The Claim revision advances once and an
-internal `action.completed` audit is written in the same staff mutation. The claimant sees the
-question as `done` with the answer in `open_items`, whether or not their session is still open.
+Request: `{"decision": "approve" | "edit" | "decline" | "contacted", "text": "..."}`.
 
-Response `200` is `{claim_id, claim_revision, question_id, update}`. A question that is already
-answered or does not belong to the Claim returns `409 QUESTION_NOT_OPEN`; a stale revision returns
+- `approve` sends the proposed answer (a `question` with a proposal only);
+- `edit` sends `text` instead (required);
+- `decline` gives `text` as the reason the claimant reads (required); the item becomes `declined`;
+- `contacted` settles a `contact_request`, with an optional note.
+
+Required headers are `If-Match` and `Idempotency-Key`. The current projection must offer
+`conversation.answer_claimant_question` for this item, which requires primary-owner or coworker
+access; no handoff is needed.
+
+The decision is saved as a claimant-visible customer update whose `related_refs` contains the item
+id (and `waiting_item:declined` or `waiting_item:contacted`), with
+`responsible_party=claims_professional`. An approved or edited answer is also posted to the
+claimant's open session as the handler's message, with `content.answers_item_id` naming the item,
+in the same save and with the shared staff-message audit fact. The Claim revision advances once.
+
+Response `200` is `{claim_id, claim_revision, question_id, decision, update, message}`. An item that
+is already settled or does not belong to the Claim returns `409 QUESTION_NOT_OPEN`; a decision that
+does not fit the item returns `422 VALIDATION_ERROR`; a stale revision returns
 `409 REVISION_CONFLICT`; an exact retry returns the original response.
+
+### `POST /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/reading`
+
+Sets what a claimant file is when the assistant read it wrongly. Request: `{"kind": "repair_quote"}`
+(a registered evidence kind). Required headers are `If-Match` and `Idempotency-Key`; the projection
+must offer `evidence.correct_reading` for the file. The reading is stored as a completed staff
+action and wins over the assistant's reading wherever files are counted by kind. Response `200` is
+`{claim_id, claim_revision, evidence_id, kind}`; the Workbench detail lists the file in
+`staff_file_readings`.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/staff-actions`
 

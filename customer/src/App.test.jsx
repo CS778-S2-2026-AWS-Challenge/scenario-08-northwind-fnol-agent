@@ -540,11 +540,11 @@ describe('claimant intake projection', () => {
           document_input: false,
         },
         {
-          id: 'nowcoding-gpt55',
-          label: 'gpt-5.5',
+          id: 'openrouter-gpt4o-mini',
+          label: 'openai/gpt-4o',
           availability: 'available',
-          image_input: false,
-          document_input: false,
+          image_input: true,
+          document_input: true,
         },
         {
           id: 'bedrock-nova2-lite',
@@ -601,40 +601,40 @@ describe('claimant intake projection', () => {
     }
   })
 
-  it('offers the two Northwind products instead of model configurations', async () => {
+  it('offers named Northwind services instead of model configurations', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(initialTurn())
     render(<App />)
 
     const model = await screen.findByRole('button', { name: 'Model' })
     expect(model).toBeEnabled()
-    expect(model).toHaveTextContent('Northwind Private')
+    expect(model).toHaveTextContent('Northwind Assist (Local)')
     expect(screen.queryByRole('button', { name: 'Claim type (optional)' })).not.toBeInTheDocument()
 
     await user.click(model)
     const options = screen.getAllByRole('option')
     expect(options.map((option) => option.querySelector('span span').textContent))
-      .toEqual(['Northwind Assist', 'Northwind Private'])
-    expect(screen.getByRole('option', { name: /Northwind Private.*Text only/ })).toBeInTheDocument()
+      .toEqual(['Northwind Assist (Default)', 'Northwind Assist (Bedrock)', 'Northwind Assist (Local)'])
+    expect(screen.getByRole('option', { name: /Northwind Assist \(Local\).*Text only/ })).toBeInTheDocument()
     expect(screen.getByRole('listbox', { name: 'Model' }))
       .not.toHaveTextContent(/qwen|gpt|gemini|nova|openrouter/i)
 
-    await user.click(screen.getByRole('option', { name: /^Northwind Assist/ }))
+    await user.click(screen.getByRole('option', { name: /^Northwind Assist \(Default\)/ }))
     expect(model).toHaveTextContent('Northwind Assist')
 
     await waitFor(() => expect(model).toHaveFocus())
     await user.keyboard('{ArrowDown}')
-    await waitFor(() => expect(screen.getByRole('option', { name: /^Northwind Assist/ })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('option', { name: /^Northwind Assist \(Default\)/ })).toHaveFocus())
     await user.keyboard('{End}{Enter}')
-    expect(model).toHaveTextContent('Northwind Private')
+    expect(model).toHaveTextContent('Northwind Assist (Local)')
     expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeInTheDocument()
 
     await user.click(model)
-    await user.click(screen.getByRole('option', { name: /^Northwind Assist/ }))
+    await user.click(screen.getByRole('option', { name: /^Northwind Assist \(Default\)/ }))
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await waitFor(() => expect(api.createClaim).toHaveBeenCalledWith(
-      expect.objectContaining({ modelProfileId: 'google-gemini35-flash-lite' }),
+      expect.objectContaining({ modelProfileId: 'openrouter-gpt4o-mini' }),
     ))
   })
 
@@ -5195,7 +5195,7 @@ describe('claimant intake projection', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('This model cannot process images.')
     await user.click(screen.getByRole('button', { name: 'Model' }))
-    await user.click(screen.getByRole('option', { name: /Northwind Assist.*Supports images/ }))
+    await user.click(screen.getByRole('option', { name: /Northwind Assist \(Default\).*Supports images/ }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
@@ -5274,8 +5274,8 @@ describe('claimant intake projection', () => {
     expect(api.createClaim).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Model' }))
-    expect(screen.getByRole('option', { name: /Northwind Private.*Does not support images/ })).toBeDisabled()
-    await user.click(screen.getByRole('option', { name: /Northwind Assist.*Supports images/ }))
+    expect(screen.getByRole('option', { name: /Northwind Assist \(Local\).*Does not support images/ })).toBeDisabled()
+    await user.click(screen.getByRole('option', { name: /Northwind Assist \(Default\).*Supports images/ }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(send).toBeEnabled()
     await user.click(send)
@@ -5284,7 +5284,7 @@ describe('claimant intake projection', () => {
       revision: 4,
       text: '',
       evidenceRefs: ['evd_file_only'],
-      modelProfileId: 'google-gemini35-flash-lite',
+      modelProfileId: 'openrouter-gpt4o-mini',
     })))
     await waitFor(() => expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument())
     const attachmentBubble = (await screen.findByText('file-only-damage.jpg')).closest('.user-bubble')
@@ -5418,8 +5418,8 @@ describe('claimant intake projection', () => {
           document_input: false,
         },
         {
-          id: 'nowcoding-gpt55',
-          label: 'gpt-5.5',
+          id: 'openrouter-gpt4o-mini',
+          label: 'openai/gpt-4o',
           availability: 'available',
           image_input: true,
           document_input: false,
@@ -5490,11 +5490,11 @@ describe('claimant intake projection', () => {
     expect(safeRetry.clientMessageId).toBe(firstAttempt.clientMessageId)
 
     await user.click(screen.getByRole('button', { name: 'Model' }))
-    await user.click(screen.getByRole('option', { name: /^Northwind Assist/ }))
+    await user.click(screen.getByRole('option', { name: /^Northwind Assist \(Default\)/ }))
     await user.click(screen.getByRole('button', { name: 'Retry message' }))
     await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(3))
     const changedModelAttempt = api.submitClaimMessage.mock.calls[2][0]
-    expect(changedModelAttempt.modelProfileId).toBe('nowcoding-gpt55')
+    expect(changedModelAttempt.modelProfileId).toBe('openrouter-gpt4o-mini')
     expect(changedModelAttempt.idempotencyKey).not.toBe(firstAttempt.idempotencyKey)
     expect(changedModelAttempt.clientMessageId).not.toBe(firstAttempt.clientMessageId)
   })

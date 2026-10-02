@@ -653,10 +653,10 @@ function App() {
     playComposerHandoff(conversationPanelRef.current?.querySelector('.workspace-composer'), fromRect)
   }, [isWorkspaceActive])
 
-  const claimantModels = useMemo(() => claimantModelChoices(runtimeCapabilities.models, {
-    selectedModelId: selectedModel,
-    defaultModelId: runtimeCapabilities.default_model_profile_id,
-  }), [runtimeCapabilities, selectedModel])
+  const claimantModels = useMemo(
+    () => claimantModelChoices(runtimeCapabilities.models),
+    [runtimeCapabilities],
+  )
   // Which service handles this conversation, named as the claimant chose it and
   // as the provider runs it (for example "Northwind Assist (openai/gpt-4o)").
   const processedBy = useMemo(() => {
