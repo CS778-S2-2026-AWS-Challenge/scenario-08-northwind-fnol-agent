@@ -110,6 +110,12 @@ Original evidence bytes, policy documents, and other large objects are stored th
 the active profile's object or document store. Domain records retain protected references
 and checksums rather than embedding those bytes.
 
+For a model turn rejected before an Agent proposal exists, the Runtime trace may carry a
+bounded `failure_diagnostic` with a stable reason code and optional structural path. It is
+written atomically with the accepted claimant message recovery and contains no raw model
+output, provider payload, or additional claimant content. A failed trace remains retryable;
+it is diagnostic evidence, not a completed Runtime turn.
+
 ## Audit Event Contract
 
 The provider-neutral structural envelope is defined by `AuditEventEnvelope` in

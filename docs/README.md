@@ -209,6 +209,11 @@ Demonstration:
 - [Issue #389 Query Source and No-Result Validation](archive/sprint-3/validation/issue-389-query-source-and-no-result.md)
 - [Issue #465 RAG, Provider Isolation, and Control Plane Validation](archive/sprint-3/validation/issue-465-rag-provider-control-validation.md)
 
+### Sprint 5
+
+- [Issue #1155 Workbench Control Inventory and Verification](archive/sprint-5/validation/issue-1155-workbench-control-inventory.md)
+- [Issue #1155 Workbench Browser Run Record at 943366f8](archive/sprint-5/validation/issue-1155-workbench-browser-run-943366f8.json)
+
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
 evidence. They must not silently override current requirements or contracts.
 

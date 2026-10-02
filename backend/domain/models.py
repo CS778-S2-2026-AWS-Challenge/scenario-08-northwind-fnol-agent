@@ -1723,6 +1723,21 @@ class RuntimeEvidenceTrace(ContractModel):
     outcome: Literal['submitted'] = 'submitted'
 
 
+class RuntimeTraceFailure(ContractModel):
+    """Bounded diagnostic for a rejected or failed Runtime model turn."""
+
+    code: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r'^[a-z][a-z0-9_]*$',
+    )
+    path: str | None = Field(
+        default=None,
+        max_length=120,
+        pattern=r'^[A-Za-z0-9_.\[\]-]+$',
+    )
+
+
 class RuntimeTraceRecord(ContractModel):
     """Provider trace retained alongside the applied Runtime turn records."""
 
@@ -1775,6 +1790,7 @@ class RuntimeTraceRecord(ContractModel):
     total_latency_ms: float | None = Field(default=None, ge=0)
     summary_state_mismatch: bool = False
     shadow_context_plan: dict[str, Any] = Field(default_factory=dict)
+    failure_diagnostic: RuntimeTraceFailure | None = None
     slo_met: bool | None = None
     status: Literal['succeeded', 'rejected', 'unavailable', 'failed']
     created_at: datetime

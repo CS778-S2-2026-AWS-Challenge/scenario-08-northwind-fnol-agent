@@ -3267,6 +3267,15 @@ def test_incomplete_model_contents_proposal_is_rejected_before_runtime_mutation(
         session_id,
         protocol,
     )
+    trace = repository.find_runtime_trace_for_trigger(
+        claim_id,
+        response.json()['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert trace is not None
+    assert trace.status == 'rejected'
+    assert trace.failure_diagnostic is not None
+    assert 'model.example.test' not in str(trace.model_dump(mode='json'))
 
 
 @pytest.mark.parametrize(
@@ -4209,6 +4218,15 @@ def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
         session_id,
         protocol,
     )
+    trace = repository.find_runtime_trace_for_trigger(
+        claim_id,
+        response.json()['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert trace is not None
+    assert trace.status == 'failed'
+    assert trace.failure_diagnostic is not None
+    assert 'model.example.test' not in str(trace.model_dump(mode='json'))
 
 
 @pytest.mark.parametrize('failure_kind', ['timeout', 'malformed'])

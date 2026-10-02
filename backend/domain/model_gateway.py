@@ -450,6 +450,8 @@ class ModelGatewayError(RuntimeError):
         provider_model: str | None = None,
         provider_status: int | None = None,
         provider_error_type: str | None = None,
+        diagnostic_code: str | None = None,
+        diagnostic_path: str | None = None,
     ) -> None:
         super().__init__(_ERROR_MESSAGES[code])
         self.code = code
@@ -457,6 +459,8 @@ class ModelGatewayError(RuntimeError):
         self.provider_model = provider_model
         self.provider_status = provider_status
         self.provider_error_type = provider_error_type
+        self.diagnostic_code = diagnostic_code
+        self.diagnostic_path = diagnostic_path
 
 
 class ModelGateway(Protocol):

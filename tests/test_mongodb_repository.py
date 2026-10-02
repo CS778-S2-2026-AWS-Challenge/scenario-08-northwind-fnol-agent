@@ -831,6 +831,25 @@ def test_message_turn_alias_reservation_has_provider_parity(
         )
 
 
+def test_message_recovery_rejects_runtime_trace_for_another_claim(
+    mutation_contract_repository: PersistenceRepository,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    session = _session(claim)
+    claimant_message, _agent_message, trace, idempotency = _runtime_records(claim, session)
+    repository.create_claim(claim, session)
+    repository.save_message(claimant_message, claim.customer_id)
+    repository.save_idempotency(idempotency)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_message_recovery(
+            claimant_message,
+            idempotency,
+            runtime_trace=trace.model_copy(update={'claim_id': 'clm_other'}),
+        )
+
+
 _DefaultT = TypeVar('_DefaultT')
 
 

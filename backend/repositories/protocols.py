@@ -1074,8 +1074,13 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
         *,
         agent_message: MessageRecord | None = None,
+        runtime_trace: RuntimeTraceRecord | None = None,
     ) -> None:
-        """Complete an accepted attempt without changing the Claim or message content."""
+        """Complete an accepted attempt without changing Claim or message content.
+
+        A rejected model attempt may include a bounded Runtime trace so its failure
+        diagnostic is durable without turning the attempt into a completed turn.
+        """
         raise NotImplementedError
 
     def get_message(
