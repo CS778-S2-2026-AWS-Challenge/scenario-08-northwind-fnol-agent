@@ -108,9 +108,9 @@
 .composer-queued span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Under a reply: what this turn opened, and why the report now needs more. */
-.turn-receipts { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.turn-receipts { display: grid; min-width: 0; max-width: 100%; gap: var(--space-2); margin-top: var(--space-2); }
 .turn-scope-note { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-caption); font-style: italic; }
-.turn-receipt { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--claimant-receipt-surface); font-size: var(--font-size-caption); }
+.turn-receipt { display: flex; min-width: 0; flex-wrap: nowrap; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--claimant-receipt-surface); font-size: var(--font-size-caption); }
 .turn-receipt.is-claimant { background: var(--claimant-open-items-surface); }
 .turn-receipt-mark { color: var(--claimant-receipt-accent); font-weight: var(--font-weight-bold); }
 .turn-receipt-text { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
