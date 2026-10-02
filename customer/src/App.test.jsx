@@ -505,8 +505,13 @@ async function openAgreementForFailureTest(user, agreement) {
   await user.click(screen.getByRole('checkbox', { name: 'I confirm this submission.' }))
 }
 
+// The one status place in the title bar opens the case panel.
 async function openCasePanel(user) {
-  const toggle = await screen.findByRole('button', { name: /^(Noted \d+\/\d+|Your claim)/ })
+  const toggle = await waitFor(() => {
+    const element = document.querySelector('.case-status')
+    if (!element) throw new Error('The title-bar status is not shown yet.')
+    return element
+  })
   if (toggle.getAttribute('aria-expanded') !== 'true') await user.click(toggle)
   return screen.findByRole('complementary', { name: 'Claim details' })
 }
@@ -744,7 +749,9 @@ describe('claimant intake projection', () => {
     const agentRow = agentArticle.querySelector('.chat-message-row')
     expect(agentRow.querySelector('.agent-avatar')).toHaveTextContent('N')
     expect(agentRow.querySelector('.agent-body')).toBeInTheDocument()
-    expect(agentArticle.querySelector('.agent-bubble')).toHaveClass('chat-bubble')
+    // The assistant writes without a bubble; only the claimant's messages have one.
+    expect(agentArticle.querySelector('.chat-bubble')).not.toBeInTheDocument()
+    expect(agentArticle.querySelector('.agent-text')).toHaveTextContent(agentMessage.content.text)
     expect(agentArticle.querySelector('time.message-timestamp'))
       .toHaveAttribute('datetime', agentMessage.created_at)
     expect(container.querySelectorAll('.message-list time.message-timestamp')).toHaveLength(1)
@@ -1312,19 +1319,19 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
     await screen.findByText(agentMessage.content.text)
-    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Third-party services' })).not.toBeInTheDocument()
     expect(container.querySelector('.message-list .service-capability-list')).not.toBeInTheDocument()
-    expect(container.querySelector('.message-list .external-capabilities-trigger')).not.toBeInTheDocument()
+    expect(container.querySelector('.message-list .case-panel-link')).not.toBeInTheDocument()
 
     await openCasePanel(user)
-    await user.click(screen.getByText('More options').closest('summary'))
-    const trigger = screen.getByRole('button', { name: /Use a third-party service/ })
-    expect(trigger.closest('section')).toHaveAccessibleName('Files and next steps')
-    expect(trigger).toHaveTextContent('View 2 options')
+    const trigger = screen.getByRole('button', { name: /Available third-party services/ })
+    expect(trigger.closest('section')).toHaveAccessibleName('Files')
     await user.click(trigger)
-    expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Close third-party services' }))
-    await waitFor(() => expect(trigger).toHaveFocus())
+    const pinned = await screen.findByRole('region', { name: 'Third-party services' })
+    expect(within(pinned).getByText('Vehicle damage assessment')).toBeVisible()
+    expect(within(pinned).getByText('Vehicle recovery')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close Third-party services' }))
+    expect(screen.queryByRole('region', { name: 'Third-party services' })).not.toBeInTheDocument()
   })
 
   it('keeps third-party support closed when reopening a claim from conversation history', async () => {
@@ -1364,12 +1371,11 @@ describe('claimant intake projection', () => {
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
-    expect(screen.queryByRole('dialog', { name: 'Third-party services' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Third-party services' })).not.toBeInTheDocument()
 
     await openCasePanel(user)
-    await user.click(screen.getByText('More options').closest('summary'))
-    await user.click(screen.getByRole('button', { name: /Use a third-party service/ }))
-    expect(await screen.findByRole('dialog', { name: 'Third-party services' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /Available third-party services/ }))
+    expect(await screen.findByRole('region', { name: 'Third-party services' })).toBeVisible()
   })
 
   it.each([false, true])('retries a saved unanswered message with its original identity and a new request key (safety notice: %s)', async (hasSafetyNotice) => {
@@ -1428,7 +1434,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    await user.click(screen.getByRole('button', { name: 'Claim history' }))
+    await user.click(screen.getAllByRole('button', { name: 'My claims' })[0])
 
     expect(screen.getByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Back to previous page' }))
@@ -1520,8 +1526,7 @@ describe('claimant intake projection', () => {
 
   it.each([
     ['Privacy & your data', 'Privacy & your data', false],
-    ['Claim history', 'Claim history', false],
-    ['External services', 'External services', true],
+    ['My claims', 'Claim history', false],
   ])('returns from the %s utility view to the conversation with the persistent header', async (
     navigationLabel,
     headingLabel,
@@ -1536,7 +1541,7 @@ describe('claimant intake projection', () => {
     const header = container.querySelector('.product-header')
     expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
 
-    await user.click(screen.getByRole('button', { name: navigationLabel }))
+    await user.click(screen.getAllByRole('button', { name: navigationLabel })[0])
     expect(await screen.findByRole('heading', { level: 1, name: headingLabel })).toBeVisible()
     const pageBack = within(container.querySelector('.workspace-utility-page'))
       .queryByRole('button', { name: /^Back/ })
@@ -1553,40 +1558,6 @@ describe('claimant intake projection', () => {
     expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
     expect(screen.queryByRole('heading', { level: 1, name: 'Start your insurance claim' }))
       .not.toBeInTheDocument()
-  })
-
-  it('keeps the shared Claim shell mounted when External services replaces the centre content', async () => {
-    const user = userEvent.setup()
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
-
-    const { container } = render(<App />)
-    await startActiveClaim(user)
-
-    const claimShell = container.querySelector('.intake-page')
-    const claimNavigation = screen.getByRole('complementary', { name: 'Conversation history' })
-    const conversationPanel = container.querySelector('.conversation-panel')
-    const claimDetails = await openCasePanel(user)
-
-    await user.click(within(claimNavigation).getByRole('button', { name: 'External services' }))
-    expect(await screen.findByRole('heading', { level: 1, name: 'External services' })).toBeVisible()
-
-    expect(container.querySelector('.intake-page')).toBe(claimShell)
-    expect(screen.getByRole('complementary', { name: 'Conversation history' })).toBe(claimNavigation)
-    expect(container.querySelector('.conversation-panel')).toBe(conversationPanel)
-    expect(screen.getByRole('complementary', { name: 'Claim details' })).toBe(claimDetails)
-    expect(claimShell).not.toHaveClass('is-external-services-view')
-    expect(claimDetails).toHaveClass('is-open')
-    expect(within(claimNavigation).getByRole('button', { name: 'External services' }))
-      .toHaveAttribute('aria-current', 'page')
-    expect(within(claimDetails).getByRole('heading', { name: 'Your claim' })).toBeVisible()
-    expect(within(claimDetails).queryByText(/^Revision /)).not.toBeInTheDocument()
-    expect(within(claimDetails).getByRole('region', { name: 'What we have so far' })).toBeVisible()
-    expect(within(claimDetails).getByRole('region', { name: 'Files and next steps' })).toBeVisible()
-
-    await user.click(within(claimDetails).getByRole('button', { name: 'Close panel' }))
-    expect(claimDetails).toHaveClass('is-collapsed')
-    await openCasePanel(user)
-    expect(claimDetails).toHaveClass('is-open')
   })
 
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
@@ -1662,54 +1633,27 @@ describe('claimant intake projection', () => {
     await waitFor(() => expect(messageList.scrollTop).toBe(960))
   })
 
-  it('replaces Staff assistance with a waiting status and prevents duplicate requests', async () => {
+  it('sends Help as an ordinary message for the assistant to judge, not a direct handoff', async () => {
     const user = userEvent.setup()
-    let resolveSupport
     api.submitClaimMessage.mockResolvedValue({
       ...initialTurn(),
       claim_revision: 2,
       current_claim_revision: 3,
       primary_action: primaryAction({ revision: 3 }),
     })
-    api.requestHumanSupport.mockImplementation(() => new Promise((resolve) => {
-      resolveSupport = resolve
-    }))
 
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
 
-    await user.click(screen.getByRole('button', { name: 'Staff assistance' }))
+    await user.click(screen.getByRole('button', { name: 'Help' }))
 
-    expect(await screen.findByRole('status', { name: /Waiting for staff/ })).toBeInTheDocument()
-    expect(screen.getByText(
-      /Your request has been sent\. You can continue adding information while you wait\./,
-    )).toBeInTheDocument()
-    const conversation = document.querySelector('.message-list')
-    expect(conversation).not.toHaveTextContent('Staff assisting')
-    expect(conversation).not.toHaveTextContent('A Northwind staff member is now assisting you.')
-    expect(screen.queryByRole('button', { name: 'Staff assistance' })).not.toBeInTheDocument()
-    expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
-    expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
-
-    await act(async () => resolveSupport({
-      revision: 3,
-      handoff: assistanceHandoff(),
-      customer_next_step: {
-        status: 'human_support_queued',
-        summary: 'A Northwind support request has been queued.',
-        responsible_party: 'claims_professional',
-      },
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(2))
+    expect(api.submitClaimMessage.mock.calls[1][0]).toEqual(expect.objectContaining({
+      text: "I'd like to talk to someone at Northwind.",
     }))
-
-    expect(await screen.findByRole('status', { name: /Waiting for staff/ })).toBeInTheDocument()
-    expect(screen.queryByText('Staff assistance requested')).not.toBeInTheDocument()
-    expect(api.requestHumanSupport).toHaveBeenCalledWith(expect.objectContaining({
-      claimId: initialClaim.claim_id,
-      revision: 3,
-    }))
-    expect(initialClaim.external_claim).toBeNull()
+    expect(api.requestHumanSupport).not.toHaveBeenCalled()
   })
 
   it('keeps a queued handoff stale until reconnect installs the authoritative accepted projection', async () => {
@@ -1737,23 +1681,14 @@ describe('claimant intake projection', () => {
         })
       })()
     })
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
-    api.requestHumanSupport.mockResolvedValue({
-      revision: 3,
-      handoff: assistanceHandoff(),
-      customer_next_step: {
-        status: 'human_support_queued',
-        summary: 'A Northwind support request has been queued.',
-        responsible_party: 'claims_professional',
-      },
-    })
+    // The assistant hands the claimant to a person in its turn.
+    api.submitClaimMessage.mockResolvedValue({ ...initialTurn(), handoff: assistanceHandoff() })
 
     const { unmount } = render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
-    await user.click(screen.getByRole('button', { name: 'Staff assistance' }))
-    expect(await screen.findByRole('status', { name: /Waiting for staff/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Waiting for staff/ })).toBeInTheDocument()
     await waitFor(() => expect(firstOnEvent).toBeTypeOf('function'))
 
     api.getClaim.mockResolvedValueOnce({
@@ -1780,17 +1715,16 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('status', {
       name: /Live updates need to be resynchronised\. Some claim information may be out of date/i,
     })).toBeInTheDocument()
-    expect(screen.getByRole('status', { name: /Waiting for staff/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Waiting for staff/ })).toBeInTheDocument()
 
     await act(async () => { finishFirstStream() })
     await waitFor(() => expect(replacementOpened).toBe(true))
 
-    expect(await screen.findByRole('status', { name: /Staff assistance accepted/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Staff assistance accepted/ })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('status', {
       name: /Live updates need to be resynchronised/i,
     })).not.toBeInTheDocument())
     expect(screen.getByText(/Northwind has accepted your assistance request\./)).toBeInTheDocument()
-    expect(api.requestHumanSupport).toHaveBeenCalledTimes(1)
     expect(api.createClaim).toHaveBeenCalledTimes(1)
 
     unmount()
@@ -1826,26 +1760,15 @@ describe('claimant intake projection', () => {
       return new Promise(() => {})
     })
     api.submitClaimMessage
-      .mockResolvedValueOnce(initialTurn())
+      .mockResolvedValueOnce({ ...initialTurn(), handoff: assistanceHandoff() })
       .mockImplementationOnce(() => new Promise((resolve) => {
         resolveReply = resolve
       }))
-    api.requestHumanSupport.mockResolvedValue({
-      revision: 3,
-      handoff: assistanceHandoff(),
-      customer_next_step: {
-        status: 'human_support_queued',
-        summary: 'A Northwind support request has been queued.',
-        responsible_party: 'claims_professional',
-      },
-    })
-
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
-    await user.click(screen.getByRole('button', { name: 'Staff assistance' }))
-    await screen.findByRole('status', { name: /Waiting for staff/ })
+    await screen.findByRole('button', { name: /Waiting for staff/ })
     await waitFor(() => expect(pushLiveUpdate).toBeTypeOf('function'))
 
     api.getClaim.mockResolvedValueOnce({
@@ -1863,7 +1786,7 @@ describe('claimant intake projection', () => {
     })
     await act(async () => pushLiveUpdate(realtimeChange(4)))
 
-    expect(await screen.findByRole('status', { name: /Staff assistance accepted/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Staff assistance accepted/ })).toBeInTheDocument()
     expect(screen.getByText(/Northwind has accepted your assistance request\./)).toBeInTheDocument()
     expect(screen.queryByText('Northwind staff joined the conversation')).not.toBeInTheDocument()
     expect(screen.queryByText('Staff assistance requested')).not.toBeInTheDocument()
@@ -1884,10 +1807,11 @@ describe('claimant intake projection', () => {
     })
     await act(async () => pushLiveUpdate(realtimeChange(5)))
 
-    expect(await screen.findByRole('status', { name: /Your response is needed/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Your response is needed/ })).toBeInTheDocument()
     const staffArticle = screen.getByText(staffMessage.content.text).closest('.msg-staff')
     expect(staffArticle.querySelector('.staff-mark')).toHaveTextContent('N')
-    expect(staffArticle.querySelector('.staff-bubble')).toHaveClass('chat-bubble')
+    expect(staffArticle.querySelector('.chat-bubble')).not.toBeInTheDocument()
+    expect(staffArticle.querySelector('.staff-text')).toHaveTextContent(staffMessage.content.text)
     expect(staffArticle.querySelector('time.message-timestamp'))
       .toHaveAttribute('datetime', staffMessage.created_at)
     expect(screen.getByText('Northwind staff')).toBeInTheDocument()
@@ -1895,8 +1819,8 @@ describe('claimant intake projection', () => {
     await user.type(replyBox, claimantReply.content.text)
     await user.click(screen.getByRole('button', { name: 'Send reply' }))
 
-    expect(await screen.findByRole('status', { name: /Your reply was sent/ })).toBeInTheDocument()
-    expect(screen.queryByRole('status', { name: /Your response is needed/ })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Your reply was sent/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Your response is needed/ })).not.toBeInTheDocument()
     expect(screen.getByText(/Waiting for the next claim update\./)).toBeInTheDocument()
 
     await act(async () => resolveReply({
@@ -1929,7 +1853,7 @@ describe('claimant intake projection', () => {
     expect(await screen.findByRole('status', { name: /Staff assistance completed/ })).toBeInTheDocument()
     expect(screen.getByText(/You can continue your claim below\./)).toBeInTheDocument()
     expect(screen.getAllByText('Staff assistance completed')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Staff assistance' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Help' })).toBeEnabled()
     expect(screen.queryByText('Claim created')).not.toBeInTheDocument()
   })
 
@@ -2044,7 +1968,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    expect(await screen.findByRole('button', { name: 'Staff assistance' })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: 'Help' })).toBeEnabled()
     expect(screen.queryByRole('status', { name: /Staff assistance completed/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Staff assistance completed')).not.toBeInTheDocument()
   })
@@ -2156,7 +2080,7 @@ describe('claimant intake projection', () => {
     })
     expect(api.createClaim).toHaveBeenCalledTimes(1)
     expect(api.startClaimSession).not.toHaveBeenCalled()
-    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
     expect(screen.queryByText('Ready to start')).not.toBeInTheDocument()
     expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Start claim' })).not.toBeInTheDocument()
@@ -2171,7 +2095,7 @@ describe('claimant intake projection', () => {
 
     expect(api.createClaim).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(globalThis.location.pathname).toBe('/claims/clm_ui_second'))
-    expect(screen.getByText('In progress')).toBeVisible()
+    expect(document.querySelector('.case-status')).toBeVisible()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()
     await waitFor(() => expect(api.streamRealtimeEvents).toHaveBeenCalled())
     expect(api.streamClaimUpdates).not.toHaveBeenCalled()
@@ -2212,7 +2136,7 @@ describe('claimant intake projection', () => {
     expect(api.pauseClaimSession.mock.calls[1][0].idempotencyKey).toBe(
       api.pauseClaimSession.mock.calls[0][0].idempotencyKey,
     )
-    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
   })
 
   it('prevents duplicate interruption saves while New chat is pending', async () => {
@@ -2236,7 +2160,7 @@ describe('claimant intake projection', () => {
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
 
-    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
   })
 
   it('uses authoritative Claim readback when the pause response is lost', async () => {
@@ -2253,7 +2177,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
     expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id)
-    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
@@ -2605,7 +2529,7 @@ describe('claimant intake projection', () => {
       claim: pausedClaim(),
       session: { session_id: 'ses_ui_vp', status: 'paused' },
     }))
-    expect(await screen.findByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
   })
 
   it('uses the homepage rail to return to the existing empty conversation workspace', async () => {
@@ -2627,7 +2551,7 @@ describe('claimant intake projection', () => {
 
     render(<App />)
 
-    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
     expect(screen.getByPlaceholderText('Write what happened, or choose a prompt above…')).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'Start your insurance claim' })).not.toBeInTheDocument()
   })
@@ -2638,21 +2562,21 @@ describe('claimant intake projection', () => {
 
     const { container } = render(<App />)
 
-    const startIntro = container.querySelector('.conversation-start-intro')
-    expect(within(startIntro).getByRole('heading', {
+    // One line and three small starting chips.
+    const start = container.querySelector('.conversation-start')
+    expect(within(start).getByRole('heading', {
       level: 1,
-      name: "Let's get your claim started",
+      name: 'Tell us what happened, in your own words.',
     })).toBeVisible()
-    expect(within(startIntro).queryByText('Ready to start')).not.toBeInTheDocument()
+    expect(within(start).queryByText('Ready to start')).not.toBeInTheDocument()
     const emptyHeading = container.querySelector('.conversation-heading')
     expect(emptyHeading).toHaveClass('is-empty')
     expect(within(emptyHeading).queryByText('Ready to start')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'New conversation' })).not.toBeInTheDocument()
-    expect(screen.getByText(/Tell us what happened in your own words/)).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Choose a starting point' })).toBeVisible()
-    expect(screen.getByText(/Your information stays private/)).toBeVisible()
+    expect(screen.getByRole('group', { name: 'Choose a starting point' })).toBeVisible()
+    expect(screen.queryByText(/Your information stays private/)).not.toBeInTheDocument()
     // The case panel stays closed until there is a claim to look at.
-    expect(screen.queryByText('Claim overview', { selector: '.overview-eyebrow' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'What we know' })).not.toBeInTheDocument()
 
     const composer = screen.getByPlaceholderText('Write what happened, or choose a prompt above…')
     const send = screen.getByRole('button', { name: 'Send' })
@@ -2705,7 +2629,7 @@ describe('claimant intake projection', () => {
     unmount()
 
     render(<App />)
-    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
     await user.click(screen.getByRole('button', { name: /home.*Continue this conversation/i }))
 
     expect(api.listClaims).not.toHaveBeenCalled()
@@ -3189,7 +3113,7 @@ describe('claimant intake projection', () => {
 
     expect(api.getClaim).toHaveBeenCalledTimes(3)
     expect(
-      await screen.findByRole('button', { name: /Review claim details/i }),
+      await screen.findByRole('button', { name: 'Check your details' }),
     ).toBeInTheDocument()
   })
 
@@ -3249,7 +3173,7 @@ describe('claimant intake projection', () => {
     expect(
       screen.getByRole('textbox', { name: 'Add more information' }),
     ).toBeVisible()
-    expect(screen.getByRole('heading', { level: 1, name: "Let's get your claim started" })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Tell us what happened, in your own words.' })).toBeVisible()
     expect(screen.queryByText(initialClaim.claim_id)).not.toBeInTheDocument()
     expect(api.getClaim).not.toHaveBeenCalled()
 
@@ -3310,7 +3234,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(
-      await screen.findByRole('button', { name: /Review claim details/i }),
+      await screen.findByRole('button', { name: 'Check your details' }),
     ).toBeInTheDocument()
 
     const conflict = Object.assign(
@@ -3343,7 +3267,7 @@ describe('claimant intake projection', () => {
     })
 
     expect(
-      screen.getByRole('button', { name: /Review claim details/i }),
+      screen.getByRole('button', { name: 'Check your details' }),
     ).toBeInTheDocument()
     expect(
       screen.getByText(newerAgentMessage.content.text),
@@ -3780,7 +3704,7 @@ describe('claimant intake projection', () => {
     await screen.findByText(agentMessage.content.text)
 
     const agreementAction = screen.getByRole('button', {
-      name: /Agreement & confirmation/i,
+      name: 'Review and agree',
     })
     expect(agreementAction.closest('.msg-agent')).toBeInTheDocument()
     expect(screen.queryByRole('button', {
@@ -3909,7 +3833,7 @@ describe('claimant intake projection', () => {
     await screen.findByText(agentMessage.content.text)
 
     expect(screen.getByRole('button', {
-      name: /Agreement & confirmation/i,
+      name: 'Review and agree',
     })).toBeInTheDocument()
 
     expect(screen.queryByRole('button', {
@@ -3959,19 +3883,14 @@ describe('claimant intake projection', () => {
     })).toBeInTheDocument()
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'External services' }))
-
-    const servicesPage = (await screen.findByRole('heading', {
-      level: 1,
-      name: 'External services',
-    })).closest('.external-services-page')
-    expect(servicesPage).not.toBeNull()
-    expect(within(servicesPage).getByText('Northwind assessment service')).toBeVisible()
-    expect(within(servicesPage).queryByRole('heading', { name: 'No external service is needed right now' }))
-      .not.toBeInTheDocument()
+    // The service chip under the reply pins the full consent card in the case panel.
+    await user.click(screen.getByRole('button', { name: /Vehicle damage assessment/i }))
+    const pinned = await screen.findByRole('region', { name: 'Vehicle damage assessment' })
+    expect(pinned.closest('.intake-details-panel')).toHaveClass('is-open')
+    expect(within(pinned).getByText('Northwind assessment service')).toBeVisible()
   })
 
-  it('restores message-bound service offers on the External services page', async () => {
+  it('restores message-bound service offers as chips that pin the service', async () => {
     const user = userEvent.setup()
     const messageAction = {
       offer_id: 'offer-assessor-history',
@@ -4021,16 +3940,10 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Motor claim/ }))
     await screen.findByText(agentMessage.content.text)
-    await user.click(screen.getByRole('button', { name: 'External services' }))
+    await user.click(screen.getByRole('button', { name: /Vehicle damage assessment/i }))
 
-    const servicesPage = screen.getByRole('heading', {
-      level: 1,
-      name: 'External services',
-    }).closest('.external-services-page')
-    expect(servicesPage).not.toBeNull()
-    expect(within(servicesPage).getByText('Northwind assessment service')).toBeVisible()
-    expect(within(servicesPage).queryByRole('heading', { name: 'No external service is needed right now' }))
-      .not.toBeInTheDocument()
+    const pinned = await screen.findByRole('region', { name: 'Vehicle damage assessment' })
+    expect(within(pinned).getByText('Northwind assessment service')).toBeVisible()
   })
 
   it('uses backend-required items for the review action instead of local field counts', async () => {
@@ -4068,14 +3981,15 @@ describe('claimant intake projection', () => {
     expect(screen.queryByPlaceholderText('Write what happened, or choose a prompt above…'))
       .not.toBeInTheDocument()
 
-    await user.click(await screen.findByRole('button', { name: /Review claim details/i }))
-    expect(screen.getByText('2 to review')).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'Check your details' }))
 
-    // The summary check opens the case panel by itself; the conversation stays in place.
+    // The summary check opens the case panel with the check pinned; the conversation stays in place.
     const panel = await screen.findByRole('complementary', { name: 'Claim details' })
     expect(panel).toHaveClass('is-open')
+    const pinned = within(panel).getByRole('region', { name: 'Check your details' })
+    expect(pinned).toHaveTextContent('2 details need your check before you submit.')
     expect(within(panel).getByRole('region', { name: 'What we have so far' })).toBeInTheDocument()
-    expect(within(panel).getByRole('region', { name: 'Files and next steps' })).toBeInTheDocument()
+    expect(within(panel).getByRole('region', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'History' }))
@@ -4157,7 +4071,7 @@ describe('claimant intake projection', () => {
 
     await openCasePanel(user)
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
-    expect(screen.queryByRole('button', { name: /Review claim details/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Check your details' })).not.toBeInTheDocument()
     // Progress now lives only on the "Just noted" card.
     expect(screen.queryByRole('button', { name: /Claim progress/i })).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
@@ -4232,7 +4146,7 @@ describe('claimant intake projection', () => {
     }
   }
 
-  it('shows what was just noted under the reply and confirms it with Looks right', async () => {
+  it('shows what was just noted as chips under the reply and confirms them with All correct', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(notedTurn())
     api.confirmClaimFields.mockResolvedValue({
@@ -4250,24 +4164,27 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const card = await screen.findByRole('region', { name: 'Just noted' })
-    expect(card.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
-    expect(card).toHaveTextContent('Incident location')
-    expect(card).toHaveTextContent('Queen Street lights')
-    expect(card).toHaveTextContent('Vehicle safe to drive')
-    expect(card).toHaveTextContent('No')
-    expect(card).toHaveTextContent('2 of 5 noted · 2 to check')
-    expect(within(card).getAllByText('To check')).toHaveLength(2)
-    expect(screen.queryByRole('button', { name: /Review claim details/i })).not.toBeInTheDocument()
+    const locationChip = await screen.findByRole('button', { name: 'Incident location: Queen Street lights (to check)' })
+    expect(locationChip.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
+    expect(locationChip).toHaveClass('is-check')
+    expect(screen.getByRole('button', { name: 'Vehicle safe to drive: No (to check)' })).toBeInTheDocument()
+    // Progress lives once, in the title bar.
+    expect(document.querySelector('.case-status')).toHaveTextContent('Noted 2/5')
+    expect(screen.queryByRole('button', { name: 'Check your details' })).not.toBeInTheDocument()
 
-    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
+    await user.click(locationChip)
+    const list = screen.getByRole('region', { name: 'Just noted' })
+    expect(list).toHaveTextContent('Incident location')
+    expect(list).toHaveTextContent('Vehicle safe to drive')
+    expect(within(list).getAllByText('To check')).toHaveLength(2)
+    await user.click(within(list).getByRole('button', { name: 'All correct' }))
 
     await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
       fieldCodes: ['incident.location', 'vehicle.drivable'],
     })))
-    expect(await within(card).findAllByText('Checked')).toHaveLength(2)
-    expect(within(card).queryByRole('button', { name: 'Looks right' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Incident location: Queen Street lights' })).not.toHaveClass('is-check')
+    expect(screen.queryByRole('region', { name: 'Just noted' })).not.toBeInTheDocument()
   })
 
   it('keeps the review prompt for a conflicting answer and confirms only suggested facts', async () => {
@@ -4297,11 +4214,13 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const card = await screen.findByRole('region', { name: 'Just noted' })
-    expect(card).not.toHaveTextContent('Monday')
-    expect(screen.getByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+    const chip = await screen.findByRole('button', { name: 'Incident location: Queen Street lights (to check)' })
+    expect(chip.closest('.turn-attachments')).not.toHaveTextContent('Monday')
+    expect(screen.getByRole('button', { name: 'Check your details' })).toBeInTheDocument()
 
-    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
+    await user.click(chip)
+    const card = screen.getByRole('region', { name: 'Just noted' })
+    await user.click(within(card).getByRole('button', { name: 'All correct' }))
     await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
       fieldCodes: ['incident.location', 'vehicle.drivable'],
     })))
@@ -4332,9 +4251,8 @@ describe('claimant intake projection', () => {
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
-    const card = await screen.findByRole('region', { name: 'Just noted' })
-
-    await user.click(within(card).getByRole('button', { name: 'Edit' }))
+    await user.click(await screen.findByRole('button', { name: 'Vehicle safe to drive: No (to check)' }))
+    const card = screen.getByRole('region', { name: 'Just noted' })
     await user.click(within(card).getByRole('button', { name: 'Change Vehicle safe to drive' }))
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Vehicle safe to drive' }), 'Yes')
     await user.click(within(card).getByRole('button', { name: 'Save' }))
@@ -4343,9 +4261,9 @@ describe('claimant intake projection', () => {
       fieldCode: 'vehicle.drivable',
       value: true,
     })))
-    // The corrected fact stays on the card of the message that first stated it.
+    // The corrected fact stays under the reply that first stated it.
     await waitFor(() => expect(within(card).getByText('Yes')).toBeInTheDocument())
-    expect(card).toHaveTextContent('Checked')
+    expect(await screen.findByRole('button', { name: 'Vehicle safe to drive: Yes' })).toBeInTheDocument()
   })
 
   it.each([true, false])('installs the current snapshot and suppresses stale replay actions (readback succeeds: %s)', async (readbackSucceeds) => {
@@ -4425,7 +4343,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
     await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id, 'ses_ui_vp'))
-    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Permission needed/)).not.toBeInTheDocument()
     await act(async () => {
       if (readbackSucceeds) {
         resolveHistory({ items: [claimantMessage, {
@@ -4442,12 +4360,12 @@ describe('claimant intake projection', () => {
       }
     })
     if (readbackSucceeds) {
-      expect(await screen.findByText('Permission withdrawn')).toBeInTheDocument()
+      expect(await screen.findByText(/Permission withdrawn/)).toBeInTheDocument()
     } else {
       expect(await screen.findByText(/Your message is saved, but current service actions could not be refreshed/)).toBeInTheDocument()
       expect(screen.queryByText(/We could not confirm delivery/)).not.toBeInTheDocument()
     }
-    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Permission needed/)).not.toBeInTheDocument()
     await openCasePanel(user)
 
     expect(screen.getAllByText('9pm').length).toBeGreaterThan(0)
@@ -4532,7 +4450,7 @@ describe('claimant intake projection', () => {
     )
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(await screen.findByText(newerAgentMessage.content.text)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check your details' })).toBeInTheDocument()
 
     await act(async () => {
       resolveClaimReadback({
@@ -4546,7 +4464,7 @@ describe('claimant intake projection', () => {
 
     expect(screen.getByText(newerClaimantMessage.content.text)).toBeInTheDocument()
     expect(screen.getByText(newerAgentMessage.content.text)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check your details' })).toBeInTheDocument()
   })
 
   it('opens a no-cursor claimant stream before taking the startup snapshot', async () => {
@@ -4764,7 +4682,7 @@ describe('claimant intake projection', () => {
       cursor: null,
       onOpen: expect.any(Function),
     }))
-    expect(await screen.findByRole('button', { name: /Review claim details/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Check your details' })).toBeInTheDocument()
     expect(api.getClaim).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(screen.queryByRole('status', {
       name: /Live updates need to be resynchronised/i,
@@ -4907,9 +4825,8 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
     const panel = await openCasePanel(user)
-    expect(within(panel).getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /What to provide/ })).not.toBeInTheDocument()
-    const documentsPanel = within(panel).getByRole('region', { name: 'Files and next steps' })
+    const documentsPanel = within(panel).getByRole('region', { name: 'Files' })
     expect(within(documentsPanel).getByRole('heading', { name: 'Documents and evidence' })).toBeInTheDocument()
     expect(within(documentsPanel).getByText('Repair quote')).toBeInTheDocument()
     expect(within(documentsPanel).getByText('0 of 1 provided')).toBeInTheDocument()
@@ -4975,10 +4892,12 @@ describe('claimant intake projection', () => {
     await startActiveClaim(user)
 
     const reply = screen.getByText(agentMessage.content.text).closest('.msg-agent')
-    expect(within(reply).getByText('Added to your to-do: Repair quote')).toBeVisible()
-    expect(within(reply).getByText('Passed to the claims team: Is my hire car covered?')).toBeVisible()
+    // One attachment row: the scope note, then chips for what this turn opened.
+    expect(within(reply).getByText('To do: Repair quote')).toBeVisible()
+    expect(within(reply).getByText('For the claims team: Is my hire car covered?')).toBeVisible()
     expect(within(reply).getByText('Because someone was hurt, two more details are needed.')).toBeVisible()
-    expect(within(reply).getByRole('button', { name: 'Upload now' })).toBeVisible()
+    expect(within(reply).getByText('To do: Repair quote').closest('.turn-chip')).toHaveClass('is-owed')
+    expect(within(reply).getByRole('button', { name: 'Upload' })).toBeVisible()
 
     const bar = screen.getByText(/Still to send: Repair quote/).closest('.open-items-bar')
     expect(bar).toHaveTextContent('Waiting on Northwind: Is my hire car covered?')
@@ -4986,7 +4905,7 @@ describe('claimant intake projection', () => {
     const panel = screen.getByRole('complementary', { name: 'Claim details' })
     const stillToDo = within(panel).getByRole('region', { name: 'Still to do' })
     expect(stillToDo).toHaveTextContent('You said you will send this later')
-    expect(stillToDo).toHaveTextContent('Waiting for Northwind to answer')
+    expect(stillToDo).toHaveTextContent('The claims team will answer after you submit')
   })
 
   it('keeps typing while a reply is on its way and sends it after the reply', async () => {
@@ -5628,7 +5547,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
-    await user.click(screen.getByRole('button', { name: 'Claim history' }))
+    await user.click(screen.getAllByRole('button', { name: 'My claims' })[0])
     expect(await screen.findByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Continue report' }))
@@ -5760,7 +5679,7 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('complementary', { name: 'Conversation history' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Claim workspace sections' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Claim history' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'My claims' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Model' })).not.toBeInTheDocument()
     expect(screen.queryByRole('complementary', { name: 'Claim details' })).not.toBeInTheDocument()
     expect(globalThis.location.pathname).toBe(`/account/claims/${claimId}/messages`)

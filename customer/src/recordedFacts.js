@@ -88,3 +88,17 @@ export function choiceLabel(value) {
   const text = String(value).replaceAll('_', ' ')
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
+
+export function displayValue(fact, input) {
+  if (input?.value_type === 'enum' && typeof fact.field.value === 'string') {
+    return choiceLabel(fact.field.value)
+  }
+  return fact.value
+}
+
+// Structured values (a time range, an address object) are corrected in the
+// details panel, which edits their parts; a chip only edits plain values.
+export function isEditable(fact) {
+  const { value } = fact.field
+  return Array.isArray(value) || value === null || typeof value !== 'object'
+}

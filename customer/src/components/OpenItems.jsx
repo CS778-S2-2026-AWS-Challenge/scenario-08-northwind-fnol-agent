@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   claimantOwedItems,
@@ -6,12 +6,11 @@ import {
   openItemStatusText,
   openItemTitle,
   openItemsBarText,
-  receiptText,
 } from '../openItems.js'
 
 // What is still owed on the Claim, from claim.open_items. The bar sits above
 // the composer whenever something is outstanding; the section lists every item
-// in the case panel; receipts sit under the reply that opened each item.
+// in the case panel. Receipts are chips under the reply (TurnAttachments).
 
 function UploadButton({ item, label = 'Upload', onUpload, busy }) {
   const input = useRef(null)
@@ -43,8 +42,32 @@ function UploadButton({ item, label = 'Upload', onUpload, busy }) {
   )
 }
 
+const RECEIVED_NOTICE_MS = 2000
+
 export function OpenItemsBar({ items, onUpload, onOpenPanel, busy }) {
+  // A document that arrives stays as "Received" for a moment before the bar folds.
+  const [received, setReceived] = useState(null)
+  const owedBefore = useRef(new Set())
+  useEffect(() => {
+    const arrived = (items || []).find((item) => (
+      item.state === 'done' && owedBefore.current.has(item.item_id)
+    ))
+    owedBefore.current = new Set(claimantOwedItems(items).map((item) => item.item_id))
+    if (!arrived) return undefined
+    setReceived(openItemTitle(arrived))
+    const timer = setTimeout(() => setReceived(null), RECEIVED_NOTICE_MS)
+    return () => clearTimeout(timer)
+  }, [items])
+
   const text = openItemsBarText(items)
+  if (!text && received) {
+    return (
+      <div className="open-items-bar is-done" role="status">
+        <span className="open-items-bar-mark" aria-hidden="true">✓</span>
+        <span className="open-items-bar-text">{`Received: ${received}`}</span>
+      </div>
+    )
+  }
   if (!text) return null
   const owed = claimantOwedItems(items)
   return (
@@ -90,25 +113,5 @@ export function OpenItemsSection({ items, onUpload, busy }) {
         </div>
       ))}
     </section>
-  )
-}
-
-export function TurnReceipts({ items, scopeNote, onUpload, busy }) {
-  if ((!items || items.length === 0) && !scopeNote) return null
-  return (
-    <div className="turn-receipts">
-      {scopeNote && <p className="turn-scope-note">{scopeNote}</p>}
-      {(items || []).map((item) => (
-        <p className={`turn-receipt is-${item.owner}`} key={item.item_id}>
-          <span className="turn-receipt-mark" aria-hidden="true">
-            {item.state === 'done' ? '✓' : '+'}
-          </span>
-          <span className="turn-receipt-text" title={receiptText(item)}>{receiptText(item)}</span>
-          {item.kind === 'document' && item.owner === 'claimant' && item.state === 'open' && (
-            <UploadButton item={item} label="Upload now" onUpload={onUpload} busy={busy} />
-          )}
-        </p>
-      ))}
-    </div>
   )
 }

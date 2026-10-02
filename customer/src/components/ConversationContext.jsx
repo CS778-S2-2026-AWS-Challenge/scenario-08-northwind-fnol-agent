@@ -5,18 +5,18 @@ function Chevron({ expanded = null }) {
   return <span className="conversation-card-chevron" aria-hidden="true">{symbol}</span>
 }
 
-export function ConversationEvent({ icon = '✓', title, detail, tone = 'success' }) {
+// A system event in the conversation is a thin divider with one sentence, not a card.
+export function ConversationEvent({ title, detail, tone = 'success' }) {
   return (
     <div
       className={`conversation-event is-${tone}`}
       role={tone === 'urgent' ? 'alert' : 'status'}
       aria-label={detail ? `${title}. ${detail}` : title}
     >
-      <span className="conversation-event-icon" aria-hidden="true">{icon}</span>
-      <div className="conversation-event-copy">
+      <span className="conversation-event-copy">
         <strong>{title}</strong>
         {detail && <span className="conversation-event-detail"> · {detail}</span>}
-      </div>
+      </span>
     </div>
   )
 }
