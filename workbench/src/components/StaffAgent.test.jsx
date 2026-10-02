@@ -346,7 +346,7 @@ describe('StaffAgent', () => {
     vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
     vi.spyOn(workbenchApi, 'sendStaffAgentMessage').mockImplementation(() => new Promise((resolve) => {
       finishSend = () => resolve({
-        session: { session_id: 'sas_1', title: 'Evidence review' },
+        session: { session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' },
         staff_message: { message_id: 'sam_staff', role: 'staff', content: 'First question', claim_ids: [], drafts: [], source_refs: [] },
         assistant_message: { message_id: 'sam_agent', role: 'assistant', content: 'First answer', claim_ids: [], drafts: [], source_refs: [] },
       })
