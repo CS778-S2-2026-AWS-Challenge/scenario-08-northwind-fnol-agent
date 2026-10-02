@@ -228,3 +228,28 @@ def _wording_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
                 )
                 break
     return problems
+
+
+# What the claimant said is recorded from the first answer; a rewrite is asked
+# for because of the reply's words. A part the rewrite leaves out is kept from
+# the first answer, so a reworded reply never loses a recorded fact.
+_RECORDED_PARTS = (
+    'field_changes',
+    'contents_item_changes',
+    'document_requests',
+    'evidence_interpretations',
+    'northwind_questions',
+    'scope_note',
+)
+
+
+def keep_recorded_parts(first: object, rewrite: object) -> object:
+    """The rewritten answer, with recorded parts it dropped restored from the first."""
+
+    if not isinstance(first, dict) or not isinstance(rewrite, dict):
+        return rewrite
+    merged = dict(rewrite)
+    for key in _RECORDED_PARTS:
+        if not merged.get(key) and first.get(key):
+            merged[key] = first[key]
+    return merged

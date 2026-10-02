@@ -107,7 +107,7 @@ from backend.services.model_request_planner import (
     prepare_model_family_context,
 )
 from backend.services.prompt_composer import load_response_schema
-from backend.services.reply_consistency import review_reply
+from backend.services.reply_consistency import keep_recorded_parts, review_reply
 from backend.services.reply_judge import ReplyJudge
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -1522,6 +1522,7 @@ class GatewayAgent:
                     )
                     request_budgets.append(recall_budget)
                     self._require_turn_time(started_at)
+                    first_output = response.structured_output
                     response = self._observed_complete(
                         recall,
                         context,
@@ -1536,6 +1537,13 @@ class GatewayAgent:
                     )
                     if response.completion_status is not ModelCompletionStatus.COMPLETE:
                         raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+                    response = response.model_copy(
+                        update={
+                            'structured_output': keep_recorded_parts(
+                                first_output, response.structured_output
+                            )
+                        }
+                    )
                     result = self._v7_proposal(
                         plan,
                         context,

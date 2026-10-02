@@ -37,6 +37,7 @@ PROBLEM_KINDS = (
     'refers_to_insurer',
     'claims_escalation_without_one',
     'promises_answer_without_question',
+    'claims_documents_block_lodging',
 )
 
 JUDGE_INSTRUCTION = """You check one reply from Northwind's claims assistant against the ledger of \
@@ -54,6 +55,9 @@ insurance company.
 passed the claim to a person.
 - promises_answer_without_question: questions_passed_on is empty and the reply says the claims \
 team will confirm, answer or check something for the claimant.
+- claims_documents_block_lodging: the reply says a photo, quote or other document is needed \
+before the claim can be lodged or submitted. Documents never block lodging; asking for one, or \
+saying it helps, is fine.
 
 Return {"problems": []} when the reply is fine. Each detail quotes the words at fault."""
 

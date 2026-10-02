@@ -215,3 +215,19 @@ def test_review_allows_fact_questions_offers_by_card_and_real_escalation() -> No
         ),
     )
     assert review_reply(passed_on).consistent
+
+
+def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    # The rewrite is about the words; facts the first answer recorded stay.
+    words_only = {**HONEST_REWRITE, 'field_changes': []}
+    provider = _provider(NAMES_REFUSED_SERVICE, words_only)
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'recall-keeps-facts')
+
+    turn = journey.send('The water is still dripping through the ceiling.')
+
+    assert turn['agent_message']['content']['text'] == HONEST_REWRITE['reply']
+    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    assert claim is not None and claim.form['property.ongoing_risk'].value == 'active_leak'
