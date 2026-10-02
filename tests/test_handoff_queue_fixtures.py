@@ -191,9 +191,7 @@ def test_active_claims_classifies_counts_filters_and_orders_by_business_priority
         'professional_review',
         'pending_creation',
     ]
-    counts = {
-        item['status']: item['count'] for item in payload['active_claim_counts']['items']
-    }
+    counts = {item['status']: item['count'] for item in payload['active_claim_counts']['items']}
     assert payload['active_claim_counts']['status'] == 'available'
     assert payload['active_claim_counts']['total'] == 4
     assert payload['active_claim_counts']['navigation_total'] == 4

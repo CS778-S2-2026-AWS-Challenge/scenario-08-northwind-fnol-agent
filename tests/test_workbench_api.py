@@ -1333,8 +1333,7 @@ def test_active_claims_use_oldest_status_entry_then_updated_at_fallback(
         pending_ids[0],
     ]
     assert all(
-        item['active_claim']['entered_at'] is None
-        for item in pending_response.json()['items']
+        item['active_claim']['entered_at'] is None for item in pending_response.json()['items']
     )
 
 
