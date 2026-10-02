@@ -4349,6 +4349,7 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
         *,
         agent_message: MessageRecord | None = None,
+        runtime_trace: RuntimeTraceRecord | None = None,
     ) -> None:
         with self._claim_mutation_lock:
             self._ensure_claim_access_open(message.claim_id)
@@ -4387,9 +4388,19 @@ class FixtureRepository(PersistenceRepository):
                 or agent_message.message_id in self._messages
             ):
                 raise IdempotencyConflict(agent_message.message_id)
+            if runtime_trace is not None and (
+                runtime_trace.claim_id != message.claim_id
+                or runtime_trace.session_id != message.session_id
+                or runtime_trace.trigger_message_id != message.message_id
+                or runtime_trace.status == 'succeeded'
+                or runtime_trace.trace_id in self._runtime_traces
+            ):
+                raise IdempotencyConflict(runtime_trace.trace_id)
             self._store_message(message)
             if agent_message is not None:
                 self._store_message(agent_message)
+            if runtime_trace is not None:
+                self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
             self._idempotency[(idempotency.actor_id, idempotency.route, idempotency.key)] = (
                 deepcopy(idempotency)
             )

@@ -69,6 +69,7 @@ from backend.services.agent import AgentEvidenceReference, AgentTurnContext, Inv
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
 from backend.services.context_resolver import TurnContextResolver
+from backend.services.isolated_context_executor import _validation_path
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import (
@@ -1155,7 +1156,7 @@ def test_verified_summary_and_knowledge_stay_separate_bounded_context_resources(
 def test_context_planner_refuses_to_truncate_authority_context() -> None:
     context = _context('A' * 3000)
     route = route_turn(context)
-    with pytest.raises(ContextBudgetExceeded, match='message.latest'):
+    with pytest.raises(ContextBudgetExceeded, match=r'message.latest'):
         plan_context(context, route, budget_limit=200, reserved_tokens=100)
 
 
@@ -1783,6 +1784,23 @@ def test_v7_isolated_review_rejects_an_unscoped_source_reference() -> None:
             _context('Compare these damage photos.', evidence=evidence)
         )
     assert error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert error.value.diagnostic_code == 'source_reference_scope'
+    assert error.value.diagnostic_path == 'source_refs'
+
+
+@pytest.mark.parametrize(
+    ('errors', 'expected'),
+    [
+        ([object()], None),
+        ([{}], None),
+        ([{'loc': ('items', 0)}], 'items.[0]'),
+        ([{'loc': ('items', object())}], None),
+    ],
+)
+def test_validation_path_is_bounded_for_untrusted_error_shapes(
+    errors: list[object], expected: str | None
+) -> None:
+    assert _validation_path(errors) == expected
 
 
 @pytest.mark.parametrize(
@@ -1829,6 +1847,8 @@ def test_v7_isolated_review_rejects_tools_incomplete_and_unsourced_results(
         )
 
     assert error.value.code is expected_code
+    if expected_code is ModelGatewayErrorCode.MALFORMED_RESPONSE:
+        assert error.value.diagnostic_code == 'output_schema_validation'
 
 
 def test_v7_authority_budget_overflow_returns_model_free_safe_clarification() -> None:
