@@ -346,7 +346,7 @@ describe('StaffAgent', () => {
     vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
     vi.spyOn(workbenchApi, 'sendStaffAgentMessage').mockImplementation(() => new Promise((resolve) => {
       finishSend = () => resolve({
-        session: { session_id: 'sas_1', title: 'Evidence review' },
+        session: { session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' },
         staff_message: { message_id: 'sam_staff', role: 'staff', content: 'First question', claim_ids: [], drafts: [], source_refs: [] },
         assistant_message: { message_id: 'sam_agent', role: 'assistant', content: 'First answer', claim_ids: [], drafts: [], source_refs: [] },
       })
@@ -749,6 +749,244 @@ describe('StaffAgent', () => {
     expect(alert).toHaveTextContent('Action executed; refresh required')
     expect(alert).toHaveTextContent('Claim queue, open Claim')
     expect(alert).toHaveTextContent('Reference: req-refresh-1')
+  })
+
+  it('explains an unavailable model and sends nothing, without creating a session', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const create = vi.spyOn(workbenchApi, 'createStaffAgentSession')
+    const send = vi.spyOn(workbenchApi, 'sendStaffAgentMessage')
+    renderAgent()
+
+    const notice = await screen.findByText('Staff Agent cannot answer right now')
+    expect(notice.closest('[role="status"]')).toHaveTextContent(
+      'No Staff Agent model is published for this Workbench environment.',
+    )
+    const input = screen.getByLabelText('Message Staff Agent')
+    expect(input).toHaveAccessibleDescription(/Messages cannot be sent until a model is available/)
+    await user.type(input, 'What is missing on this Claim?{Enter}')
+
+    expect(input).toHaveValue('What is missing on this Claim?')
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(create).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('keeps sending closed when a resumed session model is no longer published', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [{ session_id: 'sas_retired', title: 'Old model session', model_profile_id: 'retired-model' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
+    const send = vi.spyOn(workbenchApi, 'sendStaffAgentMessage')
+    renderAgent({ requestedSessionId: 'sas_retired' })
+
+    expect(await screen.findByText(
+      'The model selected for this session is not published in this Workbench environment.',
+      { exact: false },
+    )).toBeInTheDocument()
+
+    const input = screen.getByLabelText('Message Staff Agent')
+    await user.type(input, 'Can this old session still send?{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['credential_unavailable', 'The selected model has no configured credential in this environment.'],
+    ['unregistered_reason', 'The model selected for this session is not ready.'],
+  ])('explains the %s reason for the selected model', async (reason, explanation) => {
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b', availability: 'unavailable', unavailable_reason: reason }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    renderAgent()
+
+    expect(await screen.findByText(explanation, { exact: false })).toBeInTheDocument()
+  })
+
+  it('opens the floating panel as a dialog, contains Tab, and returns focus to its opener on Escape', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+
+    function FloatingHarness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Rail Staff Agent</button>
+          <StaffAgent
+            open={open}
+            onOpenChange={setOpen}
+            requestedSessionId={null}
+            token="staff-token"
+            onSessionChange={vi.fn()}
+            onConversationChanged={vi.fn()}
+          />
+        </>
+      )
+    }
+    render(<FloatingHarness />)
+
+    const opener = screen.getByRole('button', { name: 'Rail Staff Agent' })
+    await user.click(opener)
+    const dialog = screen.getByRole('dialog', { name: 'Staff Agent' })
+    expect(dialog).not.toHaveAttribute('aria-modal')
+    expect(screen.getByLabelText('Message Staff Agent')).toHaveFocus()
+
+    screen.getByRole('button', { name: 'Close Staff Agent' }).focus()
+    await user.tab({ shift: true })
+    expect(dialog).toContainElement(document.activeElement)
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Staff Agent' })).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
+  it('returns focus to the bubble when the bubble opened the panel', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+
+    function BubbleHarness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <StaffAgent
+          open={open}
+          onOpenChange={setOpen}
+          requestedSessionId={null}
+          token="staff-token"
+          onSessionChange={vi.fn()}
+          onConversationChanged={vi.fn()}
+        />
+      )
+    }
+    render(<BubbleHarness />)
+
+    await user.click(screen.getByRole('button', { name: 'Open Staff Agent' }))
+    expect(screen.getByLabelText('Message Staff Agent')).toHaveFocus()
+    await user.click(screen.getByRole('button', { name: 'Close Staff Agent' }))
+
+    expect(screen.getByRole('button', { name: 'Open Staff Agent' })).toHaveFocus()
+  })
+
+  it('keeps the embedded route panel as page content without dialog semantics', async () => {
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const onOpenChange = vi.fn()
+    const user = userEvent.setup()
+    renderAgent({ embedded: true, onOpenChange })
+
+    await screen.findByText('Staff Agent cannot answer right now')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    screen.getByLabelText('Message Staff Agent').focus()
+    await user.keyboard('{Escape}')
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps the compact-layout panel in place instead of dragging it', async () => {
+    vi.stubGlobal('matchMedia', (query) => ({
+      matches: query === '(max-width: 800px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const { container } = renderAgent()
+    await screen.findByText('Staff Agent cannot answer right now')
+
+    const header = container.querySelector('.staff-agent__header')
+    fireEvent.pointerDown(header, { button: 0, clientX: 300, clientY: 80, pointerId: 1 })
+    fireEvent.pointerMove(header, { clientX: 120, clientY: 300, pointerId: 1 })
+    fireEvent.pointerUp(header, { pointerId: 1 })
+
+    expect(container.querySelector('.staff-agent')).not.toHaveAttribute('style')
+  })
+
+  it('keeps sending closed when the session list fails but capabilities publish no model', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockRejectedValue(new ApiError('Sessions unavailable.', { status: 503 }))
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const create = vi.spyOn(workbenchApi, 'createStaffAgentSession')
+    renderAgent()
+
+    expect(await screen.findByText('Staff Agent cannot answer right now')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Message Staff Agent'), 'What is missing?{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('keeps sending closed and says why when model availability cannot be read', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockRejectedValue(new ApiError('Capabilities unavailable.', { status: 503 }))
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    const create = vi.spyOn(workbenchApi, 'createStaffAgentSession')
+    renderAgent()
+
+    expect(await screen.findByText(/model availability could not be checked/)).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Message Staff Agent'), 'What is missing?{Enter}')
+
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('returns focus to the Claim Scope toggle so a second Escape closes the panel', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({ models: [] })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+
+    function ScopeHarness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Rail Staff Agent</button>
+          <StaffAgent
+            open={open}
+            onOpenChange={setOpen}
+            requestedSessionId={null}
+            token="staff-token"
+            onSessionChange={vi.fn()}
+            onConversationChanged={vi.fn()}
+          />
+        </>
+      )
+    }
+    render(<ScopeHarness />)
+
+    const opener = screen.getByRole('button', { name: 'Rail Staff Agent' })
+    await user.click(opener)
+    const toggle = await screen.findByRole('button', { name: /Claim Scope/ })
+    await user.click(toggle)
+    const checkbox = await screen.findByRole('checkbox', { name: /NW-1042/ })
+    checkbox.focus()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('checkbox', { name: /NW-1042/ })).not.toBeInTheDocument()
+    expect(toggle).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Staff Agent' })).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
   })
 
 })

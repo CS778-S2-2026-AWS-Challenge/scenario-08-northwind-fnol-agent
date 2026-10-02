@@ -11,6 +11,9 @@ export default function NavigationRail({ profile, onLogout, onAgent, draftCount 
   const draftSelected = location.pathname.startsWith('/workbench/drafts')
   const workbenchSelected = location.pathname === '/workbench'
     || location.pathname.startsWith('/workbench/claims/')
+  const workbenchLabel = t('Workbench')
+  const conversationsLabel = t('Claim conversations')
+  const agentLabel = t('Staff Agent')
   const draftLabel = t('Draft claims')
   const draftAccessibleLabel = Number.isInteger(draftCount)
     ? t('{count} Draft claims', { count: draftCount })
@@ -26,9 +29,10 @@ export default function NavigationRail({ profile, onLogout, onAgent, draftCount 
           to="/workbench"
           className={workbenchSelected ? 'active' : undefined}
           aria-current={workbenchSelected ? 'page' : undefined}
+          aria-label={workbenchLabel}
         >
           <BriefcaseBusiness size={19} />
-          <span>{t('Workbench')}</span>
+          <span>{workbenchLabel}</span>
         </Link>
         <Link
           to="/workbench/drafts"
@@ -44,8 +48,8 @@ export default function NavigationRail({ profile, onLogout, onAgent, draftCount 
             </span>
           )}
         </Link>
-        <NavLink to="/workbench/conversations"><MessageSquareText size={19} /><span>{t('Claim conversations')}</span></NavLink>
-        <button type="button" onClick={onAgent}><Bot size={19} /><span>{t('Staff Agent')}</span></button>
+        <NavLink to="/workbench/conversations" aria-label={conversationsLabel}><MessageSquareText size={19} /><span>{conversationsLabel}</span></NavLink>
+        <button type="button" onClick={onAgent} aria-label={agentLabel}><Bot size={19} /><span>{agentLabel}</span></button>
       </nav>
       <AccountMenu profile={effectiveProfile} onLogout={onLogout} />
     </aside>

@@ -5,8 +5,42 @@ import { usePersistentTabs } from './usePersistentTabs.js'
 describe('usePersistentTabs', () => {
   beforeEach(() => localStorage.clear())
 
+  it('keeps each staff identity open tabs private to that identity', () => {
+    const claim = { claim_id: 'clm_private', display_reference: 'NW-PRIVATE', incident: { summary: 'Passenger trapped.' } }
+    const first = renderHook(() => usePersistentTabs('stf_1'))
+    act(() => first.result.current.open(claim))
+    first.unmount()
+
+    const other = renderHook(() => usePersistentTabs('stf_2'))
+    expect(other.result.current.tabs).toEqual([])
+    expect(other.result.current.activeId).toBeNull()
+    other.unmount()
+
+    const returning = renderHook(() => usePersistentTabs('stf_1'))
+    expect(returning.result.current.tabs.map((tab) => tab.claimId)).toEqual(['clm_private'])
+  })
+
+  it('removes the former browser-wide record and stores nothing without a staff identity', () => {
+    localStorage.setItem('northwind.workbench.tabs.v1', JSON.stringify({ activeId: 'clm_old', tabs: [{ claimId: 'clm_old', label: 'Old summary' }] }))
+    const { result } = renderHook(() => usePersistentTabs(null))
+
+    expect(result.current.tabs).toEqual([])
+    expect(localStorage.getItem('northwind.workbench.tabs.v1')).toBeNull()
+    act(() => result.current.open({ claim_id: 'clm_new', display_reference: 'NW-NEW' }))
+    expect(Object.keys(localStorage).filter((key) => key.startsWith('northwind.workbench.tabs'))).toEqual([])
+  })
+
+  it('switches to the signed-in identity record when the staff identity changes', () => {
+    localStorage.setItem('northwind.workbench.tabs.v1:stf_2', JSON.stringify({ activeId: 'clm_two', tabs: [{ claimId: 'clm_two', label: 'clm_two' }] }))
+    const { result, rerender } = renderHook(({ staffId }) => usePersistentTabs(staffId), { initialProps: { staffId: 'stf_1' } })
+    expect(result.current.tabs).toEqual([])
+
+    rerender({ staffId: 'stf_2' })
+    expect(result.current.tabs.map((tab) => tab.claimId)).toEqual(['clm_two'])
+  })
+
   it('reuses the existing tab when the same Claim is opened twice', () => {
-    const { result } = renderHook(() => usePersistentTabs())
+    const { result } = renderHook(() => usePersistentTabs('stf_1'))
     const claim = {
       claim_id: 'clm_100',
       display_reference: 'NW-100',
@@ -22,7 +56,7 @@ describe('usePersistentTabs', () => {
   })
 
   it('replaces an incident fallback with the authorised claimant name without losing tab state', () => {
-    const { result } = renderHook(() => usePersistentTabs())
+    const { result } = renderHook(() => usePersistentTabs('stf_1'))
     const claimId = 'clm_26ebb97a053bebb885e6'
     const createdAt = '2026-09-22T01:00:00Z'
 
@@ -57,14 +91,14 @@ describe('usePersistentTabs', () => {
   })
 
   it('refreshes restored tab identities from the queue without activating another Claim', () => {
-    localStorage.setItem('northwind.workbench.tabs.v1', JSON.stringify({
+    localStorage.setItem('northwind.workbench.tabs.v1:stf_1', JSON.stringify({
       activeId: 'clm_second',
       tabs: [
         { claimId: 'clm_first', label: 'clm_first', draft: 'First draft', section: 'summary' },
         { claimId: 'clm_second', label: 'clm_second', draft: 'Second draft', section: 'activity' },
       ],
     }))
-    const { result } = renderHook(() => usePersistentTabs())
+    const { result } = renderHook(() => usePersistentTabs('stf_1'))
 
     expect(result.current.tabs.map((tab) => tab.label)).toEqual(['Claim in progress', 'Claim in progress'])
 
@@ -94,7 +128,7 @@ describe('usePersistentTabs', () => {
   })
 
   it('keeps each Claim draft and section when another tab becomes active', () => {
-    const { result } = renderHook(() => usePersistentTabs())
+    const { result } = renderHook(() => usePersistentTabs('stf_1'))
 
     act(() => result.current.open({ claim_id: 'clm_100', display_reference: 'NW-100' }))
     act(() => result.current.update('clm_100', { draft: 'Claimant update', section: 'conversation' }))
@@ -109,14 +143,14 @@ describe('usePersistentTabs', () => {
   })
 
   it('restores tabs after a browser refresh and selects the adjacent tab on close', () => {
-    const first = renderHook(() => usePersistentTabs())
+    const first = renderHook(() => usePersistentTabs('stf_1'))
     act(() => first.result.current.open({ claim_id: 'clm_100', display_reference: 'NW-100' }))
     act(() => first.result.current.open({ claim_id: 'clm_200', display_reference: 'NW-200' }))
     act(() => first.result.current.open({ claim_id: 'clm_300', display_reference: 'NW-300' }))
     act(() => first.result.current.activate('clm_200'))
     first.unmount()
 
-    const restored = renderHook(() => usePersistentTabs())
+    const restored = renderHook(() => usePersistentTabs('stf_1'))
     expect(restored.result.current.tabs.map((tab) => tab.claimId)).toEqual([
       'clm_100',
       'clm_200',
