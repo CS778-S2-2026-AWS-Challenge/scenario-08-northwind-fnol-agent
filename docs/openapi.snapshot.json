@@ -16451,6 +16451,13 @@
             "title": "External Capabilities",
             "type": "array"
           },
+          "file_readings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "File Readings",
+            "type": "object"
+          },
           "incident": {
             "$ref": "#/components/schemas/WorkbenchIncidentSummary"
           },

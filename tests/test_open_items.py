@@ -211,11 +211,16 @@ def test_staff_answer_a_question_once_and_it_reaches_the_claimant() -> None:
         _agent_message(
             claim.claim_id,
             claim.active_session_id or '',
-            {'northwind_questions': [QUESTION], 'opened_items': ['nwq_hire']},
+            {
+                'northwind_questions': [QUESTION],
+                'opened_items': ['nwq_hire'],
+                'file_reads': [{'evidence_id': 'evd_chat', 'kind': 'incident_photo'}],
+            },
         ),
         claim.customer_id,
     )
     detail = get_workbench_claim_detail(repository, _staff(), claim.claim_id)
+    assert detail.file_readings == {'evd_chat': 'incident_photo'}
     assert any(
         action.action_code == 'conversation.answer_claimant_question'
         and action.target_ref == 'nwq_hire'

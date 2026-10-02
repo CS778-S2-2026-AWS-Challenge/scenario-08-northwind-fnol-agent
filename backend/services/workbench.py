@@ -2170,6 +2170,7 @@ def _build_projection(
         ),
         allowed_actions=allowed_actions,
         open_items=open_items,
+        file_readings=interpreted_evidence_kinds(messages),
         section_summaries=WorkbenchSectionSummaries(
             fields=WorkbenchSectionSummary(
                 status=ResourceAvailability.AVAILABLE,
