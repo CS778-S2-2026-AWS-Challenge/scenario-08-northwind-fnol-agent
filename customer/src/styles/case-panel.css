@@ -89,7 +89,7 @@
 /* Above the composer: always in view while anything is outstanding. */
 .open-items-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2) var(--space-3);
   margin-bottom: var(--space-2);
@@ -101,7 +101,8 @@
   font-size: var(--font-size-caption);
 }
 .open-items-bar-mark { color: var(--claimant-open-items-accent); }
-.open-items-bar-text { flex: 1 1 auto; min-width: 0; font-weight: var(--font-weight-semibold); }
+.open-items-bar-text { flex: 1 1 0; min-width: 0; overflow: hidden; font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.open-items-bar .open-item-upload { min-height: auto; padding-block: var(--space-1); }
 .open-items-bar-view { border: 0; color: var(--color-accent-strong); background: transparent; font: inherit; font-weight: var(--font-weight-semibold); cursor: pointer; }
 .composer-queued { display: flex; align-items: center; gap: var(--space-3); margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-caption); }
 .composer-queued span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -109,9 +110,10 @@
 /* Under a reply: what this turn opened, and why the report now needs more. */
 .turn-receipts { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
 .turn-scope-note { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-caption); font-style: italic; }
-.turn-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--claimant-receipt-surface); font-size: var(--font-size-caption); }
+.turn-receipt { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--color-text-primary); background: var(--claimant-receipt-surface); font-size: var(--font-size-caption); }
 .turn-receipt.is-claimant { background: var(--claimant-open-items-surface); }
 .turn-receipt-mark { color: var(--claimant-receipt-accent); font-weight: var(--font-weight-bold); }
+.turn-receipt-text { flex: 1 1 0; min-width: 0; }
 .turn-receipt .open-item-upload { min-height: auto; padding-block: var(--space-1); }
 
 /* Below 1440 the panel floats over the conversation instead of squeezing it. */
