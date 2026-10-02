@@ -119,3 +119,36 @@ def test_a_reply_with_nothing_to_answer_or_do_is_caught_without_a_model(
 ) -> None:
     kinds = [item.kind for item in review_reply(_turn(reply, **changes)).inconsistencies]
     assert ('leaves_claimant_stuck' in kinds) is stuck
+
+
+@pytest.mark.parametrize(
+    ('reply', 'changes', 'mismatch'),
+    [
+        # A card was offered, but "question" was declared and none was asked.
+        ('Here is a tow option.', {'service_identities': ('vehicle_recovery_request',)}, True),
+        ('Nothing else needed. Can you send a photo?', {'turn_ending': 'nothing_needed'}, True),
+        ('Which road were you on?', {}, False),
+        (
+            'Nothing else is needed; the team will review it.',
+            {'turn_ending': 'nothing_needed'},
+            False,
+        ),
+    ],
+)
+def test_the_declared_ending_matches_the_reply(
+    reply: str, changes: dict[str, Any], mismatch: bool
+) -> None:
+    review = review_reply(_turn(reply, **changes))
+    assert ('ending_mismatch' in [item.kind for item in review.inconsistencies]) is mismatch
+    # Sent back once, but not a false statement about what Northwind did.
+    assert review.truthful
+
+
+def test_the_judge_is_skipped_when_a_review_call_would_overrun_the_turn() -> None:
+    judge = ReplyJudge(lambda: _Gateway({'problems': []}))
+    agent = GatewayAgent(_Gateway(), reply_judge=judge, turn_time_limit_seconds=40)
+    assert agent._judge_within_time(datetime.now(UTC)) is judge
+    # 25 s used leaves 15 s, less than one 20 s review call: the rules review instead.
+    assert agent._judge_within_time(datetime.now(UTC) - timedelta(seconds=25)) is None
+    unbounded = GatewayAgent(_Gateway(), reply_judge=judge)
+    assert unbounded._judge_within_time(datetime.now(UTC) - timedelta(hours=1)) is judge

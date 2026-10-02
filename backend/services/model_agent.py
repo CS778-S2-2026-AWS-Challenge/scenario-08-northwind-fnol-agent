@@ -108,7 +108,7 @@ from backend.services.model_request_planner import (
 )
 from backend.services.prompt_composer import load_response_schema
 from backend.services.reply_consistency import keep_recorded_parts, review_reply
-from backend.services.reply_judge import ReplyJudge
+from backend.services.reply_judge import REPLY_JUDGE_TIMEOUT_SECONDS, ReplyJudge
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -582,6 +582,17 @@ class GatewayAgent:
         limit = self._turn_time_limit_seconds
         if limit is not None and (datetime.now(UTC) - started_at).total_seconds() >= limit:
             raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True)
+
+    def _judge_within_time(self, started_at: datetime) -> ReplyJudge | None:
+        """The review model, only when a whole review call fits in the turn's time.
+
+        Otherwise the reply is reviewed by the built-in rules, which take no time.
+        """
+        limit = self._turn_time_limit_seconds
+        if self._reply_judge is None or limit is None:
+            return self._reply_judge
+        remaining = limit - (datetime.now(UTC) - started_at).total_seconds()
+        return self._reply_judge if remaining >= REPLY_JUDGE_TIMEOUT_SECONDS else None
 
     def _complete(self, request: ModelRequest, context: AgentTurnContext) -> ModelResponse:
         snapshot = context.runtime_configuration_snapshot
@@ -1467,7 +1478,7 @@ class GatewayAgent:
                 )
                 validated_turn = result.validated_turn
                 review = (
-                    review_reply(validated_turn, self._reply_judge)
+                    review_reply(validated_turn, self._judge_within_time(started_at))
                     if validated_turn is not None
                     else None
                 )
@@ -1557,7 +1568,7 @@ class GatewayAgent:
                         request_budgets=request_budgets,
                     )
                     second_review = (
-                        review_reply(result.validated_turn, self._reply_judge)
+                        review_reply(result.validated_turn, self._judge_within_time(started_at))
                         if result.validated_turn is not None
                         else None
                     )

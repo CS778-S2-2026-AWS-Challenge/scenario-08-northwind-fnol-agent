@@ -68,7 +68,9 @@ class ReplyInconsistency:
 # These are sent back once, but they do not mislead the claimant about what
 # Northwind has done: if the rewrite still has one, the turn stands rather than
 # failing the claimant's whole message.
-SOFT_PROBLEMS = frozenset({'leaves_claimant_stuck', 'claims_documents_block_lodging'})
+SOFT_PROBLEMS = frozenset(
+    {'leaves_claimant_stuck', 'ending_mismatch', 'claims_documents_block_lodging'}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +147,24 @@ def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
             ReplyInconsistency(
                 kind='leaves_claimant_stuck',
                 detail='the reply asks nothing, offers nothing and does not say what happens next',
+            )
+        )
+        return problems
+    # The declared ending has to match the words: a question is asked, and
+    # "nothing needed" does not ask the claimant for anything.
+    asks = '?' in validated.reply
+    if validated.turn_ending == 'question' and not asks:
+        problems.append(
+            ReplyInconsistency(
+                kind='ending_mismatch',
+                detail='turn_ending is question but the reply asks no question',
+            )
+        )
+    if validated.turn_ending == 'nothing_needed' and asks:
+        problems.append(
+            ReplyInconsistency(
+                kind='ending_mismatch',
+                detail='turn_ending is nothing_needed but the reply asks the claimant something',
             )
         )
     return problems

@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 REPLY_REVIEW_PURPOSE = 'reply_review'
 REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v1'
+# Longest a review call may take; a turn with less time left uses the rules.
+REPLY_JUDGE_TIMEOUT_SECONDS = 20.0
 
 PROBLEM_KINDS = (
     'names_rejected_service',

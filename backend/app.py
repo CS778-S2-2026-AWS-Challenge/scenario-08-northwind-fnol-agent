@@ -134,6 +134,7 @@ from backend.services.protected_values import (
 )
 from backend.services.realtime import RealtimeDispatcher
 from backend.services.reply_judge import (
+    REPLY_JUDGE_TIMEOUT_SECONDS,
     REPLY_REVIEW_PROMPT_VERSION,
     REPLY_REVIEW_PURPOSE,
     ReplyJudge,
@@ -430,7 +431,9 @@ def create_app(
                 runtime_configuration=configuration.model_copy(
                     update={
                         'model_identifier': resolved_settings.reply_judge_model,
-                        'timeout_seconds': min(configuration.timeout_seconds, 20.0),
+                        'timeout_seconds': min(
+                            configuration.timeout_seconds, REPLY_JUDGE_TIMEOUT_SECONDS
+                        ),
                         'image_input': False,
                         'document_input': False,
                     }
