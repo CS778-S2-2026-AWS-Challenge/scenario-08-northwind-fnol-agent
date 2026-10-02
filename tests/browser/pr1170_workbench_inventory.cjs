@@ -11,36 +11,8 @@ fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
 const AT02 = 'clm_fixture_at02'
 const AT10 = 'clm_fixture_at10'
 
-const DIAGNOSTIC_STATUS_CONTEXT = 'ci/pr1170-browser-detail'
 const STOP_AFTER = Number.parseInt(process.env.WORKBENCH_INVENTORY_STOP_AFTER || '10', 10)
 let currentStep = 'startup'
-
-async function reportGitHubStatus(state, description) {
-  const token = process.env.GITHUB_TOKEN
-  const owner = process.env.CIRCLE_PROJECT_USERNAME
-  const repo = process.env.CIRCLE_PROJECT_REPONAME
-  if (!token || !owner || !repo || HEAD === 'unknown') return
-  const payload = {
-    state,
-    context: DIAGNOSTIC_STATUS_CONTEXT,
-    description: String(description).replace(/\\s+/g, ' ').slice(0, 140),
-  }
-  if (process.env.CIRCLE_BUILD_URL) payload.target_url = process.env.CIRCLE_BUILD_URL
-  try {
-    await fetch(`https://api.github.com/repos/${owner}/${repo}/statuses/${HEAD}`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-      body: JSON.stringify(payload),
-    })
-  } catch {
-    // Diagnostic reporting must never replace the browser result.
-  }
-}
 
 const result = {
   head: HEAD,
@@ -442,7 +414,6 @@ async function main() {
     console.log('PR1170_WORKBENCH_INVENTORY_OK')
     console.log(`HEAD=${HEAD}`)
     console.log(`SURFACES=${Object.keys(result.surfaces).length}`)
-    await reportGitHubStatus('success', 'Exact-head Workbench inventory passed')
   } catch (error) {
     result.status = 'FAIL'
     result.error = error?.stack || String(error)
@@ -456,10 +427,7 @@ async function main() {
       JSON.stringify(result, null, 2),
       'utf8',
     )
-    await reportGitHubStatus(
-      'failure',
-      `${currentStep}: ${error?.message || String(error)}`,
-    )
+    console.error(`PR1170_WORKBENCH_INVENTORY_FAILED_AT=${currentStep}`)
     throw error
   } finally {
     await browser.close()
