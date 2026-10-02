@@ -431,6 +431,18 @@ describe('ClaimWorkspace navigation', () => {
       detail={{
         ...detail,
         revision: 5,
+        workflow_state: 'created',
+        ownership: {
+          state: 'assigned',
+          current_staff_access: 'primary',
+          primary_assignee: { staff_id: 'stf_1', display_name: 'Current Staff' },
+        },
+        work_summary: {
+          ...detail.work_summary,
+          queue_key: 'completed',
+          primary_action_code: null,
+          primary_action_target_ref: null,
+        },
         claim_decision: {
           decision: 'approved',
           claimant_explanation: 'Your claim has been approved.',
@@ -447,6 +459,9 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByText('Staff-only note.')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve Claim' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reject Claim' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Staff next action')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Review in progress' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Customer-safe next step')).not.toBeInTheDocument()
   })
 
   it('keeps every Draft detail section readable while removing mutation controls', () => {
@@ -540,8 +555,11 @@ describe('ClaimWorkspace navigation', () => {
     rerender(renderDraftSection('conversation'))
     expect(screen.getByText('Current Draft information.')).toBeVisible()
     expect(screen.getByText('Draft conversation is read only')).toBeVisible()
-    expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Message to claimant')).toBeDisabled()
+    expect(screen.getByLabelText('Message to claimant')).toHaveAttribute('placeholder', 'This conversation is read-only')
+    expect(screen.getByRole('button', { name: 'Attach photos or files' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
 
     rerender(renderDraftSection('signals'))
     expect(screen.getByText('Review source-linked context.')).toBeInTheDocument()

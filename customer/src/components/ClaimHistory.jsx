@@ -197,7 +197,7 @@ export default function ClaimHistory({
   )
 }
 
-export function ClaimFeatureDirectory({ claim, onOpenEvidence }) {
+export function ClaimFeatureDirectory({ claim, onOpenEvidence, onOpenMessages }) {
   const nextStep = claim.customer_next_step || {}
   const decision = claim.claim_decision
   const decisionLabel = claimDecisionLabel(decision?.decision)
@@ -262,6 +262,16 @@ export function ClaimFeatureDirectory({ claim, onOpenEvidence }) {
         </section>
       )}
       <div className="claim-feature-list" aria-label="Features available for this Claim">
+        {claim.conversation_session_id && onOpenMessages && (
+          <button className="claim-feature-card" type="button" onClick={onOpenMessages}>
+            <span className="claim-feature-icon" aria-hidden="true">✉</span>
+            <span className="claim-feature-copy">
+              <strong>Messages with Northwind</strong>
+              <span>Read updates from Northwind staff and reply about this Claim.</span>
+            </span>
+            <span className="claim-feature-open" aria-hidden="true">Open →</span>
+          </button>
+        )}
         <button className="claim-feature-card" type="button" onClick={onOpenEvidence}>
           <span className="claim-feature-icon" aria-hidden="true">↗</span>
           <span className="claim-feature-copy">

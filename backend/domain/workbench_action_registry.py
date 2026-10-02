@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-01.3'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-02.1'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -249,11 +249,11 @@ WORKBENCH_ACTION_REGISTRY = {
             'conversation.send_claimant_message',
             WorkbenchActionTargetType.SESSION,
             'Reply to claimant',
-            'Continue the accepted claimant conversation.',
+            "Continue the Claim's active claimant conversation.",
             WorkbenchActionPermission.CLAIM_COLLABORATOR,
             ConfirmationLevel.EXPLICIT,
             'This message will be visible to the claimant.',
-            ('message.append', 'handoff.mark_in_progress'),
+            ('message.append',),
             (
                 _input(
                     'content.text', 'Claimant-visible message', WorkbenchActionInputControl.TEXTAREA

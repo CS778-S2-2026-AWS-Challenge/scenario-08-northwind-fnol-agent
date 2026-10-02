@@ -194,6 +194,7 @@ from backend.repositories.protocols import (
     validate_handoff_mutation_audit,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
+    validate_staff_message_mutation_audit,
     validate_validation_seed_session,
 )
 
@@ -7133,6 +7134,10 @@ class FixtureRepository(PersistenceRepository):
         if message is not None:
             assert stored_session is not None
             self._preflight_messages((message,), sessions=(stored_session,))
+        try:
+            validate_staff_message_mutation_audit(claim, message, idempotency, audit_event)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         prepared_audit = (
             self._prepare_audit_events(claim, (audit_event,)) if audit_event is not None else ()
         )

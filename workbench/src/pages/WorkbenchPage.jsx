@@ -1496,6 +1496,21 @@ export default function WorkbenchPage() {
     ))
   }
 
+  function openProjectedClaimantConversation(claimReadback) {
+    const conversationAction = findProjectedAction(
+      claimReadback?.allowed_actions,
+      'conversation.send_claimant_message',
+      claimReadback?.active_session_id,
+    )
+    if (
+      conversationAction?.target_type === 'session'
+      && conversationAction.based_on_revision === claimReadback.revision
+      && canSubmitProjectedAction(conversationAction)
+    ) {
+      changeSection('conversation')
+    }
+  }
+
   async function acceptClaim(action) {
     const attemptClaimId = action?.target_ref
     let mutationSucceeded = false
@@ -1541,6 +1556,7 @@ export default function WorkbenchPage() {
         kind: 'status',
         message: t('Claim assigned to you. Review started.'),
       })
+      openProjectedClaimantConversation(claimReadback)
       return claimReadback
     } catch (error) {
       const latest = detailRef.current
@@ -1550,6 +1566,7 @@ export default function WorkbenchPage() {
           kind: 'status',
           message: t('Claim assigned to you. Review started.'),
         })
+        openProjectedClaimantConversation(latest)
         return latest
       }
 

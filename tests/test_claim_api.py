@@ -3261,6 +3261,9 @@ def test_claim_collection_filters_ownership_and_paginates_updated_claims(
     assert page_one.status_code == 200
     assert page_one.json()['items'][0]['claim_id'] == first['claim_id']
     assert page_one.json()['items'][0]['revision'] == 2
+    assert (
+        page_one.json()['items'][0]['conversation_session_id'] == first['conversation_session_id']
+    )
     assert page_one.json()['items'][0]['can_resume'] is True
     assert 'customer_id' not in page_one.json()['items'][0]
     assert 'fraud_signal' not in page_one.json()['items'][0]
@@ -3351,6 +3354,7 @@ def test_claim_remains_readable_across_multiple_persisted_sessions(
     assert second_read.json()['status'] == 'active'
     assert claim_read.status_code == 200
     assert claim_read.json()['revision'] == 2
+    assert claim_read.json()['conversation_session_id'] == second_session.session_id
     assert [
         session.session_id for session in repository.list_sessions_for_claim(claim_id, 'cus_demo')
     ] == [

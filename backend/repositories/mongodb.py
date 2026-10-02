@@ -221,6 +221,7 @@ from backend.repositories.protocols import (
     validate_handoff_mutation_audit,
     validate_staff_agent_execution,
     validate_staff_agent_execution_source,
+    validate_staff_message_mutation_audit,
     validate_validation_seed_session,
 )
 
@@ -9156,6 +9157,7 @@ class MongoDBRepository:
         try:
             validate_handoff_mutation_audit(claim, handoff, idempotency, audit_event)
             validate_claim_decision_mutation_audit(claim, claim_decision, idempotency, audit_event)
+            validate_staff_message_mutation_audit(claim, message, idempotency, audit_event)
         except ValueError as error:
             raise KeyError(claim.claim_id) from error
         if (

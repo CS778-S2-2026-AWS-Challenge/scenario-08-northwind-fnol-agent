@@ -2254,9 +2254,20 @@ describe('claimant intake projection', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('opens the claim-aware privacy page and routes its claim-data action to the existing view', async () => {
+  it('returns from Claim features to the loaded non-resumable conversation', async () => {
     const user = userEvent.setup()
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    api.submitClaimMessage.mockResolvedValue({
+      ...initialTurn(),
+      decision: {
+        customer_next_step: {
+          status: 'claim_created',
+          summary: 'Claims intake review',
+          responsible_party: 'system',
+          can_resume: false,
+          required_items: [],
+        },
+      },
+    })
 
     const { container } = render(<App />)
     await startActiveClaim(user)
@@ -2277,6 +2288,15 @@ describe('claimant intake projection', () => {
 
     await user.click(screen.getByRole('button', { name: 'View information recorded for this claim' }))
     expect(screen.getByRole('heading', { level: 1, name: 'Claim features' })).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: /Current claim/ }))
+
+    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Claim features' }))
+      .not.toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -2918,7 +2938,7 @@ describe('claimant intake projection', () => {
     expect(screen.getByRole('button', { name: /Open Home claim/ })).toBeVisible()
   })
 
-  it('opens a terminal conversation as a read-only Claim without starting a Session', async () => {
+  it('keeps non-resumable Claims out of conversation history', async () => {
     const user = userEvent.setup()
     const terminalClaim = {
       ...initialClaim,
@@ -2949,17 +2969,15 @@ describe('claimant intake projection', () => {
 
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
-    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    expect(await screen.findByRole('heading', { name: 'NWF-2026-TERMINAL' }))
-      .toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Claim approved' })).toBeInTheDocument()
-    expect(screen.getByText('Your claim has been approved.')).toBeInTheDocument()
-    expect(globalThis.location.pathname).toBe('/account/claims/clm_terminal_history')
+    expect(await screen.findByText('No saved conversations yet')).toBeVisible()
+    expect(screen.queryByRole('button', { name: /Open Home claim/ })).not.toBeInTheDocument()
+    expect(api.createClaim).not.toHaveBeenCalled()
+    expect(api.getClaim).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
-  it('uses a fresh non-resumable readback instead of submitting a stale resume request', async () => {
+  it('removes a stale conversation when a fresh readback is non-resumable', async () => {
     const user = userEvent.setup()
     const staleListClaim = {
       ...initialClaim,
@@ -2997,11 +3015,16 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
-    expect(await screen.findByRole('heading', { name: 'Claim rejected' })).toBeInTheDocument()
-    expect(screen.getByText('The policy does not cover this loss.')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This conversation can no longer be resumed, so it was removed from history.',
+    )
     expect(api.getClaim).toHaveBeenCalledWith('clm_stale_terminal_history')
+    expect(api.createClaim).not.toHaveBeenCalled()
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
-    expect(screen.queryByText(/terminal Claim must be reopened/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Claim features' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    expect(screen.queryByRole('button', { name: /Open Home claim/ })).not.toBeInTheDocument()
   })
 
   it('keeps conversation history rows stable when switching the active Claim', async () => {
@@ -5550,7 +5573,7 @@ describe('claimant intake projection', () => {
         responsible_party: 'system',
       },
       updated_at: '2026-09-14T01:00:00Z',
-      can_resume: true,
+      can_resume: false,
     }
     const reportInProgress = {
       ...initialClaim,
@@ -5591,5 +5614,90 @@ describe('claimant intake projection', () => {
     await user.click(await screen.findByRole('button', { name: 'Back to Claim history' }))
     expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })).toBeInTheDocument()
+  })
+
+  it('opens a focused Claim-scoped staff conversation from a direct account message link and allows a reply', async () => {
+    const user = userEvent.setup()
+    const claimId = 'clm_customer_staff_messages'
+    const conversationSessionId = 'ses_customer_staff_messages'
+    const staffMessage = {
+      message_id: 'msg_staff_question',
+      actor: 'staff',
+      visibility: 'shared',
+      content: { type: 'text', text: 'Please confirm whether the damaged room is still usable.' },
+      created_at: '2026-09-14T01:03:00Z',
+    }
+    const createdClaim = {
+      ...initialClaim,
+      claim_id: claimId,
+      revision: 4,
+      conversation_session_id: conversationSessionId,
+      external_claim: { claim_number: 'NWF-2026-001181', creation_status: 'created' },
+      handoff: assistanceHandoff('in_progress'),
+      customer_next_step: {
+        status: 'more_information_needed',
+        summary: 'Please reply to the staff question.',
+        responsible_party: 'claimant',
+        can_resume: true,
+      },
+      can_resume: true,
+    }
+    const claimantReply = {
+      message_id: 'msg_claimant_staff_reply',
+      actor: 'claimant',
+      visibility: 'shared',
+      content: { type: 'text', text: 'Yes, the room is still usable.' },
+      created_at: '2026-09-14T01:04:00Z',
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_staff_messages',
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [createdClaim], page: { next_cursor: null } })
+    api.getClaim.mockResolvedValue(createdClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [staffMessage] })
+    api.submitClaimMessage.mockResolvedValue({
+      claimant_message: claimantReply,
+      agent_message: null,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 5,
+      decision: null,
+      handoff: assistanceHandoff('in_progress'),
+    })
+    globalThis.history.replaceState({}, '', `/account/claims/${claimId}/messages`)
+
+    render(<App />)
+
+    expect(await screen.findByText(staffMessage.content.text)).toBeInTheDocument()
+    expect(screen.getByText('Northwind staff')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Messages with Northwind' })).toBeInTheDocument()
+    expect(screen.getByText('Claim NWF-2026-001181')).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Conversation history' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Claim workspace sections' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim history' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Model' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Claim details' })).not.toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe(`/account/claims/${claimId}/messages`)
+    const reply = screen.getByPlaceholderText('Write a message about this Claim...')
+    await user.type(reply, claimantReply.content.text)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledWith(expect.objectContaining({
+      claimId,
+      sessionId: conversationSessionId,
+      revision: 4,
+      text: claimantReply.content.text,
+    })))
+    expect(await screen.findByText(claimantReply.content.text)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to Claim details' }))
+
+    expect(await screen.findByRole('heading', { name: 'Claim features' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe(`/account/claims/${claimId}`)
   })
 })

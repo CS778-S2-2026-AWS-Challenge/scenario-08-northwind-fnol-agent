@@ -2916,6 +2916,17 @@
             "title": "Claim Id",
             "type": "string"
           },
+          "conversation_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Session Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -3275,6 +3286,17 @@
             },
             "title": "Contents Items",
             "type": "array"
+          },
+          "conversation_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Session Id"
           },
           "created_at": {
             "format": "date-time",

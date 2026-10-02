@@ -23,6 +23,7 @@ from backend.domain.external_services import (
     ExternalTaskResult,
 )
 from backend.domain.models import (
+    ActorType,
     AgentDecisionRecord,
     AssessorRoutingOperation,
     BranchEvaluationRecord,
@@ -209,6 +210,43 @@ def validate_handoff_mutation_audit(
     if audit_event is None:
         raise ValueError('A Handoff mutation requires its atomic audit fact.')
     validate_handoff_audit_link(claim, handoff, idempotency, audit_event)
+
+
+def validate_staff_message_mutation_audit(
+    claim: WorkingClaim,
+    message: MessageRecord | None,
+    idempotency: IdempotencyRecord,
+    audit_event: AuditEventEnvelope | None,
+) -> None:
+    """Require one matching audit fact for every staff-to-claimant message."""
+
+    if message is None:
+        return
+    if (
+        audit_event is None
+        or message.actor is not ActorType.STAFF
+        or message.claim_id != claim.claim_id
+        or idempotency.claim_id != claim.claim_id
+        or idempotency.session_id != message.session_id
+        or idempotency.message_id != message.message_id
+        or idempotency.action_code != 'conversation.send_claimant_message'
+        or idempotency.target_ref != message.session_id
+        or audit_event.event_type is not AuditEventType.ACTION_COMPLETED
+        or audit_event.outcome is not AuditOutcome.SUCCEEDED
+        or audit_event.subject.subject_type is not AuditSubjectType.CLAIM
+        or audit_event.subject.subject_id != claim.claim_id
+        or audit_event.subject.claim_id != claim.claim_id
+        or audit_event.claim_revision != claim.revision
+        or audit_event.actor.actor_id != idempotency.actor_id
+        or audit_event.idempotency_key != idempotency.key
+        or audit_event.correlation_id != idempotency.key
+        or message.message_id not in audit_event.source_refs
+        or audit_event.permission is None
+        or audit_event.permission.required_permission != 'conversation.send_claimant_message'
+        or audit_event.permission.outcome is not AuditPermissionOutcome.AUTHORISED
+        or audit_event.visibility not in {AuditVisibility.INTERNAL_ONLY, AuditVisibility.AUDIT_ONLY}
+    ):
+        raise ValueError('The staff message audit fact does not match the persisted mutation.')
 
 
 def validate_claim_decision_mutation_audit(
@@ -1871,6 +1909,8 @@ class PersistenceRepository(ClaimRepository, Protocol):
         The registered ownership.accept_claim action alone may omit child business
         records; it requires a matching audit and presence guard and may change only
         the unassigned, created Claim's owner, revision, and update timestamp.
+        Staff messages require a matching claimant-message action audit whether or not
+        the same mutation also progresses an accepted handoff.
         """
         raise NotImplementedError
 

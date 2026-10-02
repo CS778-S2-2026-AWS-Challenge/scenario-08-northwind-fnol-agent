@@ -5,6 +5,7 @@ import { profilePathForSection, profileSectionFromPath } from './profileRoutes.j
 
 export function protectedAccountPageForPath(pathname) {
   if (pathname === '/account/claims') return 'claim-history'
+  if (/^\/account\/claims\/[^/]+\/messages$/.test(pathname)) return 'claim-messages'
   if (/^\/account\/claims\/[^/]+\/evidence$/.test(pathname)) return 'claim-evidence'
   if (/^\/account\/claims\/[^/]+$/.test(pathname)) return 'claim-features'
   if (pathname === '/files') return 'files'
@@ -40,6 +41,7 @@ export function routeForPage(page, {
   if (page === 'account') return profilePathForSection(profileSection)
   if (page === 'claim-history') return '/account/claims'
   if (page === 'claim-features' && historyClaimId) return `/account/claims/${encodeURIComponent(historyClaimId)}`
+  if (page === 'claim-messages' && historyClaimId) return `/account/claims/${encodeURIComponent(historyClaimId)}/messages`
   if (page === 'claim-evidence' && historyClaimId) return `/account/claims/${encodeURIComponent(historyClaimId)}/evidence`
   if (page === 'files') return '/files'
   if (page === 'how-it-works') return '/how-it-works'

@@ -401,7 +401,10 @@ describe('Conversation', () => {
     expect(screen.getByText('Staff messaging not available yet')).toBeVisible()
     expect(screen.getByText('Accept the handoff before replying.')).toBeVisible()
     expect(screen.getByPlaceholderText('Write a message…')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Attach photos or files' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.getByLabelText('Message to claimant').parentElement).toHaveClass('staff-composer__input')
   })
 
   it('ignores a projected message action for another session', () => {
@@ -802,7 +805,7 @@ describe('Conversation', () => {
     )
 
     await waitFor(() => expect(firstRecognition.abort).toHaveBeenCalledOnce())
-    expect(screen.queryByRole('button', { name: 'Use voice input' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Use voice input' })).toBeDisabled()
 
     view.rerender(
       <MemoryRouter initialEntries={['/workbench/claims/clm_1/conversation?session=ses_1']}>
@@ -1005,7 +1008,7 @@ describe('Conversation', () => {
     expect(screen.queryByLabelText('Message to claimant')).not.toBeInTheDocument()
   })
 
-  it('renders existing evidence references as attachment cards without inventing upload actions', () => {
+  it('renders existing evidence references as attachment cards without enabling upload actions', () => {
     renderConversation({
       detail,
       resource: {
@@ -1034,7 +1037,7 @@ describe('Conversation', () => {
     expect(attachments).toHaveTextContent('repair-quote.pdf')
     expect(attachments).toHaveTextContent('Received')
     expect(attachments).toHaveTextContent('evd_missing')
-    expect(screen.queryByRole('button', { name: /attach|upload/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Attach photos or files' })).toBeDisabled()
   })
 
   it('restores and reports the saved reading position for a conversation', () => {
