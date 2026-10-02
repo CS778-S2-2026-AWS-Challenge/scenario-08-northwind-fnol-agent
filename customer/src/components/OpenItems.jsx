@@ -103,7 +103,7 @@ export function TurnReceipts({ items, scopeNote, onUpload, busy }) {
           <span className="turn-receipt-mark" aria-hidden="true">
             {item.state === 'done' ? '✓' : '+'}
           </span>
-          <span className="turn-receipt-text">{receiptText(item)}</span>
+          <span className="turn-receipt-text" title={receiptText(item)}>{receiptText(item)}</span>
           {item.kind === 'document' && item.owner === 'claimant' && item.state === 'open' && (
             <UploadButton item={item} label="Upload now" onUpload={onUpload} busy={busy} />
           )}
