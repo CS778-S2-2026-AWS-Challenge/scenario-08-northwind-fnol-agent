@@ -431,6 +431,18 @@ describe('ClaimWorkspace navigation', () => {
       detail={{
         ...detail,
         revision: 5,
+        workflow_state: 'created',
+        ownership: {
+          state: 'assigned',
+          current_staff_access: 'primary',
+          primary_assignee: { staff_id: 'stf_1', display_name: 'Current Staff' },
+        },
+        work_summary: {
+          ...detail.work_summary,
+          queue_key: 'completed',
+          primary_action_code: null,
+          primary_action_target_ref: null,
+        },
         claim_decision: {
           decision: 'approved',
           claimant_explanation: 'Your claim has been approved.',
@@ -447,6 +459,9 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByText('Staff-only note.')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve Claim' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reject Claim' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Staff next action')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Review in progress' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Customer-safe next step')).not.toBeInTheDocument()
   })
 
   it('keeps every Draft detail section readable while removing mutation controls', () => {
@@ -928,6 +943,12 @@ describe('ClaimWorkspace navigation', () => {
       onReopen={onReopen}
       detail={{
         ...detail,
+        claim_decision: {
+          decision: 'approved',
+          claimant_explanation: 'Your claim has been approved.',
+          decided_by: 'stf_demo',
+          decided_at: '2026-09-03T00:15:00Z',
+        },
         terminal_disposition: {
           value: 'closed',
           reason_code: 'AUTHORISED_CLOSURE',

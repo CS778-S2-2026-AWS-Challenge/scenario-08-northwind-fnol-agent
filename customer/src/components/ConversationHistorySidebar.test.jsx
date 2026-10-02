@@ -69,6 +69,7 @@ describe('ConversationHistorySidebar', () => {
     expect(screen.getByRole('complementary', { name: 'Conversation history' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Collapse conversation history' })).toHaveFocus()
     expect(screen.getByText('No conversations in this browser session')).toBeVisible()
+    expect(screen.getByText('Start a claim and resumable conversations will appear here.')).toBeVisible()
     expect(screen.getByText('Saved in this browser session.')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible()
 
