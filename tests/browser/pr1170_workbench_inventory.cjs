@@ -157,13 +157,9 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const page = await context.newPage()
 
-  const presencePatches = []
   const agentSessionPosts = []
   page.on('request', (request) => {
     const pathname = pathOf(request.url())
-    if (request.method() === 'PATCH' && pathname === '/api/v1/workbench/staff/presence') {
-      presencePatches.push({ path: pathname, body: request.postData() || null })
-    }
     if (
       request.method() === 'POST'
       && (
@@ -184,12 +180,33 @@ async function main() {
     await page.getByLabel('Password').fill(STAFF_PASSWORD)
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
     await page.waitForURL((url) => !url.pathname.includes('/workbench/login'), { timeout: 30000 })
-    await waitForNodeCondition(
-      () => presencePatches.length > 0,
-      'No staff-presence PATCH was observed after sign-in.',
-      30000,
+
+    // Authentication creates revision 1. The AuthProvider lease-only renewal must
+    // advance the same authoritative presence record to revision >= 2.
+    let presence = null
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const response = await api(page, '/api/v1/workbench/staff/presence')
+      if (
+        response.status === 200
+        && response.payload?.online === true
+        && response.payload?.available === true
+        && Number(response.payload?.revision) >= 2
+      ) {
+        presence = response.payload
+        break
+      }
+      await page.waitForTimeout(250)
+    }
+    assert(
+      presence !== null,
+      'The Workbench did not renew the authenticated staff presence lease after sign-in.',
     )
-    result.checks.presence_heartbeat_after_login = true
+    result.checks.presence_heartbeat_after_login = {
+      revision: presence.revision,
+      online: presence.online,
+      available: presence.available,
+      expires_at: presence.expires_at,
+    }
     if (await stopAfter(1)) return
 
     currentStep = 'demo seed'\n    console.log('[2/10] Seed the bounded Workbench scenarios')
