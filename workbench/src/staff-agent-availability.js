@@ -8,7 +8,7 @@ const UNAVAILABLE_REASONS = {
 export function staffAgentUnavailableReason(models, modelProfileId) {
   if (!models.length) return 'No Staff Agent model is published for this Workbench environment.'
   const model = models.find((item) => item.id === modelProfileId)
-  // An unknown profile or availability is left to the server, which validates it on send.
-  if (model?.availability !== 'unavailable') return null
+  if (!model) return 'The model selected for this session is not published in this Workbench environment.'
+  if (model.availability !== 'unavailable') return null
   return UNAVAILABLE_REASONS[model.unavailable_reason] || 'The model selected for this session is not ready.'
 }

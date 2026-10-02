@@ -19,6 +19,7 @@ const ZH_CN = {
   'The selected model profile is marked unavailable for this environment.': '所选模型配置在当前环境中被标记为不可用。',
   'The selected model has no configured endpoint in this environment.': '所选模型在当前环境中没有配置服务地址。',
   'The selected model has no configured credential in this environment.': '所选模型在当前环境中没有配置访问凭据。',
+  'The model selected for this session is not published in this Workbench environment.': '本会话所选模型未发布到当前 Workbench 环境。',
   'The model selected for this session is not ready.': '本会话所选的模型尚未就绪。',
   Profile: '个人资料',
   'Account & Security': '账号与安全',

@@ -1440,12 +1440,12 @@ export default function WorkbenchPage() {
     ))
   }
 
-  async function trackOwnMutation(claimId, run) {
+  async function trackOwnMutation(claimId, run, resolveRevision = mutationResultRevision) {
     const pending = pendingOwnMutationsRef.current
     pending.set(claimId, (pending.get(claimId) || 0) + 1)
     try {
       const result = await run()
-      rememberOwnRevision(claimId, mutationResultRevision(result))
+      rememberOwnRevision(claimId, resolveRevision(result))
       return result
     } finally {
       const remaining = (pending.get(claimId) || 1) - 1
@@ -2057,12 +2057,20 @@ export default function WorkbenchPage() {
     const mutationRequestId = ++detailRequestId.current
     let record
     try {
-      record = await workbenchApi.recordClaimDecision(
-        token,
+      record = await trackOwnMutation(
         attemptClaimId,
-        action.based_on_revision,
-        payload,
-        idempotencyKey,
+        () => workbenchApi.recordClaimDecision(
+          token,
+          attemptClaimId,
+          action.based_on_revision,
+          payload,
+          idempotencyKey,
+        ),
+        (result) => (
+          Number.isInteger(result?.source_claim_revision)
+            ? result.source_claim_revision + 1
+            : mutationResultRevision(result)
+        ),
       )
     } catch (error) {
       let latest = null
@@ -2258,6 +2266,7 @@ export default function WorkbenchPage() {
     onConversationChanged: () => {
       if (isConversationWorkspace) loadConversations()
     },
+    onBusinessActionMutation: (claimId, run) => trackOwnMutation(claimId, run),
     onBusinessActionExecuted: refreshAfterStaffAgentAction,
   }
 

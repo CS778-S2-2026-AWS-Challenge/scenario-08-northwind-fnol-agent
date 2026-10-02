@@ -33,6 +33,7 @@ describe('mutationResultRevision', () => {
   it.each([
     ['a Claim projection', { claim_id: 'clm_1', revision: 7 }, 7],
     ['a staff message response', { claim_id: 'clm_1', claim_revision: 8 }, 8],
+    ['a Staff Agent execution response', { runtime_execution: { resulting_revision: 9 } }, 9],
     ['a response without a Claim revision', { decision_id: 'cdec_1' }, null],
     ['an empty response', null, null],
   ])('reads %s', (_name, result, expected) => {

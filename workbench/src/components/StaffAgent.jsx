@@ -34,6 +34,7 @@ export default function StaffAgent({
   token,
   onSessionChange,
   onConversationChanged,
+  onBusinessActionMutation,
   onBusinessActionExecuted,
 }) {
   const [sessions, setSessions] = useState([])
@@ -284,7 +285,7 @@ export default function StaffAgent({
     }
 
     const latestClaim = await workbenchApi.claim(token, draft.claim_id)
-    const response = await workbenchApi.executeStaffAgentDraft(
+    const execute = () => workbenchApi.executeStaffAgentDraft(
       token,
       sourceMessage.session_id,
       sourceMessage.message_id,
@@ -292,6 +293,9 @@ export default function StaffAgent({
       latestClaim.revision,
       draft.payload || {},
     )
+    const response = onBusinessActionMutation
+      ? await onBusinessActionMutation(draft.claim_id, execute)
+      : await execute()
 
     try {
       await onBusinessActionExecuted?.(response)

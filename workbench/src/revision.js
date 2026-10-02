@@ -10,5 +10,8 @@ export function revisionNotice(current, next, ownRevision = null) {
 export function mutationResultRevision(result) {
   if (Number.isInteger(result?.revision)) return result.revision
   if (Number.isInteger(result?.claim_revision)) return result.claim_revision
+  if (Number.isInteger(result?.runtime_execution?.resulting_revision)) {
+    return result.runtime_execution.resulting_revision
+  }
   return null
 }

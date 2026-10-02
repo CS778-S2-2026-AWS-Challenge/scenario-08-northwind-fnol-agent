@@ -774,6 +774,32 @@ describe('StaffAgent', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
+  it('keeps sending closed when a resumed session model is no longer published', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
+      items: [{ session_id: 'sas_retired', title: 'Old model session', model_profile_id: 'retired-model' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' }],
+      default_model_profile_id: 'qwen-local',
+    })
+    vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
+    vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({ items: [] })
+    const send = vi.spyOn(workbenchApi, 'sendStaffAgentMessage')
+    renderAgent({ requestedSessionId: 'sas_retired' })
+
+    expect(await screen.findByText(
+      'The model selected for this session is not published in this Workbench environment.',
+      { exact: false },
+    )).toBeInTheDocument()
+
+    const input = screen.getByLabelText('Message Staff Agent')
+    await user.type(input, 'Can this old session still send?{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Send to Staff Agent' })).toBeDisabled()
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['credential_unavailable', 'The selected model has no configured credential in this environment.'],
     ['unregistered_reason', 'The model selected for this session is not ready.'],
