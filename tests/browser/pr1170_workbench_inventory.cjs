@@ -185,7 +185,7 @@ async function main() {
       ['summary', 'claim-overview'],
       ['fields', 'claim-information'],
       ['evidence', 'claim-evidence'],
-      ['reference-checks', 'claim-reference-checks'],
+      ['references', 'claim-reference-checks'],
       ['external-services', 'claim-external-services'],
       ['signals', 'claim-signals'],
       ['activity', 'claim-activity'],
@@ -258,7 +258,17 @@ async function main() {
       body: { available: true, lease_seconds: 300 },
     })
     assert(available.status === 200, `Restoring staff availability failed: ${available.status}`)
-    await takeClaim.click()
+
+    // The failed mutation correctly refreshes the Claim and removes the action while
+    // staff presence is unavailable. Re-read the authoritative projection after
+    // restoring availability instead of reusing the now-stale dialog control.
+    await page.goto(`${WORKBENCH}/workbench/claims/${AT10}/summary`, { waitUntil: 'domcontentloaded' })
+    const refreshedReviewOwnership = page.getByRole('button', { name: 'Review ownership', exact: true })
+    await refreshedReviewOwnership.waitFor({ state: 'visible', timeout: 30000 })
+    await refreshedReviewOwnership.click()
+    const retryTakeClaim = page.getByRole('button', { name: 'Take Claim', exact: true })
+    await retryTakeClaim.waitFor({ state: 'visible', timeout: 10000 })
+    await retryTakeClaim.click()
     await page.getByText('Claim assigned to you. Review started.', { exact: true })
       .waitFor({ state: 'visible', timeout: 30000 })
     result.mutations.take_claim_success = true
