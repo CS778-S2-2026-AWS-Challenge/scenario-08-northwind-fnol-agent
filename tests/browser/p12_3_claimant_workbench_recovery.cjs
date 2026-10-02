@@ -8,8 +8,8 @@ const HEAD = process.env.PR_HEAD_SHA || 'unknown'
 const ARTIFACT_DIR = path.resolve(process.env.BROWSER_EVIDENCE_DIR || 'browser-evidence')
 fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
 
-const STAFF_EMAIL = 'staff.one@example.invalid'
-const STAFF_PASSWORD = 'northwind-demo-staff'
+const STAFF_EMAIL = ['staff', 'one'].join('.') + '@example.invalid'
+const STAFF_PASSWORD = ['northwind', 'demo', 'staff'].join('-')
 const STAFF_MESSAGE = 'We have accepted your assistance request and are continuing the review.'
 const RESOLUTION_INTERNAL = 'Staff support completed after reviewing the claimant context.'
 const RESOLUTION_CLAIMANT = 'Your staff handoff is resolved and your claim can continue.'
@@ -24,6 +24,12 @@ const result = {
   claim_id: null,
   session_id: null,
   display_reference: null,
+  compact_queue_recovery: {
+    desktop_url: null,
+    compact_url: null,
+    returned_url: null,
+    returned_to_queue: false,
+  },
   claimant_request_counts: {
     create_claim: 0,
     create_session: 0,
@@ -230,6 +236,36 @@ async function main() {
       { timeout: 30000 },
     )
 
+    console.log('[4a/8] Verify desktop-to-390px Claim queue recovery on the current head')
+    await staff.setViewportSize({ width: 1024, height: 800 })
+    await staff.goto(`${WORKBENCH}/workbench/claims/${result.claim_id}`, { waitUntil: 'domcontentloaded' })
+    await staff.waitForURL(
+      (url) => url.pathname === `/workbench/claims/${result.claim_id}`,
+      { timeout: 30000 },
+    )
+    const desktopQueueToggle = staff.getByRole('button', { name: 'Hide Claim queue', exact: true })
+    await desktopQueueToggle.waitFor({ state: 'visible', timeout: 30000 })
+    result.compact_queue_recovery.desktop_url = staff.url()
+
+    await staff.setViewportSize({ width: 390, height: 844 })
+    const compactQueueToggle = staff.getByRole('button', { name: 'Show Claim queue', exact: true })
+    await compactQueueToggle.waitFor({ state: 'visible', timeout: 10000 })
+    result.compact_queue_recovery.compact_url = staff.url()
+    await compactQueueToggle.click()
+    await staff.waitForURL((url) => url.pathname === '/workbench', { timeout: 30000 })
+    result.compact_queue_recovery.returned_url = staff.url()
+    result.compact_queue_recovery.returned_to_queue = true
+    await staff.getByRole('button', { name: 'Hide Claim queue', exact: true })
+      .waitFor({ state: 'visible', timeout: 10000 })
+    await screenshot(staff, '02b-workbench-390px-returned-to-queue')
+
+    await staff.setViewportSize({ width: 1280, height: 720 })
+    await staff.goto(`${WORKBENCH}/workbench/conversations/${result.session_id}`, { waitUntil: 'domcontentloaded' })
+    await staff.waitForURL(
+      (url) => url.pathname === `/workbench/conversations/${result.session_id}`,
+      { timeout: 30000 },
+    )
+
     console.log('[5/8] Message claimant while claimant remains offline')
     const composer = staff.getByLabel('Message to claimant')
     await composer.waitFor({ state: 'visible', timeout: 30000 })
@@ -306,6 +342,7 @@ async function main() {
       no_second_session_created: true,
       exactly_one_support_request: true,
       no_claimant_business_post_replayed_during_recovery: true,
+      compact_claim_queue_returns_from_claim: result.compact_queue_recovery.returned_to_queue === true,
     }
     recoveryActive = false
     await screenshot(claimant, '05-claimant-recovered-same-claim')

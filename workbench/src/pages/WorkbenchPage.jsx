@@ -1,4 +1,4 @@
-import { Menu, PanelLeftClose, PanelLeftOpen, RefreshCw } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { workbenchApi } from '../api.js'
@@ -8,11 +8,12 @@ import ClaimWorkspace from '../components/ClaimWorkspace.jsx'
 import NavigationRail from '../components/NavigationRail.jsx'
 import QueuePanel from '../components/QueuePanel.jsx'
 import StaffAgent from '../components/StaffAgent.jsx'
+import { COMPACT_WORKBENCH_QUERY, useMediaQuery } from '../hooks/useMediaQuery.js'
 import { usePersistentTabs } from '../hooks/usePersistentTabs.js'
 import { translate as t, useLanguage } from '../i18n.js'
 import { actionFailureMessage, failureReason, failureReference } from '../failure.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
-import { revisionNotice as buildRevisionNotice } from '../revision.js'
+import { revisionNotice as buildRevisionNotice, mutationResultRevision } from '../revision.js'
 import ConversationsPage from './ConversationsPage.jsx'
 
 const MAX_MESSAGE_READBACK_PAGES = 100
@@ -25,7 +26,7 @@ export default function WorkbenchPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const tabs = usePersistentTabs()
+  const tabs = usePersistentTabs(profile?.staff_id)
   const openTab = tabs.open
   const syncTabIdentities = tabs.syncIdentities
   const [claims, setClaims] = useState([])
@@ -52,6 +53,9 @@ export default function WorkbenchPage() {
   const conversationsRequestId = useRef(0)
   const [detail, setDetail] = useState(null)
   const detailRef = useRef(null)
+  const ownRevisionsRef = useRef(new Map())
+  const pendingOwnMutationsRef = useRef(new Map())
+  const heldRevisionNoticesRef = useRef(new Map())
   const rootRestoreAttemptedRef = useRef(false)
   const currentClaimIdRef = useRef(null)
   const detailRequestId = useRef(0)
@@ -72,6 +76,7 @@ export default function WorkbenchPage() {
   const [detailError, setDetailError] = useState(null)
   const [detailStale, setDetailStale] = useState(false)
   const [queueVisible, setQueueVisible] = useState(true)
+  const compactLayout = useMediaQuery(COMPACT_WORKBENCH_QUERY)
   const [conversationQueueVisible, setConversationQueueVisible] = useState(true)
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentSessionId, setAgentSessionId] = useState(null)
@@ -220,8 +225,18 @@ export default function WorkbenchPage() {
     detailRef.current = response
     setDetail((current) => {
       if (announceRevision) {
-        const notice = buildRevisionNotice(current, response)
-        if (notice) setRevisionNotice(notice)
+        const notice = buildRevisionNotice(
+          current,
+          response,
+          ownRevisionsRef.current.get(response.claim_id),
+        )
+        if (notice && pendingOwnMutationsRef.current.has(notice.claimId)) {
+          // An own mutation is in flight; classify this revision when its response arrives.
+          const held = heldRevisionNoticesRef.current.get(notice.claimId)
+          if (!held || held.revision < notice.revision) heldRevisionNoticesRef.current.set(notice.claimId, notice)
+        } else if (notice) {
+          setRevisionNotice(notice)
+        }
       }
       return response
     })
@@ -1267,6 +1282,26 @@ export default function WorkbenchPage() {
     }
   }, [claimBasePath, claimId, filterMetadata, navigate, queueFilters, routeSection])
 
+  // The compact layout shows either the queue or the open Claim, never both.
+  const claimQueueShown = queueVisible && !(compactLayout && claimId)
+
+  function toggleClaimQueue() {
+    // A viewport change can update CSS before React has processed the media-query
+    // subscription. Re-check the live query at activation so the first phone-width
+    // click cannot be misclassified as the desktop "hide queue" action.
+    const compactAtActivation = compactLayout || (
+      typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia(COMPACT_WORKBENCH_QUERY).matches
+    )
+    if (compactAtActivation && claimId) {
+      setQueueVisible(true)
+      navigate(queueRoute(queueBasePath, queueFilters))
+      return
+    }
+    setQueueVisible((value) => !value)
+  }
+
   function openClaim(claim) {
     tabs.open(claim)
     navigate(queueRoute(`${claimBasePath}/${claim.claim_id}`, queueFilters))
@@ -1294,12 +1329,12 @@ export default function WorkbenchPage() {
       throw new Error(request.blockedReason || 'This assistance request cannot be taken over from the current projection. Review the latest Claim state and try again.')
     }
     try {
-      await workbenchApi.acceptHandoff(
+      await trackOwnMutation(request.claim_id, () => workbenchApi.acceptHandoff(
         token,
         request.claim_id,
         request.handoff.handoff_id,
         request.detail.revision,
-      )
+      ))
     } catch (error) {
       let latest = null
       try {
@@ -1403,13 +1438,44 @@ export default function WorkbenchPage() {
     }, { replace: true })
   }
 
+  function rememberOwnRevision(claimId, revision) {
+    if (!Number.isInteger(revision)) return
+    const known = ownRevisionsRef.current.get(claimId)
+    if (Number.isInteger(known) && known >= revision) return
+    ownRevisionsRef.current.set(claimId, revision)
+    setRevisionNotice((notice) => (
+      notice?.claimId === claimId && notice.revision <= revision ? null : notice
+    ))
+  }
+
+  async function trackOwnMutation(claimId, run, resolveRevision = mutationResultRevision) {
+    const pending = pendingOwnMutationsRef.current
+    pending.set(claimId, (pending.get(claimId) || 0) + 1)
+    try {
+      const result = await run()
+      rememberOwnRevision(claimId, resolveRevision(result))
+      return result
+    } finally {
+      const remaining = (pending.get(claimId) || 1) - 1
+      if (remaining > 0) {
+        pending.set(claimId, remaining)
+      } else {
+        pending.delete(claimId)
+        const held = heldRevisionNoticesRef.current.get(claimId)
+        heldRevisionNoticesRef.current.delete(claimId)
+        const own = ownRevisionsRef.current.get(claimId)
+        if (held && !(Number.isInteger(own) && held.revision <= own)) setRevisionNotice(held)
+      }
+    }
+  }
+
   async function runClaimMutation(label, operation, { strictReadback = false, backgroundDetailRefresh = false } = {}) {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
     const mutationRequestId = ++detailRequestId.current
     let mutationResult
     try {
-      mutationResult = await operation(previous)
+      mutationResult = await trackOwnMutation(previous.claim_id, () => operation(previous))
     } catch (error) {
       let latest = null
       const refreshGeneration = backgroundRefreshId.current
@@ -1937,13 +2003,13 @@ export default function WorkbenchPage() {
     const mutationRequestId = ++detailRequestId.current
     let accepted = false
     try {
-      await workbenchApi.reopenClaim(
+      await trackOwnMutation(current.claim_id, () => workbenchApi.reopenClaim(
         token,
         current.claim_id,
         action.based_on_revision,
         payload,
         idempotencyKey,
-      )
+      ))
       accepted = true
       const latest = await workbenchApi.claim(token, current.claim_id)
       applyReopenProjection(latest, true, null, mutationRequestId, current.claim_id)
@@ -1999,12 +2065,20 @@ export default function WorkbenchPage() {
     const mutationRequestId = ++detailRequestId.current
     let record
     try {
-      record = await workbenchApi.recordClaimDecision(
-        token,
+      record = await trackOwnMutation(
         attemptClaimId,
-        action.based_on_revision,
-        payload,
-        idempotencyKey,
+        () => workbenchApi.recordClaimDecision(
+          token,
+          attemptClaimId,
+          action.based_on_revision,
+          payload,
+          idempotencyKey,
+        ),
+        (result) => (
+          Number.isInteger(result?.source_claim_revision)
+            ? result.source_claim_revision + 1
+            : mutationResultRevision(result)
+        ),
       )
     } catch (error) {
       let latest = null
@@ -2200,6 +2274,7 @@ export default function WorkbenchPage() {
     onConversationChanged: () => {
       if (isConversationWorkspace) loadConversations()
     },
+    onBusinessActionMutation: (claimId, run) => trackOwnMutation(claimId, run),
     onBusinessActionExecuted: refreshAfterStaffAgentAction,
   }
 
@@ -2208,7 +2283,6 @@ export default function WorkbenchPage() {
       <NavigationRail profile={profile} draftCount={draftCount} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
       <div className="workbench-stage">
         <header className="workbench-topbar">
-          <button className="icon-button mobile-menu" type="button" aria-label={t('Open navigation')}><Menu size={19} /></button>
           <div>
             <strong>{t('Claims Workbench')}</strong>
             <span>{t(isDraftQueue ? 'Customer drafts · Not yet submitted' : 'Source-linked operational view')}</span>
@@ -2226,7 +2300,7 @@ export default function WorkbenchPage() {
                 {conversationQueueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
               </button>
             ) : (
-              <button className="icon-button" type="button" onClick={() => setQueueVisible((value) => !value)} aria-label={queueVisible ? t('Hide Claim queue') : t('Show Claim queue')}>{queueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
+              <button className="icon-button" type="button" onClick={toggleClaimQueue} aria-expanded={claimQueueShown} aria-label={claimQueueShown ? t('Hide Claim queue') : t('Show Claim queue')}>{claimQueueShown ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
             )}
             <button className="icon-button" type="button" onClick={isConversationWorkspace ? loadConversations : filterMetadata ? loadClaims : () => setFilterMetadataAttempt((attempt) => attempt + 1)} aria-label={t('Refresh Workbench projection')}><RefreshCw size={17} /></button>
           </div>
@@ -2307,7 +2381,7 @@ export default function WorkbenchPage() {
             onSend={sendMessage}
           />
         ) : (
-          <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
+          <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}${claimId ? ' has-open-claim' : ''}`}>
             {queueVisible && (filterMetadata
               ? viewAvailable
                 ? <QueuePanel queueKind={queueKind} claims={visibleClaims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} view={view} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
@@ -2440,7 +2514,14 @@ function QueueMetadataState({ loading, error, onRetry }) {
       </header>
       <div className="queue-list" aria-live="polite" aria-busy={loading}>
         {loading && <p className="queue-state" role="status">{t('Loading queue filters...')}</p>}
-        {!loading && error && (
+        {!loading && error && (error.status === 403 || error.code === 'ACCESS_DENIED') && (
+          <div className="queue-state" role="alert">
+            <strong>{t('No Workbench access')}</strong>
+            <p>{t('This staff account is not authorised to read Workbench Claims, so retrying will not help. Ask your administrator to review your staff role.')}</p>
+            {failureReference(error) && <small>{failureReference(error)}</small>}
+          </div>
+        )}
+        {!loading && error && !(error.status === 403 || error.code === 'ACCESS_DENIED') && (
           <div className="queue-state" role="alert">
             <strong>{t('Claim queue unavailable')}</strong>
             <p>{t('The Workbench could not load the server-published queue controls. The current URL has been preserved; retry when the service is available.')}</p>

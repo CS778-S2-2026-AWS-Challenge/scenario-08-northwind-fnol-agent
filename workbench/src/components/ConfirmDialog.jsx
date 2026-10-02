@@ -1,12 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { containTabFocus } from '../focus.js'
 import { translate as t, useLanguage } from '../i18n.js'
-
-function focusableElements(container) {
-  return [...container.querySelectorAll(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  )]
-}
 
 export default function ConfirmDialog({
   open,
@@ -53,22 +48,7 @@ export default function ConfirmDialog({
         cancelHandlerRef.current()
         return
       }
-      if (event.key !== 'Tab') return
-      const elements = focusableElements(dialogRef.current)
-      if (!elements.length) {
-        event.preventDefault()
-        dialogRef.current?.focus()
-        return
-      }
-      const first = elements[0]
-      const last = elements.at(-1)
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
+      containTabFocus(event, dialogRef.current)
     }
 
     document.addEventListener('keydown', onKeyDown)

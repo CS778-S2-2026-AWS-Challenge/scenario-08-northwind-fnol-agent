@@ -50,6 +50,7 @@ const tabs = vi.hoisted(() => ({
 }))
 
 const staffAgent = vi.hoisted(() => ({
+  onBusinessActionMutation: null,
   onBusinessActionExecuted: null,
 }))
 
@@ -100,7 +101,8 @@ vi.mock('../components/ClaimWorkspace.jsx', () => ({
   },
 }))
 vi.mock('../components/StaffAgent.jsx', () => ({
-  default: ({ open, embedded = false, requestedSessionId, onBusinessActionExecuted }) => {
+  default: ({ open, embedded = false, requestedSessionId, onBusinessActionMutation, onBusinessActionExecuted }) => {
+    staffAgent.onBusinessActionMutation = onBusinessActionMutation
     staffAgent.onBusinessActionExecuted = onBusinessActionExecuted
     return open && (
       <output data-testid="staff-agent-state" data-embedded={embedded ? 'true' : 'false'}>
@@ -223,6 +225,7 @@ describe('WorkbenchPage queue routing', () => {
     vi.clearAllMocks()
     tabs.tabs = []
     tabs.activeId = null
+    staffAgent.onBusinessActionMutation = null
     staffAgent.onBusinessActionExecuted = null
     externalActionTracker.lastPromise = null
     api.claimFilterMetadata.mockResolvedValue(metadata)
@@ -290,6 +293,74 @@ describe('WorkbenchPage queue routing', () => {
       'clm_route_1',
       'ses_saved',
     ))
+  })
+
+  it('returns from an open Claim to the queue at phone width and names the toggle by what is visible', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('matchMedia', (query) => ({
+      matches: query === '(max-width: 800px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    try {
+      const { container } = renderPage('/workbench/claims/clm_route_1')
+      await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+
+      expect(container.querySelector('.workbench-layout')).toHaveClass('has-open-claim')
+      const toggle = screen.getByRole('button', { name: 'Show Claim queue' })
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      await user.click(toggle)
+
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/workbench$/))
+      expect(container.querySelector('.workbench-layout')).not.toHaveClass('has-open-claim')
+      expect(screen.getByRole('button', { name: 'Hide Claim queue' })).toHaveAttribute('aria-expanded', 'true')
+      expect(await screen.findByText('NW-900')).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('returns to the queue when the viewport becomes compact before the media-query subscription settles', async () => {
+    const user = userEvent.setup()
+    let compact = false
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      get matches() { return compact },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    try {
+      const { container } = renderPage('/workbench/claims/clm_route_1')
+      await waitFor(() => expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1'))
+
+      expect(screen.getByRole('button', { name: 'Hide Claim queue' })).toHaveAttribute('aria-expanded', 'true')
+
+      // CSS can already be at phone width while React still has the previous media-query
+      // snapshot. The activation path must use the current viewport, not that stale snapshot.
+      compact = true
+      await user.click(screen.getByRole('button', { name: 'Hide Claim queue' }))
+
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/workbench$/))
+      expect(container.querySelector('.workbench-layout')).not.toHaveClass('has-open-claim')
+      expect(await screen.findByText('NW-900')).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('explains a staff account without Workbench access instead of offering a retry', async () => {
+    api.claimFilterMetadata.mockRejectedValue(Object.assign(new Error('Access denied for the staff boundary.'), {
+      status: 403,
+      code: 'ACCESS_DENIED',
+      requestId: 'req_denied',
+    }))
+
+    renderPage('/workbench')
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('No Workbench access')
+    expect(alert).toHaveTextContent('retrying will not help')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(api.claims).not.toHaveBeenCalled()
   })
 
   it('keeps the bare Workbench queue when no persisted active Claim exists', async () => {
@@ -591,6 +662,89 @@ describe('WorkbenchPage queue routing', () => {
     expect(await screen.findByTestId('claim-revision')).toHaveTextContent('Claim revision 8')
     expect(screen.getByText(/was approved.*authoritative projection.*revision 8/i)).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Test projected Claim decision' })).not.toBeInTheDocument()
+  })
+
+  it('does not report its own Claim decision realtime revision as another session', async () => {
+    const user = userEvent.setup()
+    let pushRealtime
+    let resolveDecision
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+    const decisionAction = {
+      action_code: 'claim.record_decision',
+      target_type: 'claim',
+      target_ref: 'clm_route_1',
+      availability: 'confirmation_required',
+      based_on_revision: 7,
+    }
+    const actionable = {
+      ...claim,
+      revision: 7,
+      work_summary: {
+        ...claim.work_summary,
+        primary_action_code: decisionAction.action_code,
+        primary_action_target_ref: decisionAction.target_ref,
+      },
+      allowed_actions: [decisionAction],
+    }
+    const record = {
+      decision_id: 'cdec_1234567890abcdef1234',
+      claim_id: 'clm_route_1',
+      decision: 'approved',
+      claimant_explanation: 'Your claim has been approved.',
+      decided_by: 'stf_demo',
+      decided_at: '2026-10-01T01:00:00Z',
+      source_claim_revision: 7,
+    }
+    const decided = {
+      ...actionable,
+      revision: 8,
+      claim_decision: record,
+      work_summary: {
+        ...actionable.work_summary,
+        primary_action_code: null,
+        primary_action_target_ref: null,
+      },
+      allowed_actions: [],
+    }
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockResolvedValueOnce(decided)
+      .mockResolvedValueOnce(decided)
+    api.recordClaimDecision.mockReturnValue(new Promise((resolve) => {
+      resolveDecision = resolve
+    }))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await screen.findByRole('button', { name: 'Test projected Claim decision' })
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    await user.click(screen.getByRole('button', { name: 'Test projected Claim decision' }))
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-own-decision',
+        data: {
+          event_id: 'evt-own-decision',
+          claim_id: 'clm_route_1',
+          claim_revision: 8,
+          resources: ['claim'],
+        },
+      })
+    })
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 8')
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveDecision(record)
+    })
+    await waitFor(() => expect(api.claim).toHaveBeenCalledTimes(3))
+    expect(screen.getByText(/was approved.*authoritative projection.*revision 8/i)).toBeVisible()
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
   })
 
   it('reconciles an ambiguous decision result before allowing any further submission', async () => {
@@ -1879,6 +2033,111 @@ describe('WorkbenchPage queue routing', () => {
     expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
   })
 
+  it('does not report the staff member own mutation as a change from another session', async () => {
+    const user = userEvent.setup()
+    let pushRealtime
+    let resolveAccept
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+    const acceptAction = {
+      action_code: 'human.accept_handoff', target_type: 'handoff', target_ref: 'hnd_1', availability: 'confirmation_required', based_on_revision: 1,
+    }
+    const actionable = {
+      ...claim,
+      work_summary: { ...claim.work_summary, primary_action_code: acceptAction.action_code, primary_action_target_ref: acceptAction.target_ref },
+      allowed_actions: [acceptAction],
+    }
+    const accepted = { ...actionable, revision: 2, allowed_actions: [] }
+    const changedElsewhere = { ...accepted, revision: 3 }
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockResolvedValueOnce(accepted)
+      .mockResolvedValueOnce(accepted)
+      .mockResolvedValueOnce(changedElsewhere)
+    api.acceptHandoff.mockReturnValue(new Promise((resolve) => {
+      resolveAccept = resolve
+    }))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await screen.findByRole('button', { name: 'Test projected accept' })
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    await user.click(screen.getByRole('button', { name: 'Test projected accept' }))
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-own-accept',
+        data: { event_id: 'evt-own-accept', claim_id: 'clm_route_1', claim_revision: 2, resources: ['claim'] },
+      })
+    })
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2')
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
+    await act(async () => {
+      resolveAccept({ claim_id: 'clm_route_1', revision: 2 })
+    })
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
+
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-other-session',
+        data: { event_id: 'evt-other-session', claim_id: 'clm_route_1', claim_revision: 3, resources: ['claim'] },
+      })
+    })
+    expect(await screen.findByText('This Claim changed in another session (revision 3).')).toBeInTheDocument()
+  })
+
+  it('reports a newer foreign revision held while the staff member own mutation was in flight', async () => {
+    const user = userEvent.setup()
+    let pushRealtime
+    let resolveAccept
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+    const acceptAction = {
+      action_code: 'human.accept_handoff', target_type: 'handoff', target_ref: 'hnd_1', availability: 'confirmation_required', based_on_revision: 1,
+    }
+    const actionable = {
+      ...claim,
+      work_summary: { ...claim.work_summary, primary_action_code: acceptAction.action_code, primary_action_target_ref: acceptAction.target_ref },
+      allowed_actions: [acceptAction],
+    }
+    const changedElsewhere = { ...actionable, revision: 3, allowed_actions: [] }
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockResolvedValue(changedElsewhere)
+    api.acceptHandoff.mockReturnValue(new Promise((resolve) => {
+      resolveAccept = resolve
+    }))
+
+    renderPage('/workbench/claims/clm_route_1')
+    await screen.findByRole('button', { name: 'Test projected accept' })
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    await user.click(screen.getByRole('button', { name: 'Test projected accept' }))
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-foreign-during-own',
+        data: { event_id: 'evt-foreign-during-own', claim_id: 'clm_route_1', claim_revision: 3, resources: ['claim'] },
+      })
+    })
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveAccept({ claim_id: 'clm_route_1', revision: 2 })
+    })
+    expect(await screen.findByText('This Claim changed in another session (revision 3).')).toBeInTheDocument()
+  })
+
   it('discards a late action-failure recovery projection after a newer realtime refresh', async () => {
     const user = userEvent.setup()
     let pushRealtime
@@ -2338,6 +2597,69 @@ describe('WorkbenchPage queue routing', () => {
     view.unmount()
 
     expect(streamSignal.aborted).toBe(true)
+  })
+
+  it('tracks Staff Agent business-action revisions as the current staff member own mutation', async () => {
+    let pushRealtime
+    let resolveExecution
+    api.realtimeEvents.mockImplementation((_token, { onEvent, signal }) => {
+      pushRealtime = onEvent
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+      })
+    })
+    const ownRevision = { ...claim, revision: 2 }
+    const changedElsewhere = { ...claim, revision: 3 }
+    api.claim
+      .mockResolvedValueOnce(claim)
+      .mockResolvedValueOnce(ownRevision)
+      .mockResolvedValueOnce(changedElsewhere)
+
+    renderPage('/workbench/claims/clm_route_1')
+    await screen.findByTestId('claim-revision')
+    await waitFor(() => expect(staffAgent.onBusinessActionMutation).toEqual(expect.any(Function)))
+    await waitFor(() => expect(pushRealtime).toBeTypeOf('function'))
+
+    const tracked = staffAgent.onBusinessActionMutation(
+      'clm_route_1',
+      () => new Promise((resolve) => { resolveExecution = resolve }),
+    )
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-own-agent-action',
+        data: {
+          event_id: 'evt-own-agent-action',
+          claim_id: 'clm_route_1',
+          claim_revision: 2,
+          resources: ['claim'],
+        },
+      })
+    })
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveExecution({
+        claim_id: 'clm_route_1',
+        runtime_execution: { resulting_revision: 2 },
+      })
+      await tracked
+    })
+    expect(screen.queryByText(/changed in another session/)).not.toBeInTheDocument()
+
+    await act(async () => {
+      await pushRealtime({
+        type: 'resources.changed',
+        cursor: 'evt-agent-action-other-session',
+        data: {
+          event_id: 'evt-agent-action-other-session',
+          claim_id: 'clm_route_1',
+          claim_revision: 3,
+          resources: ['claim'],
+        },
+      })
+    })
+    expect(await screen.findByText('This Claim changed in another session (revision 3).')).toBeInTheDocument()
   })
 
   it('propagates failed queue and open-Claim refreshes after an executed Staff Agent action', async () => {

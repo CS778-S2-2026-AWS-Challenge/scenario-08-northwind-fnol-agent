@@ -39,6 +39,16 @@ describe('NavigationRail', () => {
     expect(within(navigation).getByRole('link', { name: 'Workbench' })).not.toHaveClass('active')
   })
 
+  it('names every rail control independently of its visible text, which the collapsed rail hides', () => {
+    renderNavigation('/workbench')
+
+    const navigation = screen.getByRole('navigation', { name: 'Workbench navigation' })
+    expect(within(navigation).getByRole('link', { name: 'Workbench' })).toHaveAttribute('aria-label', 'Workbench')
+    expect(within(navigation).getByRole('link', { name: 'Claim conversations' }))
+      .toHaveAttribute('aria-label', 'Claim conversations')
+    expect(within(navigation).getByRole('button', { name: 'Staff Agent' })).toHaveAttribute('aria-label', 'Staff Agent')
+  })
+
   it('keeps Workbench selected for a submitted Claim detail route', () => {
     renderNavigation('/workbench/claims/clm_1')
 
