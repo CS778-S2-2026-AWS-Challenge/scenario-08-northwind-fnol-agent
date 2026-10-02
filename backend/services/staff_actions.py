@@ -68,6 +68,7 @@ from backend.services.staff_access import (
     claim_staff_access,
     require_claim_collaborator,
 )
+from backend.services.staff_message_audit import build_staff_message_audit_event
 from backend.services.staff_presence import require_claimable_staff
 from backend.services.support import (
     now_utc,
@@ -732,14 +733,22 @@ def send_staff_message(
         None,
     )
     if active is None:
-        raise _validation('An accepted handoff is required before sending a staff message.')
-    coworker_ids = {item.staff_id for item in repository.list_claim_coworkers(claim_id)}
-    if active.assigned_to != principal.subject and principal.subject not in coworker_ids:
-        raise ApiError(
-            status_code=403,
-            code='ACCESS_DENIED',
-            message='The Claim is assigned to another staff member and cowork access is required.',
-        )
+        if claim_staff_access(repository, claim, principal) is not ClaimStaffAccess.PRIMARY:
+            raise ApiError(
+                status_code=403,
+                code='ACCESS_DENIED',
+                message='Only the primary Claim owner can message without an active handoff.',
+            )
+    else:
+        coworker_ids = {item.staff_id for item in repository.list_claim_coworkers(claim_id)}
+        if active.assigned_to != principal.subject and principal.subject not in coworker_ids:
+            raise ApiError(
+                status_code=403,
+                code='ACCESS_DENIED',
+                message=(
+                    'The Claim is assigned to another staff member and cowork access is required.'
+                ),
+            )
     if payload.in_reply_to is not None:
         referenced = repository.get_message(
             claim_id,
@@ -762,7 +771,11 @@ def send_staff_message(
         in_reply_to=payload.in_reply_to,
         created_at=timestamp,
     )
-    updated_handoff = active.model_copy(update={'status': HandoffStatus.IN_PROGRESS})
+    updated_handoff = (
+        active.model_copy(update={'status': HandoffStatus.IN_PROGRESS})
+        if active is not None
+        else None
+    )
     updated = claim.model_copy(update={'revision': claim.revision + 1, 'updated_at': timestamp})
     response = StaffMessageResponse(
         claim_id=claim_id,
@@ -778,32 +791,46 @@ def send_staff_message(
         claim_id=claim_id,
         session_id=message.session_id,
         message_id=message.message_id,
-        handoff_id=active.handoff_id,
+        handoff_id=active.handoff_id if active is not None else None,
         action_registry_version=projected_action.registry_version,
         action_code=projected_action.action_code,
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
-    audit_event = build_handoff_audit_event(
-        principal=principal,
-        claim=updated,
-        handoff=updated_handoff,
-        route=route,
-        idempotency_key=key,
-        required_permission=projected_action.action_code,
-        reason='Staff claimant message advanced the handoff work.',
-        created_at=timestamp,
-        source_refs=(message.message_id,),
+    audit_event = (
+        build_handoff_audit_event(
+            principal=principal,
+            claim=updated,
+            handoff=updated_handoff,
+            route=route,
+            idempotency_key=key,
+            required_permission=projected_action.action_code,
+            reason='Staff claimant message advanced the handoff work.',
+            created_at=timestamp,
+            source_refs=(message.message_id,),
+        )
+        if updated_handoff is not None
+        else build_staff_message_audit_event(
+            principal=principal,
+            claim=updated,
+            message=message,
+            route=route,
+            idempotency_key=key,
+            required_permission=projected_action.action_code,
+            created_at=timestamp,
+        )
     )
+    records: dict[str, Any] = {'message': message}
+    if updated_handoff is not None:
+        records['handoff'] = updated_handoff
     _save(
         repository,
         updated,
         expected,
         idempotency,
-        handoff=updated_handoff,
-        message=message,
         source=source,
         audit_event=audit_event,
+        **records,
     )
     return response
 

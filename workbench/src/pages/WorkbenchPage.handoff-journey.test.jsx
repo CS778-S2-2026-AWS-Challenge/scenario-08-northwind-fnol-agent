@@ -108,9 +108,9 @@ function sendAction(revision) {
       'ses_journey',
       revision,
       'Reply to claimant',
-      'Continue the accepted claimant conversation.',
+      "Continue the Claim's active claimant conversation.",
     ),
-    expected_effects: ['message.append', 'handoff.mark_in_progress'],
+    expected_effects: ['message.append'],
     claimant_visible_effects: ['message.append'],
     inputs: [{
       field_code: 'content.text',

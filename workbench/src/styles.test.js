@@ -27,9 +27,18 @@ describe('Workbench density tokens', () => {
     const styles = readFileSync('src/styles.css', 'utf8')
 
     expect(styles).toMatch(/\.compact-composer__input \{[^}]*min-height: var\(--size-header-compact\);/)
-    expect(styles).toMatch(/\.staff-composer__input--voice \{[^}]*grid-template-columns: var\(--space-10\) var\(--space-10\) minmax\(0, 1fr\) var\(--space-10\);/)
+    expect(styles).toMatch(/\.staff-composer__input \{[^}]*grid-template-columns: var\(--space-10\) var\(--space-10\) minmax\(0, 1fr\) var\(--space-10\);/)
+    expect(styles).not.toContain('.staff-composer__input--voice')
     expect(styles).toMatch(/\.compact-composer__textarea \{[^}]*max-height: calc\(var\(--space-6\) \* 4\);/)
     expect(styles).toMatch(/\.compact-composer__send \{[^}]*width: var\(--space-10\);[^}]*height: var\(--space-10\);/)
     expect(styles).toContain('.workbench-app:has(.conversation-detail .staff-composer) > .staff-agent:not(.is-open)')
+  })
+
+  it('keeps the draggable Staff Agent trigger visible in dark mode', () => {
+    const styles = readFileSync('src/styles.css', 'utf8')
+    const tokens = readFileSync('../frontend/shared/design-tokens.css', 'utf8')
+
+    expect(styles).toMatch(/\.staff-agent__bubble \{[^}]*background: var\(--color-workbench-nav\);[^}]*color: var\(--color-workbench-nav-active\);/)
+    expect(tokens).toContain('--color-workbench-nav-active: var(--color-workbench-dark-text-primary);')
   })
 })

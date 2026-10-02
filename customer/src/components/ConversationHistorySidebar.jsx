@@ -201,7 +201,7 @@ export default function ConversationHistorySidebar({
       return (
         <div className="conversation-sidebar-state">
           <strong>{account ? 'No saved conversations yet' : 'No conversations in this browser session'}</strong>
-          <p>Start a claim and its conversation will appear here.</p>
+          <p>Start a claim and resumable conversations will appear here.</p>
         </div>
       )
     }

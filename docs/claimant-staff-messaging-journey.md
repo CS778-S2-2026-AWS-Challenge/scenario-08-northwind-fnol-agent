@@ -12,7 +12,7 @@ APIs remain authoritative; transient browser states do not create a second persi
 | --- | --- | --- | --- | --- | --- |
 | Claimant intake | Claimant | Shared claim conversation | `sending`, then persisted `delivered` | A known rejection is `rejected_before_delivery`; a lost response is `delivery_outcome_unknown`. Retain text and reuse the same claim, turn, and client-message idempotency keys on `retrying` so replay reconciles a committed message. | Agent response is a separate persisted message, never attributed to the claimant |
 | Claimant continuation during handoff | Claimant | Assigned staff through the shared claim | `sending`, then persisted `delivered` | Keep the draft and retry with the same identifiers. Do not claim non-delivery when a network failure leaves the outcome unknown. | No draft is silently sent |
-| Staff reply | Authenticated staff member assigned to the accepted handoff | Claimant | `sending`, then persisted `delivered` | A known rejection is `rejected_before_delivery`; a lost response is `delivery_outcome_unknown`. Keep the text and reuse the same staff-message idempotency key on `retrying`. | The current prototype offers a deterministic reply template, not Agent or AI generation. Template states remain internal until staff explicitly sends the composer text. |
+| Staff reply | Primary Claim owner, or staff member/coworker authorised by an accepted handoff | Claimant | `sending`, then persisted `delivered` | A known rejection is `rejected_before_delivery`; a lost response is `delivery_outcome_unknown`. Keep the text and reuse the same staff-message idempotency key on `retrying`. | The current prototype offers a deterministic reply template, not Agent or AI generation. Template states remain internal until staff explicitly sends the composer text. |
 | Staff resolution update | Authenticated staff member | Claimant | Persisted customer update after the handoff mutation succeeds | API error leaves the handoff open and permits a current-revision retry | Internal result and Agent material never become claimant-visible automatically |
 | System or handoff status | System | Claimant-safe or staff-only projection according to visibility | Handoff notification is `delivered` or `queued_locally`; the durable handoff remains available in either case | A notification retry cannot duplicate the durable handoff | Not applicable |
 
@@ -32,14 +32,18 @@ The journey can be read as a simple conversation moving between two screens:
    text and sees a retry button instead of having to type it again.
 4. When the claimant asks for a person, the saved claim and conversation are placed in the staff
    Workbench queue. The claim is not lost if only the notification fails.
-5. On the employee website, a staff member opens that claim, reads the saved information, and
-   accepts the handoff.
+5. On the employee website, a staff member opens that claim and accepts either the queued handoff
+   or an unassigned completed Claim. For direct Claim acceptance, a fresh executable message action
+   opens the existing customer conversation; acceptance does not invent a handoff or Session.
 6. Staff may build a deterministic reply template from the claimant-safe next step. It is clearly
    marked as internal: staff can use it, change it, or reject it, but it is never sent automatically.
 7. Staff review the final wording and click send. A failed reply stays visible and can be retried
    without creating two copies of the same message.
-8. Back on the claimant website, the claimant refreshes or resumes the claim, reads the staff
-   reply, and continues from the saved point without completing the form again.
+8. Back on the claimant website, the claimant opens **Messages with Northwind** from that Claim,
+   reads the staff reply, and continues from the saved point without completing the form again.
+   This is a Claim-focused conversation view: it keeps the selected Claim identity, shared message
+   history, realtime state, and reply composer while hiding other Claims and unrelated intake
+   workspace controls. Its stable Claim message route restores the same focused view after refresh.
 
 ## Repeatable Acceptance Check
 

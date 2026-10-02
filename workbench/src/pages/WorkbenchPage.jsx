@@ -1295,6 +1295,9 @@ export default function WorkbenchPage() {
       && window.matchMedia(COMPACT_WORKBENCH_QUERY).matches
     )
     if (compactAtActivation && claimId) {
+      // This is an explicit return to the queue, not an initial Workbench load
+      // that should reopen the persisted active Claim.
+      rootRestoreAttemptedRef.current = true
       setQueueVisible(true)
       navigate(queueRoute(queueBasePath, queueFilters))
       return
@@ -1584,6 +1587,21 @@ export default function WorkbenchPage() {
     ))
   }
 
+  function openProjectedClaimantConversation(claimReadback) {
+    const conversationAction = findProjectedAction(
+      claimReadback?.allowed_actions,
+      'conversation.send_claimant_message',
+      claimReadback?.active_session_id,
+    )
+    if (
+      conversationAction?.target_type === 'session'
+      && conversationAction.based_on_revision === claimReadback.revision
+      && canSubmitProjectedAction(conversationAction)
+    ) {
+      changeSection('conversation')
+    }
+  }
+
   async function acceptClaim(action) {
     const attemptClaimId = action?.target_ref
     let mutationSucceeded = false
@@ -1629,6 +1647,7 @@ export default function WorkbenchPage() {
         kind: 'status',
         message: t('Claim assigned to you. Review started.'),
       })
+      openProjectedClaimantConversation(claimReadback)
       return claimReadback
     } catch (error) {
       const latest = detailRef.current
@@ -1638,6 +1657,7 @@ export default function WorkbenchPage() {
           kind: 'status',
           message: t('Claim assigned to you. Review started.'),
         })
+        openProjectedClaimantConversation(latest)
         return latest
       }
 

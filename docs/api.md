@@ -1667,8 +1667,12 @@ Returns only the authenticated claimant's reports. Each item contains `claim_id`
 Filters: `workflow_state`, `updated_after`, plus standard pagination.
 
 Response `200` uses the standard collection envelope. Each item contains
-`claim_id`, `revision`, `incident_type`, `workflow_state`, `external_claim`,
+`claim_id`, `revision`, `conversation_session_id`, `incident_type`, `workflow_state`, `external_claim`,
 `customer_next_step`, `created_at`, `updated_at`, and `can_resume`.
+
+`conversation_session_id` is the claimant-owned active conversation identifier. Clients use it
+with the claimant message endpoint to reopen Claim-scoped staff communication. It is `null` when
+the Claim has no active conversation and does not expose staff routing or ownership data.
 
 ### `GET /api/v1/claims/{claim_id}`
 
@@ -1678,7 +1682,7 @@ Response `200`:
 {
   "claim_id": "clm_01J4Y7Q2AW",
   "revision": 7,
-  "active_session_id": "ses_01J4Y7RPN8",
+  "conversation_session_id": "ses_01J4Y7RPN8",
   "incident_type": "motor",
   "workflow_state": "ready_for_next",
   "form": {},
@@ -3508,7 +3512,12 @@ the boolean is a display convenience and does not grant authority.
 
 Response `200` is the resulting `WorkbenchClaimDetail`: primary assignee is the authenticated
 staff member, access is `primary`, revision advances once, and `accept_claim` becomes false.
-The existing decision-action rules then apply. Claim, presence revision guard, actor-scoped
+The existing decision-action rules then apply. When the completed Claim still has its
+authoritative active claimant Session and no active handoff takes precedence, the same refreshed
+detail also projects `conversation.send_claimant_message` for that Session. The Workbench may open
+the conversation only from this fresh, executable action. No Session or handoff is created by
+acceptance; a missing or non-active Session leaves messaging blocked, and queued or accepted
+handoffs keep their existing lifecycle actions. Claim, presence revision guard, actor-scoped
 idempotency response, internal `action.completed` audit, and existing realtime event commit
 atomically. Audit identifies the staff actor, Claim, server time, action, and resulting revision.
 
@@ -3679,13 +3688,19 @@ active handoff owner or Claim assignee, is another staff member.
 After a handoff is accepted, both parties may continue using the persisted session message
 history. A claimant message during an open handoff is routed to staff without an automatic Agent
 reply. Claimants continue through the ordinary message route; there is no claimant command prefix.
-Staff messages use
-`POST /api/v1/workbench/claims/{claim_id}/messages`; they move an accepted handoff to
-`in_progress` but do not resolve it. `resolve` remains a separate, explicit lifecycle operation.
+Staff messages use `POST /api/v1/workbench/claims/{claim_id}/messages`. The route requires the
+exact current `conversation.send_claimant_message` action and an authoritative active claimant
+Session. With an accepted handoff, an assigned staff member or authorised coworker may send and
+the message moves that handoff to `in_progress`; it does not resolve it. Without an active handoff,
+only the primary owner may send, and the route appends the message without creating or progressing
+a handoff. `resolve` remains a separate, explicit lifecycle operation.
 Accept, handoff-linked staff-message progression, resolve, and ownership transfer/requeue when
 they change a handoff persist the resulting Claim/Handoff/idempotency state and one authenticated
 Claim-scoped audit fact atomically. A stale revision, blocked action, ownership denial, conflicting
 replay, or audit failure commits none of that mutation bundle.
+
+Successful staff-message delivery means durable in-app conversation persistence only. It does not
+send or authorise an email, SMS, push notification, or phone contact.
 
 The prototype clients use these provider-neutral HTTP resources for explicit message refreshes.
 Real-time delivery infrastructure remains replaceable and is not part of the API contract.

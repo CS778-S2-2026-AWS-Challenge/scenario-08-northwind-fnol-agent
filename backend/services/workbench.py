@@ -56,6 +56,7 @@ from backend.domain.models import (
     OpenItemState,
     ResponsibleParty,
     SessionRecord,
+    SessionStatus,
     SignalDecisionRecord,
     SignalDecisionValue,
     StaffActionRecord,
@@ -1145,6 +1146,31 @@ def _retention_hold_actions(
     return [action('retention.hold.release', hold.hold_id, [hold.hold_id]) for hold in active]
 
 
+def _direct_claimant_message_action(
+    claim: WorkingClaim,
+    *,
+    active_claimant_session_available: bool,
+) -> WorkbenchAllowedAction:
+    return _registered_action(
+        'conversation.send_claimant_message',
+        claim.active_session_id or claim.claim_id,
+        claim.revision,
+        availability=(
+            ActionAvailability.CONFIRMATION_REQUIRED
+            if active_claimant_session_available
+            else ActionAvailability.BLOCKED
+        ),
+        blocked_reason=(
+            None
+            if active_claimant_session_available
+            else 'No active claimant session is available.'
+        ),
+        source_refs=(
+            [claim.active_session_id] if claim.active_session_id is not None else [claim.claim_id]
+        ),
+    )
+
+
 def _allowed_actions(
     claim: WorkingClaim,
     ownership: WorkbenchOwnershipProjection,
@@ -1157,6 +1183,8 @@ def _allowed_actions(
     external_requests: Sequence[ExternalTaskRequest],
     external_results: Sequence[ExternalTaskResult],
     principal: Principal,
+    *,
+    active_claimant_session_available: bool,
     retention_holds: Sequence[RetentionHoldRecord] = (),
     retention_completed: bool = False,
 ) -> list[WorkbenchAllowedAction]:
@@ -1177,7 +1205,7 @@ def _allowed_actions(
                     blocker = 'Only a claims professional can decide this Claim.'
                 elif ownership.current_staff_access is not CurrentStaffAccess.PRIMARY:
                     blocker = 'Only the primary owner can decide this Claim.'
-                return [
+                terminal_actions = [
                     _registered_action(
                         'claim.record_decision',
                         claim.claim_id,
@@ -1192,6 +1220,14 @@ def _allowed_actions(
                         result_state=('blocked' if blocker is not None else 'pending_confirmation'),
                     )
                 ]
+                if ownership.current_staff_access is CurrentStaffAccess.PRIMARY:
+                    terminal_actions.append(
+                        _direct_claimant_message_action(
+                            claim,
+                            active_claimant_session_available=active_claimant_session_available,
+                        )
+                    )
+                return terminal_actions
             return []
         blocker = None
         if (
@@ -1222,6 +1258,20 @@ def _allowed_actions(
             ),
         ]
     actions: list[WorkbenchAllowedAction] = []
+    if (
+        terminal is not None
+        and terminal.value is TerminalDispositionValue.COMPLETED
+        and not active_handoffs
+        and claim_decision_eligible(claim)
+        and claim.claim_decision_id is None
+        and ownership.current_staff_access is CurrentStaffAccess.PRIMARY
+    ):
+        actions.append(
+            _direct_claimant_message_action(
+                claim,
+                active_claimant_session_available=active_claimant_session_available,
+            )
+        )
 
     if (
         has_incomplete_recovery
@@ -1991,6 +2041,10 @@ def _build_projection(
         external_requests,
         external_results,
         principal,
+        active_claimant_session_available=any(
+            session.session_id == claim.active_session_id and session.status is SessionStatus.ACTIVE
+            for session in sessions
+        ),
         retention_holds=repository.list_retention_holds(claim.claim_id),
         retention_completed=(
             retention is not None and retention.status is RetentionOperationStatus.COMPLETED

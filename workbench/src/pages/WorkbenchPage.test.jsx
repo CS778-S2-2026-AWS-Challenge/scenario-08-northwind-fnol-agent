@@ -323,6 +323,16 @@ describe('WorkbenchPage queue routing', () => {
   it('returns to the queue when the viewport becomes compact before the media-query subscription settles', async () => {
     const user = userEvent.setup()
     let compact = false
+    tabs.tabs = [{
+      claimId: 'clm_route_1',
+      label: 'NW-900',
+      section: 'conversation',
+      sessionId: 'ses_saved',
+      draft: '',
+      expandedRecords: [],
+      pendingAction: null,
+    }]
+    tabs.activeId = 'clm_route_1'
     vi.stubGlobal('matchMedia', vi.fn(() => ({
       get matches() { return compact },
       addEventListener: vi.fn(),
@@ -1220,6 +1230,13 @@ describe('WorkbenchPage queue routing', () => {
       availability: 'confirmation_required',
       based_on_revision: 2,
     }
+    const messageAction = {
+      action_code: 'conversation.send_claimant_message',
+      target_type: 'session',
+      target_ref: 'ses_owned_claim',
+      availability: 'confirmation_required',
+      based_on_revision: 2,
+    }
     const actionable = {
       ...claim,
       workflow_state: 'created',
@@ -1234,6 +1251,7 @@ describe('WorkbenchPage queue routing', () => {
     const accepted = {
       ...actionable,
       revision: 2,
+      active_session_id: 'ses_owned_claim',
       ownership: {
         state: 'assigned',
         current_staff_access: 'primary',
@@ -1244,7 +1262,7 @@ describe('WorkbenchPage queue routing', () => {
         primary_action_code: decisionAction.action_code,
         primary_action_target_ref: decisionAction.target_ref,
       },
-      allowed_actions: [decisionAction],
+      allowed_actions: [decisionAction, messageAction],
     }
     api.claim.mockResolvedValueOnce(actionable).mockResolvedValue(accepted)
     api.acceptClaim.mockResolvedValue(accepted)
@@ -1259,6 +1277,7 @@ describe('WorkbenchPage queue routing', () => {
     ))
     await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
     expect(await screen.findByText('Claim assigned to you. Review started.')).toBeVisible()
+    expect(screen.getByTestId('location')).toHaveTextContent('/workbench/claims/clm_route_1/conversation')
     expect(api.claim).toHaveBeenCalledTimes(2)
   })
 

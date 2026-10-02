@@ -418,6 +418,7 @@ function App() {
   const realtimeSeenEventIds = useRef(new Set())
   const messagesRequestGeneration = useRef(0)
   const claimTransitionRef = useRef(null)
+  const claimMessagesOpeningRef = useRef(null)
   const latestEvidenceRevision = useRef(0)
   const latestEvidenceItems = useRef([])
   const evidenceHasLocalMutation = useRef(false)
@@ -460,11 +461,12 @@ function App() {
   const isWorkspaceActive = workspaceActive && (hasStarted || draftWorkspaceActive)
   const savedReports = claimHistory === null
     ? null
-    : claimHistory
+    : claimHistory.filter((item) => item.can_resume)
   const conversationReports = claim
     ? claimHistory?.some((item) => item.claim_id === claim.claim_id)
       ? claimHistory
-        .map((item) => item.claim_id === claim.claim_id ? claim : item)
+          .map((item) => item.claim_id === claim.claim_id ? claim : item)
+          .filter((item) => item.claim_id === claim.claim_id || item.can_resume)
       : [claim, ...(savedReports || [])]
     : (savedReports || [])
   const homepageConversationReports = claim ? conversationReports : (savedReports || [])
@@ -700,7 +702,7 @@ function App() {
       setProfileSection(nextProfileSection)
       setSelectedHistoryClaimId(historyClaimIdFromPath(path))
       setPageState(nextPage)
-      const canonicalPath = ['claim-history', 'claim-features', 'claim-evidence'].includes(nextPage)
+      const canonicalPath = ['claim-history', 'claim-features', 'claim-messages', 'claim-evidence'].includes(nextPage)
         ? path
         : nextPage === 'account'
           ? profilePathForSection(nextProfileSection)
@@ -736,6 +738,7 @@ function App() {
     'requesting-support',
     'creating-claim',
     'loading-reports',
+    'opening-claim-messages',
     'resuming',
     'granting-service-consent',
     'requesting-assessor',
@@ -2940,9 +2943,13 @@ function App() {
       const savedClaim = await getClaim(claimId)
       const canResume = savedClaim.can_resume ?? savedClaim.customer_next_step?.can_resume
       if (canResume === false) {
-        rememberClaimInHistory(savedClaim)
-        openClaimFeatures(savedClaim)
-        setStatus('idle')
+        if (hasClaimantAccessToken()) {
+          rememberClaimInHistory(savedClaim)
+        } else {
+          setClaimHistory(forgetAnonymousConversation(claimId))
+        }
+        setError('This conversation can no longer be resumed, so it was removed from history.')
+        setStatus('error')
         return
       }
       const session = await resumeClaimSession({ claimId })
@@ -2964,6 +2971,9 @@ function App() {
         resumed_after_message_id: orderMessages(conversation.items).at(-1)?.message_id || null,
         has_resume_boundary: true,
       })
+      setWorkspaceView('chat')
+      setSelectedHistoryClaimId(null)
+      setMobileView('chat')
       setWorkspaceActive(true)
       setPageState('home')
       setStatus('idle')
@@ -2998,16 +3008,11 @@ function App() {
 
   function resumeHomepageConversation(claimId) {
     closeConversationHistorySidebar()
-    const savedClaim = claimHistory?.find((item) => item.claim_id === claimId)
-      || (claim?.claim_id === claimId ? claim : null)
-    const canResume = savedClaim?.can_resume ?? savedClaim?.customer_next_step?.can_resume
-    if (savedClaim && canResume === false) {
-      setError('')
-      openClaimFeatures(savedClaim)
-      return
-    }
     if (claimId === claim?.claim_id && sessionId) {
       setError('')
+      setWorkspaceView('chat')
+      setSelectedHistoryClaimId(null)
+      setMobileView('chat')
       setWorkspaceActive(true)
       setPageState('home')
       const claimPath = `/claims/${claim.claim_id}`
@@ -3177,6 +3182,63 @@ function App() {
     }
   }
 
+  async function openClaimMessagesById(claimId) {
+    if (!claimId || claimMessagesOpeningRef.current === claimId) return
+    claimMessagesOpeningRef.current = claimId
+    setError('')
+    setStatus('opening-claim-messages')
+    const transition = beginClaimTransition(claimId)
+    try {
+      const current = await getClaim(claimId)
+      const conversationSessionId = current.conversation_session_id
+      if (!conversationSessionId) {
+        throw new Error('Messages are not available for this Claim yet.')
+      }
+      const conversation = await getClaimMessages(claimId, conversationSessionId)
+      clearComposerAttachments()
+      replaceActiveClaimContext(current, conversationSessionId)
+      commitMessages(conversation.items)
+      setRecoveryFailure(null)
+      setForm(current.form)
+      setContentsItems(current.contents_items || [])
+      setDynamicForm(current.dynamic_form || null)
+      setNextStep(current.customer_next_step)
+      setHandoff(current.handoff || null)
+      setResumeContext(null)
+      rememberClaimInHistory(current)
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      setWorkspaceActive(true)
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    } finally {
+      claimMessagesOpeningRef.current = null
+      finishClaimTransition(transition)
+    }
+  }
+
+  function openClaimMessages() {
+    if (!selectedHistoryClaim) return
+    const claimId = selectedHistoryClaim.claim_id
+    setPageState('claim-messages')
+    globalThis.history?.pushState(
+      { northwindRoute: 'claim-messages' },
+      '',
+      `/account/claims/${encodeURIComponent(claimId)}/messages`,
+    )
+    if (isWorkspaceActive) {
+      openClaimMessagesById(claimId)
+    }
+  }
+
+  useEffect(() => {
+    if (page !== 'claim-messages' || !account || !selectedHistoryClaimId) return
+    openClaimMessagesById(selectedHistoryClaimId)
+  // Opening is a route command. The ref prevents duplicate work under Strict Mode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.customer_id, page, selectedHistoryClaimId])
+
   function openCurrentClaimDocuments() {
     setWorkspaceView('chat')
     setDetailsOpen(true)
@@ -3202,7 +3264,18 @@ function App() {
     leaveWorkspaceUtility()
   }
 
+  function leaveClaimMessages() {
+    setWorkspaceView('chat')
+    setMobileView('chat')
+    setWorkspaceActive(false)
+    setPage('claim-features')
+  }
+
   function handleWorkspaceHeaderBack() {
+    if (page === 'claim-messages') {
+      leaveClaimMessages()
+      return
+    }
     if (workspaceView !== 'chat') {
       navigateBackFromWorkspaceUtility()
       return
@@ -3505,6 +3578,7 @@ function App() {
   const isUrgentSupport = handoff?.support_need === 'urgent'
   const isProfilePage = page === 'account'
   const isStandaloneClaimHistory = !isWorkspaceActive && page === 'claim-history'
+  const isFocusedClaimMessages = isWorkspaceActive && page === 'claim-messages'
   const profileDisplayName = account?.profile?.display_name || 'Log in'
   const profileEmail = account?.profile?.email || 'Profile and preferences'
   const profileNamePreview = middleEllipsisLayoutParts(profileDisplayName, PROFILE_NAME_PREVIEW_LENGTH)
@@ -3535,7 +3609,8 @@ function App() {
     setMobileView('chat')
   }
 
-  const showsClaimDetails = workspaceView === 'chat' || workspaceView === 'external-services'
+  const showsClaimDetails = !isFocusedClaimMessages
+    && (workspaceView === 'chat' || workspaceView === 'external-services')
   const claimDetailsExpanded = detailsOpen && showsClaimDetails
 
   return (
@@ -3550,7 +3625,9 @@ function App() {
             <button
               className="header-back-to-start"
               type="button"
-              aria-label={workspaceView === 'chat' ? 'Back to start' : 'Back to previous page'}
+              aria-label={isFocusedClaimMessages
+                ? 'Back to Claim details'
+                : workspaceView === 'chat' ? 'Back to start' : 'Back to previous page'}
               onClick={handleWorkspaceHeaderBack}
               disabled={isBusy}
             >
@@ -3580,7 +3657,7 @@ function App() {
             {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
         )}
-        {isWorkspaceActive && claim && !['login', 'register'].includes(page) && (
+        {isWorkspaceActive && claim && !isFocusedClaimMessages && !['login', 'register'].includes(page) && (
           <div className="header-actions">
             {status === 'requesting-support' || handoff ? (
               <span className="header-assistance-chip">
@@ -3668,34 +3745,44 @@ function App() {
             <p className="claim-history-page-checking" role="status">Checking your account…</p>
           )}
         </main>
-      ) : !isWorkspaceActive && ['claim-features', 'claim-evidence'].includes(page) ? (
+      ) : !isWorkspaceActive && ['claim-features', 'claim-messages', 'claim-evidence'].includes(page) ? (
         <main className="evidence-history-page">
           {account ? (
             <section className="evidence-history-page-content" aria-labelledby="account-claim-view-title">
               <button
                 className="back-link"
                 type="button"
-                onClick={page === 'claim-evidence'
+                onClick={['claim-evidence', 'claim-messages'].includes(page)
                   ? () => setPage('claim-features')
                   : openClaimHistory}
               >
                 <span className="back-link-arrow" aria-hidden="true">←</span>
-                {page === 'claim-evidence'
+                {['claim-evidence', 'claim-messages'].includes(page)
                   ? 'Back to Claim features'
                   : 'Back to Claim history'}
               </button>
               <p className="eyebrow">Northwind account</p>
               <h1 id="account-claim-view-title">
-                {page === 'claim-features' ? 'Claim features' : 'Evidence history'}
+                {page === 'claim-features'
+                  ? 'Claim features'
+                  : page === 'claim-messages'
+                    ? 'Messages with Northwind'
+                    : 'Evidence history'}
               </h1>
               <p>
                 {page === 'claim-features'
                   ? 'Review this Claim\'s current status and available information.'
+                  : page === 'claim-messages'
+                    ? 'Opening the conversation for this Claim…'
                   : 'Review the files and supporting material recorded for the selected Claim.'}
               </p>
               {page === 'claim-features' && (
                 selectedHistoryClaim ? (
-                  <ClaimFeatureDirectory claim={selectedHistoryClaim} onOpenEvidence={openClaimEvidence} />
+                  <ClaimFeatureDirectory
+                    claim={selectedHistoryClaim}
+                    onOpenEvidence={openClaimEvidence}
+                    onOpenMessages={openClaimMessages}
+                  />
                 ) : claimHistory === null && !claimHistoryError ? (
                   <p className="claim-history-state" role="status">Loading this Claim…</p>
                 ) : (
@@ -3704,6 +3791,17 @@ function App() {
                     <p>Return to Claim history and choose a Claim that is available to your account.</p>
                     <button className="secondary-button" type="button" onClick={openClaimHistory}>Return to Claim history</button>
                   </div>
+                )
+              )}
+              {page === 'claim-messages' && (
+                error ? (
+                  <div className="claim-history-state is-error" role="alert">
+                    <h2>Messages could not be opened</h2>
+                    <p>{error}</p>
+                    <button className="secondary-button" type="button" onClick={() => setPage('claim-features')}>Return to Claim features</button>
+                  </div>
+                ) : (
+                  <p className="claim-history-state" role="status">Loading this Claim conversation…</p>
                 )
               )}
               {page === 'claim-evidence' && (
@@ -3843,12 +3941,12 @@ function App() {
         />
       ) : (
         <main
-          className={`intake-page ${claimDetailsExpanded ? 'details-open' : 'details-closed'} ${workspaceView === 'privacy' ? 'privacy-view' : ''} ${arrivingFromEntry ? 'is-arriving' : ''}`}
+          className={`intake-page ${claimDetailsExpanded ? 'details-open' : 'details-closed'} ${isFocusedClaimMessages ? 'claim-messages-focus' : ''} ${workspaceView === 'privacy' ? 'privacy-view' : ''} ${arrivingFromEntry ? 'is-arriving' : ''}`}
           onAnimationEnd={(event) => {
             if (event.target.classList?.contains('message-list')) setArrivingFromEntry(false)
           }}
         >
-          <aside className={`intake-history mobile-view-${mobileView}`} aria-label="Conversation history">
+          {!isFocusedClaimMessages && <aside className={`intake-history mobile-view-${mobileView}`} aria-label="Conversation history">
             <button className="mobile-history-back" type="button" onClick={() => setMobileView('chat')}>
               Back to conversation
             </button>
@@ -3891,7 +3989,7 @@ function App() {
                     type="button"
                     key={report.claim_id}
                     aria-current={isCurrent ? 'page' : undefined}
-                    onClick={isCurrent ? undefined : () => resumeSavedReport(report.claim_id)}
+                    onClick={() => resumeHomepageConversation(report.claim_id)}
                     disabled={isBusy}
                   >
                     <span className="intake-history-title">
@@ -3929,7 +4027,7 @@ function App() {
                 </span>
               </button>
             </div>
-          </aside>
+          </aside>}
           <section ref={conversationPanelRef} className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
             <div
               className={`workspace-utility-page ${['history', 'claim-features', 'claim-evidence', 'files'].includes(workspaceView) ? 'is-claim-record-page' : ''} ${workspaceView === 'privacy' ? 'is-privacy-page' : ''} ${workspaceView === 'agreement' ? 'is-agreement-page' : ''}`}
@@ -3989,7 +4087,11 @@ function App() {
               )}
               {workspaceView === 'claim-features' && (
                 selectedHistoryClaim ? (
-                  <ClaimFeatureDirectory claim={selectedHistoryClaim} onOpenEvidence={openClaimEvidence} />
+                  <ClaimFeatureDirectory
+                    claim={selectedHistoryClaim}
+                    onOpenEvidence={openClaimEvidence}
+                    onOpenMessages={openClaimMessages}
+                  />
                 ) : (
                   <div className="claim-history-state is-error" role="alert">
                     <h2>This Claim is no longer available</h2>
@@ -4049,7 +4151,14 @@ function App() {
               {claim && (
                 <div className="conversation-heading-main">
                   <div className="claim-heading-identity">
-                    <h1 id="conversation-title">{claimHeading(claim)}</h1>
+                    {isFocusedClaimMessages ? (
+                      <div className="claim-message-heading-copy">
+                        <h1 id="conversation-title">Messages with Northwind</h1>
+                        <p>Claim {claimHeading(claim)}</p>
+                      </div>
+                    ) : (
+                      <h1 id="conversation-title">{claimHeading(claim)}</h1>
+                    )}
                   </div>
                 </div>
               )}
@@ -4204,7 +4313,7 @@ function App() {
                   {renderConversationAction()}
                 </div>
               )}
-              {account && claim && (
+              {account && claim && !isFocusedClaimMessages && (
                 <ClaimAutoFillPanel
                   key={`${account.customer_id}:${claim.claim_id}`}
                   account={account}
@@ -4325,14 +4434,20 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onSubmit={sendMessage}
-              inputLabel={assistanceState?.key === 'response_needed' ? 'Reply to Northwind staff' : inputLabel}
+              inputLabel={isFocusedClaimMessages
+                ? 'Message Northwind about this Claim'
+                : assistanceState?.key === 'response_needed' ? 'Reply to Northwind staff' : inputLabel}
               busy={isBusy}
-              hint={assistanceState?.key === 'reply_sent'
+              hint={isFocusedClaimMessages
+                ? null
+                : assistanceState?.key === 'reply_sent'
                 ? 'Your reply is recorded. You can still add information if needed.'
                 : proposedFields.length > 0 || proposedContentsItems.length > 0
                   ? 'You can keep describing the incident or correct a detail while these suggestions are waiting for review.'
                   : null}
-              placeholder={assistanceState?.key === 'response_needed'
+              placeholder={isFocusedClaimMessages
+                ? 'Write a message about this Claim...'
+                : assistanceState?.key === 'response_needed'
                 ? 'Reply to Northwind staff...'
                 : isNewConversationEmpty
                   ? 'Write what happened, or choose a prompt above…'
@@ -4341,11 +4456,14 @@ function App() {
                 ? 'Sending...'
                 : failedMessage
                   ? 'Retry message'
+                  : isFocusedClaimMessages
+                    ? 'Send message'
                   : assistanceState?.key === 'response_needed'
                     ? 'Send reply'
                     : 'Send'}
               error={error}
               variant="workspace"
+              showModelControl={!isFocusedClaimMessages}
               claimType={claimType}
               setClaimType={setClaimType}
               claimTypes={runtimeCapabilities.claim_types}

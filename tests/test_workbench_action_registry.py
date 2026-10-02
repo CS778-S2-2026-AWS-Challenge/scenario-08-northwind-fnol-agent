@@ -22,7 +22,7 @@ from backend.services.support import now_utc
 
 
 def test_action_registry_owns_every_projected_action_contract_dimension() -> None:
-    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-10-02.1'
+    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-10-02.2'
     assert set(WORKBENCH_ACTION_REGISTRY) == {
         'claim.abandon',
         'claim.record_decision',
@@ -96,6 +96,10 @@ def test_registry_owns_ownership_inputs_and_conditional_completion_requirements(
         'claim.revision.advance',
         'audit.append',
     )
+
+    message = WORKBENCH_ACTION_REGISTRY['conversation.send_claimant_message']
+    assert message.expected_effects == ('message.append',)
+    assert message.claimant_visible_effects == ('message.append',)
 
 
 def test_registered_target_variants_own_fixed_completion_effects() -> None:

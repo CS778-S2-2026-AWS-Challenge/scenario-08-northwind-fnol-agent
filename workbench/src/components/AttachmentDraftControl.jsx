@@ -89,6 +89,7 @@ const AttachmentDraftControl = forwardRef(function AttachmentDraftControl({
         ref={fileInputRef}
         className="sr-only"
         type="file"
+        disabled={!available}
         multiple
         accept={ACCEPTED_ATTACHMENT_TYPES}
         aria-label="Choose photos or files"

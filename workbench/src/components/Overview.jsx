@@ -41,7 +41,7 @@ export default function Overview({ detail, handoffs, collaborationRequests, supp
         </div>
       )}
       <ClaimDecisionSummary decision={detail.claim_decision} />
-      {!readOnly && <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} ownership={detail.ownership} profile={profile} workflowState={detail.workflow_state} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onAcceptClaim={onAcceptClaim} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onClaimDecision={onClaimDecision} onSection={onSection} />}
+      {!readOnly && (!detail.claim_decision || primaryAction) && <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} ownership={detail.ownership} profile={profile} workflowState={detail.workflow_state} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onAcceptClaim={onAcceptClaim} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onClaimDecision={onClaimDecision} onSection={onSection} />}
       <RecoverySummary context={detail.work_summary?.incomplete_context} />
       <IntegrationSummary summary={detail.integration_summary} />
       <SourceSummary summary={detail.source_summary} />
@@ -90,7 +90,7 @@ function WorkSummary({ detail, profile }) {
         <SummaryItem label={t('Queue')} value={words(detail.work_summary?.queue_key)} />
       </div>
       {detail.terminal_disposition && <TerminalSummary terminal={detail.terminal_disposition} />}
-      <div className="summary-callout"><div><p className="summary-callout__label">{t('Customer-safe next step')}</p><p>{detail.customer_next_step?.summary || t('No next-step summary is available.')}</p></div>{detail.customer_next_step?.expected_by && <time>{formatDateTime(detail.customer_next_step.expected_by)}</time>}</div>
+      {!detail.claim_decision && <div className="summary-callout"><div><p className="summary-callout__label">{t('Customer-safe next step')}</p><p>{detail.customer_next_step?.summary || t('No next-step summary is available.')}</p></div>{detail.customer_next_step?.expected_by && <time>{formatDateTime(detail.customer_next_step.expected_by)}</time>}</div>}
     </section>
   )
 }
