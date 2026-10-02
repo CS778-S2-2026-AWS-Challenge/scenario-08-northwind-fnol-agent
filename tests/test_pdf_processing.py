@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any, cast
@@ -26,7 +27,12 @@ from backend.domain.model_gateway import (
 )
 from backend.domain.models import CompleteEvidenceProcessingRequest, EvidenceFileStatus
 from backend.repositories.fixture import FixtureRepository
-from backend.services.evidence import complete_evidence_processing, reserve_evidence_processing
+from backend.repositories.protocols import IdempotencyRecord
+from backend.services.evidence import (
+    complete_evidence_processing,
+    defer_evidence_processing,
+    reserve_evidence_processing,
+)
 from backend.services.pdf_processing import (
     PDF_MODEL_PROFILE_ID,
     PDF_PROCESSING_PROMPT_VERSION,
@@ -40,12 +46,21 @@ PDF = b'%PDF-1.4\nNorthwind simulated police reference NZP-1042\n%%EOF\n'
 class Gateway:
     capabilities = ModelCapabilities(structured_output=True, document_input=True)
 
-    def __init__(self, response: ModelResponse | ModelGatewayError) -> None:
+    def __init__(
+        self,
+        response: ModelResponse | ModelGatewayError,
+        on_complete: Callable[[], None] | None = None,
+    ) -> None:
         self.response = response
+        self.on_complete = on_complete
         self.requests: list[ModelRequest] = []
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
+        if self.on_complete is not None:
+            callback = self.on_complete
+            self.on_complete = None
+            callback()
         if isinstance(self.response, ModelGatewayError):
             raise self.response
         return self.response
@@ -545,6 +560,107 @@ def test_duplicate_dispatch_with_stale_revision_cannot_call_provider_twice() -> 
 
     assert conflict.value.code == 'REVISION_CONFLICT'
     assert len(gateway.requests) == 1
+
+
+def test_completion_revision_race_requeues_pdf_without_committing_stale_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, storage, claim_id, evidence_id, revision = _uploaded_pdf()
+
+    def mutate_claim(key: str = 'completion-race') -> None:
+        current = cast(Any, repository.get_claim_internal(claim_id))
+        repository.save_claim_mutation(
+            current.model_copy(update={'revision': current.revision + 1}),
+            current.revision,
+            IdempotencyRecord(
+                actor_id=current.customer_id,
+                route=f'/api/v1/claims/{claim_id}/test-revision-race/{key}',
+                key=key,
+                request_fingerprint=f'{key}-v1',
+                claim_id=claim_id,
+                session_id=current.active_session_id or '',
+            ),
+        )
+
+    requeue_attempts = 0
+
+    def defer_after_one_more_claim_race(*args: Any, **kwargs: Any) -> None:
+        nonlocal requeue_attempts
+        requeue_attempts += 1
+        if requeue_attempts == 1:
+            mutate_claim('requeue-race')
+        defer_evidence_processing(*args, **kwargs)
+
+    monkeypatch.setattr(
+        'backend.services.pdf_processing.defer_evidence_processing',
+        defer_after_one_more_claim_race,
+    )
+
+    gateway = Gateway(
+        ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output={
+                'facts': [
+                    {
+                        'field_code': 'authorities.police_report_reference',
+                        'value': 'NZP-RACE',
+                    }
+                ]
+            },
+        ),
+        on_complete=mutate_claim,
+    )
+    processor, _ = _processor(repository, storage, gateway)
+
+    processor.process(_evidence(repository, claim_id, evidence_id), revision)
+
+    queued = _evidence(repository, claim_id, evidence_id)
+    assert queued.file_status is EvidenceFileStatus.PROCESSING
+    assert queued.provenance['processing_state'] == 'queued'
+    assert queued.provenance['processing_last_failure'] == 'CLAIM_REVISION_CONFLICT'
+    assert cast(Any, repository.get_claim_internal(claim_id)).form == {}
+    assert requeue_attempts == 2
+
+    current_revision = cast(Any, repository.get_claim_internal(claim_id)).revision
+    processor.process(queued, current_revision)
+
+    stored = _evidence(repository, claim_id, evidence_id)
+    claim = cast(Any, repository.get_claim_internal(claim_id))
+    assert stored.file_status is EvidenceFileStatus.READY
+    assert claim.form['authorities.police_report_reference'].value == 'NZP-RACE'
+    assert len(gateway.requests) == 2
+
+
+def test_completion_non_revision_error_is_not_requeued_as_a_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, storage, claim_id, evidence_id, revision = _uploaded_pdf()
+    gateway = Gateway(
+        ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output={'facts': []},
+        )
+    )
+    processor, _ = _processor(repository, storage, gateway)
+
+    def reject_completion(*args: Any, **kwargs: Any) -> None:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The completion is no longer valid.',
+        )
+
+    monkeypatch.setattr(
+        'backend.services.pdf_processing.complete_evidence_processing',
+        reject_completion,
+    )
+
+    with pytest.raises(ApiError) as error:
+        processor.process(_evidence(repository, claim_id, evidence_id), revision)
+
+    assert error.value.code == 'INVALID_STATE_TRANSITION'
+    stored = _evidence(repository, claim_id, evidence_id)
+    assert stored.provenance['processing_state'] == 'running'
 
 
 def test_claimant_projection_never_exposes_processing_operation_or_provider_metadata() -> None:
