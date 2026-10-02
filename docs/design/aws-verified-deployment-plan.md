@@ -1,153 +1,203 @@
-# First AWS deployment framework and evidence
+# AWS Deployment Plan
 
-This document records the first AWS deployment framework for the Validation
-Prototype under Issue #1085. It separates the architecture decision from the
-bounded evidence recorded under Issue #786. It does not claim that the full
-FNOL application is deployed or that every AWS capability is available.
+This document records the current AWS deployment plan for the Northwind FNOL
+Agent. It describes a bounded demonstration deployment using synthetic data.
+It is not a production rollout and it does not perform application-data
+migration.
 
-## Framework decision
+## Current Deployment Framework
 
-The first framework uses AWS for static delivery and the host environment while
-the existing application data and object-store runtime remain on one EC2 host.
-The framework is:
+The application is hosted on one Sydney EC2 instance. CloudFront is the public
+HTTPS entry point. Static frontend assets are served from a private S3 bucket;
+the application runtime remains the existing Docker Compose topology.
 
 ```text
 Browser
-  -> CloudFront
-     -> private Sydney S3 origin through Origin Access Control
-        -> static claimant, Workbench, and Admin assets
-
-Browser or API client
-  -> HTTPS API origin at the EC2 host (required, not yet configured)
-     -> Docker Compose
-        -> Backend / FastAPI
-        -> MongoDB replica set
-        -> MinIO
-        -> existing external model gateway
+  -> CloudFront HTTPS
+     -> /                         private S3 origin through OAC
+        -> claimant and Staff Workbench static assets
+     -> /api/*                    EC2 custom origin over HTTP
+        -> Nginx
+           -> Backend / FastAPI
+              -> MongoDB replica set
+              -> MinIO
+              -> existing external model gateway
+     -> /northwind-evidence/*     EC2 -> signed MinIO object path
 ```
 
-CloudFront serves static assets only. It does not expose `/api/*`,
-`/internal/*`, MongoDB, MinIO, evidence objects, or knowledge objects. The API
-origin requires a separately verified HTTPS, certificate or DNS, reverse-proxy,
-and CORS boundary before a browser client can use it. The application retains
-the provider-neutral model gateway; AWS hosting does not imply Bedrock model
-inference.
+The deployment uses Sydney (`ap-southeast-2`) for regional resources.
+CloudFront is global. CloudFront serves the static frontend from the private
+S3 origin and routes API and signed Evidence requests to the EC2 origin.
+MongoDB and MinIO administration ports remain bound to the EC2 host. The
+`/internal/*` surface is not exposed through CloudFront.
 
-This framework is a durable architecture record. It does not change Claim,
-Session, Message, Evidence, RAG, permission, revision, or idempotency
-semantics.
+The current application semantics remain unchanged. This deployment does not
+change Claim, Session, Message, Evidence, RAG, permission, revision,
+idempotency, or audit contracts.
 
-## Decision boundaries
+## AWS Resources In Scope
 
-The framework has the following boundaries and evidence states.
-
-| Component | Framework role | Evidence state | Boundary or restriction |
-| --- | --- | --- | --- |
-| CloudFront and private S3 | Static asset delivery | `validated` | The bounded synthetic check succeeded in Sydney; the origin remains private. |
-| EC2 | Host for the existing Compose topology | `unconfigured` | Launch, security-group, storage, restart, and outbound-network evidence is still required. |
-| Backend API origin | Separate HTTPS entry point | `unconfigured` | No API certificate, DNS, reverse proxy, or browser CORS result is claimed. |
-| Docker Compose | Run Backend, MongoDB, MinIO, and the configured model gateway together | `unconfigured` | Container startup, health, restart, and persistence must be verified on EC2. |
-| MongoDB | First application persistence runtime | `local_only` | The current provider-neutral MongoDB contract remains in use; local evidence is not AWS evidence and this is not Atlas. |
-| MinIO | First Evidence and knowledge object-store runtime | `local_only` | Keep the current S3-compatible boundary until an AWS runtime object-store path is separately verified. |
-| External model gateway | Model inference | `unconfigured` | The existing external gateway remains the model boundary; no Bedrock result is claimed. |
-| IAM runtime identity | Permission boundary for the host and services | `unconfigured` | Use only the course-provided boundary; do not create or assume an unverified role. |
-| Secrets Manager | Candidate runtime secret injection | `unconfigured` | No secret, credential, or secret-read path is committed or claimed. |
-| CloudWatch and budget monitoring | Deployment visibility and cost control | `unconfigured` | Configure and verify only for resources that are actually deployed. |
-| DynamoDB | Not enabled by this framework | `unconfigured` | Local migration rehearsals remain `local_only`; no AWS table, adapter, or read/write result is claimed. |
-| Bedrock and Knowledge Bases | Not enabled by this framework | `unconfigured` | The provider-neutral RAG contract remains; no Bedrock retrieval or citation result is claimed. |
-| ECS/Fargate | Not used for the first framework | `unconfigured` | No image-pull, task-role, networking, secret, or persistent-volume evidence is claimed. |
-| Lambda and EventBridge | Excluded from the core Claim journey | `unconfigured` | Optional non-core automation must not control persistence, Evidence, RAG, or Claim state. |
-
-The framework uses Sydney (`ap-southeast-2`) for regional resources. CloudFront
-is global, but its origin is the Sydney S3 bucket.
-
-## Verified evidence
-
-The following is the bounded evidence recorded for the course-provided AWS
-sandbox. Exact account, bucket, object, distribution, and domain identifiers
-remain in the private operator record and are intentionally absent here.
-
-| Check | Evidence state | Result |
+| Resource | Purpose | Current use |
 | --- | --- | --- |
-| Synthetic object upload to a private Sydney S3 origin | `validated` | Upload succeeded; the object was not public. |
-| CloudFront read through the private origin | `validated` | The request returned HTTP `200`, the expected synthetic 52-byte body, `Via: CloudFront`, and `X-Cache: Hit from cloudfront`. |
-| Direct S3 object request | `validated` | The request returned HTTP `403`, confirming that the bucket was not made public. |
-| EC2 launch and application runtime | `unconfigured` | No EC2 host, Compose startup, or application-call evidence is included in this record. |
-| HTTPS API origin, certificate, DNS, reverse proxy, and CORS | `unconfigured` | No browser-safe API path has been configured or verified. |
-| Runtime identity and secret injection | `unconfigured` | No host-to-service identity or secret-read call has been verified. |
-| AWS persistence, Evidence, RAG, and full FNOL journey | `unconfigured` | No AWS application integration is claimed. |
+| CloudFront | Public HTTPS entry point and path routing | Static frontend, API, and signed Evidence paths |
+| Private S3 bucket | Static frontend origin | Built claimant and Staff Workbench assets; direct public access denied |
+| EC2 | Host for the application stack | Backend, MongoDB, MinIO, Nginx, and deployment files |
+| EBS | EC2 boot and application data volumes | MongoDB, MinIO, SQLite control-plane data, and recovery artifacts |
+| VPC, subnet, and security group | Network boundary | Restrict EC2 access to required demonstration paths |
+| Elastic IP | Stable EC2 origin address | Stable origin address while the test host is active |
+| EC2 Instance Connect | Temporary host administration | Short-lived SSH access for bounded deployment operations |
+| CloudShell | AWS control-plane and deployment shell | AWS CLI and bounded operator commands |
+| Docker Compose | Runtime composition | Backend, MongoDB, MinIO, initialization, and recovery services |
+| External model gateway | Agent model inference | Existing provider-neutral gateway; the actual configured model is external GPT-4o |
+| AWS Budgets | Cost visibility | Existing team budget plus the separate validation cost guard |
 
-The static result proves only private S3-to-CloudFront delivery. A console
-login, local MongoDB or MinIO result, fixture, mock, or external model response
-does not upgrade any other row to `validated`.
+The application uses its existing MongoDB, MinIO, and external model-gateway
+boundaries.
 
-This evidence is supplied to #786 for prerequisite verification. It is not
-deployment-readiness evidence for the EC2 application stack or its API origin.
+## Permission Boundary
 
-## Verification labels and stop conditions
+The course SSO identity is:
 
-Use these labels in the AWS verification record.
+- Role: `ICTGSStudentPermissionSet`
+- Regional resources: `ap-southeast-2`
 
-| Label | Meaning |
-| --- | --- |
-| `validated` | A real bounded call or journey succeeded in the named AWS environment. |
-| `permission_denied` | AWS returned an explicit authorization denial. |
-| `unreachable` | The endpoint or network path could not be reached. |
-| `unconfigured` | The required resource or runtime configuration does not exist in the checked environment. |
-| `unavailable` | The service or capability cannot be used under the checked account constraints. |
-| `local_only` | The result came from local MongoDB, MinIO, a fixture, or a mock environment. |
+The account identity is retained only in the private operator evidence and is
+not committed here.
 
-Do not substitute local results for a required AWS capability. Stop the
-deployment record when a required capability is `permission_denied`,
-`unreachable`, `unconfigured`, or `unavailable`. In particular, do not
-report the following as complete AWS integration:
+The current identity can operate the bounded CloudFront, S3, EC2, networking,
+CloudShell, and budget resources used by this plan. It cannot pass an EC2 IAM
+role for the application host. Pre-created roles exist in the account, but the
+current deployment does not depend on attaching one. EC2 Instance Connect is
+used for short-lived host access.
 
-- Browser login without a running application call.
-- An S3 console upload without Backend runtime access.
-- Local MongoDB or MinIO data without EC2 restart and readback evidence.
-- Local RAG retrieval without a verified deployed retrieval provider.
-- A fixture or external model response labelled as Bedrock output.
-- A static CloudFront page calling an unspecified plain-HTTP API endpoint.
+No teaching resources related to AWSAccelerator, ControlTower, or CloudHealth
+are modified. No credentials, access keys, private keys, `.env` files, or
+runtime secret values are committed to the repository.
 
-## Activation sequence
+## Runtime Configuration
 
-When the account and permissions are available, validate the framework in this
-order. Each step must retain its actual evidence label.
+The EC2 host runs the existing provider-neutral Compose deployment:
 
-1. Verify Sydney-region EC2 launch, networking, storage, and the permitted
-   runtime identity using synthetic data and bounded resource sizes.
-2. Start the existing Compose topology and verify health, restart, persistence,
-   claimant, Workbench, Evidence, RAG, and model-gateway smoke paths.
-3. Configure an HTTPS API origin and its CORS policy separately from the
-   static CloudFront distribution, then verify browser-to-API calls.
-4. Publish static clients to the private S3 origin and verify CloudFront
-   delivery without exposing internal services.
-5. Add CloudWatch and budget visibility for the resources actually used, and
-   stop non-essential resources outside demonstrations.
-6. Record exact identifiers only in the approved private AWS verification
-   record. Keep repository and GitHub evidence anonymized.
+- Backend / FastAPI serves the application API.
+- MongoDB replica set stores Claim, Session, Message, workflow, revision,
+  idempotency, and application audit state according to the current local MVP
+  contract.
+- MinIO stores Evidence bytes and governed policy-knowledge objects.
+- SQLite volumes retain the existing identity and control-plane state.
+- The existing external model gateway provides model inference.
+- Nginx supplies the EC2 HTTP origin and the signed Evidence routing boundary.
 
-This sequence does not activate DynamoDB, Bedrock, Knowledge Bases,
-ECS/Fargate, or an S3 Evidence adapter. Each future activation requires a
-separate bounded task against the then-current contracts and permissions.
+Secrets are supplied only through a protected operator-side deployment
+mechanism during a test run. They are not stored in GitHub, S3 static assets,
+CloudFront configuration, or frontend code.
 
-## Migration boundary
+## Historical Application Rehearsal Evidence (2026-10-02)
 
-The repository's MongoDB-to-DynamoDB design and local rehearsal remain
-preparation evidence only. They do not enable DynamoDB and are not evidence of
-AWS reads or writes. This document does not close, supersede, or otherwise
-dispose of PR #1010; that PR's treatment is outside this architecture record.
+This is the latest successful application rehearsal recorded for this plan. It
+used synthetic data and pinned application commit
+`f1b897d76dbb3d5d854b6172c7cc49907e3f902a` on a Sydney `t3.small`. It is
+historical evidence for that exact release, not evidence that the current
+`origin/main` or a future frozen release has already been deployed.
 
-Evidence bytes and governed knowledge objects remain behind the current MinIO
-boundary for the first EC2 framework. The synthetic S3 check must not be
-interpreted as permission to change the Evidence adapter or to copy
-policyholder data to S3.
+| Check | Result | Boundary |
+| --- | --- | --- |
+| Private S3 to CloudFront | Passed | Static synthetic content was served through CloudFront; direct S3 access was denied |
+| CloudFront API routing | Passed | `/api/health` reached the EC2 origin through CloudFront |
+| EC2 host | Passed | Small test instance started and returned healthy system and instance status |
+| EC2 administration | Passed | EC2 Instance Connect accepted a short-lived public key and an SSH command completed |
+| Compose initialization | Passed | Backend, MongoDB, and MinIO became healthy; initialization completed |
+| Backend readiness | Passed with degraded status | Persistence and object services were available; existing fixture-backed services remain explicit |
+| External model gateway | Passed | Live structured request used the configured external GPT-4o gateway |
+| Motor, home, and contents workflows | Passed for bounded HTTP journeys | Account/session, model turn, Evidence upload/completion, support request, staff reply, and claimant readback completed |
+| Claimant browser path | Passed for bounded coverage | Registration, model reply, and synthetic JPEG upload reached `Ready` |
+| Staff Workbench | Passed for bounded coverage | Staff login and all three product conversations were visible after recovery |
+| Governed RAG | Passed against MinIO | Citations contained document, chunk, version, checksum, and source metadata; missing evidence returned `no_evidence` |
+| Container and host restart | Passed | Revision, messages, Evidence checksum, and claim-creation replay survived restart and EC2 reboot |
+| Backup and restore rehearsal | Passed | MongoDB, MinIO, and SQLite data restored to separate named volumes and read back |
+| Cost guard | Configured and read back | Validation budget covers the existing baseline plus an additional USD 200; actual-cost thresholds are configured |
+| Failure handling | Passed for bounded checks | Model timeout returned a retryable timeout; unavailable MinIO returned `unavailable` with zero citations; fixture fallback was refused |
 
-## Cost and safety controls
+These results demonstrate the bounded test deployment. They are not a claim
+that the service is a production-ready, always-on system.
 
-Use one smallest suitable EC2 host, one private S3 origin, synthetic data,
-bounded logs, and stopped resources outside demonstrations. Do not provision
-DynamoDB, Bedrock Knowledge Bases, OpenSearch, ECS/Fargate, or always-on search
-infrastructure without a separate capability and cost review. Never commit
-credentials, endpoints, account identifiers, policyholder data, or raw
-credential-bearing errors.
+## Evidence and RAG Boundary
+
+Evidence is uploaded through the signed application path and stored in MinIO.
+The application records the claim/evidence association, checksum, and object
+metadata in its existing persistence contract. Unsigned object access is
+denied.
+
+Governed policy knowledge is initialized into MinIO using the current local
+knowledge contract. Retrieval returns citations with document, chunk, version,
+checksum, and source metadata. A missing applicable document returns
+`no_evidence`; an unavailable knowledge service returns `unavailable` without
+fabricating citations.
+
+The external model gateway remains the model boundary. AWS hosting does not
+change the selected inference provider.
+
+## Operational Boundaries
+
+The deployment is intended for a bounded synthetic-data demonstration. Before
+each demonstration, the operator must verify the current application release,
+the model-gateway configuration, the EC2 host state, the Compose health state,
+the CloudFront distribution state, and the active cost guard.
+
+The API origin currently uses HTTP between CloudFront and EC2 for the bounded
+test path. A production deployment would require a trusted certificate and a
+DNS name for the EC2 origin. This plan does not claim end-to-end TLS from
+CloudFront to EC2.
+
+The deployment must not expose MongoDB, MinIO administration, SQLite files,
+runtime secrets, or internal application endpoints to the public Internet.
+Evidence remains accessible only through the application-authorized signed
+path.
+
+## Known Limits
+
+- The rehearsal was performed against the pinned release stated above. It is
+  not evidence for a newer unreconciled `origin/main` release.
+- The external model timeout is bounded at the application gateway. A long
+  request still needs a separate end-to-end acceptance decision if the final
+  demonstration requires requests longer than the CloudFront origin budget.
+- The current object-store adapter records a controlled RAG read timeout as
+  `unavailable`; a separate timeout classification is not claimed.
+- Browser evidence covers the bounded claimant and Workbench paths, not every
+  browser route or an external insurer submission.
+- Audit preservation after restart and restore requires a separate field-level
+  acceptance check before production use.
+- Retained EBS volumes, private S3 artifacts, and other retained test objects
+  can continue to incur storage charges after the active compute resources are
+  stopped.
+
+## Cleanup and Cost Control
+
+The active test environment must be stopped when it is not being demonstrated.
+Temporary SSH ingress, public addresses, and CloudFront test exposure must be
+removed after a bounded run. Retained data volumes and private artifacts must
+be reviewed separately because stopping EC2 does not stop their storage cost.
+
+The pre-existing team budget named `Budget` is a school-managed annual cost
+budget and is already above its nominal USD 200 amount. It is retained as
+account-level cost information and is not treated as evidence that this
+validation deployment created the historical spend. The separate Northwind
+validation cost guard is the relevant monitor for this work.
+
+## Future Demonstration Acceptance Checklist
+
+This remains a future acceptance checklist. It is not a claim that every item
+is currently satisfied for the next frozen release:
+
+1. CloudFront serves the private S3 frontend and routes the required API and
+   signed Evidence paths.
+2. EC2 starts the existing Compose topology with healthy Backend, MongoDB, and
+   MinIO services.
+3. Motor, home, and contents workflows complete with synthetic data.
+4. Evidence checksums, governed RAG citations, revision, idempotency, and
+   restart readback remain consistent with the existing application contract.
+5. The external model gateway is available and its configured release is
+   recorded.
+6. Cost monitoring is visible and the environment is stopped after the test.
+
+No data migration, new AWS persistence adapter, new model provider, or change
+to the existing business lifecycle is required by this deployment plan.
