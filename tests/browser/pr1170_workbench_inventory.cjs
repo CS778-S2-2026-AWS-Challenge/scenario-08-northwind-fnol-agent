@@ -183,7 +183,42 @@ async function main() {
     }
     await screenshot(page, '02-at02-conversation')
 
-    console.log('[5/9] Exercise presence failure, Take Claim, and Claim decision on AT-10')
+    console.log('[5/10] Verify own versus foreign realtime revision notices in two Workbench pages')
+    await page.goto(`${WORKBENCH}/workbench/claims/${AT02}/summary`, { waitUntil: 'domcontentloaded' })
+    const reviewAcceptance = page.getByRole('button', { name: 'Review acceptance', exact: true })
+    await reviewAcceptance.waitFor({ state: 'visible', timeout: 30000 })
+    await reviewAcceptance.click()
+    const confirmAccept = page.getByRole('button', { name: /Confirm Accept Claim/i })
+    await confirmAccept.waitFor({ state: 'visible', timeout: 10000 })
+    await confirmAccept.click()
+
+    await page.goto(`${WORKBENCH}/workbench/claims/${AT02}/conversation`, { waitUntil: 'domcontentloaded' })
+    const composer = page.getByLabel('Message to claimant')
+    await composer.waitFor({ state: 'visible', timeout: 30000 })
+    const ownMessage = 'Exact-head own mutation check.'
+    await composer.fill(ownMessage)
+    await page.getByRole('button', { name: 'Send message', exact: true }).click()
+    await page.getByText(ownMessage, { exact: true }).waitFor({ state: 'visible', timeout: 30000 })
+    await page.waitForTimeout(500)
+    assert(
+      await page.getByText(/changed in another session/i).count() === 0,
+      'The current page announced its own successful mutation as an external change.',
+    )
+
+    const otherPage = await context.newPage()
+    await otherPage.goto(`${WORKBENCH}/workbench/claims/${AT02}/conversation`, { waitUntil: 'domcontentloaded' })
+    const otherComposer = otherPage.getByLabel('Message to claimant')
+    await otherComposer.waitFor({ state: 'visible', timeout: 30000 })
+    const foreignMessage = 'Exact-head second-session mutation check.'
+    await otherComposer.fill(foreignMessage)
+    await otherPage.getByRole('button', { name: 'Send message', exact: true }).click()
+    await otherPage.getByText(foreignMessage, { exact: true }).waitFor({ state: 'visible', timeout: 30000 })
+    await page.getByText(/changed in another session/i).waitFor({ state: 'visible', timeout: 30000 })
+    result.checks.own_mutation_notice_suppressed = true
+    result.checks.foreign_mutation_notice_visible = true
+    await otherPage.close()
+
+    console.log('[6/10] Exercise presence failure, Take Claim, and Claim decision on AT-10')
     await page.goto(`${WORKBENCH}/workbench/claims/${AT10}/summary`, { waitUntil: 'domcontentloaded' })
     const reviewOwnership = page.getByRole('button', { name: 'Review ownership', exact: true })
     await reviewOwnership.waitFor({ state: 'visible', timeout: 30000 })
@@ -229,7 +264,7 @@ async function main() {
     await captureSurface(page, 'at10-after-decision')
     await screenshot(page, '03-at10-approved')
 
-    console.log('[6/9] Verify Staff Agent fail-closed behavior')
+    console.log('[7/10] Verify Staff Agent fail-closed behavior')
     await page.goto(`${WORKBENCH}/workbench`, { waitUntil: 'domcontentloaded' })
     const openAgent = page.getByRole('button', { name: 'Staff Agent', exact: true }).first()
     await openAgent.waitFor({ state: 'visible', timeout: 30000 })
@@ -250,7 +285,7 @@ async function main() {
     await screenshot(page, '04-staff-agent-unavailable')
     await page.getByRole('button', { name: 'Close Staff Agent', exact: true }).click()
 
-    console.log('[7/9] Verify staff-scoped Claim-tab persistence')
+    console.log('[8/10] Verify staff-scoped Claim-tab persistence')
     const tabKeys = await page.evaluate(() => (
       Object.keys(localStorage).filter((key) => key.startsWith('northwind.workbench.tabs.v1'))
     ))
@@ -258,7 +293,7 @@ async function main() {
     assert(tabKeys.some((key) => key.startsWith('northwind.workbench.tabs.v1:')), `No staff-scoped tab key found: ${JSON.stringify(tabKeys)}`)
     result.checks.staff_scoped_tab_storage = tabKeys
 
-    console.log('[8/9] Enumerate settings and phone-width behavior')
+    console.log('[9/10] Enumerate settings and phone-width behavior')
     for (const section of ['profile', 'security', 'notifications', 'appearance', 'help']) {
       await page.goto(`${WORKBENCH}/workbench/settings/${section}`, { waitUntil: 'domcontentloaded' })
       await page.getByRole('heading').first().waitFor({ state: 'visible', timeout: 30000 })
@@ -283,7 +318,7 @@ async function main() {
     await captureSurface(page, 'phone-workbench-agent')
     await screenshot(page, '05-phone-agent')
 
-    console.log('[9/9] Exact-head Workbench inventory evidence passed')
+    console.log('[10/10] Exact-head Workbench inventory evidence passed')
     result.status = 'PASS'
     fs.writeFileSync(
       path.join(ARTIFACT_DIR, 'pr1170-workbench-inventory-PASS.json'),
