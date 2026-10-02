@@ -75,22 +75,18 @@ def test_the_judge_reads_the_reply_with_the_turn_ledger() -> None:
 def test_a_clean_judgement_overrides_the_english_rules() -> None:
     judge = ReplyJudge(lambda: _Gateway({'problems': []}))
     # The rules would flag this wording; the judge, reading the turn, does not.
-    assert review_reply(_turn("I've escalated this for a review."), judge).consistent
+    assert review_reply(_turn("I've escalated this for a review. Anything else?"), judge).consistent
 
 
 def test_the_rules_take_over_when_the_judge_cannot_answer() -> None:
     judge = ReplyJudge(lambda: _Gateway(error=True))
-    review = review_reply(_turn('Please check with your insurer.'), judge)
+    review = review_reply(_turn('Please check with your insurer. Anything else?'), judge)
     assert [item.kind for item in review.inconsistencies] == ['refers_to_insurer']
 
 
 def test_a_reply_that_leaves_the_claimant_stuck_is_soft() -> None:
-    stuck = ReplyJudge(
-        lambda: _Gateway(
-            {'problems': [{'kind': 'leaves_claimant_stuck', 'detail': 'Thanks, noted.'}]}
-        )
-    )
-    review = review_reply(_turn('Thanks, noted.'), stuck)
+    clean = ReplyJudge(lambda: _Gateway({'problems': []}))
+    review = review_reply(_turn('Thanks, noted.'), clean)
     # Sent back once, but a rewrite that is still only stuck is not a false statement.
     assert not review.consistent and review.truthful
 
@@ -106,3 +102,20 @@ def test_no_further_model_call_starts_after_the_turn_limit() -> None:
     with pytest.raises(ModelGatewayError) as raised:
         agent._require_turn_time(datetime.now(UTC) - timedelta(seconds=41))
     assert raised.value.code is ModelGatewayErrorCode.TIMEOUT
+
+
+@pytest.mark.parametrize(
+    ('reply', 'changes', 'stuck'),
+    [
+        ('Thanks, noted.', {}, True),
+        ('Thanks, noted. Which road were you on?', {}, False),
+        ('Thanks, noted.', {'turn_ending': 'nothing_needed'}, False),
+        ('Thanks, noted.', {'service_identities': ('vehicle_recovery_request',)}, False),
+        ('Thanks, noted.', {'action': 'answer_only'}, False),
+    ],
+)
+def test_a_reply_with_nothing_to_answer_or_do_is_caught_without_a_model(
+    reply: str, changes: dict[str, Any], stuck: bool
+) -> None:
+    kinds = [item.kind for item in review_reply(_turn(reply, **changes)).inconsistencies]
+    assert ('leaves_claimant_stuck' in kinds) is stuck

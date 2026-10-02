@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
@@ -47,6 +47,7 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     NeededFor,
+    OpenItemState,
     ProposedFormChange,
     ResponsibleParty,
     SessionRecord,
@@ -56,7 +57,11 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
-from backend.domain.open_items import TURN_RECORD_KEY, interpreted_evidence_kinds
+from backend.domain.open_items import (
+    TURN_RECORD_KEY,
+    interpreted_evidence_kinds,
+    staff_open_items,
+)
 from backend.domain.recovery_policy_registry import RecoveryTrigger, classify_recovery
 from backend.domain.retrieval import PolicyRetrievalRecord, ReviewSignalRecord
 from backend.domain.runtime import (
@@ -365,12 +370,17 @@ def _value_sources(field: StructuredFormField) -> list[str]:
     return current.source_refs if current is not None else field.source_refs
 
 
+def _question_key(text: str) -> str:
+    return ' '.join(re.sub(r'[^\w\s]', ' ', text.casefold()).split())
+
+
 def build_turn_record(
     *,
     form_changes: Mapping[str, StructuredFormField],
     claimant_message: MessageRecord,
     validated: Any,
     opened_evidence: EvidenceRecord | None,
+    open_questions: Collection[str] = (),
 ) -> dict[str, Any]:
     """What this turn recorded, stored with the Agent message in the same save.
 
@@ -393,15 +403,21 @@ def build_turn_record(
     record: dict[str, Any] = {'recorded_facts': recorded}
     if validated is None:
         return record
-    questions = [
-        {
-            'question_id': new_id('nwq'),
-            'question': item.question,
-            'claimant_wording': item.claimant_wording,
-            'model_view': item.model_view,
-        }
-        for item in getattr(validated, 'northwind_questions', ())
-    ]
+    # A question already waiting for the claims team is not passed on twice.
+    asked = {_question_key(text) for text in open_questions}
+    questions = []
+    for item in getattr(validated, 'northwind_questions', ()):
+        if _question_key(item.question) in asked:
+            continue
+        asked.add(_question_key(item.question))
+        questions.append(
+            {
+                'question_id': new_id('nwq'),
+                'question': item.question,
+                'claimant_wording': item.claimant_wording,
+                'model_view': item.model_view,
+            }
+        )
     opened = [item['question_id'] for item in questions]
     if opened_evidence is not None:
         opened.insert(0, opened_evidence.evidence_id)
@@ -1176,6 +1192,11 @@ def reduce_turn(
                 claimant_message=claimant_message,
                 validated=validated,
                 opened_evidence=pending_evidence,
+                open_questions=[
+                    item.subject
+                    for item in staff_open_items((), claim_messages(repository, claim))
+                    if item.kind == 'question' and item.state is OpenItemState.OPEN
+                ],
             ),
         },
         in_reply_to=claimant_message.message_id,

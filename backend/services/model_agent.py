@@ -1548,12 +1548,24 @@ class GatewayAgent:
                         started_at=started_at,
                         request_budgets=request_budgets,
                     )
-                    if (
-                        result.validated_turn is not None
-                        and not review_reply(result.validated_turn, self._reply_judge).truthful
-                    ):
+                    second_review = (
+                        review_reply(result.validated_turn, self._reply_judge)
+                        if result.validated_turn is not None
+                        else None
+                    )
+                    if second_review is not None and not second_review.truthful:
                         # Still untrue after the rewrite: the saved message enters
                         # the existing persist-first recovery path unchanged.
+                        logger.info(
+                            'agent_turn_consistency_failed',
+                            extra={
+                                'claim_id': context.claim.claim_id,
+                                'problems': [
+                                    {'kind': item.kind, 'detail': item.detail}
+                                    for item in second_review.inconsistencies
+                                ],
+                            },
+                        )
                         raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
             except TurnFieldContractViolation as contract_error:
                 if plan.schema_id == 'claimant.turn.v1':

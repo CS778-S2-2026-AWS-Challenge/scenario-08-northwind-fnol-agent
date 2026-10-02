@@ -128,6 +128,25 @@ def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
                 detail='summarize was chosen but summary_fields did not name any current field',
             )
         )
+    asks_for_documents = any(item.stance == 'asking' for item in validated.document_requests)
+    if (
+        validated.turn_ending is not None
+        and '?' not in validated.reply
+        and validated.turn_ending != 'nothing_needed'
+        and validated.action not in {'summarize', 'answer_only', 'escalate'}
+        and validated.escalation is None
+        and not validated.service_identities
+        and not asks_for_documents
+        and not validated.northwind_questions
+    ):
+        # Nothing to answer, nothing to act on, no summary to check, and the
+        # model did not say nothing is needed: the claimant is left guessing.
+        problems.append(
+            ReplyInconsistency(
+                kind='leaves_claimant_stuck',
+                detail='the reply asks nothing, offers nothing and does not say what happens next',
+            )
+        )
     return problems
 
 

@@ -37,7 +37,6 @@ PROBLEM_KINDS = (
     'refers_to_insurer',
     'claims_escalation_without_one',
     'promises_answer_without_question',
-    'leaves_claimant_stuck',
 )
 
 JUDGE_INSTRUCTION = """You check one reply from Northwind's claims assistant against the ledger of \
@@ -55,10 +54,6 @@ insurance company.
 passed the claim to a person.
 - promises_answer_without_question: questions_passed_on is empty and the reply says the claims \
 team will confirm, answer or check something for the claimant.
-- leaves_claimant_stuck: the reply asks nothing, offers nothing (offered_services, \
-documents_asked and questions_passed_on are empty), is not a summary to check, and does not say \
-what happens next, so the claimant cannot tell what to say or do. Do not judge which ending label \
-was chosen.
 
 Return {"problems": []} when the reply is fine. Each detail quotes the words at fault."""
 

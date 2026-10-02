@@ -304,3 +304,29 @@ def test_a_turn_records_its_facts_and_opens_items_the_claimant_can_see(
     ]
     assert {item['opened_in_message_id'] for item in items} == {turn['agent_message']['message_id']}
     assert 'model_view' not in items[1]
+
+
+def test_a_question_already_with_the_claims_team_is_not_passed_on_twice(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    passed_on = {key: QUESTION[key] for key in ('question', 'claimant_wording', 'model_view')}
+    provider = V8JourneyProvider(
+        [
+            {
+                **envelope(fields=[fact('claim.product_family', 'motor', 'rear-ended')]),
+                'northwind_questions': [passed_on],
+            },
+            {
+                **envelope(),
+                'northwind_questions': [{**passed_on, 'question': 'Is my hire car covered'}],
+            },
+        ]
+    )
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'motor', 'one-question')
+
+    journey.send('I was rear-ended. Will you pay for a hire car?')
+    journey.send('Just checking you have the hire car question.')
+
+    questions = [item for item in journey.view()['open_items'] if item['kind'] == 'question']
+    assert len(questions) == 1
