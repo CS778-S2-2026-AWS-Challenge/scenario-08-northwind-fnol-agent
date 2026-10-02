@@ -2198,9 +2198,9 @@ def submit_message(
             and item.status == 'open'
             and item.confirmation_request is not None
         ),
-        key=lambda item: item.confirmation_request.claim_revision
-        if item.confirmation_request
-        else 0,
+        key=lambda item: (
+            item.confirmation_request.claim_revision if item.confirmation_request else 0
+        ),
         default=None,
     )
     confirmation_revision_before_message = claim.revision
