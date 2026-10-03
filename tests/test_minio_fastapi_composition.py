@@ -6,7 +6,6 @@ from typing import Any, cast
 import pytest
 from botocore.exceptions import EndpointConnectionError
 from fastapi.testclient import TestClient
-from starlette.requests import Request
 
 from backend.adapters.evidence_storage import MinioEvidenceStorage
 from backend.app import create_app
@@ -179,11 +178,12 @@ def test_minio_profile_rejects_fixture_proxy_without_reading_body(
         )
         evidence_id = str(requested.json()['evidence_id'])
 
-        async def fail_if_streamed(_request: Request) -> Any:
+        async def fail_if_read(*_args: Any, **_kwargs: Any) -> bytes:
             raise AssertionError('The fixture-only proxy must reject before reading the body.')
-            yield b''
 
-        monkeypatch.setattr(Request, 'stream', fail_if_streamed)
+        # Patch the route's body reader rather than Request.stream: Starlette's HTTP
+        # middleware also calls Request.stream while forwarding the request.
+        monkeypatch.setattr('backend.api.evidence._read_bounded_upload', fail_if_read)
         rejected = client.put(
             f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/content',
             headers={**CLAIMANT_AUTH, 'Content-Type': 'image/jpeg'},

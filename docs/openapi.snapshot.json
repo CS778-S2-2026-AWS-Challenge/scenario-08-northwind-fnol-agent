@@ -16320,6 +16320,115 @@
         "title": "WorkbenchActionResultDefaults",
         "type": "object"
       },
+      "WorkbenchActiveClaimCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchActiveClaimStatusCount"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitation"
+          },
+          "navigation_total": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation Total"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchViewCountStatus"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WorkbenchActiveClaimCounts",
+        "type": "object"
+      },
+      "WorkbenchActiveClaimProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "entered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entered At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchActiveClaimStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WorkbenchActiveClaimProjection",
+        "type": "object"
+      },
+      "WorkbenchActiveClaimStatus": {
+        "enum": [
+          "urgent",
+          "human_assistance",
+          "professional_review",
+          "pending_creation"
+        ],
+        "title": "WorkbenchActiveClaimStatus",
+        "type": "string"
+      },
+      "WorkbenchActiveClaimStatusCount": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchActiveClaimStatus"
+          }
+        },
+        "required": [
+          "status",
+          "count"
+        ],
+        "title": "WorkbenchActiveClaimStatusCount",
+        "type": "object"
+      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -16508,6 +16617,16 @@
       "WorkbenchClaimDetail": {
         "additionalProperties": false,
         "properties": {
+          "active_claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActiveClaimProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "active_session_id": {
             "anyOf": [
               {
@@ -16786,6 +16905,13 @@
       "WorkbenchClaimFilterMetadata": {
         "additionalProperties": false,
         "properties": {
+          "active_claim_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchFilterOption"
+            },
+            "title": "Active Claim Statuses",
+            "type": "array"
+          },
           "priorities": {
             "items": {
               "$ref": "#/components/schemas/WorkbenchFilterOption"
@@ -16823,6 +16949,7 @@
           "views",
           "workflow_states",
           "priorities",
+          "active_claim_statuses",
           "tags",
           "tag_registry_version"
         ],
@@ -16832,6 +16959,16 @@
       "WorkbenchClaimListItem": {
         "additionalProperties": false,
         "properties": {
+          "active_claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActiveClaimProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "claim_id": {
             "title": "Claim Id",
             "type": "string"
@@ -16928,6 +17065,9 @@
       "WorkbenchClaimListResponse": {
         "additionalProperties": false,
         "properties": {
+          "active_claim_counts": {
+            "$ref": "#/components/schemas/WorkbenchActiveClaimCounts"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/WorkbenchClaimListItem"
@@ -16945,7 +17085,8 @@
         "required": [
           "items",
           "page",
-          "view_counts"
+          "view_counts",
+          "active_claim_counts"
         ],
         "title": "WorkbenchClaimListResponse",
         "type": "object"
@@ -18096,6 +18237,7 @@
           "completed",
           "abandoned",
           "closed",
+          "active_claims",
           "urgent",
           "human_requests",
           "incomplete_claims",
@@ -26116,6 +26258,22 @@
                 }
               ],
               "title": "View"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/WorkbenchActiveClaimStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active Status"
             }
           },
           {

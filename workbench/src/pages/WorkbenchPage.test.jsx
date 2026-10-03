@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -58,6 +58,10 @@ const externalActionTracker = vi.hoisted(() => ({
   lastPromise: null,
 }))
 
+const navigationRail = vi.hoisted(() => ({
+  render: vi.fn(),
+}))
+
 vi.mock('../api.js', () => ({ workbenchApi: api }))
 vi.mock('../auth/auth-context.js', () => ({
   useAuth: () => ({
@@ -67,7 +71,12 @@ vi.mock('../auth/auth-context.js', () => ({
   }),
 }))
 vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs }))
-vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
+vi.mock('../components/NavigationRail.jsx', () => ({
+  default: (props) => {
+    navigationRail.render(props)
+    return null
+  },
+}))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
   default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onAcceptClaim, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
@@ -122,12 +131,19 @@ const metadata = {
     { value: 'completed', label: 'Completed', group: 'terminal' },
     { value: 'abandoned', label: 'Abandoned', group: 'terminal' },
     { value: 'closed', label: 'Closed', group: 'terminal' },
+    { value: 'active_claims', label: 'Active claims', group: 'operational' },
     { value: 'urgent', label: 'Urgent', group: 'operational' },
     { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
     { value: 'created_routed', label: 'Created / routed', group: 'operational' },
   ],
   workflow_states: [{ value: 'collecting', label: 'Collecting' }],
   priorities: [{ value: 'routine', label: 'Routine' }],
+  active_claim_statuses: [
+    { value: 'urgent', label: 'Urgent' },
+    { value: 'human_assistance', label: 'Human assistance' },
+    { value: 'professional_review', label: 'Professional review' },
+    { value: 'pending_creation', label: 'Pending creation' },
+  ],
   tags: [],
   tag_registry_version: '0.3',
 }
@@ -164,6 +180,7 @@ const claim = {
   workflow_state: 'awaiting_evidence',
   ownership: { state: 'unassigned', current_staff_access: 'read_only' },
   priority_projection: { level: 'routine' },
+  active_claim: { status: 'urgent', entered_at: '2026-09-09T11:00:00Z' },
   work_summary: { queue_key: 'waiting_user', current_work_item: null },
   allowed_actions: [],
   tags: [],
@@ -183,6 +200,17 @@ const agentConversationSummary = {
 const availableCounts = {
   status: 'available',
   items: metadata.views.map((view) => ({ view: view.value, count: 1 })),
+  limitation: null,
+}
+
+const availableActiveClaimCounts = {
+  status: 'available',
+  total: 1,
+  navigation_total: 1,
+  items: metadata.active_claim_statuses.map((status) => ({
+    status: status.value,
+    count: status.value === 'urgent' ? 1 : 0,
+  })),
   limitation: null,
 }
 
@@ -210,6 +238,9 @@ function renderPage(initialEntry) {
         <Route path="/workbench/conversations" element={page} />
         <Route path="/workbench/conversations/:conversationSessionId" element={page} />
         <Route path="/workbench/agent/sessions/:agentSessionId" element={page} />
+        <Route path="/workbench/active" element={page} />
+        <Route path="/workbench/active/claims/:claimId" element={page} />
+        <Route path="/workbench/active/claims/:claimId/:section" element={page} />
         <Route path="/workbench/drafts" element={page} />
         <Route path="/workbench/drafts/:claimId" element={page} />
         <Route path="/workbench/drafts/:claimId/:section" element={page} />
@@ -233,6 +264,7 @@ describe('WorkbenchPage queue routing', () => {
       items: [claim],
       page: { next_cursor: null },
       view_counts: availableCounts,
+      active_claim_counts: availableActiveClaimCounts,
     })
     api.claim.mockResolvedValue(claim)
     api.fields.mockResolvedValue({ items: [], page: { next_cursor: null }, status: 'available' })
@@ -443,6 +475,73 @@ describe('WorkbenchPage queue routing', () => {
     expect(api.reconcileExternalTaskResponse).not.toHaveBeenCalled()
     expect(api.reopenClaim).not.toHaveBeenCalled()
     expect(api.recordClaimDecision).not.toHaveBeenCalled()
+  })
+
+  it('loads, filters, and deep-links Active claims in an interactive workspace', async () => {
+    const user = userEvent.setup()
+    renderPage('/workbench/active?active_status=urgent')
+
+    expect(await screen.findByRole('heading', { name: 'Active claims' })).toBeVisible()
+    expect(screen.getByText('Claims needing continued attention')).toBeVisible()
+    await waitFor(() => expect(api.claims).toHaveBeenCalledWith(
+      'staff-token',
+      expect.objectContaining({
+        view: 'active_claims',
+        active_status: 'urgent',
+      }),
+    ))
+
+    await user.click(await screen.findByText('NW-900'))
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workbench/active/claims/clm_route_1?active_status=urgent',
+    ))
+    expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1')
+    expect(screen.getByTestId('workspace-mode')).toHaveTextContent('interactive')
+  })
+
+  it('keeps an authoritative zero in the Active claims navigation state', async () => {
+    api.claims.mockResolvedValue({
+      items: [],
+      page: { next_cursor: null },
+      view_counts: availableCounts,
+      active_claim_counts: {
+        status: 'available',
+        total: 0,
+        navigation_total: 0,
+        items: availableActiveClaimCounts.items.map((item) => ({ ...item, count: 0 })),
+        limitation: null,
+      },
+    })
+
+    renderPage('/workbench/active')
+
+    await waitFor(() => expect(navigationRail.render).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCount: 0 }),
+    ))
+  })
+
+  it('presents a readable recovery state when the Active claims view is not published', async () => {
+    const user = userEvent.setup()
+    api.claimFilterMetadata.mockResolvedValue({
+      ...metadata,
+      views: metadata.views.filter(({ value }) => value !== 'active_claims'),
+    })
+
+    const { container } = renderPage('/workbench/active')
+
+    expect(await screen.findByRole('heading', { name: 'Active claims' })).toBeVisible()
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveClass('queue-state--unavailable')
+    expect(within(alert).getByText('Active claims is unavailable')).toBeVisible()
+    expect(alert).toHaveTextContent('The Workbench service has not published this queue yet.')
+    expect(alert).not.toHaveTextContent('active_claims')
+    expect(container.querySelector('.queue-state__icon')).toHaveAttribute('aria-hidden', 'true')
+    expect(api.claims).not.toHaveBeenCalled()
+
+    await user.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(api.claimFilterMetadata).toHaveBeenCalledTimes(2))
   })
 
   it('keeps the submitted Claim workspace interactive for projected actions', async () => {
@@ -984,6 +1083,7 @@ describe('WorkbenchPage queue routing', () => {
     })
 
     renderPage('/workbench/conversations')
+    await user.click(await screen.findByRole('tab', { name: 'My conversations, 1 conversations' }))
     await user.click(await screen.findByRole('button', { name: /Alex Morgan/ }))
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
@@ -1162,6 +1262,8 @@ describe('WorkbenchPage queue routing', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
       '/workbench/conversations/ses_help',
     ))
+    expect(screen.getByRole('tab', { name: 'Action needed, 0 conversations' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'My conversations, 1 conversations' })).toBeInTheDocument()
   })
 
   it('removes the previous queue rows while a changed filter fails to load', async () => {

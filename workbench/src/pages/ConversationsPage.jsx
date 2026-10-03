@@ -77,16 +77,15 @@ export default function ConversationsPage({
   const claimConversations = conversations
     .filter((item) => item.kind === 'claim')
     .map((item) => ({ ...item, draft: conversationTabByClaim.get(item.claim_id)?.draft || '' }))
-  const assignedConversations = claimConversations.filter((item) => isAssignedToViewer(item, profile))
+  const assignedConversations = claimConversations.filter((item) => (
+    isCurrentClaimConversation(item) && isAssignedToViewer(item, profile)
+  ))
   const agentConversations = conversations.filter((item) => item.kind === 'staff_agent')
   const assistanceQueue = assistanceRequests.map((request) => ({
     ...assistanceConversation(request),
     draft: conversationTabByClaim.get(request.claim_id)?.draft || '',
   }))
-  const attentionConversations = mergeConversationQueues(
-    assistanceQueue,
-    claimConversations.filter(needsAttention),
-  )
+  const attentionConversations = assistanceQueue
   const selectedConversation = findSelectedConversation(
     selectedConversationSessionId,
     claimConversations,
@@ -284,7 +283,7 @@ function QueueState({ category, conversations, loading, errors, selectedSessionI
     return category === 'agent'
       ? <div className="conversation-queue__empty" role="status"><Bot aria-hidden="true" /><strong>{t('No Staff Agent conversations yet.')}</strong><p>{t('Past internal assistance sessions will appear here.')}</p></div>
       : category === 'attention'
-        ? <div className="conversation-queue__empty" role="status"><Clock3 aria-hidden="true" /><strong>{t('Nothing needs attention')}</strong><p>{t('New customer requests and unread replies will appear here.')}</p></div>
+        ? <div className="conversation-queue__empty" role="status"><Clock3 aria-hidden="true" /><strong>{t('Nothing needs attention')}</strong><p>{t('New unassigned staff assistance requests will appear here.')}</p></div>
         : <div className="conversation-queue__empty" role="status"><CircleUserRound aria-hidden="true" /><strong>{t('No assigned conversations')}</strong><p>{t('Conversations assigned to you will appear here.')}</p></div>
   }
   return (
@@ -602,27 +601,11 @@ function assistanceConversation(request) {
   }
 }
 
-function mergeConversationQueues(primary, secondary) {
-  const seen = new Set()
-  return [...primary, ...secondary].filter((conversation) => {
-    const key = conversation.claim_id || conversation.conversation_id
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
 function findSelectedConversation(sessionId, claimConversations, assistanceQueue, tabs) {
   if (!sessionId) return null
   return [...assistanceQueue, ...claimConversations].find((item) => item.session_id === sessionId)
     || tabs.find((item) => item.sessionId === sessionId)
     || null
-}
-
-function needsAttention(conversation) {
-  if (conversation.kind !== 'claim') return false
-  const state = conversationState(conversation)
-  return ['needs-attention', 'waiting-request'].includes(state.key)
 }
 
 function isAssignedToViewer(conversation, profile) {
@@ -631,6 +614,13 @@ function isAssignedToViewer(conversation, profile) {
     profile?.staff_id
       && conversation.assistance?.assigned_to === profile.staff_id,
   )
+}
+
+function isCurrentClaimConversation(conversation) {
+  if (conversation.kind !== 'claim' || conversation.status !== 'active') return false
+  if (conversation.assistance?.status === 'resolved') return false
+  const activeSessionId = conversation.detail?.active_session_id
+  return Boolean(activeSessionId && conversation.session_id === activeSessionId)
 }
 
 function conversationState(conversation) {
@@ -685,8 +675,8 @@ function updatedLabel(value) {
 }
 
 function queueDescription(category) {
-  if (category === 'attention') return t('Customer replies and unassigned requests')
-  if (category === 'assigned') return t('Your current and recently resolved Claim conversations')
+  if (category === 'attention') return t('Unassigned assistance requests waiting for take-over')
+  if (category === 'assigned') return t('Active Claim conversations assigned to you')
   return t('Internal assistance history')
 }
 

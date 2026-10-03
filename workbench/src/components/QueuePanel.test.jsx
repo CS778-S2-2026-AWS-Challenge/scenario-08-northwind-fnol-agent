@@ -23,6 +23,7 @@ const filterMetadata = {
     { value: 'completed', label: 'Completed', group: 'terminal' },
     { value: 'abandoned', label: 'Abandoned', group: 'terminal' },
     { value: 'closed', label: 'Closed', group: 'terminal' },
+    { value: 'active_claims', label: 'Active claims', group: 'operational' },
     { value: 'urgent', label: 'Urgent', group: 'operational' },
     { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
   ],
@@ -34,6 +35,12 @@ const filterMetadata = {
     { value: 'standard', label: 'Standard' },
     { value: 'high', label: 'High' },
   ],
+  active_claim_statuses: [
+    { value: 'urgent', label: 'Urgent' },
+    { value: 'human_assistance', label: 'Human assistance' },
+    { value: 'professional_review', label: 'Professional review' },
+    { value: 'pending_creation', label: 'Pending creation' },
+  ],
   tags: [{ value: tag.code, label: tag.label, category: tag.category }],
   tag_registry_version: '0.3',
 }
@@ -43,6 +50,17 @@ const viewCounts = {
   items: filterMetadata.views.map((option) => ({
     view: option.value,
     count: option.value === 'all' || option.value === 'processing' ? 1 : 0,
+  })),
+  limitation: null,
+}
+
+const activeClaimCounts = {
+  status: 'available',
+  total: 1,
+  navigation_total: 1,
+  items: filterMetadata.active_claim_statuses.map((option) => ({
+    status: option.value,
+    count: option.value === 'urgent' ? 1 : 0,
   })),
   limitation: null,
 }
@@ -70,8 +88,11 @@ function renderQueue(overrides = {}) {
     selectedId: null,
     filterMetadata,
     viewCounts,
+    activeClaimCounts,
     view: 'all',
     onView: vi.fn(),
+    activeStatus: '',
+    onActiveStatus: vi.fn(),
     workflowState: '',
     onWorkflowState: vi.fn(),
     priority: '',
@@ -92,11 +113,63 @@ function renderQueue(overrides = {}) {
 }
 
 describe('QueuePanel', () => {
+  it('shows Active claims status, customer, owner, update time, and status filtering', async () => {
+    const onActiveStatus = vi.fn()
+    const onOpen = vi.fn()
+    const user = userEvent.setup()
+    const activeClaim = {
+      ...claim,
+      active_claim: { status: 'urgent', entered_at: '2026-09-02T01:00:00Z' },
+      ownership: { state: 'assigned', primary_assignee: { staff_id: 'stf_2', display_name: 'Jordan Lee' } },
+    }
+    renderQueue({
+      queueKind: 'active',
+      view: 'active_claims',
+      claims: [activeClaim],
+      onActiveStatus,
+      onOpen,
+    })
+
+    expect(screen.getByRole('heading', { name: 'Active claims' })).toBeVisible()
+    expect(screen.getByText('Claims needing continued attention or staff action.')).toBeVisible()
+    expect(screen.getByText('Urgent')).toHaveClass('active-claim-status--urgent')
+    expect(screen.getByText('Alex Morgan · Jordan Lee')).toBeVisible()
+    expect(screen.getByText('NW-1042')).toBeVisible()
+    expect(screen.getByText(formatQueueDateTime(claim.updated_at)))
+      .toHaveAccessibleName(`Updated ${formatDateTime(claim.updated_at)}`)
+
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    await user.selectOptions(screen.getByLabelText('Claim status'), 'human_assistance')
+    expect(onActiveStatus).toHaveBeenCalledWith('human_assistance')
+    await user.click(screen.getByRole('button', { name: /NW-1042/ }))
+    expect(onOpen).toHaveBeenCalledWith(activeClaim)
+  })
+
+  it('explains when no Active claims need attention', () => {
+    renderQueue({
+      queueKind: 'active',
+      view: 'active_claims',
+      claims: [],
+      activeClaimCounts: {
+        status: 'available',
+        total: 0,
+        navigation_total: 0,
+        items: activeClaimCounts.items.map((item) => ({ ...item, count: 0 })),
+        limitation: null,
+      },
+    })
+
+    expect(screen.getByText('No Active claims currently need attention.')).toBeVisible()
+    expect(screen.queryByLabelText('Search claims')).not.toBeInTheDocument()
+  })
+
   it('presents the formal queue as Submitted claims without a competing view switch', () => {
     renderQueue({ queueKind: 'submitted', view: 'created_routed' })
 
     expect(screen.getByRole('heading', { name: 'Submitted claims' })).toBeVisible()
     expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
+    expect(screen.getByText('Review the reported vehicle damage.', { selector: 'strong' })).toBeVisible()
+    expect(screen.queryByText('Alex Morgan')).not.toBeInTheDocument()
     expect(screen.getByText('Submitted · Motor · Unassigned')).toBeVisible()
     expect(screen.queryByText(/^Completed/)).not.toBeInTheDocument()
   })
@@ -108,7 +181,6 @@ describe('QueuePanel', () => {
       view: 'incomplete_claims',
       claims: [{
         ...claim,
-        claimant: { customer_id: 'cus_1' },
         incident: { family: null, summary: 'Kitchen water damage' },
         work_summary: {
           ...claim.work_summary,
@@ -121,6 +193,7 @@ describe('QueuePanel', () => {
     expect(screen.getByText('Customers are still completing these claims. They have not entered the formal work queue.')).toBeVisible()
     expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
     expect(screen.getByText('Kitchen water damage', { selector: 'strong' })).toBeVisible()
+    expect(screen.queryByText('Alex Morgan')).not.toBeInTheDocument()
     expect(screen.getByText('Draft')).toBeVisible()
     expect(screen.getByText('Not submitted · Type not confirmed')).toBeVisible()
     expect(screen.getByText(`Last customer activity ${formatDateTime(lastClaimantActivity)}`)).toBeVisible()

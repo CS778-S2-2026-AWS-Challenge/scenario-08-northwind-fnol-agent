@@ -1,407 +1,57 @@
-"""Select backend checks from the files changed by one commit or pull request.
+"""Select backend checks from the files and lines changed by a pull request.
 
-The remote backend quality gate is always diff-scoped. Known implementation
-paths select their direct consumers. Unmapped backend and quality-tooling paths
-select the selector contract sentinel, while changed-line coverage requires
-the pull request's own tests to execute its changed backend lines.
+Pull requests run the test files that executed their changed backend lines in the latest
+full-suite run on ``main`` (see ``scripts/backend_test_map.py``), plus the test files they
+change and the test files that import changed test-support or script modules. The whole
+suite runs on ``main``, on the daily schedule, when shared test infrastructure changes, and
+when no coverage map is available.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import os
+import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-SELECTOR_TEST_PATH = 'tests/test_backend_test_selection.py'
-TOOLING_CONSUMER_RULES: dict[str, tuple[str, ...]] = {
-    '.circleci/config.yml': (SELECTOR_TEST_PATH,),
-    '.github/workflows/ci.yml': (SELECTOR_TEST_PATH,),
-    'backend/requirements-dev.txt': (SELECTOR_TEST_PATH,),
-    'pyproject.toml': (SELECTOR_TEST_PATH,),
-    'scripts/check_diff_coverage.py': ('tests/test_diff_coverage.py',),
-    'scripts/select_backend_tests.py': (SELECTOR_TEST_PATH,),
-}
-TEST_SUPPORT_CONSUMERS: dict[str, tuple[str, ...]] = {
-    'tests/journey_runs/': ('tests/test_journey_runs.py',),
-}
-JOURNEY_TEST_PATH = 'tests/test_journey_runs.py'
-JOURNEY_CRITICAL_PATHS = frozenset(
+try:
+    from scripts.backend_test_map import CoverageMap, load_map
+except ModuleNotFoundError:  # run as `python scripts/select_backend_tests.py`
+    from backend_test_map import CoverageMap, load_map  # type: ignore[import-not-found,no-redef]
+
+DEFAULT_MAP_PATH = Path('.ci/backend-test-map.json.gz')
+
+# Changing any of these can change the outcome of every test, so the whole suite runs.
+FULL_SUITE_PATHS = frozenset(
     {
-        'backend/adapters/claims_service.py',
-        'backend/adapters/evidence_storage.py',
-        'backend/app.py',
-        'backend/api/claims.py',
-        'backend/api/evidence.py',
-        'backend/api/handoffs.py',
-        'backend/api/integrations.py',
-        'backend/api/workbench.py',
-        'backend/domain/branch_registry.py',
-        'backend/domain/claim_creation.py',
-        'backend/domain/evidence.py',
-        'backend/domain/external_service_registry.py',
-        'backend/domain/external_services.py',
-        'backend/domain/models.py',
-        'backend/domain/runtime.py',
-        'backend/domain/workbench.py',
-        'backend/repositories/fixture.py',
-        'backend/repositories/handoff_guard.py',
-        'backend/repositories/protocols.py',
-        'backend/services/agent.py',
-        'backend/services/agent_external_lifecycle.py',
-        'backend/services/agent_tools.py',
-        'backend/services/branching.py',
-        'backend/services/claim_creation.py',
-        'backend/services/claimant_action_projection.py',
-        'backend/services/claimant_form_projection.py',
-        'backend/services/claims.py',
-        'backend/services/evidence.py',
-        'backend/services/external_capability_dispatcher.py',
-        'backend/services/external_service_entry.py',
-        'backend/services/external_service_offers.py',
-        'backend/services/external_services.py',
-        'backend/services/external_tasks.py',
-        'backend/services/fact_resolution.py',
-        'backend/services/handoff_context.py',
-        'backend/services/handoffs.py',
-        'backend/services/integrations.py',
-        'backend/services/message_history.py',
-        'backend/services/messages.py',
-        'backend/services/ownership.py',
-        'backend/services/runtime_agent_policy.py',
-        'backend/services/runtime_work_items.py',
-        'backend/services/workbench.py',
+        'backend/requirements.txt',
+        'backend/requirements-dev.txt',
+        'pyproject.toml',
+        'scripts/backend_test_map.py',
+        'scripts/ci_plan.py',
+        'scripts/select_backend_tests.py',
+        'tests/__init__.py',
+        'tests/conftest.py',
     }
 )
-BACKEND_CONSUMER_RULES = (
-    (
-        (
-            'backend/services/image_recovery.py',
-            'backend/services/pdf_processing.py',
-        ),
-        (
-            'tests/test_evidence_api.py',
-            'tests/test_image_recovery.py',
-            'tests/test_pdf_processing.py',
-        ),
-    ),
-    (
-        ('backend/services/policy_judgment.py',),
-        (
-            'tests/test_policy_judgment.py',
-            'tests/test_policy_judgment_persistence.py',
-            'tests/test_policy_judgment_turn.py',
-        ),
-    ),
-    (
-        (
-            'backend/api/account_data.py',
-            'backend/domain/account_data.py',
-            'backend/repositories/account_data.py',
-            'backend/services/account_data.py',
-            'backend/services/protected_values.py',
-        ),
-        ('tests/test_account_data_api.py', 'tests/test_protected_values.py'),
-    ),
-    (
-        (
-            'backend/api/realtime.py',
-            'backend/domain/realtime.py',
-            'backend/services/realtime.py',
-        ),
-        (
-            'tests/test_api_boundaries.py',
-            'tests/test_asset_repository.py',
-            'tests/test_mongodb_repository.py',
-            'tests/test_realtime_events.py',
-            'tests/test_staff_mutation_actor_links.py',
-        ),
-    ),
-    (
-        (
-            'backend/api/assets.py',
-            'backend/domain/assets.py',
-            'backend/repositories/assets.py',
-            'backend/services/assets.py',
-        ),
-        (
-            'tests/test_asset_api.py',
-            'tests/test_asset_repository.py',
-            'tests/test_api_boundaries.py',
-            'tests/test_branch_registry.py',
-            'tests/test_claim_api.py',
-            'tests/test_mongodb_repository.py',
-        ),
-    ),
-    (
-        ('backend/api/claims.py', 'backend/services/claims.py'),
-        (
-            'tests/test_claim_api.py',
-            'tests/test_claim_creation_journey.py',
-            'tests/test_claim_transaction_boundary.py',
-        ),
-    ),
-    (
-        (
-            'backend/api/evidence.py',
-            'backend/domain/evidence.py',
-            'backend/services/evidence.py',
-        ),
-        (
-            'tests/test_evidence_api.py',
-            'tests/test_evidence_condition_contract.py',
-            'tests/test_evidence_fixtures.py',
-            'tests/test_evidence_handoff_packet.py',
-            'tests/test_evidence_storage_boundary.py',
-            'tests/test_evidence_visibility_check.py',
-        ),
-    ),
-    (
-        (
-            'backend/api/handoffs.py',
-            'backend/api/workbench.py',
-            'backend/domain/workbench.py',
-            'backend/services/workbench.py',
-        ),
-        (
-            'tests/test_evidence_storage_boundary.py',
-            'tests/test_handoff_api.py',
-            'tests/test_handoff_dispatch.py',
-            'tests/test_handoff_persistence_ownership.py',
-            'tests/test_model_gateway.py',
-            'tests/test_workbench_action_registry.py',
-            'tests/test_workbench_api.py',
-            'tests/test_workbench_terminal_reopen.py',
-        ),
-    ),
-    (
-        (
-            'backend/api/admin.py',
-            'backend/domain/configuration.py',
-            'backend/services/configuration.py',
-        ),
-        ('tests/test_admin_api.py',),
-    ),
-    (
-        (
-            'backend/adapters/identity.py',
-            'backend/adapters/staff_identity.py',
-            'backend/domain/identity.py',
-            'backend/services/admin_accounts.py',
-        ),
-        ('tests/test_admin_accounts.py',),
-    ),
-    (
-        (
-            'backend/adapters/identity.py',
-            'backend/api/identity.py',
-            'backend/services/identity.py',
-        ),
-        (
-            'tests/test_identity_adapters.py',
-            'tests/test_identity_api.py',
-            'tests/test_identity_runtime.py',
-        ),
-    ),
-    (
-        (
-            'backend/core/auth.py',
-            'backend/api/staff_identity.py',
-            'backend/api/staff_presence.py',
-            'backend/services/staff_identity.py',
-            'backend/services/staff_presence.py',
-        ),
-        (
-            'tests/test_admin_access_audit.py',
-            'tests/test_identity_runtime.py',
-            'tests/test_staff_identity.py',
-            'tests/test_staff_workbench_authorization.py',
-        ),
-    ),
-    (
-        (
-            'backend/domain/claim_creation.py',
-            'backend/domain/external_service_registry.py',
-            'backend/domain/external_services.py',
-            'backend/services/external_services.py',
-            'backend/services/integrations.py',
-        ),
-        (
-            'tests/test_external_service_entry.py',
-            'tests/test_external_service_registry.py',
-            'tests/test_external_service_validation.py',
-            'tests/test_external_task_api.py',
-            'tests/test_external_task_request.py',
-            'tests/test_external_task_result.py',
-            'tests/test_external_task_result_verification.py',
-            'tests/test_external_task_retry.py',
-            'tests/test_external_task_status.py',
-            'tests/test_external_task_transition.py',
-            'tests/test_integrations.py',
-            'tests/test_agent_external_lifecycle.py',
-            'tests/test_model_gateway.py',
-        ),
-    ),
-    (
-        (
-            'backend/domain/follow_up_execution.py',
-            'backend/domain/follow_up_migration.py',
-            'backend/domain/recovery.py',
-            'backend/domain/recovery_policy_registry.py',
-            'backend/domain/retention.py',
-            'backend/recovery_worker_main.py',
-            'backend/services/follow_up_recovery.py',
-            'backend/services/recovery_decisions.py',
-            'backend/services/recovery_worker.py',
-            'backend/services/retention.py',
-            'backend/services/retention_holds.py',
-            'backend/services/terminal_claims.py',
-            'scripts/backfill_follow_up_policy.py',
-        ),
-        (
-            'tests/test_cross_session_recovery.py',
-            'tests/test_cross_session_recovery_confirmed_questions.py',
-            'tests/test_cross_session_recovery_resolved_evidence.py',
-            'tests/test_follow_up_discovery_persistence.py',
-            'tests/test_follow_up_execution.py',
-            'tests/test_follow_up_operation_persistence.py',
-            'tests/test_follow_up_recovery_backfill.py',
-            'tests/test_incomplete_claim_recovery.py',
-            'tests/test_incomplete_claim_recovery_concurrency.py',
-            'tests/test_incomplete_claim_recovery_edges.py',
-            'tests/test_incomplete_claim_recovery_late_review.py',
-            'tests/test_incomplete_claim_recovery_review.py',
-            'tests/test_p17_staff_abandonment.py',
-            'tests/test_recovery_decisions.py',
-            'tests/test_recovery_message_policy.py',
-            'tests/test_recovery_policy_registry.py',
-            'tests/test_recovery_work_item_settlement.py',
-            'tests/test_retention_access_closure.py',
-            'tests/test_retention_contract.py',
-            'tests/test_retention_eligibility.py',
-            'tests/test_retention_execution.py',
-            'tests/test_retention_discovery_sweep.py',
-            'tests/test_retention_hold_actions.py',
-            'tests/test_retention_repository_guards.py',
-            'tests/test_follow_up_execution_guards.py',
-            'tests/test_follow_up_discovery_cursor.py',
-            'tests/test_recovery_worker_entrypoint.py',
-            'tests/test_stable_ids.py',
-            'tests/test_unified_recovery.py',
-        ),
-    ),
-    (
-        (
-            'backend/repositories/fixture.py',
-            'backend/repositories/mongodb.py',
-            'backend/repositories/protocols.py',
-        ),
-        (
-            'tests/test_account_data_api.py',
-            'tests/test_admin_access_audit.py',
-            'tests/test_api_boundaries.py',
-            'tests/test_audit_repository.py',
-            'tests/test_staff_agent_tools.py',
-            'tests/test_staff_workbench_authorization.py',
-            'tests/test_validation_seed.py',
-        ),
-    ),
-    (
-        ('backend/repositories/',),
-        (
-            'tests/test_asset_repository.py',
-            'tests/test_claim_save_transaction_boundary.py',
-            'tests/test_claim_transaction_boundary.py',
-            'tests/test_mongodb_repository.py',
-            'tests/test_persistence_integration.py',
-            'tests/test_repository.py',
-            'tests/test_realtime_events.py',
-            'tests/test_staff_mutation_actor_links.py',
-        ),
-    ),
-    (
-        ('backend/domain/audit.py', 'scripts/export_audit_contract.py'),
-        ('tests/test_audit_contract.py',),
-    ),
-    (
-        (
-            'backend/core/model_gateway.py',
-            'backend/domain/model_gateway.py',
-            'backend/services/model_agent.py',
-        ),
-        (
-            'tests/test_agent_evidence_tools.py',
-            'tests/test_model_agent_product_scope.py',
-            'tests/test_model_gateway.py',
-            'tests/test_namespaced_runtime.py',
-            'tests/test_runtime_agent_policy.py',
-            'tests/test_runtime_configuration.py',
-            'tests/test_staff_agent.py',
-            'tests/test_staff_agent_gateway.py',
-            'tests/test_verify_model_gateway_live.py',
-            'tests/test_week5_api_rag_provider_control_integration.py',
-        ),
-    ),
-    (
-        (
-            'backend/domain/runtime.py',
-            'backend/services/agent.py',
-            'backend/services/agent_external_lifecycle.py',
-            'backend/services/agent_tools.py',
-            'backend/services/messages.py',
-            'backend/services/runtime_agent_policy.py',
-            'backend/services/runtime_work_items.py',
-            'backend/services/staff_agent.py',
-        ),
-        (
-            'tests/test_agent.py',
-            'tests/test_agent_action_execution.py',
-            'tests/test_agent_action_mapping.py',
-            'tests/test_agent_evidence_tools.py',
-            'tests/test_agent_external_lifecycle.py',
-            'tests/test_claim_api.py',
-            'tests/test_external_task_awaited_material.py',
-            'tests/test_fact_resolution.py',
-            'tests/test_model_gateway.py',
-            'tests/test_mongodb_repository.py',
-            'tests/test_namespaced_runtime.py',
-            'tests/test_runtime_agent_policy.py',
-            'tests/test_runtime_work_items.py',
-            'tests/test_staff_agent.py',
-            'tests/test_staff_agent_gateway.py',
-        ),
-    ),
-    (
-        (
-            'backend/domain/agent_action_commands.py',
-            'backend/domain/agent_action_registry.py',
-            'backend/domain/agent_actions.py',
-            'backend/domain/agent_tool_registry.py',
-            'backend/domain/branch_registry.py',
-            'backend/services/agent_action_execution.py',
-            'backend/services/agent_evidence_actions.py',
-            'backend/services/agent_action_mapping.py',
-        ),
-        (
-            'tests/test_agent_action_commands.py',
-            'tests/test_agent_action_execution.py',
-            'tests/test_agent_action_mapping.py',
-            'tests/test_agent_action_registry.py',
-            'tests/test_agent_evidence_action_execution.py',
-            'tests/test_agent_evidence_tools.py',
-            'tests/test_branch_registry.py',
-            'tests/test_namespaced_runtime.py',
-            'tests/test_runtime_agent_policy.py',
-            'tests/test_staff_tool_registry.py',
-        ),
-    ),
+FULL_SUITE_PREFIXES = ('.circleci/',)
+OPENAPI_PATHS = frozenset({'backend/app.py', 'backend/main.py', 'scripts/export_openapi.py'})
+AUDIT_CONTRACT_PATHS = frozenset(
+    {
+        'backend/domain/audit.py',
+        'scripts/export_audit_contract.py',
+        'docs/contracts/audit-event.schema.json',
+    }
 )
+_HUNK = re.compile(r'^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@')
 
 
 @dataclass(frozen=True)
-class TestSelection:
+class BackendSelection:
     """Selected pytest paths and the reason for the selection."""
 
     mode: str
@@ -409,133 +59,212 @@ class TestSelection:
     reason: str
 
 
-def select_tests(changed_paths: Sequence[str]) -> TestSelection:
-    """Select tests from repository-relative changed paths.
+@dataclass(frozen=True)
+class ImportGraph:
+    """Static imports among repository Python modules, keyed by module name."""
+
+    imports: Mapping[str, frozenset[str]]
+
+    def importers_of(self, module: str) -> set[str]:
+        return {
+            name
+            for name, imported in self.imports.items()
+            if any(item == module or item.startswith(f'{module}.') for item in imported)
+        }
+
+
+def select_tests(
+    changed: Sequence[str],
+    *,
+    hunks: Mapping[str, Sequence[tuple[int, int]]],
+    test_map: CoverageMap | None,
+    stale_paths: Iterable[str] = (),
+    graph: ImportGraph | None = None,
+    force_full: bool = False,
+) -> BackendSelection:
+    """Select backend tests for repository-relative changed paths.
 
     Args:
-        changed_paths: Paths changed relative to the target branch.
-    Returns:
-        A deterministic selection with ``scoped`` or ``skip`` mode.
+        changed: Paths changed relative to the merge base.
+        hunks: Merge-base ``(start, length)`` line ranges changed in each backend file.
+        test_map: The latest full-suite coverage map, or ``None`` when unavailable.
+        stale_paths: Backend files that differ between the map commit and the merge base;
+            their line numbers cannot be trusted, so every test covering the file is selected.
+        graph: Static import graph used for files the map does not cover.
+        force_full: Run the whole suite regardless of the change.
     """
 
-    paths = tuple(sorted(set(_normalise_path(path) for path in changed_paths)))
-    if not paths:
-        return TestSelection('skip', (), 'no changed paths')
+    paths = sorted({_normalise(path) for path in changed})
+    if force_full:
+        return BackendSelection('full', (), 'main, schedule, or explicit full run')
+    for path in paths:
+        if path in FULL_SUITE_PATHS or path.startswith(FULL_SUITE_PREFIXES):
+            return BackendSelection('full', (), f'shared test infrastructure changed: {path}')
 
+    python = [path for path in paths if path.endswith('.py')]
+    backend = [path for path in python if path.startswith('backend/')]
+    others = [path for path in python if not path.startswith('backend/')]
+    if not backend and not others:
+        return BackendSelection('skip', (), 'no backend, test, or script Python changed')
+    if backend and test_map is None:
+        return BackendSelection('full', (), 'no coverage map from main is available')
+
+    graph = graph or ImportGraph({})
+    stale = {_normalise(path) for path in stale_paths}
     selected: set[str] = set()
-    backend_changed = False
-    guarded_unmapped_change = False
-    for raw_path in paths:
-        path = PurePosixPath(raw_path.replace('\\', '/'))
-        path_text = path.as_posix()
-        if consumers := TOOLING_CONSUMER_RULES.get(path_text):
-            selected.update(consumers)
-        if path_text in JOURNEY_CRITICAL_PATHS:
-            selected.add(JOURNEY_TEST_PATH)
-        if path_text == 'docs/vp-field-branch-mapping.md':
-            selected.add('tests/test_branch_registry.py')
-        if path_text.startswith('backend/'):
-            backend_changed = True
-        if path_text.startswith('tests/') and path_text.endswith('.py'):
-            if _is_pytest_module(path):
-                selected.add(path_text)
-            elif path_text == 'tests/conftest.py' or path_text.startswith(
-                ('tests/fixtures/', 'tests/helpers/', 'tests/support/')
-            ):
-                guarded_unmapped_change = True
-            elif consumers := _test_support_consumers(path_text):
-                selected.update(consumers)
-            else:
-                guarded_unmapped_change = True
+    for path in others:
+        if path.startswith('tests/') and _is_test_module(path):
+            if Path(path).is_file():
+                selected.add(path)
+            continue
+        selected.update(_test_importers(_module_name(path), graph))
+    for path in backend:
+        assert test_map is not None
+        selected.update(_tests_for_backend_file(path, hunks.get(path, ()), test_map, stale, graph))
 
-        if consumers := _backend_consumers(path_text):
-            selected.update(consumers)
-        elif path_text.startswith('backend/'):
-            guarded_unmapped_change = True
+    tests = tuple(sorted(test for test in selected if Path(test).is_file()))
+    return BackendSelection('scoped', tests, f'{len(tests)} test files cover the changed lines')
 
-    if guarded_unmapped_change or (backend_changed and not selected):
-        selected.add(SELECTOR_TEST_PATH)
-    if selected:
-        reason = (
-            'direct consumers plus unmapped-change sentinel'
-            if guarded_unmapped_change
-            else 'direct consumers of changed paths'
+
+def _tests_for_backend_file(
+    path: str,
+    ranges: Sequence[tuple[int, int]],
+    test_map: CoverageMap,
+    stale: set[str],
+    graph: ImportGraph,
+) -> set[str]:
+    coverage = test_map.files.get(path)
+    if coverage is None:
+        # New or never-executed module: use the tests that import it, directly or through
+        # the backend modules that import it.
+        module = _module_name(path)
+        selected = _test_importers(module, graph)
+        for importer in graph.importers_of(module):
+            importer_path = _module_path(importer)
+            if importer_path in test_map.files:
+                selected.update(test_map.files[importer_path].all_tests)
+        return selected
+    if path in stale or not Path(path).is_file() or not ranges:
+        return set(coverage.all_tests)
+
+    selected = set()
+    for start, length in ranges:
+        lines = range(start, start + length) if length else range(start, start + 2)
+        executable = [line for line in lines if line in coverage.statements]
+        if not executable:
+            continue  # comments, blank lines, or docstrings only
+        covering = set().union(
+            *(coverage.tests_by_line.get(line, frozenset()) for line in executable)
         )
-        return TestSelection('scoped', tuple(sorted(selected)), reason)
-    return TestSelection('skip', (), 'no backend behavior changed')
+        # Lines run only at import time (signatures, class bodies, module constants) have
+        # no test context; any test using the module may depend on them.
+        selected.update(covering or coverage.all_tests)
+    return selected
 
 
-def _normalise_path(path: str) -> str:
+def _test_importers(module: str, graph: ImportGraph) -> set[str]:
+    """Return test modules that import ``module`` directly or through test-support modules."""
+
+    found: set[str] = set()
+    pending = [module]
+    seen = {module}
+    while pending:
+        for importer in graph.importers_of(pending.pop()):
+            if importer in seen:
+                continue
+            seen.add(importer)
+            path = _module_path(importer)
+            if path.startswith('tests/') and _is_test_module(path):
+                found.add(path)
+            elif importer.startswith('tests.'):
+                pending.append(importer)
+    return found
+
+
+def build_import_graph(roots: Sequence[str] = ('backend', 'scripts', 'tests')) -> ImportGraph:
+    """Parse imports of every Python file under ``roots``."""
+
+    imports: dict[str, frozenset[str]] = {}
+    for root in roots:
+        for file in Path(root).rglob('*.py'):
+            relative = file.as_posix()
+            if '/fixtures/' in relative:
+                continue
+            try:
+                tree = ast.parse(file.read_text(encoding='utf-8'))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            imports[_module_name(relative)] = frozenset(_imported_names(tree))
+    return ImportGraph(imports)
+
+
+def _imported_names(tree: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module)
+            names.update(f'{node.module}.{alias.name}' for alias in node.names)
+    return names
+
+
+def _module_name(path: str) -> str:
+    module = PurePosixPath(path).with_suffix('').as_posix().replace('/', '.')
+    return module.removesuffix('.__init__')
+
+
+def _module_path(module: str) -> str:
+    candidate = module.replace('.', '/')
+    return f'{candidate}.py' if Path(f'{candidate}.py').is_file() else f'{candidate}/__init__.py'
+
+
+def _normalise(path: str) -> str:
     return PurePosixPath(path.replace('\\', '/')).as_posix()
 
 
-def _is_pytest_module(path: PurePosixPath) -> bool:
-    """Return whether pytest treats the path as a test module by default."""
-
-    return path.name.startswith('test_') or path.name.endswith('_test.py')
-
-
-def _test_support_consumers(path: str) -> tuple[str, ...]:
-    """Return the durable test modules that exercise a support-module path."""
-
-    for prefix, consumers in TEST_SUPPORT_CONSUMERS.items():
-        if path.startswith(prefix):
-            return consumers
-    return ()
+def _is_test_module(path: str) -> bool:
+    name = PurePosixPath(path).name
+    return name.startswith('test_') or name.endswith('_test.py')
 
 
-def _backend_consumers(path: str) -> tuple[str, ...]:
-    """Return the focused tests for a mapped backend implementation path."""
+def parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]:
+    """Return merge-base line ranges from ``git diff -U0`` output, per backend file."""
 
-    selected: set[str] = set()
-    for prefixes, consumers in BACKEND_CONSUMER_RULES:
-        if any(
-            path.startswith(prefix) if prefix.endswith('/') else path == prefix
-            for prefix in prefixes
-        ):
-            selected.update(consumers)
-    return tuple(sorted(selected))
+    hunks: dict[str, list[tuple[int, int]]] = {}
+    current: str | None = None
+    for line in diff_text.splitlines():
+        if line.startswith('--- '):
+            source = line[4:]
+            current = source[2:] if source.startswith('a/') else None
+        elif current and (match := _HUNK.match(line)):
+            start = int(match.group(1))
+            length = int(match.group(2)) if match.group(2) is not None else 1
+            hunks.setdefault(current, []).append((start, length))
+    return hunks
 
 
 def changed_python_files(changed: Sequence[str]) -> tuple[str, ...]:
-    """Return changed Python files for scoped static checks."""
+    """Return changed Python files that still exist, for scoped static checks."""
 
     return tuple(
         sorted(
             {
-                normalised
-                for path in changed
-                if (normalised := _normalise_path(path)).endswith('.py')
-                and Path(normalised).is_file()
+                path
+                for path in (_normalise(item) for item in changed)
+                if path.endswith('.py') and Path(path).is_file()
             }
         )
     )
 
 
-def existing_test_paths(selected: Sequence[str]) -> tuple[str, ...]:
-    """Return existing changed tests after validating every configured consumer."""
-
-    configured = {
-        *(path for consumers in TOOLING_CONSUMER_RULES.values() for path in consumers),
-        *(path for consumers in TEST_SUPPORT_CONSUMERS.values() for path in consumers),
-        *(path for _, consumers in BACKEND_CONSUMER_RULES for path in consumers),
-    }
-    missing_configured = sorted(path for path in configured if not Path(path).is_file())
-    if missing_configured:
-        missing = ', '.join(missing_configured)
-        raise FileNotFoundError(f'Configured backend test consumers do not exist: {missing}')
-
-    return tuple(path for path in selected if Path(path).is_file())
-
-
 def needs_openapi_check(changed: Sequence[str]) -> bool:
     """Return whether the changed paths can alter the generated OpenAPI schema."""
 
-    paths = {_normalise_path(path) for path in changed}
+    paths = {_normalise(path) for path in changed}
     return bool(
-        paths & {'backend/app.py', 'backend/main.py', 'scripts/export_openapi.py'}
-        or any(path.startswith('backend/api/') for path in paths)
-        or any(path.startswith('backend/domain/') for path in paths)
+        paths & OPENAPI_PATHS
+        or any(path.startswith(('backend/api/', 'backend/domain/')) for path in paths)
         or 'docs/openapi.snapshot.json' in paths
     )
 
@@ -543,40 +272,37 @@ def needs_openapi_check(changed: Sequence[str]) -> bool:
 def needs_audit_contract_check(changed: Sequence[str]) -> bool:
     """Return whether the AuditEvent contract or its snapshot changed."""
 
-    paths = {_normalise_path(path) for path in changed}
-    return bool(
-        paths
-        & {
-            'backend/domain/audit.py',
-            'scripts/export_audit_contract.py',
-            'docs/contracts/audit-event.schema.json',
-        }
-    )
+    return bool({_normalise(path) for path in changed} & AUDIT_CONTRACT_PATHS)
 
 
-def changed_paths(*, main_branch: bool = False) -> tuple[str, ...]:
-    """Read the paths affected by the current pull request or main commit.
-
-    Args:
-        main_branch: Compare a main-branch commit with its first parent when true.
-
-    Returns:
-        Repository-relative added, copied, modified, renamed, or deleted paths.
-    """
-
-    comparison = 'HEAD^1..HEAD' if main_branch else 'origin/main...HEAD'
-    completed = subprocess.run(
-        ['git', 'diff', '--name-only', '--diff-filter=ACMRD', comparison],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return tuple(line for line in completed.stdout.splitlines() if line)
+def _git(*args: str) -> str:
+    return subprocess.run(['git', *args], check=True, capture_output=True, text=True).stdout
 
 
-def running_on_main() -> bool:
-    """Return whether CI is testing the main branch rather than a pull request."""
+def merge_base() -> str:
+    return _git('merge-base', 'origin/main', 'HEAD').strip()
 
+
+def changed_paths(base: str) -> tuple[str, ...]:
+    output = _git('diff', '--name-only', '--diff-filter=ACMRD', base, 'HEAD')
+    return tuple(line for line in output.splitlines() if line)
+
+
+def stale_backend_paths(map_commit: str, base: str) -> tuple[str, ...]:
+    """Return backend files whose content differs between the map commit and the merge base."""
+
+    try:
+        output = _git('diff', '--name-only', map_commit, base, '--', 'backend')
+    except subprocess.CalledProcessError:
+        return ('backend/',)
+    return tuple(line for line in output.splitlines() if line)
+
+
+def running_full() -> bool:
+    """Return whether CI asked for the whole suite (main, schedule, or full workflow)."""
+
+    if os.getenv('BACKEND_FULL_SUITE') == 'true':
+        return True
     github_main = (
         os.getenv('GITHUB_REF') == 'refs/heads/main'
         and os.getenv('GITHUB_EVENT_NAME') != 'pull_request'
@@ -585,23 +311,43 @@ def running_on_main() -> bool:
     return github_main or circle_main
 
 
+def current_selection(map_path: Path) -> tuple[BackendSelection, tuple[str, ...]]:
+    base = merge_base()
+    paths = changed_paths(base)
+    test_map = load_map(map_path)
+    stale: tuple[str, ...] = ()
+    if test_map is not None:
+        stale = stale_backend_paths(test_map.commit, base)
+        if stale == ('backend/',):
+            stale = tuple(path for path in paths if path.startswith('backend/'))
+    selection = select_tests(
+        paths,
+        hunks=parse_hunks(_git('diff', '-U0', '--diff-filter=MD', base, 'HEAD', '--', 'backend')),
+        test_map=test_map,
+        stale_paths=stale,
+        graph=build_import_graph(),
+        force_full=running_full(),
+    )
+    return selection, paths
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', action='store_true', help='print only the selection mode')
-    parser.add_argument('--tests', action='store_true', help='print selected pytest paths')
-    parser.add_argument('--python-files', action='store_true', help='print changed Python files')
-    parser.add_argument('--needs-openapi', action='store_true', help='print OpenAPI check need')
-    parser.add_argument(
+    parser.add_argument('--map', type=Path, default=DEFAULT_MAP_PATH, help='coverage map path')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--mode', action='store_true', help='print only the selection mode')
+    group.add_argument('--tests', action='store_true', help='print selected pytest paths')
+    group.add_argument('--python-files', action='store_true', help='print changed Python files')
+    group.add_argument('--needs-openapi', action='store_true', help='print OpenAPI check need')
+    group.add_argument(
         '--needs-audit-contract', action='store_true', help='print AuditEvent check need'
     )
     args = parser.parse_args()
-    on_main = running_on_main()
-    paths = changed_paths(main_branch=on_main)
-    selection = select_tests(paths)
+    selection, paths = current_selection(args.map)
     if args.mode:
         print(selection.mode)
     elif args.tests:
-        print('\n'.join(existing_test_paths(selection.tests)))
+        print('\n'.join(selection.tests))
     elif args.python_files:
         print('\n'.join(changed_python_files(paths)))
     elif args.needs_openapi:

@@ -3,8 +3,9 @@
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
-from journey_runs.engine import Journey
-from journey_runs.record import RECORD_SCHEMA, JourneyRunRecord, StepOutcome
+
+from tests.journey_runs.engine import Journey
+from tests.journey_runs.record import RECORD_SCHEMA, JourneyRunRecord, StepOutcome
 
 
 def _plain_app(status_code: int) -> FastAPI:
