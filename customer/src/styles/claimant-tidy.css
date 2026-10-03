@@ -301,7 +301,7 @@
   .conversation-heading h1 { font-size: var(--font-size-body); }
   .mobile-history-toggle { min-height: var(--size-control-touch); padding: 0 var(--space-2); }
   .case-status { min-height: var(--claimant-chip-height); padding: 0 var(--space-2); }
-  .case-status-sync { display: none; }
+  .case-status-sync, .case-status-tip { display: none; }
   .turn-chips .turn-chip, .turn-chips button.turn-chip { min-width: 0; height: auto; min-height: var(--claimant-chip-height-compact); padding: 0 var(--space-2); border-radius: var(--radius-md); font-size: var(--font-size-micro); }
   .turn-chips { gap: var(--space-1); }
   .header-my-claims, .product-header.is-intake-header .support-button { padding: 0 var(--space-2); }

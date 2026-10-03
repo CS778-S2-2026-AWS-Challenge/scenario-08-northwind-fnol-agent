@@ -254,3 +254,60 @@ def test_after_the_handler_writes_the_agent_stays_out_and_the_reply_is_unread(
     assert after.work_summary.queue_key.value == 'processing'
     view = client.get(f'/api/v1/claims/{claim.claim_id}', headers=auth_headers).json()
     assert view['handler_assigned'] is True
+
+
+def test_a_corrected_reading_closes_the_same_item_for_staff_and_claimant(
+    client: TestClient, auth_headers: dict[str, str], repository: FixtureRepository
+) -> None:
+    claim = _store_created_claim(repository, 'clm_reading')
+    common = {
+        'claim_id': claim.claim_id,
+        'source': EvidenceSource.CLAIMANT,
+        'created_at': NOW,
+        'updated_at': NOW,
+    }
+    # The claimant owes a repair quote; a file they sent was read as something else.
+    repository.save_evidence(
+        EvidenceRecord(
+            evidence_id='evd_quote_owed',
+            kind='repair_quote',
+            status=EvidenceStatus.PENDING,
+            file_status=EvidenceFileStatus.NOT_AVAILABLE,
+            **common,
+        ),
+        claim.customer_id,
+    )
+    repository.save_evidence(
+        EvidenceRecord(
+            evidence_id='evd_sent',
+            kind='other_document',
+            status=EvidenceStatus.RECEIVED,
+            file_status=EvidenceFileStatus.READY,
+            media_type='application/pdf',
+            **common,
+        ),
+        claim.customer_id,
+    )
+
+    def states() -> tuple[str, str]:
+        staff = get_workbench_claim_detail(repository, _staff(), claim.claim_id)
+        claimant = client.get(f'/api/v1/claims/{claim.claim_id}', headers=auth_headers).json()
+        staff_state = next(i.state.value for i in staff.open_items if i.item_id == 'evd_quote_owed')
+        claimant_state = next(
+            i['state'] for i in claimant['open_items'] if i['item_id'] == 'evd_quote_owed'
+        )
+        return staff_state, claimant_state
+
+    assert states() == ('open', 'open')
+
+    correct_evidence_reading(
+        repository,
+        _staff(),
+        claim.claim_id,
+        'evd_sent',
+        CorrectEvidenceReadingRequest(kind='repair_quote'),
+        'reading-quote',
+        str(get_workbench_claim_detail(repository, _staff(), claim.claim_id).revision),
+    )
+
+    assert states() == ('done', 'done')

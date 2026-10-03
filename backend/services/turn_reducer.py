@@ -1210,7 +1210,8 @@ def reduce_turn(
                 open_questions=[
                     item.subject
                     for item in staff_open_items((), claim_messages(repository, claim))
-                    if item.kind == 'question' and item.state is OpenItemState.OPEN
+                    if item.kind in {'question', 'contact_request'}
+                    and item.state is OpenItemState.OPEN
                 ],
             ),
         },

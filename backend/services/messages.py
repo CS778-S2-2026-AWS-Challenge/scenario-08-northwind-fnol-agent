@@ -1755,7 +1755,7 @@ def _northwind_question_projection(
             claim_messages(repository, claim),
             repository.list_customer_updates(claim.claim_id),
         )
-        if item.kind == 'question'
+        if item.kind in {'question', 'contact_request'}
     )
 
 

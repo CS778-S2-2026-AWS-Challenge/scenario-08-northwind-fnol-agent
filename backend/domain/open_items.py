@@ -223,14 +223,17 @@ def claimant_open_items(
     evidence: Sequence[EvidenceRecord],
     messages: Sequence[MessageRecord],
     updates: Sequence[CustomerUpdateRecord] = (),
+    staff_actions: Sequence[StaffActionRecord] = (),
 ) -> list[ClaimantOpenItem]:
+    """The claimant's view of the same items staff see; a handler's file reading
+    counts here exactly as in the Workbench."""
     return [
         ClaimantOpenItem.model_validate(
             item.model_dump(
                 exclude={'claimant_wording', 'proposed_answer', 'basis', 'contact_preference'}
             )
         )
-        for item in staff_open_items(evidence, messages, updates)
+        for item in staff_open_items(evidence, messages, updates, staff_actions)
     ]
 
 
