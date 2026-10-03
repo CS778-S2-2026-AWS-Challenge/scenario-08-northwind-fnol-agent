@@ -1,489 +1,173 @@
-import subprocess
-import sys
-from unittest.mock import patch
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from scripts import select_backend_tests as selector
+from scripts.backend_test_map import CoverageMap, FileCoverage, build_map, context_test_file
 from scripts.select_backend_tests import (
-    changed_paths,
+    BackendSelection,
+    ImportGraph,
     changed_python_files,
-    existing_test_paths,
     needs_audit_contract_check,
     needs_openapi_check,
+    parse_hunks,
     select_tests,
 )
 
+CLAIMS = 'backend/services/claims.py'
+CLAIM_API = 'tests/test_claim_api.py'
+EVIDENCE_API = 'tests/test_evidence_api.py'
+REPOSITORY = 'tests/test_repository.py'
 
-def test_docs_only_change_skips_backend_pytest() -> None:
-    selection = select_tests(['docs/README.md'])
+
+def _map(commit: str = 'abc') -> CoverageMap:
+    return CoverageMap(
+        commit=commit,
+        files={
+            CLAIMS: FileCoverage(
+                # 1 is a def line run at import; 2-3 run inside tests; 4 is a comment.
+                statements=frozenset({1, 2, 3, 10}),
+                all_tests=frozenset({CLAIM_API, EVIDENCE_API, REPOSITORY}),
+                tests_by_line={2: frozenset({CLAIM_API}), 3: frozenset({EVIDENCE_API})},
+            ),
+        },
+    )
+
+
+def _select(
+    changed: list[str],
+    hunks: dict[str, list[tuple[int, int]]] | None = None,
+    *,
+    test_map: CoverageMap | None | str = 'default',
+    **kwargs: Any,
+) -> BackendSelection:
+    chosen = _map() if test_map == 'default' else test_map
+    assert not isinstance(chosen, str)
+    return select_tests(changed, hunks=hunks or {}, test_map=chosen, **kwargs)
+
+
+def test_docs_and_frontend_changes_skip_backend_pytest() -> None:
+    selection = _select(['docs/README.md', 'customer/src/App.jsx'])
 
     assert selection.mode == 'skip'
     assert selection.tests == ()
 
 
-def test_policy_judgment_change_selects_validation_persistence_and_api_consumers() -> None:
-    selection = select_tests(['backend/services/policy_judgment.py'])
-    assert selection.mode == 'scoped'
-    assert set(selection.tests) == {
-        'tests/test_policy_judgment.py',
-        'tests/test_policy_judgment_persistence.py',
-        'tests/test_policy_judgment_turn.py',
-    }
-
-
-@pytest.mark.parametrize(
-    'path',
-    [
-        'backend/services/image_recovery.py',
-        'backend/services/pdf_processing.py',
-    ],
-)
-def test_evidence_processing_worker_changes_select_pdf_and_recovery_contracts(path: str) -> None:
-    selection = select_tests([path])
+def test_changed_lines_select_only_the_test_files_that_executed_them() -> None:
+    selection = _select([CLAIMS], {CLAIMS: [(2, 1)]})
 
     assert selection.mode == 'scoped'
-    assert {
-        'tests/test_evidence_api.py',
-        'tests/test_image_recovery.py',
-        'tests/test_pdf_processing.py',
-    } <= set(selection.tests)
+    assert selection.tests == (CLAIM_API,)
 
 
-def test_narrow_claim_api_change_selects_direct_consumers() -> None:
-    selection = select_tests(['backend/api/claims.py'])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_claim_api.py' in selection.tests
-    assert 'tests/test_claim_creation_journey.py' in selection.tests
+def test_comment_only_change_selects_no_tests() -> None:
+    assert _select([CLAIMS], {CLAIMS: [(4, 1)]}).tests == ()
 
 
-def test_asset_modules_select_asset_claim_branch_and_mongodb_contracts() -> None:
-    selection = select_tests(
-        [
-            'backend/api/assets.py',
-            'backend/domain/assets.py',
-            'backend/repositories/assets.py',
-            'backend/services/assets.py',
-        ]
+def test_import_time_line_selects_every_test_covering_the_file() -> None:
+    selection = _select([CLAIMS], {CLAIMS: [(1, 1)]})
+
+    assert set(selection.tests) == {CLAIM_API, EVIDENCE_API, REPOSITORY}
+
+
+def test_insertion_uses_the_neighbouring_lines() -> None:
+    # `-2,0` inserts after line 2, between lines covered by two different test files.
+    assert set(_select([CLAIMS], {CLAIMS: [(2, 0)]}).tests) == {CLAIM_API, EVIDENCE_API}
+
+
+def test_file_changed_since_the_map_commit_selects_every_test_covering_it() -> None:
+    selection = _select([CLAIMS], {CLAIMS: [(2, 1)]}, stale_paths=[CLAIMS])
+
+    assert set(selection.tests) == {CLAIM_API, EVIDENCE_API, REPOSITORY}
+
+
+def test_new_backend_module_selects_tests_that_import_it_or_its_importers() -> None:
+    graph = ImportGraph(
+        {
+            'backend.services.claims': frozenset({'backend.services.new_rule'}),
+            'tests.test_config': frozenset({'backend.services.new_rule'}),
+        }
     )
 
-    assert selection.mode == 'scoped'
-    assert {
-        'tests/test_asset_api.py',
-        'tests/test_asset_repository.py',
-        'tests/test_api_boundaries.py',
-        'tests/test_branch_registry.py',
-        'tests/test_claim_api.py',
-        'tests/test_mongodb_repository.py',
-    } <= set(selection.tests)
+    selection = _select(['backend/services/new_rule.py'], graph=graph)
+
+    assert set(selection.tests) == {'tests/test_config.py', CLAIM_API, EVIDENCE_API, REPOSITORY}
 
 
-def test_realtime_modules_select_projection_lifecycle_and_boundary_contracts() -> None:
-    selection = select_tests(
-        [
-            'backend/api/realtime.py',
-            'backend/domain/realtime.py',
-            'backend/services/realtime.py',
-        ]
+def test_changed_test_file_is_selected_and_support_module_selects_its_importers() -> None:
+    graph = ImportGraph(
+        {
+            'tests.journey_runs.engine': frozenset(),
+            'tests.journey_runs.motor_collision': frozenset({'tests.journey_runs.engine'}),
+            'tests.test_journey_runs': frozenset({'tests.journey_runs.motor_collision'}),
+        }
     )
 
-    assert selection.mode == 'scoped'
-    assert {
-        'tests/test_api_boundaries.py',
-        'tests/test_asset_repository.py',
-        'tests/test_mongodb_repository.py',
-        'tests/test_realtime_events.py',
-        'tests/test_staff_mutation_actor_links.py',
-    } <= set(selection.tests)
-
-
-def test_audit_contract_change_selects_audit_contract_tests() -> None:
-    selection = select_tests(['backend/domain/audit.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_audit_contract.py',)
-
-
-def test_shared_domain_model_change_uses_sentinel_and_complete_journey() -> None:
-    selection = select_tests(['backend/domain/models.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == (
-        'tests/test_backend_test_selection.py',
+    assert _select([REPOSITORY]).tests == (REPOSITORY,)
+    assert _select(['tests/journey_runs/engine.py'], graph=graph).tests == (
         'tests/test_journey_runs.py',
     )
 
 
 @pytest.mark.parametrize(
     'path',
-    [
-        'backend/adapters/identity.py',
-        'backend/adapters/staff_identity.py',
-        'backend/domain/identity.py',
-        'backend/services/admin_accounts.py',
-    ],
+    ['tests/conftest.py', 'pyproject.toml', 'backend/requirements-dev.txt', '.circleci/config.yml'],
 )
-def test_customer_identity_changes_select_admin_account_contract(path: str) -> None:
-    selection = select_tests([path])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_admin_accounts.py' in selection.tests
+def test_shared_test_infrastructure_runs_the_full_suite(path: str) -> None:
+    assert _select([path]).mode == 'full'
 
 
-def test_unrelated_identity_change_does_not_select_admin_account_contract() -> None:
-    selection = select_tests(['backend/services/staff_identity.py'])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_admin_accounts.py' not in selection.tests
+def test_backend_change_without_a_map_runs_the_full_suite() -> None:
+    assert _select([CLAIMS], test_map=None).mode == 'full'
 
 
-@pytest.mark.parametrize(
-    'path',
-    [
-        'backend/core/auth.py',
-        'backend/api/staff_identity.py',
-        'backend/api/staff_presence.py',
-        'backend/services/staff_identity.py',
-        'backend/services/staff_presence.py',
-    ],
-)
-def test_staff_authorization_changes_select_identity_and_workbench_contracts(path: str) -> None:
-    selection = select_tests([path])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_identity_runtime.py' in selection.tests
-    assert 'tests/test_staff_identity.py' in selection.tests
-    assert 'tests/test_staff_workbench_authorization.py' in selection.tests
+def test_forced_full_run_ignores_the_change() -> None:
+    assert _select(['docs/README.md'], force_full=True).mode == 'full'
 
 
-def test_unmapped_backend_change_never_returns_an_empty_selection() -> None:
-    selection = select_tests(['backend/unknown_component.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
-
-
-def test_ci_change_selects_the_selector_contract_without_full_suite() -> None:
-    selection = select_tests(['.circleci/config.yml', '.github/workflows/ci.yml'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
-
-
-def test_shared_test_fixture_change_uses_scoped_sentinel() -> None:
-    selection = select_tests(['tests/conftest.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
-
-
-def test_branch_registry_contract_test_runs_the_focused_suite() -> None:
-    selection = select_tests(['tests/test_branch_registry.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_branch_registry.py',)
-
-
-def test_pytest_suffix_test_module_runs_the_focused_suite() -> None:
-    selection = select_tests(['tests/branch_registry_test.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/branch_registry_test.py',)
-
-
-def test_journey_run_support_changes_select_their_consumer_suite() -> None:
-    selection = select_tests(
+def test_parse_hunks_reads_merge_base_ranges() -> None:
+    diff = '\n'.join(
         [
-            'tests/journey_runs/__main__.py',
-            'tests/journey_runs/engine.py',
-            'tests/journey_runs/motor_collision.py',
+            'diff --git a/backend/x.py b/backend/x.py',
+            '--- a/backend/x.py',
+            '+++ b/backend/x.py',
+            '@@ -12,3 +12,4 @@ def f():',
+            '@@ -40 +41 @@',
+            '@@ -50,0 +52,2 @@',
+            'diff --git a/backend/new.py b/backend/new.py',
+            '--- /dev/null',
+            '+++ b/backend/new.py',
+            '@@ -0,0 +1,3 @@',
         ]
     )
 
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_journey_runs.py',)
+    assert parse_hunks(diff) == {'backend/x.py': [(12, 3), (40, 1), (50, 0)]}
 
 
-@pytest.mark.parametrize(
-    'path',
-    [
-        'backend/app.py',
-        'backend/api/claims.py',
-        'backend/api/evidence.py',
-        'backend/api/workbench.py',
-        'backend/domain/branch_registry.py',
-        'backend/domain/external_service_registry.py',
-        'backend/services/messages.py',
-        'backend/services/external_services.py',
-        'backend/repositories/fixture.py',
-    ],
-)
-def test_journey_critical_backend_change_selects_complete_journey(path: str) -> None:
-    selection = select_tests([path])
+def test_map_build_attributes_lines_to_test_files() -> None:
+    class Data:
+        def measured_files(self) -> list[str]:
+            return [str(Path('backend/x.py').resolve()), str(Path('scripts/y.py').resolve())]
 
-    assert selection.mode == 'scoped'
-    assert 'tests/test_journey_runs.py' in selection.tests
+        def contexts_by_lineno(self, _path: str) -> dict[int, list[str]]:
+            return {
+                1: [''],
+                2: ['tests/test_a.py::test_one|run', 'tests/test_b.py::test_two|setup'],
+            }
 
+    payload = build_map('abc', Path.cwd(), Data(), {'backend/x.py': [1, 2, 3]})
 
-@pytest.mark.parametrize(
-    'path',
-    [
-        'backend/api/admin.py',
-        'backend/domain/audit.py',
-        'backend/adapters/model_gateway.py',
-        'backend/repositories/mongodb.py',
-    ],
-)
-def test_unrelated_backend_change_does_not_select_complete_journey(path: str) -> None:
-    selection = select_tests([path])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_journey_runs.py' not in selection.tests
+    assert payload['tests'] == ['tests/test_a.py', 'tests/test_b.py']
+    assert payload['files'] == {
+        'backend/x.py': {'statements': [1, 2, 3], 'all': [0, 1], 'lines': {'2': [0, 1]}}
+    }
+    assert context_test_file('') is None
 
 
-@pytest.mark.parametrize(
-    'path',
-    [
-        'backend/domain/follow_up_execution.py',
-        'backend/domain/recovery.py',
-        'backend/domain/retention.py',
-        'backend/recovery_worker_main.py',
-        'backend/services/recovery_worker.py',
-        'backend/services/retention.py',
-        'backend/services/retention_holds.py',
-        'backend/services/terminal_claims.py',
-    ],
-)
-def test_recovery_modules_select_complete_p17_recovery_contracts(path: str) -> None:
-    selection = select_tests([path])
-
-    assert selection.mode == 'scoped'
-    assert {
-        'tests/test_cross_session_recovery.py',
-        'tests/test_follow_up_execution.py',
-        'tests/test_incomplete_claim_recovery.py',
-        'tests/test_incomplete_claim_recovery_concurrency.py',
-        'tests/test_incomplete_claim_recovery_edges.py',
-        'tests/test_incomplete_claim_recovery_review.py',
-        'tests/test_p17_staff_abandonment.py',
-        'tests/test_retention_execution.py',
-        'tests/test_retention_hold_actions.py',
-        'tests/test_unified_recovery.py',
-    } <= set(selection.tests)
-
-
-@pytest.mark.parametrize(
-    'path',
-    [
-        'backend/repositories/fixture.py',
-        'backend/repositories/mongodb.py',
-        'backend/repositories/protocols.py',
-    ],
-)
-def test_monolithic_repository_changes_select_cross_feature_contracts(path: str) -> None:
-    selection = select_tests([path])
-
-    assert selection.mode == 'scoped'
-    assert {
-        'tests/test_account_data_api.py',
-        'tests/test_admin_access_audit.py',
-        'tests/test_api_boundaries.py',
-        'tests/test_audit_repository.py',
-        'tests/test_staff_agent_tools.py',
-        'tests/test_staff_workbench_authorization.py',
-        'tests/test_validation_seed.py',
-    } <= set(selection.tests)
-
-
-def test_unknown_test_support_module_uses_scoped_sentinel() -> None:
-    selection = select_tests(['tests/custom_support/builders.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
-
-
-def test_vp_mapping_document_runs_the_focused_contract_suite() -> None:
-    selection = select_tests(['docs/vp-field-branch-mapping.md'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_branch_registry.py',)
-
-
-def test_ci_selector_change_runs_its_contract_tests() -> None:
-    selection = select_tests(['scripts/select_backend_tests.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
-
-
-def test_agent_evidence_action_change_selects_runtime_action_consumers() -> None:
-    selection = select_tests(
-        [
-            'backend/domain/agent_action_registry.py',
-            'backend/domain/agent_tool_registry.py',
-            'backend/services/agent_evidence_actions.py',
-            'tests/test_agent_evidence_action_execution.py',
-        ]
+def test_static_check_helpers() -> None:
+    assert changed_python_files(['scripts/select_backend_tests.py', 'gone.py']) == (
+        'scripts/select_backend_tests.py',
     )
-
-    assert selection.mode == 'scoped'
-    assert {
-        'tests/test_agent_action_commands.py',
-        'tests/test_agent_action_execution.py',
-        'tests/test_agent_action_mapping.py',
-        'tests/test_agent_action_registry.py',
-        'tests/test_agent_evidence_action_execution.py',
-        'tests/test_agent_evidence_tools.py',
-        'tests/test_runtime_agent_policy.py',
-        'tests/test_staff_tool_registry.py',
-    } <= set(selection.tests)
-
-
-def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:
-    assert changed_python_files(
-        ['backend/api/claims.py', 'backend/removed.py', 'docs/README.md']
-    ) == ('backend/api/claims.py',)
-
-
-def test_intentionally_deleted_changed_test_module_is_not_emitted_to_pytest() -> None:
-    assert existing_test_paths(('tests/test_removed_contract_never_exists.py',)) == ()
-
-
-def test_missing_declared_consumer_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(
-        selector.TOOLING_CONSUMER_RULES,
-        'scripts/synthetic_selector.py',
-        ('tests/test_missing_declared_consumer.py',),
-    )
-
-    with pytest.raises(
-        FileNotFoundError,
-        match='tests/test_missing_declared_consumer.py',
-    ):
-        existing_test_paths(())
-
-
-def test_contract_checks_follow_their_own_impact() -> None:
     assert needs_openapi_check(['backend/api/claims.py'])
-    assert needs_openapi_check(['backend/domain/models.py'])
     assert not needs_openapi_check(['backend/services/claims.py'])
-    assert needs_audit_contract_check(['backend/domain/audit.py'])
-    assert not needs_audit_contract_check(['backend/services/claims.py'])
-
-
-def test_main_change_detection_uses_first_parent_and_includes_deletions() -> None:
-    completed = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout='customer/src/App.jsx\nbackend/removed.py\n'
-    )
-    with patch('scripts.select_backend_tests.subprocess.run', return_value=completed) as run:
-        paths = changed_paths(main_branch=True)
-
-    assert paths == ('customer/src/App.jsx', 'backend/removed.py')
-    run.assert_called_once_with(
-        ['git', 'diff', '--name-only', '--diff-filter=ACMRD', 'HEAD^1..HEAD'],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_pull_request_change_detection_uses_merge_base() -> None:
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout='backend/api/claims.py\n')
-    with patch('scripts.select_backend_tests.subprocess.run', return_value=completed) as run:
-        paths = changed_paths()
-
-    assert paths == ('backend/api/claims.py',)
-    run.assert_called_once_with(
-        ['git', 'diff', '--name-only', '--diff-filter=ACMRD', 'origin/main...HEAD'],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_main_frontend_change_uses_impact_selection(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def frontend_main_paths(*, main_branch: bool) -> tuple[str, ...]:
-        assert main_branch
-        return ('customer/src/App.jsx',)
-
-    monkeypatch.setattr(selector, 'running_on_main', lambda: True)
-    monkeypatch.setattr(selector, 'changed_paths', frontend_main_paths)
-    monkeypatch.setattr(sys, 'argv', ['select_backend_tests.py', '--mode'])
-
-    assert selector.main() == 0
-    assert capsys.readouterr().out.strip() == 'skip'
-
-
-@pytest.mark.parametrize('flag', ['--needs-openapi', '--needs-audit-contract'])
-def test_main_frontend_change_skips_backend_contract_checks(
-    flag: str,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    def frontend_main_paths(*, main_branch: bool) -> tuple[str, ...]:
-        assert main_branch
-        return ('customer/src/App.jsx',)
-
-    monkeypatch.setattr(selector, 'running_on_main', lambda: True)
-    monkeypatch.setattr(selector, 'changed_paths', frontend_main_paths)
-    monkeypatch.setattr(sys, 'argv', ['select_backend_tests.py', flag])
-
-    assert selector.main() == 0
-    assert capsys.readouterr().out.strip() == 'false'
-
-
-def test_workbench_domain_change_selects_workbench_consumers() -> None:
-    selection = select_tests(['backend/domain/workbench.py', 'backend/services/workbench.py'])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_workbench_api.py' in selection.tests
-    assert 'tests/test_workbench_action_registry.py' in selection.tests
-
-
-def test_agent_gateway_change_selects_agent_consumers() -> None:
-    selection = select_tests(
-        [
-            'backend/domain/model_gateway.py',
-            'backend/services/agent.py',
-            'backend/services/messages.py',
-        ]
-    )
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_model_gateway.py' in selection.tests
-    assert 'tests/test_staff_agent.py' in selection.tests
-
-
-def test_external_registry_change_selects_lifecycle_consumers() -> None:
-    selection = select_tests(['backend/domain/external_service_registry.py'])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_external_service_registry.py' in selection.tests
-    assert 'tests/test_agent_external_lifecycle.py' in selection.tests
-    assert 'tests/test_model_gateway.py' in selection.tests
-
-
-def test_staff_agent_service_change_selects_staff_consumers() -> None:
-    selection = select_tests(['backend/services/staff_agent.py'])
-
-    assert selection.mode == 'scoped'
-    assert 'tests/test_staff_agent.py' in selection.tests
-    assert 'tests/test_staff_agent_gateway.py' in selection.tests
-    assert 'tests/test_mongodb_repository.py' in selection.tests
-
-
-def test_unknown_backend_module_stays_scoped() -> None:
-    selection = select_tests(['backend/services/new_unmapped_service.py'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
-
-
-def test_backend_file_rules_do_not_match_longer_similar_names() -> None:
-    selection = select_tests(['backend/services/agent.py.backup'])
-
-    assert selection.mode == 'scoped'
-    assert selection.tests == ('tests/test_backend_test_selection.py',)
+    assert needs_audit_contract_check(['docs/contracts/audit-event.schema.json'])
