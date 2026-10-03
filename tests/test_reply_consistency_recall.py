@@ -2,21 +2,21 @@
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 from backend.domain.agent_v8 import V8Escalation, V8NorthwindQuestion
-from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse
-from backend.domain.models import RuntimeInvocationTrace, RuntimeTraceRecord
+from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse, ModelToolCall
 from backend.repositories.fixture import FixtureRepository
-from backend.services.agent import InvariantGuardedAgent
+from backend.services.agent import AgentProposal, AgentTurnContext, InvariantGuardedAgent
+from backend.services.model_agent import GatewayAgent
+from backend.services.model_request_planner import plan_model_turn
 from backend.services.turn_proposal_validation import ValidatedTurn
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
+from tests.test_agent_context_runtime_v7 import _RecordingGateway
 
 # A Home claim asking for a Motor-only service: Runtime refuses the suggestion.
 NAMES_REFUSED_SERVICE = envelope(
@@ -236,28 +236,101 @@ def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
     assert claim is not None and claim.form['property.ongoing_risk'].value == 'active_leak'
 
 
-def test_a_recall_after_a_tool_continuation_fits_the_turn_trace() -> None:
-    # Proposal, context.resolve continuation, consistency recall and
-    # field-contract repair: a turn's trace holds all four calls.
-    calls = [RuntimeInvocationTrace(ordinal=index, latency_ms=10) for index in range(1, 5)]
-    trace = RuntimeTraceRecord(
-        trace_id='trace_recall',
-        claim_id='clm_recall',
-        session_id='ses_recall',
-        model_profile_id='openrouter-gpt4o-mini',
-        trigger_message_id='msg_recall',
-        invocations=calls,
-        model_invocations=len(calls),
-        action_code='ask_missing_information',
-        runtime_action_code='ask_missing_information',
-        reason_codes=['consistency_recall'],
-        status='succeeded',
-        created_at=datetime(2026, 10, 3, tzinfo=UTC),
-        finished_at=datetime(2026, 10, 3, tzinfo=UTC),
+class _LookupThenRecall(GatewayAgent):
+    """A coverage question: context.resolve, its continuation, then one recall."""
+
+    def __init__(self, first_reply: dict[str, Any], rewrite: dict[str, Any]) -> None:
+        self.gateway = _RecordingGateway([])
+        super().__init__(self.gateway)
+        self.first_reply = first_reply
+        self.rewrite = rewrite
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        context = replace(
+            context,
+            knowledge_context_loader=lambda _limit: {
+                'status': 'evidence_found',
+                'chunks': [POLICY_CHUNK],
+            },
+        )
+        plan = plan_model_turn(context)
+        assert plan is not None
+        reference = next(
+            ref for ref in plan.context_plan.references if ref.resource_type == 'policy_version'
+        )
+        self.gateway.responses.extend(
+            [
+                ModelResponse(
+                    tool_calls=[
+                        ModelToolCall(
+                            call_id='call_hire_car',
+                            name='context.resolve',
+                            arguments={
+                                'ref': reference.ref,
+                                'selector': 'matching_facts_and_guidance',
+                                'max_tokens': 600,
+                            },
+                        )
+                    ],
+                    completion_status=ModelCompletionStatus.COMPLETE,
+                ),
+                ModelResponse(
+                    structured_output=self.first_reply,
+                    completion_status=ModelCompletionStatus.COMPLETE,
+                ),
+                ModelResponse(
+                    structured_output=self.rewrite,
+                    completion_status=ModelCompletionStatus.COMPLETE,
+                ),
+            ]
+        )
+        return super().propose_turn(context)
+
+
+POLICY_CHUNK = {
+    'document_id': 'doc_hire_car',
+    'chunk_id': 'chk_hire_car',
+    'title': 'Synthetic motor policy wording',
+    'section_path': 'MTR-BEN-04',
+    'source_uri': 'fixture://hire-car',
+    'version': 'MVP-2026.1',
+    'checksum': 'synthetic-hire-car-checksum',
+    'text': 'Hire car cover depends on the optional benefits shown on the schedule.',
+}
+
+
+def test_a_recall_after_a_tool_continuation_is_saved_with_three_calls(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    # The real-model failure: proposal, context.resolve continuation and a
+    # consistency recall in one turn returned HTTP 500 when the trace was saved.
+    promise = envelope(reply='The claims team will check hire car cover. Is anyone hurt?')
+    passed_on = {
+        **promise,
+        'northwind_questions': [
+            {
+                'question': 'Is a hire car covered while my car is repaired?',
+                'claimant_wording': 'will my policy pay for a hire car',
+                'model_view': 'Depends on the optional benefits on the schedule.',
+            }
+        ],
+    }
+    agent = _LookupThenRecall(promise, passed_on)
+    provider = V8JourneyProvider([])
+    provider.agent = agent
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'motor', 'recall-after-lookup')
+
+    turn = journey.send('Will my policy pay for a hire car while my car is repaired?')
+
+    assert len(agent.gateway.requests) == 3
+    assert turn['agent_message']['content']['text'] == passed_on['reply']
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
     )
-    assert [call.ordinal for call in trace.invocations] == [1, 2, 3, 4]
-    with pytest.raises(ValidationError):
-        RuntimeInvocationTrace(ordinal=5, latency_ms=10)
+    assert trace is not None
+    assert [call.ordinal for call in trace.invocations] == [1, 2, 3]
+    assert trace.model_invocations == 3
 
 
 def test_mentioning_a_question_passed_on_earlier_is_not_sent_back(
@@ -295,3 +368,14 @@ def test_review_allows_a_promise_about_a_question_passed_on_earlier() -> None:
     earlier = replace(_validated(promise), earlier_open_questions=('Is my hire car covered?',))
     assert review_reply(earlier).consistent
     assert turn_ledger(earlier)['questions_passed_on'] == ['Is my hire car covered?']
+    # An open question about something else does not back a new promise.
+    unrelated = replace(
+        _validated(
+            'The claims team will confirm whether Northwind accepts liability. '
+            'What is the registration?'
+        ),
+        earlier_open_questions=('Is my hire car covered?',),
+    )
+    assert [item.kind for item in review_reply(unrelated).inconsistencies] == [
+        'promises_answer_without_question'
+    ]

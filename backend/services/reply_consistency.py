@@ -51,6 +51,67 @@ _PROMISED_ANSWER = re.compile(
     r"(?:\bwill|'ll|’ll)\s+(?:\S+\s+){0,2}?(?:confirm|answer|check|get back|let you know)\b",  # noqa: RUF001
     re.IGNORECASE,
 )
+# Words that say nothing about which question a promise is about.
+_PROMISE_FILLER = frozenset(
+    [
+        'about',
+        'and',
+        'answer',
+        'any',
+        'are',
+        'back',
+        'can',
+        'check',
+        'claims',
+        'confirm',
+        'cover',
+        'covered',
+        'covers',
+        'does',
+        'for',
+        'get',
+        'have',
+        'how',
+        'its',
+        'know',
+        'let',
+        'northwind',
+        'our',
+        'policy',
+        'question',
+        'soon',
+        'team',
+        'than',
+        'that',
+        'the',
+        'their',
+        'them',
+        'they',
+        'this',
+        'what',
+        'when',
+        'whether',
+        'which',
+        'will',
+        'with',
+        'you',
+        'your',
+    ]
+)
+_WORD = re.compile(r'[a-z]{3,}')
+
+
+def _topic_words(text: str) -> set[str]:
+    return set(_WORD.findall(text.casefold())) - _PROMISE_FILLER
+
+
+def _about_an_open_question(sentence: str, questions: tuple[str, ...]) -> bool:
+    """A promise about a question passed on earlier names something from it."""
+
+    words = _topic_words(sentence)
+    return any(words & _topic_words(question) for question in questions)
+
+
 _ESCALATION_CLAIM = re.compile(
     r"\b(?:i|we)(?:'ve|’ve| have)?\s+(?:escalated|referred|passed|flagged|forwarded)\b",  # noqa: RUF001
     re.IGNORECASE,
@@ -237,10 +298,14 @@ def _wording_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
                     ReplyInconsistency(kind='claims_escalation_without_one', detail=match.group(0))
                 )
                 break
-    if not validated.northwind_questions and not validated.earlier_open_questions:
+    if not validated.northwind_questions:
         for sentence in sentences:
             match = _PROMISED_ANSWER.search(sentence)
-            if match is not None and not sentence.rstrip().endswith('?'):
+            if (
+                match is not None
+                and not sentence.rstrip().endswith('?')
+                and not _about_an_open_question(sentence, validated.earlier_open_questions)
+            ):
                 problems.append(
                     ReplyInconsistency(
                         kind='promises_answer_without_question', detail=match.group(0)

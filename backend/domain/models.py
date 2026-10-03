@@ -1702,11 +1702,12 @@ class ModelDecisionProvenance(ContractModel):
 class RuntimeInvocationTrace(ContractModel):
     """Bounded provider metadata for one staged Runtime invocation.
 
-    A turn makes at most four calls: the proposal, one tool continuation, one
-    consistency recall and one field-contract repair.
+    A turn makes at most three calls: the proposal, one ``context.resolve``
+    continuation and one consistency recall. Field-contract repair is a second
+    call only on turns with neither.
     """
 
-    ordinal: int = Field(ge=1, le=4)
+    ordinal: int = Field(ge=1, le=3)
     provider_model: str | None = Field(default=None, max_length=300)
     provider_request_id: str | None = Field(default=None, max_length=500)
     finish_reason: str | None = Field(default=None, max_length=100)
@@ -1751,7 +1752,7 @@ class RuntimeTraceRecord(ContractModel):
     model_profile_id: str
     trigger_message_id: str
     evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
-    invocations: list[RuntimeInvocationTrace] = Field(min_length=0, max_length=4)
+    invocations: list[RuntimeInvocationTrace] = Field(min_length=0, max_length=3)
     deterministic_response_id: str | None = Field(default=None, max_length=120)
     tool_call_id: str | None = None
     tool_name: str | None = Field(
@@ -1784,7 +1785,7 @@ class RuntimeTraceRecord(ContractModel):
     prefix_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     tool_manifest_id: str | None = Field(default=None, max_length=160)
     resolved_ref_count: int = Field(default=0, ge=0, le=1)
-    model_invocations: int | None = Field(default=None, ge=0, le=4)
+    model_invocations: int | None = Field(default=None, ge=0, le=3)
     tool_calls: int | None = Field(default=None, ge=0, le=1)
     output_tokens: int | None = Field(default=None, ge=0)
     cache_read_tokens: int | None = Field(default=None, ge=0)

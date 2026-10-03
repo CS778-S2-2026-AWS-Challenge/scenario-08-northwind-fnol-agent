@@ -28,7 +28,7 @@ from backend.domain.model_gateway import (
 logger = logging.getLogger(__name__)
 
 REPLY_REVIEW_PURPOSE = 'reply_review'
-REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v1'
+REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v2'
 # Longest a review call may take; a turn with less time left uses the rules.
 REPLY_JUDGE_TIMEOUT_SECONDS = 20.0
 
@@ -55,8 +55,8 @@ a service such as towing, repairs, an assessor or a rental car. Services are off
 insurance company.
 - claims_escalation_without_one: escalation is null and the reply says it escalated, referred or \
 passed the claim to a person.
-- promises_answer_without_question: questions_passed_on is empty and the reply says the claims \
-team will confirm, answer or check something for the claimant.
+- promises_answer_without_question: the reply says the claims team will confirm, answer or check \
+something for the claimant, and that thing is not one of questions_passed_on.
 - claims_documents_block_lodging: the reply says a photo, quote or other document is needed \
 before the claim can be lodged or submitted. Documents never block lodging; asking for one, or \
 saying it helps, is fine.
