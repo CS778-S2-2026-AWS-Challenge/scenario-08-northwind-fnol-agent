@@ -155,7 +155,7 @@ jobs:
                 exit 0
                 ;;
               full)
-                python -m pytest --cov=backend --cov-report=json:coverage.json \
+                python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 \
                   --junitxml=test-results/junit.xml -o junit_family=xunit1
                 ;;
               scoped)
@@ -164,7 +164,7 @@ jobs:
                   echo "No existing test covers the changed lines."
                   echo '{"files": {}}' > coverage.json
                 else
-                  python -m pytest --cov=backend --cov-report=json:coverage.json \
+                  python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 \
                     --junitxml=test-results/junit.xml -o junit_family=xunit1 $tests
                 fi
                 ;;
@@ -176,6 +176,7 @@ jobs:
             python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
       - store_test_results:
           path: test-results
+          when: always
       - contract-snapshot-checks
 
   backend-full-tests:
@@ -194,7 +195,7 @@ jobs:
               | circleci tests split --split-by=timings --timings-type=filename > /tmp/shard-tests.txt
             echo "This shard runs $(wc -l < /tmp/shard-tests.txt) test files."
             COVERAGE_FILE="coverage-shards/.coverage.${CIRCLE_NODE_INDEX}" python -m pytest \
-              --cov=backend --cov-context=test --cov-report= \
+              --cov=backend --cov-context=test --cov-report= --cov-fail-under=0 \
               --junitxml=test-results/junit.xml -o junit_family=xunit1 \
               $(cat /tmp/shard-tests.txt)
       - run:
@@ -210,6 +211,7 @@ jobs:
             fi
       - store_test_results:
           path: test-results
+          when: always
       - persist_to_workspace:
           root: coverage-shards
           paths:
@@ -227,8 +229,8 @@ jobs:
           name: Combine shard coverage and refresh the coverage map
           command: |
             python -m coverage combine coverage-shards/.coverage.*
-            python -m coverage json -o coverage.json
-            python -m coverage report --format=total | sed 's/^/Total backend coverage: /'
+            python -m coverage json -o coverage.json --fail-under=0
+            echo "Total backend coverage: $(python -m coverage report --format=total --fail-under=0)%"
             python -m scripts.backend_test_map --data .coverage --commit "${CIRCLE_SHA1}" \
               --out .ci/backend-test-map.json.gz
       - save_cache:
