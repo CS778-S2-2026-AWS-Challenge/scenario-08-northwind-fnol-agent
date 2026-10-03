@@ -26,6 +26,33 @@ export class GitHubClient {
     return this.restJson(`/repos/${owner}/${repo}/issues/${String(issueNumber)}`);
   }
 
+  async listPullRequestCommits(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+  ): Promise<{ sha: string; message: string; parentCount: number }[]> {
+    const commits: { sha: string; message: string; parentCount: number }[] = [];
+    for (let page = 1; ; page += 1) {
+      const response = await this.request(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${String(pullNumber)}/commits?per_page=100&page=${String(page)}`,
+        {},
+      );
+      const payload: unknown = await response.json();
+      if (!Array.isArray(payload)) {
+        throw new GitHubApiError("GitHub REST commit list is not an array.", response.status);
+      }
+      for (const item of payload.filter(isRecord)) {
+        const commit = isRecord(item.commit) ? item.commit : {};
+        commits.push({
+          sha: typeof item.sha === "string" ? item.sha : "",
+          message: typeof commit.message === "string" ? commit.message : "",
+          parentCount: Array.isArray(item.parents) ? item.parents.length : 1,
+        });
+      }
+      if (payload.length < 100) return commits;
+    }
+  }
+
   async listIssueComments(
     owner: string,
     repo: string,

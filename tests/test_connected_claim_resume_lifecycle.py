@@ -69,14 +69,17 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         },
     )
     assert claimant_turn.status_code == 200
-    assert claimant_turn.json()['claim_revision'] == 2
+    # The first agent turn may write the Claim more than once (form, then turn record);
+    # every later step below adds exactly one revision.
+    turn_revision = claimant_turn.json()['claim_revision']
+    assert turn_revision >= 2
 
     support = client.post(
         f'/api/v1/claims/{claim_id}/support-requests',
         headers={
             **auth_headers,
             'Idempotency-Key': 'issue-257-support',
-            'If-Match': '2',
+            'If-Match': str(turn_revision),
         },
         json={
             'reason': 'I want a staff member to help me continue.',
@@ -84,7 +87,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         },
     )
     assert support.status_code == 201
-    assert support.json()['revision'] == 3
+    assert support.json()['revision'] == turn_revision + 1
     handoff_id = support.json()['handoff']['handoff_id']
 
     queue = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
@@ -96,12 +99,12 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         headers={
             **staff_auth_headers,
             'Idempotency-Key': 'issue-257-accept',
-            'If-Match': '3',
+            'If-Match': str(turn_revision + 1),
         },
         json={},
     )
     assert accepted.status_code == 200
-    assert accepted.json()['revision'] == 4
+    assert accepted.json()['revision'] == turn_revision + 2
     assert accepted.json()['handoff']['assigned_to'] == 'stf_demo'
 
     staff_content = {
@@ -113,12 +116,12 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         headers={
             **staff_auth_headers,
             'Idempotency-Key': 'issue-257-staff-reply',
-            'If-Match': '4',
+            'If-Match': str(turn_revision + 2),
         },
         json={'content': staff_content},
     )
     assert staff_reply.status_code == 200
-    assert staff_reply.json()['claim_revision'] == 5
+    assert staff_reply.json()['claim_revision'] == turn_revision + 3
     staff_message_id = staff_reply.json()['message']['message_id']
 
     replay_after_staff_mutation = client.post(
@@ -135,9 +138,9 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         },
     )
     assert replay_after_staff_mutation.status_code == 200
-    assert replay_after_staff_mutation.json()['claim_revision'] == 2
-    assert replay_after_staff_mutation.json()['current_claim_revision'] == 5
-    assert replay_after_staff_mutation.json()['current_claim']['revision'] == 5
+    assert replay_after_staff_mutation.json()['claim_revision'] == turn_revision
+    assert replay_after_staff_mutation.json()['current_claim_revision'] == turn_revision + 3
+    assert replay_after_staff_mutation.json()['current_claim']['revision'] == turn_revision + 3
 
     history = client.get(
         f'/api/v1/claims/{claim_id}/sessions/{first_session_id}/messages?limit=100',
@@ -156,7 +159,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         headers={
             **auth_headers,
             'Idempotency-Key': 'issue-257-continuation',
-            'If-Match': '5',
+            'If-Match': str(turn_revision + 3),
         },
         json={
             'client_message_id': 'issue-257-continuation',
@@ -165,7 +168,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         },
     )
     assert continuation.status_code == 200
-    assert continuation.json()['claim_revision'] == 6
+    assert continuation.json()['claim_revision'] == turn_revision + 4
     assert continuation.json()['decision'] is None
     assert continuation.json()['agent_message'] is None
 
@@ -173,13 +176,13 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
     assert before_resume is not None
     assert handoff is not None
-    assert before_resume.revision == 6
+    assert before_resume.revision == turn_revision + 4
     assert before_resume.active_session_id == first_session_id
     assert handoff.status is HandoffStatus.IN_PROGRESS
     assert handoff.assigned_to == 'stf_demo'
     assert repository.claim_count == 1
 
-    assert _pause_active_session(repository, claim_id) == 7
+    assert _pause_active_session(repository, claim_id) == turn_revision + 5
     resume_headers = {**auth_headers, 'Idempotency-Key': 'issue-257-resume'}
     resumed = client.post(
         f'/api/v1/claims/{claim_id}/sessions',
@@ -203,9 +206,9 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert after_resume is not None
     assert resumed_session is not None
     assert preserved_handoff is not None
-    assert after_resume.revision == 8
+    assert after_resume.revision == turn_revision + 6
     assert after_resume.active_session_id == resumed_session_id
-    assert resumed_session.context_revision == 7
+    assert resumed_session.context_revision == turn_revision + 5
     assert preserved_handoff.status is HandoffStatus.IN_PROGRESS
     assert preserved_handoff.assigned_to == 'stf_demo'
     assert repository.claim_count == 1
@@ -216,7 +219,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         headers={
             **staff_auth_headers,
             'Idempotency-Key': 'issue-257-stale-staff-reply',
-            'If-Match': '7',
+            'If-Match': str(turn_revision + 5),
         },
         json={'content': {'type': 'text', 'text': 'This stale reply must not persist.'}},
     )
@@ -231,7 +234,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         headers={
             **auth_headers,
             'Idempotency-Key': 'issue-257-resumed-turn',
-            'If-Match': '8',
+            'If-Match': str(turn_revision + 6),
         },
         json={
             'client_message_id': 'issue-257-resumed-turn',
@@ -240,7 +243,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         },
     )
     assert resumed_turn.status_code == 200
-    assert resumed_turn.json()['claim_revision'] == 9
+    assert resumed_turn.json()['claim_revision'] == turn_revision + 7
     assert resumed_turn.json()['decision'] is None
     assert resumed_turn.json()['agent_message'] is None
     resumed_message_id = resumed_turn.json()['claimant_message']['message_id']
@@ -250,7 +253,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     final_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
     assert final_claim is not None
     assert final_handoff is not None
-    assert final_claim.revision == 9
+    assert final_claim.revision == turn_revision + 7
     assert final_claim.incident_type == product_family
     assert final_claim.active_session_id == resumed_session_id
     assert final_handoff.status is HandoffStatus.IN_PROGRESS

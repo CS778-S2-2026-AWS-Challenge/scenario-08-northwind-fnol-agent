@@ -48,11 +48,10 @@ frontend test modules. A test must assert observable behaviour such as an API
 response, persisted state, claimant projection, staff projection, or rendered
 interaction. Do not put durable `assert` logic in a JSON fixture.
 
-The presentation journey under `tests/fixtures/presentation/` is a temporary
-quarantine for presentation-specific checks. Product and contract assertions
-that remain valuable after the demonstration belong in a normal journey or API
-test module. Presentation-only assertions must be removed or archived when the
-temporary demonstration work ends.
+`tests/fixtures/` holds data only. Pytest does not collect test modules placed
+there (`norecursedirs` in `pyproject.toml`), and CI test selection never picks
+them, so a test module under `tests/fixtures/` would silently never run. The
+former presentation checks now live in `tests/` next to the other journey tests.
 
 ### Runtime test doubles
 

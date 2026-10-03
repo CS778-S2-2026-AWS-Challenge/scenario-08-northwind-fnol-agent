@@ -2,12 +2,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.domain.retrieval import PolicyRetrievalRecord
 from backend.repositories.fixture import FixtureRepository
 
-JOURNEY_PATH = Path(__file__).parents[1] / 'journeys' / 'PRES-02-guided-rear-end-review.json'
+JOURNEY_PATH = (
+    Path(__file__).parent / 'fixtures' / 'journeys' / 'PRES-02-guided-rear-end-review.json'
+)
 
 
 def _journey() -> dict[str, Any]:
@@ -60,6 +63,10 @@ def _assert_customer_text_excludes_internal_terms(payload: dict[str, Any]) -> No
         assert internal_term not in customer_text
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason='#1193: the Workbench detail shows an inferred, unconfirmed incident family',
+)
 def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_customer(
     client: TestClient,
     repository: FixtureRepository,

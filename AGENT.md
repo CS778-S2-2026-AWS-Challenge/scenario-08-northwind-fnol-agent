@@ -107,19 +107,25 @@ explicit so they are not lost when an agent follows only the entry point:
 
 ## Test writing and CI scope
 
-Before adding a test, identify the new business behaviour it proves. Equivalent inputs belong in
-one boundary table or a focused parameterized test; do not create numbered near-duplicates. Keep
-one parameterized function to 8-10 cases unless the PR explains the distinct business contract for
-each case. Unit tests mock databases, queues, and external services by default; a test that uses
-real I/O must be explicitly marked `@pytest.mark.integration` and kept out of the fast PR path.
+Reuse comes first. Pull-request CI runs the existing tests that execute your changed lines, and
+those tests count toward the 85% changed-line coverage, so add no test when existing tests already
+cover the change. When a new case is needed, add it to the test file of the module it exercises.
+Create a new test file only for a module or behaviour that has none, and name it after that module
+or behaviour, never after a PR, issue, week, or prompt version. Before adding a test, identify the
+new business behaviour it proves; equivalent inputs belong in one boundary table or a focused
+parameterized test, not numbered near-duplicates. A parameterized function above about 10 cases
+should say in the PR which separate contracts its cases cover. Unit tests mock databases, queues,
+and external services by default; a test that uses real I/O must be explicitly marked
+`@pytest.mark.integration` and kept out of the fast PR path. Test modules never live under
+`tests/fixtures/`, which holds data only and is not collected.
 
 Preserve explicit coverage for permission boundaries, claimant visibility, idempotency, revision
-conflicts, append-only audit events, and external-service authorization. When test volume grows
-far beyond the changed production code, review the cases for duplicated behaviour before adding
-more. Ordinary PR CI is impact-scoped. Shared core files, unmapped backend paths, and CI tooling
-select the backend selector contract sentinel; changed executable backend lines must still meet
-the diff-coverage threshold. Remote CI never falls back to the full backend suite. A newer commit
-for the same PR supersedes older CI runs.
+conflicts, append-only audit events, and external-service authorization. Every merge to `main` and
+a daily schedule run the whole backend suite; when it fails, CI opens a "Full backend suite fails
+on main" issue. Fix the failure, or mark a test that fails for a known product defect
+`xfail(strict=True)` with that defect's issue; never delete a failing test to make the run green.
+A newer commit for the same PR supersedes older CI runs. See
+`docs/skills/repo-governance-for-novice/ci-checks.md` for the selection rules.
 
 The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
 archived under [docs/archive/governance/](docs/archive/governance/) and are historical

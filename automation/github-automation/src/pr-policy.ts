@@ -1,3 +1,4 @@
+import { validateCommits } from "../../../.github/scripts/commit_policy.cjs";
 import { validatePullRequestBody } from "../../../.github/scripts/pr_policy.cjs";
 
 import { GitHubApiError } from "./github";
@@ -42,6 +43,9 @@ export async function evaluatePullRequestPolicy(
       }
     }
   }
+
+  const commits = await client.listPullRequestCommits(owner, repo, event.pullRequest.number);
+  result.errors.push(...validateCommits({ commits, body: event.pullRequest.body }).errors);
 
   await client.setCommitStatus({
     owner,
