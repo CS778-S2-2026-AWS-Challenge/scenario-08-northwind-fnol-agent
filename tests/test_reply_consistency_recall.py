@@ -8,12 +8,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.domain.agent_v8 import V8Escalation, V8NorthwindQuestion
+from backend.domain.agent_v8 import V8Escalation
 from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse, ModelToolCall
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentProposal, AgentTurnContext, InvariantGuardedAgent
 from backend.services.model_agent import GatewayAgent
 from backend.services.model_request_planner import plan_model_turn
+from backend.services.reply_judge import ReplyJudge, turn_ledger
 from backend.services.turn_proposal_validation import ValidatedTurn
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 from tests.test_agent_context_runtime_v7 import _RecordingGateway
@@ -202,22 +203,11 @@ def test_review_allows_fact_questions_offers_by_card_and_real_escalation() -> No
     assert review_reply(
         _validated("I've passed this to a claims specialist.", escalated=True)
     ).consistent
-    # Promising an answer is only true once the question was passed on.
-    promise = 'That clause is not in the wording I have; our claims team will confirm.'
-    assert [item.kind for item in review_reply(_validated(promise)).inconsistencies] == [
-        'promises_answer_without_question'
-    ]
-    passed_on = replace(
-        _validated(promise),
-        northwind_questions=(
-            V8NorthwindQuestion(
-                question='Is my hire car covered?',
-                claimant_wording='is a hire car covered',
-                model_view='Not in the excerpts.',
-            ),
-        ),
-    )
-    assert review_reply(passed_on).consistent
+    # Whether a promise matches a question passed on is the review model's call;
+    # the fallback rules do not judge it.
+    assert review_reply(
+        _validated('That clause is not in the wording I have; our claims team will confirm.')
+    ).consistent
 
 
 def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
@@ -236,12 +226,27 @@ def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
     assert claim is not None and claim.form['property.ongoing_risk'].value == 'active_leak'
 
 
+class _ReviewModel(ReplyJudge):
+    """Stands in for the review model: a promise needs a question passed on."""
+
+    def __init__(self) -> None:
+        super().__init__(lambda: _RecordingGateway([]))
+        self.ledgers: list[dict[str, object]] = []
+
+    def problems(self, validated: Any) -> list[tuple[str, str]] | None:
+        ledger = turn_ledger(validated)
+        self.ledgers.append(ledger)
+        if 'claims team will' in validated.reply and not ledger['questions_passed_on']:
+            return [('promises_answer_without_question', 'the claims team will')]
+        return []
+
+
 class _LookupThenRecall(GatewayAgent):
     """A coverage question: context.resolve, its continuation, then one recall."""
 
     def __init__(self, first_reply: dict[str, Any], rewrite: dict[str, Any]) -> None:
         self.gateway = _RecordingGateway([])
-        super().__init__(self.gateway)
+        super().__init__(self.gateway, reply_judge=_ReviewModel())
         self.first_reply = first_reply
         self.rewrite = rewrite
 
@@ -350,6 +355,8 @@ def test_mentioning_a_question_passed_on_earlier_is_not_sent_back(
     }
     reminds = envelope(reply='The claims team will confirm the hire car question. Is anyone hurt?')
     provider = _provider(passes_on, reminds)
+    review = _ReviewModel()
+    provider.agent = GatewayAgent(provider.gateway, reply_judge=review)
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     journey = Journey(client, 'home', 'recall-earlier-question')
 
@@ -358,17 +365,15 @@ def test_mentioning_a_question_passed_on_earlier_is_not_sent_back(
 
     assert len(provider.gateway.requests) == 2
     assert turn['agent_message']['content']['text'] == reminds['reply']
+    assert review.ledgers[-1]['questions_passed_on'] == [
+        'Is my hire car covered while my car is repaired?'
+    ]
 
 
-def test_review_allows_a_promise_about_a_question_passed_on_earlier() -> None:
+def test_an_earlier_question_reaches_the_review_model_without_excusing_other_promises() -> None:
     from backend.services.reply_consistency import review_reply
-    from backend.services.reply_judge import turn_ledger
+    from backend.services.reply_judge import JUDGE_INSTRUCTION
 
-    promise = 'Our claims team will confirm the hire car question. What is the registration?'
-    earlier = replace(_validated(promise), earlier_open_questions=('Is my hire car covered?',))
-    assert review_reply(earlier).consistent
-    assert turn_ledger(earlier)['questions_passed_on'] == ['Is my hire car covered?']
-    # An open question about something else does not back a new promise.
     unrelated = replace(
         _validated(
             'The claims team will confirm whether Northwind accepts liability. '
@@ -376,6 +381,20 @@ def test_review_allows_a_promise_about_a_question_passed_on_earlier() -> None:
         ),
         earlier_open_questions=('Is my hire car covered?',),
     )
-    assert [item.kind for item in review_reply(unrelated).inconsistencies] == [
+    # The model is asked whether the promise is about a question passed on,
+    # and is given the earlier one to compare.
+    assert 'is not one of questions_passed_on' in JUDGE_INSTRUCTION
+    assert turn_ledger(unrelated)['questions_passed_on'] == ['Is my hire car covered?']
+
+    class _Flags(ReplyJudge):
+        def __init__(self) -> None:
+            super().__init__(lambda: _RecordingGateway([]))
+
+        def problems(self, validated: Any) -> list[tuple[str, str]] | None:
+            return [('promises_answer_without_question', 'accepts liability')]
+
+    # When the model reports the promise, an open question elsewhere on the
+    # Claim does not excuse it.
+    assert [item.kind for item in review_reply(unrelated, _Flags()).inconsistencies] == [
         'promises_answer_without_question'
     ]
