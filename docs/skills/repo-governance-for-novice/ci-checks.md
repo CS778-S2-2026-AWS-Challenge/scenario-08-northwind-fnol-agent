@@ -51,49 +51,63 @@ one:
   Coupling on the whole `backend/` directory may over-report; narrow it to the
   route/model subdirectories when implementing.
 
-- **Impact-scoped backend tests**: pull requests and `main` use
-  `scripts/select_backend_tests.py` to select direct consumer tests from the
-  changed paths. Pull requests compare their merge base with `HEAD`; `main`
-  compares the current commit with its first parent so a merge validates only
-  the behavior it introduces. Documentation- and frontend-only changes may
-  skip backend pytest. Known Workbench, Agent, Model Gateway, Evidence,
-  identity, Claim, and external-service paths select their declared consumer
-  suites. Shared or unmapped backend paths and CI/test tooling select the
-  selector contract sentinel instead of the complete suite. Changed backend
-  behavior must add or change a focused test so changed-line coverage can
-  execute the affected lines. Ruff and Mypy receive only changed Python files,
-  while OpenAPI and AuditEvent snapshot checks run only when their contract can
-  be affected. The selector has no automatic or explicit full-suite mode and
-  must never return an empty selection for a backend behavior change.
+- **Job planning**: a setup pipeline (`.circleci/config.yml` running
+  `scripts/ci_plan.py`) decides from the changed paths which workflows exist,
+  then continues with `.circleci/continue_config.yml`. A job that a change does
+  not need is never created; do not add jobs that start and then skip
+  themselves. `main` creates every job; the daily schedule creates only the full
+  backend suite; a change to the CI definition creates everything.
 
-- **Changed-line backend coverage**: diff coverage is the remote backend coverage gate:
-  1. Scoped backend runs emit `coverage.json` and run
-     `python scripts/check_diff_coverage.py --base origin/main --min 85`.
-  2. Diff coverage measures only added executable Python lines under `backend/` in the
-     exact PR diff. Deleted lines, non-Python changes, and lines omitted from coverage.py's
-     executable-line report are excluded.
-  3. The check is implemented inside the existing GitHub/CircleCI backend quality profiles;
-     Codecov, Coveralls, and a second remote quality provider are not required.
-  4. Remote CI does not run a repository-wide total-coverage gate. This avoids unrelated
-     historical code blocking a focused change, but it also means the quality profile does not
-     detect coverage loss outside the changed executable lines. A full suite remains a manual
-     diagnostic command, not required merge evidence.
+- **Coverage-selected backend tests**: every merge to `main` and the daily
+  schedule run the whole backend suite in parallel containers with
+  `--cov-context=test`. `scripts/backend_test_map.py` turns the result into a
+  map from each backend line to the test files that executed it, cached for pull
+  requests. On a pull request `scripts/select_backend_tests.py` runs:
+  1. the test files that executed the changed lines (for a line that runs only
+     at import time, such as a signature or class body, every test file that
+     uses the module);
+  2. the test files the pull request changes, and the test files that import a
+     changed test-support or script module;
+  3. the whole suite when shared test infrastructure changes (`tests/conftest.py`,
+     `pyproject.toml`, backend requirements, `.circleci/`, the selector itself)
+     or no map is available.
+  There is no hand-written path-to-test table to maintain. Ruff and Mypy
+  receive only changed Python files, while OpenAPI and AuditEvent snapshot
+  checks run only when their contract can be affected (always on `main`).
+
+- **Full-suite failures**: when the full suite fails on `main` or on the
+  schedule, CI opens a GitHub issue titled "Full backend suite fails on main",
+  or comments on the open one. Fix `main` or mark a test that fails for a known
+  product defect `xfail(strict=True)` with the defect's issue; never delete a
+  failing test to make the run green.
+
+- **Changed-line backend coverage**: at least 85% of the executable Python lines
+  a pull request adds under `backend/` must be executed by the selected tests
+  (`python scripts/check_diff_coverage.py --base origin/main --min 85`).
+  Because the selection includes the existing tests that already cover those
+  lines, **reuse comes first**: if existing tests execute the changed lines, add
+  no new test. When a new case is needed, add it to the test file of the module
+  it exercises; create a new test file only for a module or behaviour that has
+  none, and name it after that module or behaviour, never after a PR, issue,
+  week, or prompt version. CI prints non-blocking advice for new test files that
+  break this naming rule or extend an existing file's name
+  (`scripts/check_test_layout.py`). Deleted lines, non-Python changes, and
+  non-executable lines are excluded from the denominator.
 
 - Markdown lint: `DavidAnson/markdownlint-cli2-action`, linting only the
   markdown files changed in the current PR (no back-scan of existing
   documents, to avoid an enormous first run).
 - PR policy adds the "read AGENT.md" field check (see `pr-workflow.md`
   section 5.4).
-- **Commit message format check**: add a step to the existing PR policy
-  workflow that matches the first line of every commit message in the PR
-  against the following regex (shell implementation; no commitlint or Node
-  toolchain):
+- **Commit message format check**: the Cloudflare Worker checks the first line
+  of every commit in the PR as part of the `Northwind PR policy` status
+  (`.github/scripts/commit_policy.cjs`) against the following regex:
 
 ```text
 ^(feat|fix|docs|chore|ci|test|refactor|perf|revert)(\((backend|frontend|docs|deploy|scripts|api|deps)\))?!?: .+
 ```
 
-  Merge commits are exempt. The same step verifies breaking-change two-way
+  Merge commits are exempt. The same check verifies breaking-change two-way
   consistency: when a commit carries `!` or a `BREAKING CHANGE:` footer, the
   PR body must contain a breaking-change declaration section (see
   `pr-workflow.md` section 5.1).

@@ -44,9 +44,9 @@ Run focused local checks for the code being changed so defects are found before 
 commands documented by the affected package or the equivalent commands in the configured CircleCI
 jobs. A failed or interrupted focused check is not a pass.
 
-CircleCI is the authoritative repository quality provider. Before requesting review, confirm its
-backend, claimant, GitHub automation, documentation, and PR-policy checks have run against the
-current exact head. A PR without the configured remote checks, or with any failed or pending
+CircleCI is the authoritative repository quality provider. Before requesting review, confirm that
+the CircleCI jobs its setup pipeline created for your change and the Worker's `Northwind PR policy`
+status have run against the current exact head. A PR without the configured remote checks, or with any failed or pending
 required check, remains Draft and must not be approved or merged. Local output cannot substitute
 for missing remote exact-head evidence.
 

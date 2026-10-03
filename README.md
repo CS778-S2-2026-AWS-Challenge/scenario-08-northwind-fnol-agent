@@ -54,7 +54,7 @@ authorisation.
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
-| `.circleci/` | External backend, frontend, PR-policy, documentation, and GitHub-automation quality jobs |
+| `.circleci/` | Setup pipeline (`config.yml`) and the backend, frontend, documentation, and GitHub-automation quality jobs it creates (`continue_config.yml`) |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
 | `docs/` | Product direction, API contract, engineering conventions, and research material |
@@ -356,19 +356,19 @@ This profile uses normal claimant and staff authentication, durable MongoDB, Min
 volumes, and an idempotent governed-knowledge bootstrap. It still labels policy/history and the
 controlled assessor honestly as synthetic; it is not an AWS or production deployment claim.
 
-To run the same changed-scope backend coverage check locally, use:
+To run the same changed-line backend check locally, download `backend-test-map.json.gz` from
+the latest `backend-full-report` job on `main` into `.ci/`, then run:
 
 ```powershell
-$selectedTests = py -3.12 scripts/select_backend_tests.py --tests
+$selectedTests = py -3.12 -m scripts.select_backend_tests --tests
 py -3.12 -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $selectedTests
 py -3.12 scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
 ```
 
-The remote backend quality gate requires at least 85% of executable lines added or modified
-under `backend/` to be covered by the selected consumer tests. Deleted lines, non-Python files,
-and non-executable lines are not part of the diff denominator. Remote CI does not run the full
-backend suite or enforce repository-wide total coverage; developers may still run the complete
-suite manually when diagnosing broad interactions.
+Without the map the selector asks for the whole suite. The backend check requires at least 85% of
+executable lines added or modified under `backend/` to be covered by the selected tests, which
+include the existing tests that already execute those lines. Deleted lines, non-Python files, and
+non-executable lines are not part of the diff denominator.
 
 In another terminal, start the claimant client:
 
@@ -408,16 +408,20 @@ must not be used as a production approval mechanism.
 
 ## Verification
 
-CircleCI is the authoritative repository quality provider for the active backend, frontend, policy,
-documentation, and GitHub-automation gates. Claimant, Workbench, and Control Plane quality gates
-run only when their package or shared frontend tokens change; unrelated pull requests complete
-their impact check without installing frontend dependencies. Each affected package runs its
-`npm ci`, lint, test, and build chain. Backend pull requests use impact-scoped tests selected by
-`scripts/select_backend_tests.py`; known paths run mapped consumer tests, while shared or unmapped
-backend and quality-tooling changes run the selector contract sentinel and rely on diff coverage to
-require focused tests for changed executable lines. Ruff and Mypy inspect only changed Python files,
-and contract snapshot checks run only when their inputs are affected. Documentation-only changes
-skip the Python backend quality chain. Pull requests and `main` use the same diff-scoped policy.
+CircleCI is the authoritative repository quality provider for the backend, frontend,
+documentation, and GitHub-automation checks; the Cloudflare Worker reports the
+`Northwind PR policy` status (PR body and commit messages). A setup pipeline
+(`scripts/ci_plan.py`) decides which jobs a change needs before any of them starts, so an
+unrelated job is never created. Each affected frontend package runs its `npm ci`, lint, test, and
+build chain.
+
+Backend pull requests run the test files that executed their changed lines in the latest full run
+on `main` (`scripts/select_backend_tests.py` reading the cached coverage map from
+`scripts/backend_test_map.py`), plus the test files they change. Ruff and Mypy inspect only changed
+Python files, and contract snapshot checks run only when their inputs are affected. Every merge to
+`main`, a daily schedule, and changes to shared test infrastructure run the whole backend suite in
+parallel containers; on `main` and the schedule this refreshes the coverage map and opens a GitHub
+issue titled "Full backend suite fails on main" when it fails.
 
 For focused local backend verification while developing, run the checks affected by the change:
 
