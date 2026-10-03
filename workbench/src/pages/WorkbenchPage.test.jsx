@@ -58,6 +58,10 @@ const externalActionTracker = vi.hoisted(() => ({
   lastPromise: null,
 }))
 
+const navigationRail = vi.hoisted(() => ({
+  render: vi.fn(),
+}))
+
 vi.mock('../api.js', () => ({ workbenchApi: api }))
 vi.mock('../auth/auth-context.js', () => ({
   useAuth: () => ({
@@ -67,7 +71,12 @@ vi.mock('../auth/auth-context.js', () => ({
   }),
 }))
 vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs }))
-vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
+vi.mock('../components/NavigationRail.jsx', () => ({
+  default: (props) => {
+    navigationRail.render(props)
+    return null
+  },
+}))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimWorkspace.jsx', () => ({
   default: ({ detail, resources, externalActionNotices = [], readOnly = false, onAccept, onAcceptClaim, onResolve, onSignalDecision, onCreateAction, onUpdateAction, onSend, onOwnershipAction, onReopen, onClaimDecision, onExternalTaskAction, onRetryExternalActionContext, onRetry }) => {
@@ -489,6 +498,27 @@ describe('WorkbenchPage queue routing', () => {
     ))
     expect(api.claim).toHaveBeenCalledWith('staff-token', 'clm_route_1')
     expect(screen.getByTestId('workspace-mode')).toHaveTextContent('interactive')
+  })
+
+  it('keeps an authoritative zero in the Active claims navigation state', async () => {
+    api.claims.mockResolvedValue({
+      items: [],
+      page: { next_cursor: null },
+      view_counts: availableCounts,
+      active_claim_counts: {
+        status: 'available',
+        total: 0,
+        navigation_total: 0,
+        items: availableActiveClaimCounts.items.map((item) => ({ ...item, count: 0 })),
+        limitation: null,
+      },
+    })
+
+    renderPage('/workbench/active')
+
+    await waitFor(() => expect(navigationRail.render).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCount: 0 }),
+    ))
   })
 
   it('presents a readable recovery state when the Active claims view is not published', async () => {

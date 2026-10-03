@@ -994,6 +994,7 @@ def test_staff_lists_claims_for_workbench_queue(
     assert payload['page'] == {'next_cursor': None}
     item = next(item for item in payload['items'] if item['claim_id'] == claim_id)
     assert item['claimant']['customer_id'] == 'cus_demo'
+    assert item['claimant']['display_name'] is None
     assert item['work_summary']['queue_key'] == 'processing'
     assert item['priority_projection']['level'] == 'standard'
     assert item['work_summary']['primary_action_code'] is None

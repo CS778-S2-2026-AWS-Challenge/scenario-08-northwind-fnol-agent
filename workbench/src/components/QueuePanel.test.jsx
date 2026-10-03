@@ -168,6 +168,8 @@ describe('QueuePanel', () => {
 
     expect(screen.getByRole('heading', { name: 'Submitted claims' })).toBeVisible()
     expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
+    expect(screen.getByText('Review the reported vehicle damage.', { selector: 'strong' })).toBeVisible()
+    expect(screen.queryByText('Alex Morgan')).not.toBeInTheDocument()
     expect(screen.getByText('Submitted · Motor · Unassigned')).toBeVisible()
     expect(screen.queryByText(/^Completed/)).not.toBeInTheDocument()
   })
@@ -179,7 +181,6 @@ describe('QueuePanel', () => {
       view: 'incomplete_claims',
       claims: [{
         ...claim,
-        claimant: { customer_id: 'cus_1' },
         incident: { family: null, summary: 'Kitchen water damage' },
         work_summary: {
           ...claim.work_summary,
@@ -192,6 +193,7 @@ describe('QueuePanel', () => {
     expect(screen.getByText('Customers are still completing these claims. They have not entered the formal work queue.')).toBeVisible()
     expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
     expect(screen.getByText('Kitchen water damage', { selector: 'strong' })).toBeVisible()
+    expect(screen.queryByText('Alex Morgan')).not.toBeInTheDocument()
     expect(screen.getByText('Draft')).toBeVisible()
     expect(screen.getByText('Not submitted · Type not confirmed')).toBeVisible()
     expect(screen.getByText(`Last customer activity ${formatDateTime(lastClaimantActivity)}`)).toBeVisible()

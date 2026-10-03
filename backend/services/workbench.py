@@ -2421,7 +2421,7 @@ def list_workbench_claims(
             continue
         projected = _build_projection(repository, principal, claim, include_detail=False)
         assert isinstance(projected, WorkbenchClaimListItem)
-        if identity_repository is not None:
+        if view is WorkbenchQueueView.ACTIVE_CLAIMS and identity_repository is not None:
             account = identity_repository.get_account(claim.customer_id)
             if account is not None:
                 projected = projected.model_copy(

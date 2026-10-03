@@ -177,7 +177,7 @@ export default function WorkbenchPage() {
       const count = Number.isInteger(activeClaimCounts.navigation_total)
         ? activeClaimCounts.navigation_total
         : activeClaimCounts.total
-      setActiveCount(count > 0 ? count : null)
+      setActiveCount(count)
     }
     if (queueHasCrossQueueFilters) return
     if (viewCounts?.status !== 'available') return

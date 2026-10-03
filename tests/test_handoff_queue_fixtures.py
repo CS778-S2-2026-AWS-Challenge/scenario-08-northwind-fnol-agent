@@ -357,7 +357,13 @@ def test_staff_queue_searches_each_documented_projection_field() -> None:
             params={'search': 'Demo Claimant One'},
             headers=headers,
         )
-        assert item['claimant']['display_name'] == 'Demo Claimant One'
+        active_item = client.get(
+            '/api/v1/workbench/claims',
+            params={'view': 'active_claims'},
+            headers=headers,
+        ).json()['items'][0]
+        assert item['claimant']['display_name'] is None
+        assert active_item['claimant']['display_name'] == 'Demo Claimant One'
         assert non_searchable_name.json()['items'] == []
 
     repository, claim_id = _load('AT-02-coverage-ambiguity')

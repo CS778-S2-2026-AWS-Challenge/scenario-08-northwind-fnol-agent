@@ -3062,8 +3062,9 @@ sorting falls back to the Claim's `updated_at`. The `active_status` filter appli
 classification. `active_claim_counts` is calculated after the other result filters but before
 `view`, `active_status`, cursor, and limit, so `total` and the status counts describe the current
 filter context. `navigation_total` is calculated before result filters and supplies the stable
-sidebar badge. A staff-safe claimant display name is included when the identity record is
-available; clients retain the opaque customer ID as a non-inferred fallback.
+sidebar badge. Rows returned by `view=active_claims` include a staff-safe claimant display name
+when the identity record is available; other Workbench views retain their existing identity
+projection. Clients retain the opaque customer ID as a non-inferred fallback.
 
 `work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
 Claim. The server applies actionable staff work and an accepted provider wait before terminal

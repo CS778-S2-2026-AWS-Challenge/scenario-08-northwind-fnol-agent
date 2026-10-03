@@ -7,13 +7,13 @@ vi.mock('./AccountMenu.jsx', () => ({
   default: () => <div data-testid="account-menu" />,
 }))
 
-function renderNavigation(pathname) {
+function renderNavigation(pathname, { activeCount = 4, draftCount = 3 } = {}) {
   render(
     <MemoryRouter initialEntries={[pathname]}>
       <NavigationRail
         profile={{ staff_id: 'stf_demo', display_name: 'Demo Staff' }}
-        activeCount={4}
-        draftCount={3}
+        activeCount={activeCount}
+        draftCount={draftCount}
         onLogout={vi.fn()}
         onAgent={vi.fn()}
       />
@@ -51,6 +51,13 @@ describe('NavigationRail', () => {
     expect(within(active).getByText('4')).toHaveClass('navigation-rail__count')
     expect(within(navigation).getByRole('link', { name: 'Workbench' })).not.toHaveClass('active')
     expect(within(navigation).getByRole('link', { name: '3 Draft claims' })).not.toHaveClass('active')
+  })
+
+  it('renders the server-authoritative zero for Active claims', () => {
+    renderNavigation('/workbench/active', { activeCount: 0 })
+
+    const active = screen.getByRole('link', { name: '0 Active claims' })
+    expect(within(active).getByText('0')).toHaveClass('navigation-rail__count')
   })
 
   it('names every rail control independently of its visible text, which the collapsed rail hides', () => {

@@ -173,7 +173,7 @@ export default function QueuePanel({ queueKind = 'legacy', claims, loading, erro
           </div>
         )}
         {claims.map((claim) => {
-          const identity = claimIdentity(claim)
+          const identity = queueClaimIdentity(claim, isActiveQueue)
           const reason = queueReason(claim)
           const updatedLabel = t('Updated {date}', { date: formatDateTime(claim.updated_at) })
           const claimantActivityAt = draftClaimantActivityAt(claim)
@@ -231,6 +231,17 @@ export default function QueuePanel({ queueKind = 'legacy', claims, loading, erro
       </div>
     </aside>
   )
+}
+
+function queueClaimIdentity(claim, includeClaimantName) {
+  return claimIdentity(includeClaimantName
+    ? claim
+    : {
+        ...claim,
+        claimant: claim.claimant
+          ? { ...claim.claimant, display_name: null }
+          : claim.claimant,
+      })
 }
 
 function claimTypeLabel(claim) {
