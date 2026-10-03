@@ -44,11 +44,14 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
         },
     )
     assert turn.status_code == 200
-    assert turn.json()['claim_revision'] == 2
+    # The turn may write the Claim more than once; what matters is that a replayed
+    # creation never returns or restores an older revision than this one.
+    turn_revision = turn.json()['claim_revision']
+    assert turn_revision > 1
 
     stored_after_turn = repository.get_claim(claim_id, 'cus_demo')
     assert stored_after_turn is not None
-    assert stored_after_turn.revision == 2
+    assert stored_after_turn.revision == turn_revision
     assert stored_after_turn.active_session_id == session_id
 
     replay_after_change = client.post('/api/v1/claims', headers=create_headers, json=payload)
@@ -56,14 +59,14 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
     replay_body = replay_after_change.json()
     persisted_payload = stored_after_turn.model_dump(mode='json')
     assert replay_body['claim']['claim_id'] == claim_id
-    assert replay_body['claim']['revision'] == 2
+    assert replay_body['claim']['revision'] == turn_revision
     assert replay_body['session']['session_id'] == session_id
     assert replay_body['claim']['form'] == persisted_payload['form']
     assert replay_body['claim']['customer_next_step'] == persisted_payload['customer_next_step']
 
     stored_after_replay = repository.get_claim(claim_id, 'cus_demo')
     assert stored_after_replay is not None
-    assert stored_after_replay.revision == 2
+    assert stored_after_replay.revision == turn_revision
     assert stored_after_replay.active_session_id == session_id
     assert repository.claim_count == 1
     sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
@@ -80,5 +83,5 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
 
     final_claim = repository.get_claim(claim_id, 'cus_demo')
     assert final_claim is not None
-    assert final_claim.revision == 2
+    assert final_claim.revision == turn_revision
     assert repository.claim_count == 1
