@@ -35,6 +35,22 @@ const rejectedClaim = {
   },
 }
 
+const approvedClaim = {
+  ...newerClaim,
+  incident_type: 'home',
+  external_claim: { claim_number: 'NWF-2026-267868', creation_status: 'created' },
+  customer_next_step: {
+    status: 'claim_created',
+    summary: 'Claims intake review',
+    responsible_party: 'system',
+  },
+  claim_decision: {
+    decision: 'approved',
+    decided_at: '2026-09-15T04:45:00Z',
+    claimant_explanation: 'Your claim has been approved.',
+  },
+}
+
 // The most recently updated report is still in progress: it is promoted separately from past Claims.
 const reportInProgress = {
   claim_id: 'clm_motor_in_progress',
@@ -60,22 +76,24 @@ const olderReportInProgress = {
 it('lists only created Claims, latest update first, with their reference, status, and next step', () => {
   render(<ClaimHistory claims={[olderClaim, reportInProgress, newerClaim]} onSelect={vi.fn()} />)
 
-  const rows = screen.getAllByRole('button', { name: /^Open / })
-  expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual([
-    'Open Motor claim, Claim NWF-2026-001042',
-    'Open Home claim, Claim reference clm_home_older',
+  const actions = screen.getAllByRole('button', { name: /^View / })
+  expect(actions.map((action) => action.getAttribute('aria-label'))).toEqual([
+    'View Motor claim, Claim NWF-2026-001042',
+    'View Home claim, Claim reference clm_home_older',
   ])
   expect(screen.getByText('2 claims')).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
   expect(screen.queryByText(/clm_motor_in_progress/)).not.toBeInTheDocument()
 
-  const newest = within(rows[0])
-  expect(newest.getByText('Claims Review')).toBeInTheDocument()
+  const newest = within(screen.getByRole('article', { name: 'Motor claim' }))
+  expect(newest.getByLabelText('Status: In review')).toHaveTextContent('In review')
+  expect(newest.getByText('Current stage').closest('dl')).toBeInTheDocument()
   expect(newest.getByText('Review the incident details.')).toBeInTheDocument()
-  expect(newest.getByText('Responsible now: Claims professional')).toBeInTheDocument()
+  expect(newest.getByText('Responsible now')).toBeInTheDocument()
+  expect(newest.getByText('Claims professional')).toBeInTheDocument()
   expect(newest.getByText('Updated 14 Sept 2026, 3:30 pm')).toBeInTheDocument()
-  expect(rows[0]).toHaveAccessibleDescription(
-    'Review the incident details. Responsible now: Claims professional',
+  expect(actions[0]).toHaveAccessibleDescription(
+    'Current stage Review the incident details. Responsible now Claims professional',
   )
 })
 
@@ -95,11 +113,70 @@ it('opens a created Claim from the keyboard', async () => {
 it('shows the claimant-safe final decision in Claim history without staff-only fields', () => {
   render(<ClaimHistory claims={[rejectedClaim]} onSelect={vi.fn()} />)
 
-  const row = within(screen.getByRole('button', { name: /NWF-2026-001042/ }))
+  const row = within(screen.getByRole('article', { name: 'Motor claim' }))
+  expect(row.getByLabelText('Status: Rejected')).toHaveTextContent('Rejected')
   expect(row.getByText('Decision: Rejected')).toBeInTheDocument()
   expect(row.getByText('The policy does not cover this type of loss.')).toBeInTheDocument()
+  expect(row.queryByLabelText('Status: In review')).not.toBeInTheDocument()
   expect(row.queryByText(/internal/i)).not.toBeInTheDocument()
   expect(row.queryByText(/decided by/i)).not.toBeInTheDocument()
+})
+
+it('uses an approved decision as the single overall status and keeps the result compact', () => {
+  render(<ClaimHistory claims={[approvedClaim]} onSelect={vi.fn()} />)
+
+  const row = within(screen.getByRole('article', { name: 'Home claim' }))
+  expect(row.getByLabelText('Status: Approved')).toHaveTextContent('Approved')
+  expect(row.getByText('Decision: Approved')).toBeInTheDocument()
+  expect(row.getByText('Your claim has been approved.')).toBeInTheDocument()
+  expect(row.queryByLabelText('Status: In review')).not.toBeInTheDocument()
+})
+
+it('shows action required when the claimant-safe next step belongs to the claimant', () => {
+  render(
+    <ClaimHistory
+      claims={[{
+        ...newerClaim,
+        customer_next_step: {
+          status: 'confirmation_required',
+          summary: 'Review and confirm the incident details.',
+          responsible_party: 'claimant',
+        },
+      }]}
+      onSelect={vi.fn()}
+    />,
+  )
+
+  const row = within(screen.getByRole('article', { name: 'Motor claim' }))
+  expect(row.getByLabelText('Status: Action required')).toHaveTextContent('Action required')
+  expect(row.getByText('You')).toBeInTheDocument()
+})
+
+it('keeps long claimant-safe content intact when no decision is available', () => {
+  const longClaimNumber = 'NWF-2026-HOME-VERY-LONG-REFERENCE-267868'
+  const longStage = 'Claims intake review while Northwind verifies the submitted incident information'
+  render(
+    <ClaimHistory
+      claims={[{
+        ...olderClaim,
+        external_claim: { claim_number: longClaimNumber, creation_status: 'created' },
+        customer_next_step: {
+          status: 'claims_review',
+          summary: longStage,
+          responsible_party: 'system',
+        },
+      }]}
+      onSelect={vi.fn()}
+    />,
+  )
+
+  const row = within(screen.getByRole('article', { name: 'Home claim' }))
+  expect(row.getByText(`Claim ${longClaimNumber}`)).toBeInTheDocument()
+  expect(row.getByText(longStage)).toBeInTheDocument()
+  expect(row.queryByText(/^Decision:/)).not.toBeInTheDocument()
+  expect(row.getByRole('button')).toHaveAccessibleName(
+    `View Home claim, Claim ${longClaimNumber}`,
+  )
 })
 
 it('offers a route to start a Claim when the claimant has none', async () => {
@@ -146,7 +223,7 @@ it('keeps earlier Claim records visible when a refresh fails', () => {
 
   expect(screen.getByText('Showing earlier Claim records')).toBeInTheDocument()
   expect(
-    screen.getByRole('button', { name: 'Open Home claim, Claim reference clm_home_older' }),
+    screen.getByRole('button', { name: 'View Home claim, Claim reference clm_home_older' }),
   ).toBeInTheDocument()
 })
 
@@ -169,9 +246,10 @@ it('does not substitute internal workflow state in a history row', () => {
     />,
   )
 
-  const row = within(screen.getByRole('button', { name: /NWF-2026-001042/ }))
+  const row = within(screen.getByRole('article', { name: 'Motor claim' }))
   expect(row.getByText('Status unavailable')).toBeInTheDocument()
-  expect(row.getByText('Responsible now: Not available')).toBeInTheDocument()
+  expect(row.getByText('Responsible now')).toBeInTheDocument()
+  expect(row.getByText('Not available')).toBeInTheDocument()
   expect(screen.queryByText('Professional Review')).not.toBeInTheDocument()
 })
 

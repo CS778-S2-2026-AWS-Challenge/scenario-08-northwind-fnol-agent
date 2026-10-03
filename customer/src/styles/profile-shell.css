@@ -3,6 +3,11 @@
   min-height: var(--size-control-touch);
 }
 
+.customer-app.is-profile-page .product-header .login-button.profile-entry-button {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+}
+
 .profile-page {
   min-height: calc(100svh - var(--size-header-compact));
   padding: var(--space-6) var(--space-4);

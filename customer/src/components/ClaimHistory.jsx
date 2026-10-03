@@ -34,48 +34,88 @@ function claimDecisionLabel(decision) {
   return null
 }
 
+function claimHistoryStatus(claim) {
+  const decision = claim.claim_decision?.decision
+  if (decision === 'approved') return { label: 'Approved', tone: 'success' }
+  if (decision === 'rejected') return { label: 'Rejected', tone: 'danger' }
+
+  const nextStep = claim.customer_next_step || {}
+  if (nextStep.responsible_party === 'claimant') {
+    return { label: 'Action required', tone: 'warning' }
+  }
+  if (nextStep.status === 'claim_created' || nextStep.status === 'claims_review') {
+    return { label: 'In review', tone: 'neutral' }
+  }
+  if (nextStep.status === 'closed') return { label: 'Closed', tone: 'neutral' }
+  if (nextStep.status === 'approved') return { label: 'Approved', tone: 'success' }
+  if (['declined', 'rejected', 'error'].includes(nextStep.status)) {
+    return { label: claimStatusLabel(nextStep.status), tone: 'danger' }
+  }
+  return { label: claimStatusLabel(nextStep.status), tone: 'neutral' }
+}
+
 function ClaimHistoryRow({ claim, onSelect }) {
   const nextStep = claim.customer_next_step || {}
   const decisionLabel = claimDecisionLabel(claim.claim_decision?.decision)
+  const overallStatus = claimHistoryStatus(claim)
+  const title = claimTitle(claim)
+  const reference = claimReference(claim)
+  const titleId = `claim-history-${claim.claim_id}-title`
   const detailsId = `claim-history-${claim.claim_id}-details`
   return (
     <li>
-      <button
-        className="claim-history-card"
-        type="button"
-        onClick={() => onSelect(claim)}
-        aria-label={`Open ${claimTitle(claim)}, ${claimReference(claim)}`}
-        aria-describedby={detailsId}
-      >
-        <span className="claim-history-card-heading">
-          <strong>{claimTitle(claim)}</strong>
-          <span className="claim-status-badge">
+      <article className="claim-history-card" aria-labelledby={titleId}>
+        <div className="claim-history-card-content">
+          <header className="claim-history-card-identity">
+            <h3 id={titleId}>{title}</h3>
+            <p>{reference}</p>
+          </header>
+          <span
+            className={`claim-history-card-status is-${overallStatus.tone}`}
+            aria-label={`Status: ${overallStatus.label}`}
+          >
             <span aria-hidden="true" />
-            {claimStatusLabel(nextStep.status)}
+            {overallStatus.label}
           </span>
-        </span>
-        <span className="claim-history-card-reference">{claimReference(claim)}</span>
-        <span className="claim-history-card-details" id={detailsId}>
-          {decisionLabel && (
-            <span className="claim-history-card-decision">
-              <strong>Decision: {decisionLabel}</strong>
-              <span>{claim.claim_decision.claimant_explanation}</span>
+          <dl className="claim-history-card-details" id={detailsId}>
+            <div>
+              <dt>Current stage</dt>
+              <dd>{nextStep.summary || 'No current stage is available yet.'}</dd>
+            </div>
+            <div>
+              <dt>Responsible now</dt>
+              <dd>{responsiblePartyLabel(nextStep.responsible_party)}</dd>
+            </div>
+          </dl>
+          <time className="claim-history-card-updated" dateTime={claim.updated_at}>
+            Updated {formatDateTime(claim.updated_at)}
+          </time>
+          <button
+            className="claim-history-card-action"
+            type="button"
+            onClick={() => onSelect(claim)}
+            aria-label={`View ${title}, ${reference}`}
+            aria-describedby={detailsId}
+          >
+            View claim <span aria-hidden="true">→</span>
+          </button>
+        </div>
+        {decisionLabel && (
+          <div
+            className={`claim-history-card-decision is-${claim.claim_decision.decision}`}
+          >
+            <span className="claim-history-card-decision-icon" aria-hidden="true">
+              {claim.claim_decision.decision === 'approved' ? '✓' : '×'}
             </span>
-          )}
-          <span className="claim-history-card-summary">
-            {nextStep.summary || 'No next step is available yet.'}
-          </span>
-          {/* Keeps the two sentences apart in the accessible description. */}
-          {' '}
-          <span className="claim-history-card-responsible">
-            Responsible now: {responsiblePartyLabel(nextStep.responsible_party)}
-          </span>
-        </span>
-        <span className="claim-history-card-meta">
-          <time dateTime={claim.updated_at}>Updated {formatDateTime(claim.updated_at)}</time>
-          <span aria-hidden="true">Open →</span>
-        </span>
-      </button>
+            <strong>Decision: {decisionLabel}</strong>
+            {claim.claim_decision.claimant_explanation && (
+              <span className="claim-history-card-decision-copy">
+                {claim.claim_decision.claimant_explanation}
+              </span>
+            )}
+          </div>
+        )}
+      </article>
     </li>
   )
 }
@@ -156,7 +196,8 @@ export default function ClaimHistory({
             <span>{loading ? 'Loading…' : claimCount}</span>
             {!loading && created.length > 0 && onRetry && (
               <button type="button" onClick={onRetry} disabled={refreshing}>
-                {refreshing ? 'Refreshing…' : 'Refresh'}
+                <span aria-hidden="true">↻</span>
+                <span>{refreshing ? 'Refreshing…' : 'Refresh'}</span>
               </button>
             )}
           </div>

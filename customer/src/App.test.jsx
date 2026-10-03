@@ -5611,7 +5611,7 @@ describe('claimant intake projection', () => {
     expect(screen.getByText('Track open claims and review your previous submissions.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/profile')
     expect(screen.getByRole('button', { name: 'Start a new claim' })).toBeInTheDocument()
-    const row = await screen.findByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })
+    const row = await screen.findByRole('button', { name: 'View Home claim, Claim NWF-2026-000973' })
     // Only the created Claim is listed; the report in progress is promoted separately.
     expect(screen.getByText('1 claim')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Your report is underway' })).toBeInTheDocument()
@@ -5625,7 +5625,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Back to Claim features' }))
     await user.click(await screen.findByRole('button', { name: 'Back to Claim history' }))
     expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Home claim, Claim NWF-2026-000973' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View Home claim, Claim NWF-2026-000973' })).toBeInTheDocument()
   })
 
   it('opens a focused Claim-scoped staff conversation from a direct account message link and allows a reply', async () => {
