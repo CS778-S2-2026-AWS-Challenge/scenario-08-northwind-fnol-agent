@@ -34,19 +34,34 @@ HONEST_REWRITE = envelope(
 )
 
 
-def _provider(*proposals: dict[str, Any]) -> V8JourneyProvider:
+class _Verdicts(ReplyJudge):
+    """Stands in for the review model: returns the given verdicts in order."""
+
+    def __init__(self, *verdicts: list[tuple[str, str]]) -> None:
+        super().__init__(lambda: _RecordingGateway([]))
+        self.verdicts = list(verdicts)
+
+    def problems(self, validated: Any) -> list[tuple[str, str]] | None:
+        return self.verdicts.pop(0) if self.verdicts else []
+
+
+NAMES_TOW = [('names_rejected_service', 'vehicle recovery')]
+
+
+def _provider(*proposals: dict[str, Any], review: ReplyJudge | None = None) -> V8JourneyProvider:
     provider = V8JourneyProvider([])
     provider.gateway.responses.extend(
         ModelResponse(completion_status=ModelCompletionStatus.COMPLETE, structured_output=item)
         for item in proposals
     )
+    provider.agent = GatewayAgent(provider.gateway, reply_judge=review)
     return provider
 
 
 def test_inconsistent_reply_is_sent_back_once_and_the_rewrite_is_shown(
     app: FastAPI, client: TestClient, repository: FixtureRepository
 ) -> None:
-    provider = _provider(NAMES_REFUSED_SERVICE, HONEST_REWRITE)
+    provider = _provider(NAMES_REFUSED_SERVICE, HONEST_REWRITE, review=_Verdicts(NAMES_TOW))
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     journey = Journey(client, 'home', 'recall-once')
     turn = journey.send('The water is still dripping through the ceiling.')
@@ -72,7 +87,9 @@ def test_inconsistent_reply_is_sent_back_once_and_the_rewrite_is_shown(
 def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
     app: FastAPI, client: TestClient, repository: FixtureRepository
 ) -> None:
-    provider = _provider(NAMES_REFUSED_SERVICE, NAMES_REFUSED_SERVICE)
+    provider = _provider(
+        NAMES_REFUSED_SERVICE, NAMES_REFUSED_SERVICE, review=_Verdicts(NAMES_TOW, NAMES_TOW)
+    )
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     journey = Journey(client, 'home', 'recall-twice')
     response = client.post(
@@ -94,58 +111,6 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
     assert body['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     # No spliced or stripped reply reached the claimant; the message is kept.
     assert len(repository.list_messages(journey.claim_id, journey.session_id, 'cus_demo')) == 1
-
-
-def test_consistent_reply_costs_one_call() -> None:
-    from backend.services.reply_consistency import review_reply
-    from backend.services.turn_proposal_validation import ValidatedTurn
-
-    validated = ValidatedTurn(
-        reply='Noted. Is anyone hurt?',
-        form_changes=[],
-        contents_item_changes=[],
-        next_question=None,
-        service_identities=(),
-        state_changes=[],
-        escalation=None,
-        ready_to_create=False,
-        confirms_batch=False,
-        rejected=[],
-    )
-    assert review_reply(validated).consistent
-    accepted_service = ValidatedTurn(
-        reply='I will arrange a tow for you.',
-        form_changes=[],
-        contents_item_changes=[],
-        next_question=None,
-        service_identities=('vehicle_recovery_request',),
-        state_changes=[],
-        escalation=None,
-        ready_to_create=False,
-        confirms_batch=False,
-        rejected=[],
-    )
-    # offer_service only creates a pending card this turn; arranging still requires the
-    # claimant's own consent on that card in a later turn. An arrangement claim is a lie
-    # regardless of whether a service was accepted this turn.
-    review = review_reply(accepted_service)
-    assert not review.consistent
-    assert review.inconsistencies[0].kind == 'claims_arrangement_without_service'
-
-    offered_without_promise = ValidatedTurn(
-        reply="I've noted your request for a tow. Is anyone hurt?",
-        form_changes=[],
-        contents_item_changes=[],
-        next_question=None,
-        service_identities=('vehicle_recovery_request',),
-        state_changes=[],
-        escalation=None,
-        ready_to_create=False,
-        confirms_batch=False,
-        rejected=[],
-    )
-    # Describing the offer itself, without claiming it is already arranged, remains fine.
-    assert review_reply(offered_without_promise).consistent
 
 
 def _validated(
@@ -170,44 +135,34 @@ def _validated(
 
 
 @pytest.mark.parametrize(
-    ('reply', 'kind'),
+    'reply',
     [
-        (
-            'Glad nobody is hurt. Would you need any repair services or guidance at this point?',
-            'offers_service_in_words',
-        ),
-        ('Do you need any specific assistance at this time?', 'offers_service_in_words'),
-        (
-            'Rental cover is not in the wording I have. Please check with your insurer.',
-            'refers_to_insurer',
-        ),
-        ("I've escalated this for a review.", 'claims_escalation_without_one'),
-        ('Do you need guidance for traffic crash reporting?', 'offers_service_in_words'),
+        'Glad nobody is hurt. Would you need any repair services or guidance at this point?',
+        'Rental cover is not in the wording I have. Please check with your insurer.',
+        "I've escalated this for a review.",
+        'That clause is not in the wording I have; our claims team will confirm.',
+        'I will arrange a tow for you.',
     ],
 )
-def test_review_catches_words_the_turn_does_not_back(reply: str, kind: str) -> None:
+def test_without_the_review_model_no_rule_judges_the_words(reply: str) -> None:
     from backend.services.reply_consistency import review_reply
 
+    # Only the review model reads the words. When it is not there, the reply is
+    # shown and the turn is marked as not reviewed; no pattern stands in for it.
     review = review_reply(_validated(reply))
+    assert review.consistent
+    assert not review.words_reviewed
 
-    assert [item.kind for item in review.inconsistencies] == [kind]
 
-
-def test_review_allows_fact_questions_offers_by_card_and_real_escalation() -> None:
+def test_the_review_models_verdict_sends_the_reply_back() -> None:
     from backend.services.reply_consistency import review_reply
 
-    assert review_reply(_validated('Does the car need towing?')).consistent
-    assert review_reply(
-        _validated('Can I help with a tow?', services=('vehicle_recovery_request',))
-    ).consistent
-    assert review_reply(
-        _validated("I've passed this to a claims specialist.", escalated=True)
-    ).consistent
-    # Whether a promise matches a question passed on is the review model's call;
-    # the fallback rules do not judge it.
-    assert review_reply(
-        _validated('That clause is not in the wording I have; our claims team will confirm.')
-    ).consistent
+    review = review_reply(
+        _validated('I will arrange a tow for you.'),
+        _Verdicts([('claims_arrangement_without_service', 'I will arrange')]),
+    )
+    assert review.words_reviewed
+    assert [item.kind for item in review.inconsistencies] == ['claims_arrangement_without_service']
 
 
 def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
@@ -215,7 +170,7 @@ def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
 ) -> None:
     # The rewrite is about the words; facts the first answer recorded stay.
     words_only = {**HONEST_REWRITE, 'field_changes': []}
-    provider = _provider(NAMES_REFUSED_SERVICE, words_only)
+    provider = _provider(NAMES_REFUSED_SERVICE, words_only, review=_Verdicts(NAMES_TOW))
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
     journey = Journey(client, 'home', 'recall-keeps-facts')
 

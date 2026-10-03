@@ -1,11 +1,13 @@
 """A second model reads each reply against what the turn actually did.
 
-Regex rules match English wording and miss a rephrased promise. The judge gets
-the reply and a ledger of the turn's structured parts (services offered or
-refused, escalation, questions passed to the claims team, declared ending) and
-names the problems it finds. Runtime still never edits the reply: problems send
-the turn back to the turn model once (``reply_consistency``). When the judge is
-not configured or its call fails, the existing rules are used instead.
+Whether a reply says something the turn does not back is a judgement about
+meaning, so a model makes it. The judge gets the reply and a ledger of the
+turn's structured parts (services offered or refused, escalation, questions
+passed to the claims team, declared ending) and names the problems it finds.
+Runtime still never edits the reply: problems send the turn back to the turn
+model once (``reply_consistency``). When the judge is not configured or its call
+fails, no rule stands in: the reply is shown and the turn is logged as not
+reviewed.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 REPLY_REVIEW_PURPOSE = 'reply_review'
 REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v2'
-# Longest a review call may take; a turn with less time left uses the rules.
+# Longest a review call may take; it runs after the turn's own model calls.
 REPLY_JUDGE_TIMEOUT_SECONDS = 20.0
 
 PROBLEM_KINDS = (
@@ -110,7 +112,7 @@ def turn_ledger(validated: Any) -> dict[str, object]:
 
 
 class ReplyJudge:
-    """Ask the review model for problems; None means "use the rules instead"."""
+    """Ask the review model for problems; None means the words were not reviewed."""
 
     def __init__(self, gateway_factory: Callable[[], ModelGateway]) -> None:
         self._gateway_factory = gateway_factory

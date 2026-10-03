@@ -1,8 +1,9 @@
-"""The review model reads each reply against its turn; rules are the fallback."""
+"""The review model reads each reply against its turn; no rule stands in for it."""
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -14,6 +15,7 @@ from backend.domain.model_gateway import (
     ModelRequest,
     ModelResponse,
 )
+from backend.services.agent import AgentTurnContext
 from backend.services.model_agent import GatewayAgent
 from backend.services.reply_consistency import review_reply
 from backend.services.reply_judge import REPLY_REVIEW_PURPOSE, ReplyJudge, turn_ledger
@@ -72,16 +74,17 @@ def test_the_judge_reads_the_reply_with_the_turn_ledger() -> None:
     assert turn_ledger(turn)['declared_ending'] == 'question'
 
 
-def test_a_clean_judgement_overrides_the_english_rules() -> None:
+def test_a_clean_judgement_is_final() -> None:
     judge = ReplyJudge(lambda: _Gateway({'problems': []}))
-    # The rules would flag this wording; the judge, reading the turn, does not.
     assert review_reply(_turn("I've escalated this for a review. Anything else?"), judge).consistent
 
 
-def test_the_rules_take_over_when_the_judge_cannot_answer() -> None:
+def test_no_rule_stands_in_when_the_judge_cannot_answer() -> None:
     judge = ReplyJudge(lambda: _Gateway(error=True))
     review = review_reply(_turn('Please check with your insurer. Anything else?'), judge)
-    assert [item.kind for item in review.inconsistencies] == ['refers_to_insurer']
+    # The reply is shown and the turn is recorded as not reviewed.
+    assert review.consistent
+    assert not review.words_reviewed
 
 
 def test_a_reply_that_leaves_the_claimant_stuck_is_soft() -> None:
@@ -144,11 +147,17 @@ def test_the_declared_ending_matches_the_reply(
     assert review.truthful
 
 
-def test_the_judge_is_skipped_when_a_review_call_would_overrun_the_turn() -> None:
-    judge = ReplyJudge(lambda: _Gateway({'problems': []}))
-    agent = GatewayAgent(_Gateway(), reply_judge=judge, turn_time_limit_seconds=40)
-    assert agent._judge_within_time(datetime.now(UTC)) is judge
-    # 25 s used leaves 15 s, less than one 20 s review call: the rules review instead.
-    assert agent._judge_within_time(datetime.now(UTC) - timedelta(seconds=25)) is None
-    unbounded = GatewayAgent(_Gateway(), reply_judge=judge)
-    assert unbounded._judge_within_time(datetime.now(UTC) - timedelta(hours=1)) is judge
+def test_the_review_runs_however_long_the_turn_took() -> None:
+    # The turn limit caps the turn's own model calls; the review has its own
+    # timeout and is never replaced by rules because the turn was slow.
+    gateway = _Gateway({'problems': []})
+    agent = GatewayAgent(
+        _Gateway(), reply_judge=ReplyJudge(lambda: gateway), turn_time_limit_seconds=40
+    )
+    context = cast(
+        AgentTurnContext,
+        SimpleNamespace(claim=SimpleNamespace(claim_id='clm_slow'), trigger_message_id='msg_slow'),
+    )
+    review = agent._review(_turn('Which road were you on?'), context)
+    assert review.words_reviewed
+    assert len(gateway.requests) == 1

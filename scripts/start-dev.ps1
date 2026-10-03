@@ -262,14 +262,15 @@ $backendEnv.NORTHWIND_CONTROL_PLANE_DB_PATH = $controlPlaneDb
 $backendEnv.AGENT_RUNTIME_PROFILE = 'model_gateway'
 $backendEnv.MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
-# A turn makes up to two model calls (reply, and one rewrite if the reply
-# contradicts the record); a hung provider must not leave the claimant waiting
-# minutes. Typical calls take 3-6 seconds. No further call starts once the turn
-# has run for TURN_TIME_LIMIT_SECONDS.
+# A turn makes up to three model calls (reply, one continuation after a lookup,
+# and one rewrite if the reply contradicts the record); a hung provider must not
+# leave the claimant waiting minutes. Typical calls take 3-6 seconds. No further
+# turn-model call starts once the turn has run for TURN_TIME_LIMIT_SECONDS; the
+# reply review below runs after them with its own timeout.
 $backendEnv.MODEL_TIMEOUT_SECONDS = '30'
 $backendEnv.TURN_TIME_LIMIT_SECONDS = '40'
 # A second, smaller model on the same OpenRouter connection reviews each reply
-# against what the turn actually did. Leave empty to use the built-in rules.
+# against what the turn actually did. Left empty, replies are shown unreviewed.
 $backendEnv.REPLY_JUDGE_MODEL = 'anthropic/claude-haiku-4.5'
 
 # 6. Start the backend. The log config prints the structured diagnostic fields the runtime
