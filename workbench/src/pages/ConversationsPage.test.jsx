@@ -249,6 +249,36 @@ it('keeps the one current owned session and removes historical or resolved work 
   expect(within(queue).getAllByRole('button')).toHaveLength(2)
 })
 
+it('excludes an owned active-looking row when the authoritative current session is missing', async () => {
+  const user = userEvent.setup()
+  const missingCurrentSession = {
+    ...claimConversation,
+    conversation_id: 'claim:ses_missing_current',
+    claim_id: 'clm_missing_current',
+    display_reference: 'NW-4002',
+    session_id: 'ses_missing_current',
+    detail: {
+      ...claimDetail,
+      claim_id: 'clm_missing_current',
+      display_reference: 'NW-4002',
+      active_session_id: undefined,
+      claimant: { display_name: 'Jordan Kim' },
+      ownership: { state: 'assigned', current_staff_access: 'read_only' },
+    },
+    assistance: {
+      status: 'in_progress',
+      assigned_to: 'stf_demo',
+      waitingForCustomer: false,
+    },
+  }
+  renderPage({ conversations: [missingCurrentSession], assistanceRequests: [] })
+
+  await user.click(screen.getByRole('tab', { name: 'My conversations, 0 conversations' }))
+
+  expect(screen.getByRole('status')).toHaveTextContent('No assigned conversations')
+  expect(screen.queryByText('Jordan Kim')).not.toBeInTheDocument()
+})
+
 it('opens queue summaries without expanding full messages in the list', async () => {
   const user = userEvent.setup()
   const { props } = renderPage()

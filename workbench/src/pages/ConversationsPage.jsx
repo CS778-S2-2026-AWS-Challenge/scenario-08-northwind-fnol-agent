@@ -620,7 +620,7 @@ function isCurrentClaimConversation(conversation) {
   if (conversation.kind !== 'claim' || conversation.status !== 'active') return false
   if (conversation.assistance?.status === 'resolved') return false
   const activeSessionId = conversation.detail?.active_session_id
-  return !activeSessionId || conversation.session_id === activeSessionId
+  return Boolean(activeSessionId && conversation.session_id === activeSessionId)
 }
 
 function conversationState(conversation) {
