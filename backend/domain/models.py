@@ -1784,7 +1784,7 @@ class RuntimeTraceRecord(ContractModel):
     prefix_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     tool_manifest_id: str | None = Field(default=None, max_length=160)
     resolved_ref_count: int = Field(default=0, ge=0, le=1)
-    model_invocations: int | None = Field(default=None, ge=0, le=2)
+    model_invocations: int | None = Field(default=None, ge=0, le=4)
     tool_calls: int | None = Field(default=None, ge=0, le=1)
     output_tokens: int | None = Field(default=None, ge=0)
     cache_read_tokens: int | None = Field(default=None, ge=0)

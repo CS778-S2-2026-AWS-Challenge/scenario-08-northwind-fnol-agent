@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -246,6 +247,13 @@ def test_a_recall_after_a_tool_continuation_fits_the_turn_trace() -> None:
         model_profile_id='openrouter-gpt4o-mini',
         trigger_message_id='msg_recall',
         invocations=calls,
+        model_invocations=len(calls),
+        action_code='ask_missing_information',
+        runtime_action_code='ask_missing_information',
+        reason_codes=['consistency_recall'],
+        status='succeeded',
+        created_at=datetime(2026, 10, 3, tzinfo=UTC),
+        finished_at=datetime(2026, 10, 3, tzinfo=UTC),
     )
     assert [call.ordinal for call in trace.invocations] == [1, 2, 3, 4]
     with pytest.raises(ValidationError):
