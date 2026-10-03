@@ -29,6 +29,18 @@ function requestUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
+const COMMITS_PATH = "/pulls/301/commits";
+
+function commits(...messages: string[]): Response {
+  return Response.json(
+    messages.map((message, index) => ({
+      sha: `sha${String(index)}abcdef`,
+      commit: { message },
+      parents: [{ sha: "parent" }],
+    })),
+  );
+}
+
 function requestBody(init: RequestInit | undefined): string {
   if (typeof init?.body !== "string") throw new Error("Expected a JSON string request body.");
   return init.body;
@@ -41,6 +53,7 @@ describe("Worker PR policy adapter", () => {
       const url = requestUrl(input);
       calls.push({ url, init });
       if (url.endsWith("/issues/101")) return Promise.resolve(Response.json({ number: 101 }));
+      if (url.includes(COMMITS_PATH)) return Promise.resolve(commits("ci: plan jobs first"));
       if (url.endsWith("/statuses/head-sha-301")) return Promise.resolve(Response.json({ id: 1 }));
       return Promise.resolve(new Response("not found", { status: 404 }));
     };
@@ -64,6 +77,7 @@ describe("Worker PR policy adapter", () => {
     let statusBody: Record<string, unknown> | null = null;
     const fetcher: typeof fetch = (input, init) => {
       const url = requestUrl(input);
+      if (url.includes(COMMITS_PATH)) return Promise.resolve(commits("ci: plan jobs first"));
       if (url.endsWith("/issues/999")) {
         return Promise.resolve(new Response("missing", { status: 404 }));
       }
@@ -82,6 +96,28 @@ describe("Worker PR policy adapter", () => {
     expect(result.errors).toContain(
       "#999 is not an issue in CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent.",
     );
+    expect(statusBody).toMatchObject({ state: "failure", context: PR_POLICY_STATUS_CONTEXT });
+  });
+
+  it("reports a non-conventional commit in the same status", async () => {
+    let statusBody: Record<string, unknown> | null = null;
+    const fetcher: typeof fetch = (input, init) => {
+      const url = requestUrl(input);
+      if (url.endsWith("/issues/101")) return Promise.resolve(Response.json({ number: 101 }));
+      if (url.includes(COMMITS_PATH)) return Promise.resolve(commits("Update stuff"));
+      if (url.endsWith("/statuses/head-sha-301")) {
+        statusBody = JSON.parse(requestBody(init)) as Record<string, unknown>;
+        return Promise.resolve(Response.json({ id: 3 }));
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    };
+
+    const result = await evaluatePullRequestPolicy(
+      event("## Linked issue\n\nRefs #101\n\n## Summary\n\nChecks commit messages."),
+      new GitHubClient("test-token", fetcher),
+    );
+
+    expect(result.errors.some((error) => error.includes('"Update stuff"'))).toBe(true);
     expect(statusBody).toMatchObject({ state: "failure", context: PR_POLICY_STATUS_CONTEXT });
   });
 });
