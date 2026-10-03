@@ -111,6 +111,9 @@ class ValidatedTurn:
     document_requests: tuple[V8DocumentRequest, ...] = ()
     evidence_interpretations: tuple[V8EvidenceInterpretation, ...] = ()
     northwind_questions: tuple[V8NorthwindQuestion, ...] = ()
+    # Questions passed to the claims team on earlier turns and not yet answered.
+    # The reply may mention them without passing them on again.
+    earlier_open_questions: tuple[str, ...] = ()
     turn_ending: str | None = None
     scope_note: str | None = None
     # Service identities the model proposed but Runtime refused this turn.

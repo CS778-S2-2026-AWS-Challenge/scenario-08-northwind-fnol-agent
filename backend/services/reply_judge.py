@@ -98,7 +98,10 @@ def turn_ledger(validated: Any) -> dict[str, object]:
             {'kind': item.document_kind, 'stance': item.stance}
             for item in validated.document_requests
         ],
-        'questions_passed_on': [item.question for item in validated.northwind_questions],
+        'questions_passed_on': [
+            *(item.question for item in validated.northwind_questions),
+            *getattr(validated, 'earlier_open_questions', ()),
+        ],
         'summary_fields': list(validated.summary_fields),
         'next_question': (
             validated.next_question.wording if validated.next_question is not None else None

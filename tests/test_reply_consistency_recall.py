@@ -258,3 +258,40 @@ def test_a_recall_after_a_tool_continuation_fits_the_turn_trace() -> None:
     assert [call.ordinal for call in trace.invocations] == [1, 2, 3, 4]
     with pytest.raises(ValidationError):
         RuntimeInvocationTrace(ordinal=5, latency_ms=10)
+
+
+def test_mentioning_a_question_passed_on_earlier_is_not_sent_back(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    # Turn 1 passes the hire-car question on; turn 2 reminds the claimant the
+    # team will confirm it. The review sees the open question and keeps the reply.
+    passes_on = {
+        **envelope(reply='The claims team will confirm hire car cover. Is anyone hurt?'),
+        'northwind_questions': [
+            {
+                'question': 'Is my hire car covered while my car is repaired?',
+                'claimant_wording': 'will my policy pay for a hire car',
+                'model_view': 'Not in the excerpts.',
+            }
+        ],
+    }
+    reminds = envelope(reply='The claims team will confirm the hire car question. Is anyone hurt?')
+    provider = _provider(passes_on, reminds)
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'recall-earlier-question')
+
+    journey.send('Water is coming through the ceiling. Can someone tell me about a hire car?')
+    turn = journey.send('Nobody is hurt.')
+
+    assert len(provider.gateway.requests) == 2
+    assert turn['agent_message']['content']['text'] == reminds['reply']
+
+
+def test_review_allows_a_promise_about_a_question_passed_on_earlier() -> None:
+    from backend.services.reply_consistency import review_reply
+    from backend.services.reply_judge import turn_ledger
+
+    promise = 'Our claims team will confirm the hire car question. What is the registration?'
+    earlier = replace(_validated(promise), earlier_open_questions=('Is my hire car covered?',))
+    assert review_reply(earlier).consistent
+    assert turn_ledger(earlier)['questions_passed_on'] == ['Is my hire car covered?']

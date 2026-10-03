@@ -237,7 +237,7 @@ def _wording_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
                     ReplyInconsistency(kind='claims_escalation_without_one', detail=match.group(0))
                 )
                 break
-    if not validated.northwind_questions:
+    if not validated.northwind_questions and not validated.earlier_open_questions:
         for sentence in sentences:
             match = _PROMISED_ANSWER.search(sentence)
             if match is not None and not sentence.rstrip().endswith('?'):

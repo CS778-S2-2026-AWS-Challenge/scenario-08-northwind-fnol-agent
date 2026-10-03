@@ -927,6 +927,14 @@ class GatewayAgent:
                 validated_turn = replace(
                     validated_turn, rejected=[*optional_rejections, *validated_turn.rejected]
                 )
+            validated_turn = replace(
+                validated_turn,
+                earlier_open_questions=tuple(
+                    str(item.get('question'))
+                    for item in getattr(context, 'northwind_questions', ())
+                    if item.get('state') == 'open' and item.get('question')
+                ),
+            )
             form_changes = validated_turn.form_changes
             contents_changes = validated_turn.contents_item_changes
             service_offer_ids = list(validated_turn.service_identities)
