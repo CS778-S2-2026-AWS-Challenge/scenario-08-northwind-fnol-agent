@@ -31,7 +31,7 @@ _FAMILIES = frozenset(_FAMILY_TERMS)
 def _normalise(value: object) -> str | None:
     if not isinstance(value, str):
         return None
-    normalised = {'property': 'home'}.get(value.strip().lower(), value.strip().lower())
+    normalised = value.strip().lower()
     return normalised if normalised in _FAMILIES else None
 
 

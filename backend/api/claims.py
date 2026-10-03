@@ -4,16 +4,14 @@ from datetime import datetime
 from typing import Protocol, TypeVar, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.api.account_data import claim_router as claim_account_data_router
 from backend.api.assets import claim_router as claim_assets_router
-from backend.api.realtime import realtime_stream
 from backend.core.auth import Principal, require_claimant, require_claimant_session
-from backend.core.errors import ApiError, ErrorDetail
+from backend.core.errors import ApiError
 from backend.domain.external_service_registry import capability_catalogue
 from backend.domain.identity import ClaimAutoFillSuggestionManifest
 from backend.domain.model_gateway import ModelGatewayError
@@ -63,7 +61,6 @@ from backend.services.claim_data import (
     get_motor_other_driver,
     list_contents_item_evidence_associations,
 )
-from backend.services.claimant_events import claimant_event_revision
 from backend.services.claims import (
     confirm_form_fields,
     get_claim,
@@ -765,69 +762,6 @@ def read_messages(
         cursor=cursor,
         before=before,
         after=after,
-    )
-
-
-@router.get(
-    '/{claim_id}/sessions/{session_id}/events',
-    response_class=StreamingResponse,
-    responses={200: {'content': {'text/event-stream': {}}}},
-)
-def read_claim_events(
-    claim_id: str,
-    session_id: str,
-    request: Request,
-    principal: Principal = Depends(require_claimant),
-    after_revision: int = Query(default=0, ge=0),
-    cursor: str | None = Query(default=None),
-    last_event_id: str | None = Header(default=None, alias='Last-Event-ID'),
-) -> StreamingResponse:
-    repository = repository_for(request)
-    current_revision = claimant_event_revision(repository, principal, claim_id, session_id)
-    if after_revision > current_revision:
-        raise ApiError(
-            status_code=409,
-            code='INVALID_EVENT_CURSOR',
-            message='The live-update revision is newer than the current claim.',
-            retryable=True,
-            current_revision=current_revision,
-        )
-    legacy_cursor_revision = after_revision
-    realtime_cursor = cursor
-    if last_event_id is not None:
-        try:
-            legacy_cursor_revision = int(last_event_id)
-        except ValueError:
-            realtime_cursor = last_event_id
-        if legacy_cursor_revision < 0:
-            raise ApiError(
-                status_code=409,
-                code='INVALID_EVENT_CURSOR',
-                message='The legacy Claim event revision is invalid.',
-                retryable=True,
-                details=[
-                    ErrorDetail(
-                        field='Last-Event-ID',
-                        reason='Expected a non-negative revision.',
-                    )
-                ],
-            )
-    if legacy_cursor_revision > current_revision:
-        raise ApiError(
-            status_code=409,
-            code='INVALID_EVENT_CURSOR',
-            message='The live-update revision is newer than the current claim.',
-            retryable=True,
-            current_revision=current_revision,
-        )
-    return realtime_stream(
-        request,
-        principal,
-        cursor=realtime_cursor,
-        claim_id=claim_id,
-        legacy_session_id=session_id,
-        legacy_after_revision=legacy_cursor_revision,
-        legacy_current_revision=current_revision,
     )
 
 

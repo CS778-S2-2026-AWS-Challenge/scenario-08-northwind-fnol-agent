@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 def test_development_cors_allows_any_origin(client: TestClient) -> None:
     response = client.options(
-        '/api/claims/message',
+        '/api/v1/claims',
         headers={
             'Origin': 'http://developer-host.example',
             'Access-Control-Request-Method': 'POST',

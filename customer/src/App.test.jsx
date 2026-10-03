@@ -46,7 +46,6 @@ const api = vi.hoisted(() => ({
   completeEvidenceUpload: vi.fn(),
   resumeClaimSession: vi.fn(),
   startClaimSession: vi.fn(),
-  streamClaimUpdates: vi.fn(() => new Promise(() => {})),
   streamRealtimeEvents: vi.fn(() => new Promise(() => {})),
   submitClaimMessage: vi.fn(),
   setClaimantAccessToken: vi.fn(),
@@ -2114,7 +2113,6 @@ describe('claimant intake projection', () => {
     expect(document.querySelector('.case-status')).toBeVisible()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()
     await waitFor(() => expect(api.streamRealtimeEvents).toHaveBeenCalled())
-    expect(api.streamClaimUpdates).not.toHaveBeenCalled()
     expect(api.streamRealtimeEvents.mock.calls.at(-1)[0]).toEqual(expect.objectContaining({
       cursor: null,
       signal: expect.any(AbortSignal),

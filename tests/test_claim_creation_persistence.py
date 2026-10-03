@@ -76,7 +76,7 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
     conflicting_reuse = client.post(
         '/api/v1/claims',
         headers=create_headers,
-        json={**payload, 'incident_type': 'property'},
+        json={**payload, 'incident_type': 'home'},
     )
     assert conflicting_reuse.status_code == 409
     assert conflicting_reuse.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'

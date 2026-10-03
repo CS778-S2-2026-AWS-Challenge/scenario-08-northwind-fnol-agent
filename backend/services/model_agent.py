@@ -285,8 +285,6 @@ def _knowledge_product(incident_type: str | None) -> str | None:
     return {
         'motor': 'motor',
         'home': 'home',
-        # ``property`` is retained as a compatibility alias for older fixtures.
-        'property': 'home',
         'contents': 'contents',
     }.get(incident_type or '')
 

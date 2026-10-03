@@ -22,7 +22,6 @@ import {
   selectClaimPolicy,
   selectClaimPayoutContact,
   setClaimantAccessToken,
-  streamClaimUpdates,
   streamRealtimeEvents,
   submitClaimMessage,
   updateAccountAsset,
@@ -318,114 +317,6 @@ function trackedOpenEventStreamResponse(frame, order, label) {
   )
 }
 
-
-describe('claimant live-update stream', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn())
-    setClaimantAccessToken(null)
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    setClaimantAccessToken(null)
-  })
-
-  it('parses claimant-safe update frames and authenticates an anonymous session', async () => {
-    fetch.mockResolvedValue(eventStreamResponse([
-      'retry: 1500\n: connected\n\n',
-      'id: 4\nevent: claim.updated\ndata: {"event_id":"4","claim_id":"clm_1",\n',
-      'data: "session_id":"ses_1","claim_revision":4,"resources":["claim","messages"]}\n\n',
-    ]))
-    const received = []
-
-    await streamClaimUpdates({
-      claimId: 'clm_1',
-      sessionId: 'ses_1',
-      afterRevision: 3,
-      signal: new AbortController().signal,
-      onEvent: async (event) => received.push(event),
-    })
-
-    expect(received).toEqual([
-      expect.objectContaining({ claim_revision: 4, resources: ['claim', 'messages'] }),
-    ])
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/v1/claims/clm_1/sessions/ses_1/events?after_revision=3',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Accept: 'text/event-stream',
-          'X-Northwind-Anonymous-Session': expect.any(String),
-        }),
-      }),
-    )
-  })
-
-  it('uses the claimant bearer token without exposing it in the stream URL', async () => {
-    setClaimantAccessToken('claimant-session-token')
-    fetch.mockResolvedValue(eventStreamResponse([': connected\n\n']))
-
-    await streamClaimUpdates({
-      claimId: 'clm_2',
-      sessionId: 'ses_2',
-      afterRevision: 8,
-      signal: new AbortController().signal,
-      onEvent: vi.fn(),
-    })
-
-    const [url, request] = fetch.mock.calls[0]
-    expect(url).not.toContain('claimant-session-token')
-    expect(request.headers.Authorization).toBe('Bearer claimant-session-token')
-    expect(request.headers['X-Northwind-Anonymous-Session']).toBeUndefined()
-  })
-
-  it('tracks only opaque durable cursors while preserving legacy revision events', async () => {
-    fetch.mockResolvedValue(eventStreamResponse([
-      'id: 4\nevent: claim.updated\ndata: {"event_id":"4","claim_revision":4}\n\n',
-      'id: eyJldmVudF9pZCI6InJ0ZV8xIn0\nevent: agent.turn.progress\ndata: {"turn_id":"message-1","session_id":"ses_1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
-    ]))
-    const onCursor = vi.fn()
-    const onEvent = vi.fn()
-
-    await streamClaimUpdates({
-      claimId: 'clm_1',
-      sessionId: 'ses_1',
-      afterRevision: 3,
-      signal: new AbortController().signal,
-      onEvent,
-      onCursor,
-    })
-
-    expect(onEvent).toHaveBeenCalledTimes(2)
-    expect(onCursor).toHaveBeenCalledOnce()
-    expect(onCursor).toHaveBeenCalledWith('eyJldmVudF9pZCI6InJ0ZV8xIn0')
-  })
-
-  it('does not advance an opaque cursor and cancels the legacy stream when the handler fails', async () => {
-    const order = []
-    fetch.mockResolvedValue(trackedOpenEventStreamResponse(
-      'id: eyJldmVudF9pZCI6InJ0ZV8yIn0\nevent: agent.turn.progress\ndata: {"turn_id":"message-2","session_id":"ses_1","stage":"model.waiting","state":"running","ordinal":2}\n\n',
-      order,
-      'legacy',
-    ))
-    const onCursor = vi.fn()
-    const handlerFailure = new Error('Authoritative readback failed.')
-
-    await expect(streamClaimUpdates({
-      claimId: 'clm_1',
-      sessionId: 'ses_1',
-      afterRevision: 3,
-      signal: new AbortController().signal,
-      onEvent: vi.fn(async () => {
-        order.push('handler')
-        throw handlerFailure
-      }),
-      onCursor,
-    })).rejects.toBe(handlerFailure)
-
-    expect(onCursor).not.toHaveBeenCalled()
-    expect(order).toEqual(['handler', 'legacy:cancel'])
-  })
-})
 
 describe('claim creation contract', () => {
   it('uses the protected payout and Claim selection contracts without changing field names', async () => {

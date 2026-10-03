@@ -41,7 +41,6 @@ from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
 from backend.api.identity import router as identity_router
 from backend.api.integrations import router as integrations_router
-from backend.api.legacy import router as legacy_router
 from backend.api.realtime import claimant_router as realtime_claimant_router
 from backend.api.realtime import workbench_router as realtime_workbench_router
 from backend.api.staff_agent import router as staff_agent_router
@@ -595,7 +594,6 @@ def create_app(
     app.include_router(staff_feedback_router)
     app.include_router(staff_presence_router)
     app.include_router(staff_agent_router)
-    app.include_router(legacy_router)
     app.include_router(capabilities_router)
     app.include_router(claims_router)
     app.include_router(realtime_claimant_router)

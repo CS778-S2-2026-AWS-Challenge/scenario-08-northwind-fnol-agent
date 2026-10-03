@@ -740,13 +740,6 @@ def test_closed_claimant_routes_use_concealed_absence(
             ),
         ),
         (
-            'GET old session event stream',
-            lambda: client.get(
-                (f'/api/v1/claims/{claim_id}/sessions/{session_id}/events'),
-                headers=auth_headers,
-            ),
-        ),
-        (
             'POST stale resume',
             lambda: client.post(
                 f'/api/v1/claims/{claim_id}/sessions',
