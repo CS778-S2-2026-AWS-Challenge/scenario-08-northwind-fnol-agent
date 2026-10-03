@@ -236,8 +236,6 @@ class ProfilePatchRequest(BaseModel):
     date_of_birth: date | None = None
     phone: ProfilePhone | None = None
     residential_address: ProfileAddress | None = None
-    # Transitional write alias for clients that have not moved to legal_name yet.
-    display_name: ProfileName | None = None
 
     @field_validator('date_of_birth')
     @classmethod
@@ -247,23 +245,15 @@ class ProfilePatchRequest(BaseModel):
         return value
 
     @model_validator(mode='after')
-    def validate_compatibility_name(self) -> 'ProfilePatchRequest':
+    def validate_supplied_fields(self) -> 'ProfilePatchRequest':
         if not self.model_fields_set:
             raise ValueError('At least one profile field must be supplied.')
         if 'legal_name' in self.model_fields_set and self.legal_name is None:
             raise ValueError('legal_name cannot be null.')
-        if 'display_name' in self.model_fields_set and self.display_name is None:
-            raise ValueError('display_name cannot be null.')
         if 'email' in self.model_fields_set and self.email is None:
             raise ValueError('email cannot be null.')
         if 'phone' in self.model_fields_set and self.phone is None:
             raise ValueError('phone cannot be null.')
-        if (
-            self.legal_name is not None
-            and self.display_name is not None
-            and self.legal_name.strip() != self.display_name.strip()
-        ):
-            raise ValueError('display_name and legal_name cannot describe different names.')
         return self
 
 

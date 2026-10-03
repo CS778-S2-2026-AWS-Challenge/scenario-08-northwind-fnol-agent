@@ -21,7 +21,6 @@ class ReadinessResponse(BaseModel):
     checked_at: datetime
 
 
-@router.get('/health', response_model=LivenessResponse, deprecated=True)
 @router.get('/health/live', response_model=LivenessResponse)
 def liveness() -> LivenessResponse:
     return LivenessResponse(status='ok')
@@ -56,6 +55,7 @@ def readiness(request: Request) -> ReadinessResponse:
         status=status,
         checks={
             **data_checks,
+            'environment': request.app.state.settings.environment,
             'data_runtime_profile': data_runtime.profile.value,
             'object_storage_adapter': request.app.state.settings.object_storage_adapter.value,
             'agent': agent_runtime_status,

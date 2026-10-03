@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 
 
-def test_legacy_and_versioned_liveness_routes(client: TestClient) -> None:
-    assert client.get('/health').json() == {'status': 'ok'}
+def test_liveness_route_and_no_legacy_alias(client: TestClient) -> None:
     assert client.get('/health/live').json() == {'status': 'ok'}
+    assert client.get('/health').status_code == 404
 
 
 def test_readiness_reports_every_dependency_honestly(client: TestClient) -> None:

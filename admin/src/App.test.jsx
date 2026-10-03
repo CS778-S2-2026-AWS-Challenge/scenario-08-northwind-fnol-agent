@@ -177,13 +177,18 @@ it('uses the projected revision and idempotency key for a configuration action',
   expect(options.headers.get('Idempotency-Key')).toBeTruthy()
 })
 
-it('resolves a Runtime Snapshot using explicit environment and profile inputs', async () => {
+it('resolves a Runtime Snapshot for the environment and profile the backend is running', async () => {
   const user = userEvent.setup()
   sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
-  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ release_set_id: 'rel_active', environment: 'test', runtime_profile: 'fixture', loaded_at: '2026-09-07T00:00:00Z', configurations: {}, integrations: {}, knowledge: {} })))
+  const fetchMock = vi.fn().mockImplementation((path) => Promise.resolve(jsonResponse(
+    path === '/health/ready'
+      ? { status: 'ok', checks: { environment: 'test', data_runtime_profile: 'fixture' } }
+      : { release_set_id: 'rel_active', environment: 'test', runtime_profile: 'fixture', loaded_at: '2026-09-07T00:00:00Z', configurations: {}, integrations: {}, knowledge: {} },
+  )))
   vi.stubGlobal('fetch', fetchMock)
   render(<MemoryRouter initialEntries={['/admin/runtime']}><App /></MemoryRouter>)
 
+  await waitFor(() => expect(screen.getByDisplayValue('fixture')).toBeInTheDocument())
   await user.click(await screen.findByRole('button', { name: /resolve snapshot/i }))
 
   await waitFor(() => expect(screen.getByRole('heading', { name: 'rel_active' })).toBeInTheDocument())

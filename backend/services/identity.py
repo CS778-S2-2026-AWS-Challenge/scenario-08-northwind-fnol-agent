@@ -135,9 +135,7 @@ def update_profile(
             code='RESOURCE_NOT_FOUND',
             message='The claimant account was not found.',
         )
-    # Legacy profile clients predate optimistic headers; projections now expose revision so
-    # upgraded clients can use If-Match without breaking the existing personal interface.
-    expected_revision = parse_if_match(if_match) if if_match is not None else account.revision
+    expected_revision = parse_if_match(if_match)
     if account.revision != expected_revision:
         raise ApiError(
             status_code=409,
@@ -146,9 +144,8 @@ def update_profile(
             retryable=True,
             current_revision=account.revision,
         )
-    changes = payload.model_dump(exclude_unset=True, exclude={'display_name'})
-    legacy_name = payload.display_name.strip() if payload.display_name is not None else None
-    legal_name = str(changes.pop('legal_name', legacy_name or account.legal_name)).strip()
+    changes = payload.model_dump(exclude_unset=True)
+    legal_name = str(changes.pop('legal_name', account.legal_name)).strip()
     email = changes.get('email', account.email)
     preferred_name = changes.get('preferred_name', account.preferred_name)
     if isinstance(preferred_name, str):
@@ -203,9 +200,7 @@ def update_preferences(
             code='RESOURCE_NOT_FOUND',
             message='The claimant account was not found.',
         )
-    # Keep compatibility with clients that predate account revision headers while allowing
-    # current clients to protect the projection they edited.
-    expected_revision = parse_if_match(if_match) if if_match is not None else account.revision
+    expected_revision = parse_if_match(if_match)
     if account.revision != expected_revision:
         raise ApiError(
             status_code=409,

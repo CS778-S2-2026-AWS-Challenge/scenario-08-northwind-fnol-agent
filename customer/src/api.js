@@ -295,7 +295,7 @@ export function selectClaimPayoutContact({
 export function updateAccountProfile(profile, revision) {
   return apiRequest('/api/v1/account/profile', {
     method: 'PATCH',
-    headers: revision == null ? undefined : { 'If-Match': String(revision) },
+    headers: { 'If-Match': String(revision) },
     body: JSON.stringify(profile),
   })
 }
@@ -303,7 +303,7 @@ export function updateAccountProfile(profile, revision) {
 export function updateAccountPreferences(preferences, revision) {
   return apiRequest('/api/v1/account/preferences', {
     method: 'PATCH',
-    headers: revision == null ? undefined : { 'If-Match': String(revision) },
+    headers: { 'If-Match': String(revision) },
     body: JSON.stringify(preferences),
   })
 }

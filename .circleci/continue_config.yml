@@ -385,7 +385,7 @@ jobs:
               return 1
             }
 
-            wait_for_url http://127.0.0.1:8000/health
+            wait_for_url http://127.0.0.1:8000/health/live
             wait_for_url http://127.0.0.1:8001/
             wait_for_url http://127.0.0.1:8002/workbench/
 

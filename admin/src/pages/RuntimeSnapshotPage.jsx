@@ -4,10 +4,15 @@ import { adminFetch, getToken, withQuery } from '../api.js'
 import DetailPanel from '../components/DetailPanel.jsx'
 import { Feedback, Field } from '../components/FormControls.jsx'
 import PageHeader from '../components/PageHeader.jsx'
+import useRunningRuntime from '../hooks/useRunningRuntime.js'
 
 export default function RuntimeSnapshotPage() {
-  const [environment, setEnvironment] = useState('test')
-  const [runtimeProfile, setRuntimeProfile] = useState('fixture')
+  const running = useRunningRuntime()
+  const [environmentInput, setEnvironment] = useState(null)
+  const [runtimeProfileInput, setRuntimeProfile] = useState(null)
+  // Until the operator edits a field it shows what the backend is running now.
+  const environment = environmentInput ?? running?.environment ?? ''
+  const runtimeProfile = runtimeProfileInput ?? running?.runtimeProfile ?? ''
   const [snapshot, setSnapshot] = useState(null)
   const [feedback, setFeedback] = useState(null)
 

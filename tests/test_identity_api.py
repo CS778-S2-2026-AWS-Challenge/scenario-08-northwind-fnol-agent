@@ -27,7 +27,7 @@ def test_login_account_update_and_logout_are_server_authenticated(client: TestCl
     account = client.get('/api/v1/account', headers=headers)
     profile = client.patch(
         '/api/v1/account/profile',
-        headers=headers,
+        headers={**headers, 'If-Match': str(account.json()['revision'])},
         json={
             'legal_name': 'Updated Demo Claimant',
             'date_of_birth': '1990-04-12',
@@ -38,7 +38,7 @@ def test_login_account_update_and_logout_are_server_authenticated(client: TestCl
     )
     preferences = client.patch(
         '/api/v1/account/preferences',
-        headers=headers,
+        headers={**headers, 'If-Match': str(profile.json()['revision'])},
         json={'email': False, 'sms': True},
     )
     logout = client.delete('/api/v1/auth/session', headers=headers)
@@ -258,9 +258,11 @@ def test_profile_rejects_blank_normalized_text_without_advancing_revision(
 def test_profile_rejects_an_email_owned_by_another_claimant(client: TestClient) -> None:
     login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
     second = login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    authorization = {'Authorization': f'Bearer {second["access_token"]}'}
+    revision = client.get('/api/v1/account', headers=authorization).json()['revision']
     response = client.patch(
         '/api/v1/account/profile',
-        headers={'Authorization': f'Bearer {second["access_token"]}'},
+        headers={**authorization, 'If-Match': str(revision)},
         json={'email': 'claimant.one@example.invalid'},
     )
 
@@ -303,7 +305,7 @@ def test_profile_accepts_unchanged_email_after_normalization(client: TestClient)
 
     response = client.patch(
         '/api/v1/account/profile',
-        headers=headers,
+        headers={**headers, 'If-Match': str(before['revision'])},
         json={'email': ' CLAIMANT.ONE@EXAMPLE.INVALID '},
     )
 
@@ -324,9 +326,11 @@ def test_profile_maps_repository_duplicate_email_conflict_to_resource_conflict()
     )
     with TestClient(app) as test_client:
         session = login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        authorization = {'Authorization': f'Bearer {session["access_token"]}'}
+        revision = test_client.get('/api/v1/account', headers=authorization).json()['revision']
         response = test_client.patch(
             '/api/v1/account/profile',
-            headers={'Authorization': f'Bearer {session["access_token"]}'},
+            headers={**authorization, 'If-Match': str(revision)},
             json={'email': 'available@example.invalid'},
         )
 
@@ -473,3 +477,17 @@ def test_preferences_maps_repository_revision_conflict_without_changing_the_acco
     assert response.json()['error']['retryable'] is True
     assert response.json()['error']['current_revision'] == before['revision'] + 1
     assert after == before
+
+
+def test_profile_and_preference_changes_require_the_edited_revision(client: TestClient) -> None:
+    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    headers = {'Authorization': f'Bearer {session["access_token"]}'}
+
+    profile = client.patch('/api/v1/account/profile', headers=headers, json={'phone': '021 111'})
+    preferences = client.patch(
+        '/api/v1/account/preferences', headers=headers, json={'email': False, 'sms': True}
+    )
+
+    for response in (profile, preferences):
+        assert response.status_code == 409
+        assert response.json()['error']['code'] == 'REVISION_REQUIRED'

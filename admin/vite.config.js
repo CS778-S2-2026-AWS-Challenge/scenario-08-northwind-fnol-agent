@@ -13,6 +13,10 @@ export default defineConfig(({ mode }) => {
           target: env.ADMIN_API_TARGET || 'http://127.0.0.1:8000',
           changeOrigin: true,
         },
+        '/health': {
+          target: env.ADMIN_API_TARGET || 'http://127.0.0.1:8000',
+          changeOrigin: true,
+        },
       },
     },
     plugins: [react()],
