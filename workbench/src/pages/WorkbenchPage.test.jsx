@@ -984,6 +984,7 @@ describe('WorkbenchPage queue routing', () => {
     })
 
     renderPage('/workbench/conversations')
+    await user.click(await screen.findByRole('tab', { name: 'My conversations, 1 conversations' }))
     await user.click(await screen.findByRole('button', { name: /Alex Morgan/ }))
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
@@ -1162,6 +1163,8 @@ describe('WorkbenchPage queue routing', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
       '/workbench/conversations/ses_help',
     ))
+    expect(screen.getByRole('tab', { name: 'Action needed, 0 conversations' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'My conversations, 1 conversations' })).toBeInTheDocument()
   })
 
   it('removes the previous queue rows while a changed filter fails to load', async () => {
