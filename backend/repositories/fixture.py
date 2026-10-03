@@ -1929,7 +1929,9 @@ class FixtureRepository(PersistenceRepository):
             with self._realtime_condition:
                 available = self.replay_realtime_events(cursor, limit=500)
                 if not available:
-                    self._realtime_condition.wait(timeout=1.0)
+                    # New events notify this condition at once. The short timeout only
+                    # bounds how long `stop` waits, because setting it cannot notify here.
+                    self._realtime_condition.wait(timeout=0.05)
                     continue
             for event in available:
                 cursor = RealtimeCursor(
