@@ -13,8 +13,9 @@ from backend.domain.agent_context_runtime import (
 )
 from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.configuration import ModelRuntimeConfiguration
-from backend.domain.model_gateway import ModelTool
+from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode, ModelTool
 from backend.domain.prompt_pack import PromptPackManifest
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 from backend.services.agent import AgentTurnContext
 from backend.services.cache_planner import build_cache_plan
 from backend.services.context_budget import (
@@ -35,7 +36,6 @@ from backend.services.provider_capability_registry import (
 )
 from backend.services.request_profile_registry import (
     request_profile_for_intents,
-    request_profile_for_task,
 )
 from backend.services.turn_family_resolution import resolve_turn_family
 from backend.services.turn_field_contract import (
@@ -79,7 +79,7 @@ def prepare_model_family_context(context: AgentTurnContext) -> AgentTurnContext:
     """
     snapshot = context.runtime_configuration_snapshot
     record = snapshot.model(context.model_profile_id) if snapshot is not None else None
-    if record is None or record.values.get('prompt_version') != 'northwind-fnol-claimant-v8':
+    if record is None or record.values.get('prompt_version') != CLAIMANT_V8_PROMPT_ID:
         return context
     if (
         context.branch_evaluation is not None
@@ -205,22 +205,15 @@ def plan_model_turn(
         )
         or (route.task.value == 'status_question' and len(context.conversation_messages) > 4)
     )
-    if model_configuration.prompt_version == 'northwind-fnol-claimant-v8':
-        profile = request_profile_for_intents(
-            route.intents,
-            has_current_media=bool(context.evidence),
-            isolated_review=isolated_review,
-            needs_lookup=needs_lookup,
-            profiles=published_profiles,
-        )
-    else:
-        profile = request_profile_for_task(
-            route.task,
-            has_current_media=bool(context.evidence),
-            isolated_review=isolated_review,
-            needs_lookup=needs_lookup,
-            profiles=published_profiles,
-        )
+    if model_configuration.prompt_version != CLAIMANT_V8_PROMPT_ID:
+        raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+    profile = request_profile_for_intents(
+        route.intents,
+        has_current_media=bool(context.evidence),
+        isolated_review=isolated_review,
+        needs_lookup=needs_lookup,
+        profiles=published_profiles,
+    )
     capability = (
         runtime_policy.tool_policy.provider_capabilities[context.model_profile_id]
         if runtime_policy is not None

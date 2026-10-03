@@ -18,7 +18,6 @@ from backend.domain.model_gateway import (
     ModelRequest,
     ModelResponse,
 )
-from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.runtime_configuration import (
@@ -77,7 +76,7 @@ def _runtime_configuration_matches_settings(
         and configuration.credential_environment_variable == settings.model_api_key_env
         and configuration.purpose == CLAIMANT_AGENT_PURPOSE
         and configuration.privacy_class == CLAIMANT_AGENT_PRIVACY_CLASS
-        and configuration.prompt_version == MOTOR_CLAIMANT_PROMPT_ID
+        and configuration.prompt_version == settings.model_prompt_version
         and configuration.structured_output
         and configuration.image_input == settings.model_supports_image_input
         and configuration.document_input == settings.model_supports_document_input

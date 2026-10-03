@@ -24,12 +24,7 @@ from backend.domain.release import (
     ReleaseSetRecord,
     ReleaseSetValidationRequest,
 )
-from backend.prompts import (
-    CLAIMANT_V7_PROMPT_ID,
-    CLAIMANT_V8_PROMPT_ID,
-    MOTOR_CLAIMANT_PROMPT_ID,
-    load_motor_claimant_prompt,
-)
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.repositories.release_set import ReleaseSetRepository
@@ -46,10 +41,9 @@ from backend.services.runtime_agent_policy import registered_agent_tool_names
 
 _AUTHOR = 'repository-initial-release-author'
 _REVIEWER = 'repository-initial-release-reviewer'
-_REQUIRED_V7_MODEL_PROFILES = frozenset(
+_REQUIRED_MODEL_PROFILES = frozenset(
     {'qwen-local', 'openrouter-gpt4o-mini', 'google-gemini35-flash-lite'}
 )
-_REQUIRED_V6_MODEL_PROFILES = frozenset({'qwen-local', 'openrouter-gpt4o-mini'})
 _VALIDATION_EVIDENCE = (
     'Repository-defined initial Runtime release passed structural and binding validation.'
 )
@@ -72,61 +66,22 @@ def _model_values(
     return values
 
 
-def repository_v6_values(
-    bindings: Sequence[ModelRuntimeBinding],
-) -> dict[str, dict[str, object]]:
-    if {binding.prompt_version for binding in bindings} != {MOTOR_CLAIMANT_PROMPT_ID}:
-        raise ValueError('A v6 Runtime release requires only v6 deployment bindings.')
-    values: dict[str, dict[str, object]] = {
-        'agent_instruction': {
-            'prompt_version': MOTOR_CLAIMANT_PROMPT_ID,
-            'purpose': 'claimant_agent',
-            'composition_mode': 'single',
-            'system_prompt': load_motor_claimant_prompt(),
-        },
-        'agent_tool_policy': {
-            'policy_version': 'northwind-fnol-agent-tools-v1',
-            'allowed_action_codes': list(registered_actions()),
-            'allowed_tool_names': list(registered_agent_tool_names()),
-        },
-        'agent_rule': {
-            'rules_version': 'northwind-fnol-controlled-rules-v1',
-            'disabled_rule_ids': [],
-            'observation_rule_ids': [],
-        },
-        'feature': {
-            'feature_version': 'northwind-fnol-agent-features-v1',
-            'model_assisted_turns': True,
-            'knowledge_retrieval': True,
-            'external_service_offers': True,
-        },
-    }
-    for binding in bindings:
-        values[f'model:{binding.profile_id}'] = _model_values(
-            binding,
-            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
-        )
-    return values
-
-
-def repository_v7_values(
+def repository_release_values(
     bindings: Sequence[ModelRuntimeBinding],
 ) -> dict[str, dict[str, object]]:
     prompt_versions = {binding.prompt_version for binding in bindings}
-    if prompt_versions not in ({CLAIMANT_V7_PROMPT_ID}, {CLAIMANT_V8_PROMPT_ID}):
+    if prompt_versions != {CLAIMANT_V8_PROMPT_ID}:
         raise ValueError(
-            'A claimant Runtime release requires one published claimant prompt version.'
+            f'A claimant Runtime release requires every binding to use {CLAIMANT_V8_PROMPT_ID}; '
+            'superseded prompt versions are archived and cannot be published.'
         )
-    prompt_version = next(iter(prompt_versions))
+    prompt_version = CLAIMANT_V8_PROMPT_ID
     manifest = load_prompt_manifest(prompt_version)
     fragment_contents = load_fragment_contents(manifest)
     model_values = {
         binding.profile_id: _model_values(binding, prompt_version=prompt_version)
         for binding in bindings
     }
-    # This function composes the shared release for both the v7 and v8 claimant prompt: the
-    # governance labels below must track whichever prompt_version was actually requested, not
-    # a version baked in when this only served v7.
     governance_version = prompt_version.rsplit('-', 1)[-1]
     values: dict[str, dict[str, object]] = {
         'agent_instruction': {
@@ -320,24 +275,13 @@ def install_initial_runtime_release(
             return active_release
 
     bindings = settings.model_runtime_bindings
-    prompt_versions = {binding.prompt_version for binding in bindings}
-    required_profiles = (
-        _REQUIRED_V7_MODEL_PROFILES
-        if prompt_versions in ({CLAIMANT_V7_PROMPT_ID}, {CLAIMANT_V8_PROMPT_ID})
-        else _REQUIRED_V6_MODEL_PROFILES
-    )
     profile_ids = {binding.profile_id for binding in bindings}
-    missing_profiles = required_profiles - profile_ids
+    missing_profiles = _REQUIRED_MODEL_PROFILES - profile_ids
     if missing_profiles:
         missing = ', '.join(sorted(missing_profiles))
         raise ValueError(f'The initial Runtime release is missing required models: {missing}.')
 
-    if prompt_versions in ({CLAIMANT_V7_PROMPT_ID}, {CLAIMANT_V8_PROMPT_ID}):
-        release_values = repository_v7_values(bindings)
-    elif prompt_versions == {MOTOR_CLAIMANT_PROMPT_ID}:
-        release_values = repository_v6_values(bindings)
-    else:
-        raise ValueError('The initial Runtime release cannot mix Prompt versions.')
+    release_values = repository_release_values(bindings)
 
     records: dict[str, ConfigurationRecord] = {}
     for slot, values in release_values.items():

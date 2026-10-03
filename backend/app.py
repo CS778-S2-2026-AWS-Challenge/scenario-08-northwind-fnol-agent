@@ -399,16 +399,6 @@ def create_app(
             pdf_gateway,
         )
 
-        def published_instruction() -> str | None:
-            try:
-                record = app.state.runtime_configuration_resolver.resolve('agent_instruction')
-            except RuntimeConfigurationResolutionError:
-                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
-            if record is None:
-                return None
-            value = record.values.get('system_prompt', record.values.get('instructions'))
-            return value if isinstance(value, str) and value.strip() else None
-
         def reply_judge_gateway() -> ModelGateway:
             # The review model shares the turn model's provider connection; only
             # the model identifier, purpose and a short timeout differ.
@@ -446,7 +436,6 @@ def create_app(
             KnowledgeGroundedAgent(
                 GatewayAgent(
                     model_gateway,
-                    published_instruction,
                     model_operations,
                     reply_judge,
                     resolved_settings.turn_time_limit_seconds or None,

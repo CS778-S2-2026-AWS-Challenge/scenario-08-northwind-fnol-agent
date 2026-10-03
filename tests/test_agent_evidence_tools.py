@@ -1,15 +1,10 @@
-import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from fastapi.testclient import TestClient
 
-from backend.adapters.model_gateway import ModelGatewayRegistry
-from backend.app import create_app
-from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.core.errors import ApiError
 from backend.domain.agent_action_registry import (
     ActionIdempotencyPolicy,
@@ -18,13 +13,6 @@ from backend.domain.agent_action_registry import (
     action_contract,
 )
 from backend.domain.agent_tool_registry import tool_contract
-from backend.domain.model_gateway import (
-    ModelCapabilities,
-    ModelCompletionStatus,
-    ModelRequest,
-    ModelResponse,
-    ModelToolCall,
-)
 from backend.domain.models import (
     AgentAction,
     AuthorityOutcome,
@@ -51,66 +39,6 @@ from backend.services.messages import (
     _validate_evidence_history_action,
     _validate_tool_requests,
 )
-
-
-class EvidenceHistoryGateway:
-    """Return the same Evidence proposal before and after Runtime history lookup."""
-
-    def __init__(self) -> None:
-        self.requests: list[ModelRequest] = []
-
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return ModelCapabilities(structured_output=True, tools=True)
-
-    def complete(self, request: ModelRequest) -> ModelResponse:
-        self.requests.append(request)
-        if request.required_tool_name:
-            return ModelResponse(
-                completion_status=ModelCompletionStatus.COMPLETE,
-                tool_calls=[
-                    ModelToolCall(
-                        call_id=f'call-claim-read-{len(self.requests)}',
-                        name='claim.read',
-                        arguments={},
-                    )
-                ],
-                provider_model='qwen3.8-27b',
-                provider_request_id=f'provider-{len(self.requests)}',
-            )
-        history_loaded = len(self.requests) == 4
-        return ModelResponse(
-            completion_status=ModelCompletionStatus.COMPLETE,
-            structured_output={
-                'action_code': 'claim.propose_evidence_reuse',
-                'runtime_action_code': 'runtime.wait_for_user',
-                'reason_codes': ['EVIDENCE_REUSE_AVAILABLE'],
-                'customer_reason': (
-                    'An eligible prior Evidence item is available.'
-                    if history_loaded
-                    else 'Authorised Evidence history is required before selecting an item.'
-                ),
-                'customer_response': (
-                    'I found your prior damage photo. Confirm if you want the original '
-                    'Evidence linked to this Claim without copying the file.'
-                    if history_loaded
-                    else 'I will check your authorised Evidence history first.'
-                ),
-                'customer_next_step': {
-                    'status': 'confirm_evidence_reuse',
-                    'summary': 'Confirm whether the prior Evidence should be reused.',
-                    'responsible_party': 'claimant',
-                    'required_items': ['evidence_reuse_confirmation'],
-                },
-                'form_changes': [],
-                'contents_item_changes': [],
-                'source_refs': ['evd_ready'] if history_loaded else [],
-                'evidence_id': 'evd_ready' if history_loaded else None,
-                'source_claim_id': 'clm_source' if history_loaded else None,
-            },
-            provider_model='qwen3.8-27b',
-            provider_request_id=f'provider-{len(self.requests)}',
-        )
 
 
 def _claim(
@@ -675,98 +603,3 @@ def test_evidence_history_tool_request_validation_and_execution() -> None:
         )
         is None
     )
-
-
-def test_model_runtime_queries_history_then_proposes_reuse_without_mutating_evidence() -> None:
-    gateway = EvidenceHistoryGateway()
-    registry = ModelGatewayRegistry()
-    registry.register('openai_compatible', lambda _config: gateway)
-    repository = FixtureRepository()
-    source = _claim('clm_source', 'cus_demo')
-    repository._claims[source.claim_id] = source
-    original = _evidence('evd_ready', source.claim_id)
-    repository.save_evidence(original, source.customer_id)
-    settings = Settings(
-        environment='test',
-        identity_mode=IdentityMode.DEVELOPER,
-        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
-        model_protocol_adapter='openai_compatible',
-        model_profile_id='qwen-local',
-        model_base_url='http://model.example.test/v1',
-        model_identifier='qwen3.8-27b',
-        model_supports_tools=True,
-    )
-
-    with TestClient(
-        create_app(
-            settings,
-            repository=repository,
-            model_gateway_registry=registry,
-        )
-    ) as client:
-        headers = {'Authorization': 'Bearer synthetic-claimant'}
-        created = client.post(
-            '/api/v1/claims',
-            headers={**headers, 'Idempotency-Key': 'evidence-history-claim'},
-            json={
-                'channel': 'web_agent',
-                'locale': 'en-NZ',
-                'incident_type': 'motor',
-                'model_profile_id': 'qwen-local',
-            },
-        )
-        assert created.status_code == 201, created.text
-        claim_id = created.json()['claim']['claim_id']
-        session_id = created.json()['session']['session_id']
-
-        response = client.post(
-            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-            headers={
-                **headers,
-                'Idempotency-Key': 'evidence-history-turn',
-                'If-Match': '1',
-            },
-            json={
-                'client_message_id': 'evidence-history-message',
-                'content': {
-                    'type': 'text',
-                    'text': 'Can I reuse the damage photo from my earlier claim?',
-                },
-                'evidence_refs': [],
-            },
-        )
-
-        assert response.status_code == 200, response.text
-        assert (
-            'It has not been attached or copied'
-            in response.json()['agent_message']['content']['text']
-        )
-        assert len(gateway.requests) == 4
-        replanned_context = json.loads(gateway.requests[2].messages[-1].content or '{}')
-        history_result = next(
-            result
-            for result in replanned_context['tool_results']
-            if result['tool'] == 'evidence.history'
-        )
-        assert [item['evidence_id'] for item in history_result['items']] == ['evd_ready']
-        assert all('storage_key' not in item for item in history_result['items'])
-
-        runtime_turn = repository.get_runtime_turn_for_trigger(
-            claim_id,
-            response.json()['claimant_message']['message_id'],
-            'cus_demo',
-        )
-        assert runtime_turn is not None
-        assert runtime_turn.proposal.action_code == 'claim.propose_evidence_reuse'
-        assert {result.tool_name for result in runtime_turn.tool_results} == {
-            'claim.read',
-            'evidence.history',
-        }
-        persisted_history = next(
-            result for result in runtime_turn.tool_results if result.tool_name == 'evidence.history'
-        )
-        assert persisted_history.source_refs == ['evd_ready']
-        assert persisted_history.status == 'succeeded'
-
-    assert repository.get_evidence(source.claim_id, original.evidence_id, 'cus_demo') == original
-    assert repository.list_evidence_for_customer('cus_demo') == [original]

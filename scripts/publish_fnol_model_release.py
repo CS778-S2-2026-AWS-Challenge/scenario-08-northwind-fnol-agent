@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from backend.core.config import load_model_runtime_bindings  # noqa: E402
 from backend.domain.configuration import ModelRuntimeBinding  # noqa: E402
-from backend.services.initial_runtime_release import repository_v7_values  # noqa: E402
+from backend.services.initial_runtime_release import repository_release_values  # noqa: E402
 
 DEFAULT_BINDINGS = ROOT / 'config' / 'model-runtime-bindings.json'
 
@@ -171,7 +171,7 @@ def publish(args: argparse.Namespace) -> str:
     query = urlencode({'environment': args.environment, 'runtime_profile': args.runtime_profile})
     active = client.get(f'/internal/v1/admin/runtime-snapshots?{query}')
 
-    release_values = repository_v7_values(bindings)
+    release_values = repository_release_values(bindings)
     published = {
         slot: client.publish_configuration(
             domain='model' if slot.startswith('model:') else slot,

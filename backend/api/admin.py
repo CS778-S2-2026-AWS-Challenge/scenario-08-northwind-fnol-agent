@@ -22,7 +22,6 @@ from backend.domain.configuration import (
     ValidationRequest,
 )
 from backend.domain.model_gateway import CLAIMANT_AGENT_PRIVACY_CLASS, CLAIMANT_AGENT_PURPOSE
-from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID
 from backend.repositories.configuration import (
     ConfigurationIdempotencyRecord,
     ConfigurationRepository,
@@ -60,7 +59,7 @@ def _model_runtime_bindings(request: Request) -> tuple[ModelRuntimeBinding, ...]
             credential_environment_variable=settings.model_api_key_env,
             purpose=CLAIMANT_AGENT_PURPOSE,
             privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
-            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            prompt_version=settings.model_prompt_version,
             structured_output=True,
             tools=settings.model_supports_tools,
             image_input=settings.model_supports_image_input,

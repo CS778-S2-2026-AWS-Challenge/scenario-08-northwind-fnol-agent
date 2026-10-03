@@ -10,6 +10,7 @@ from backend.domain.agent_action_registry import action_contract
 from backend.domain.agent_context_runtime import TurnFamilyResolution, VerifiedConversationSummary
 from backend.domain.intake import infer_controlled_product_family, next_requirement_field
 from backend.domain.knowledge import KnowledgeChunk
+from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -41,6 +42,7 @@ from backend.domain.support_intent import (
     detect_support_intent,
     support_need_for_intent,
 )
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 
 if TYPE_CHECKING:
     from backend.domain.agent_v8 import V8TurnProposal
@@ -333,6 +335,19 @@ class AgentTurnContext:
     # Files the claimant attached this turn that the selected provider cannot
     # read. They stay saved and listed; the model is told they arrived.
     unattached_evidence: tuple[AgentEvidenceReference, ...] = ()
+
+
+def published_prompt_version(context: AgentTurnContext) -> str:
+    """Return the published prompt version, refusing anything but the current one.
+
+    Superseded prompt versions are archived; a model turn without a published runtime
+    policy, or with another version, is a configuration error and never falls back.
+    """
+
+    policy = context.runtime_policy
+    if policy is None or policy.instruction.prompt_version != CLAIMANT_V8_PROMPT_ID:
+        raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+    return policy.instruction.prompt_version
 
 
 @dataclass(frozen=True, slots=True)

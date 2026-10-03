@@ -2,7 +2,6 @@
 
 import json
 import logging
-from dataclasses import replace
 
 import pytest
 from fastapi import FastAPI
@@ -16,11 +15,9 @@ from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import estimate_tokens
 from backend.services.request_profile_registry import (
-    V7_INPUT_HARD_LIMIT,
     V8_INPUT_HARD_LIMIT,
     request_profile,
 )
-from tests.test_agent_context_runtime_v7 import _context
 from tests.test_turn_proposal_v8 import v8_context
 
 
@@ -116,37 +113,3 @@ def test_lookup_hard_limit_is_per_request_not_cumulative_input_plus_output() -> 
     assert result.raw_input_tokens <= V8_INPUT_HARD_LIMIT
     assert result.turn_cumulative_tokens > V8_INPUT_HARD_LIMIT
     assert result.reserved_output_tokens == 7500
-
-
-@pytest.mark.parametrize(
-    ('family', 'message'),
-    [
-        (
-            'motor',
-            'My car was rear-ended on Queen Street yesterday at 3pm; '
-            'the bumper is damaged and nobody is injured.',
-        ),
-        (
-            'home',
-            'A bathroom pipe burst last night at 12 Example Street, Wellington. '
-            'The kitchen and ceiling are wet, the water is off, and we can live here.',
-        ),
-        (
-            'contents',
-            'My laptop was stolen through the back window yesterday afternoon in Wellington. '
-            'Nobody was injured.',
-        ),
-    ],
-)
-def test_v7_rollback_three_family_context_fits_measured_compensation(
-    family: str, message: str
-) -> None:
-    context = _context(message, incident_type=family)
-    assert context.runtime_policy is not None
-    evaluation = context.runtime_policy.branch_evaluator().evaluate(
-        context.claim, latest_message=message, recomputation_reason='v7_rollback_budget_observation'
-    )
-    plan = plan_model_turn(replace(context, branch_evaluation=evaluation))
-    assert plan is not None
-    assert plan.request_budget.raw_input_tokens <= V7_INPUT_HARD_LIMIT
-    assert plan.request_budget.hard_limit == V7_INPUT_HARD_LIMIT == 8000

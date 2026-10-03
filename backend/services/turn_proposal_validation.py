@@ -455,8 +455,8 @@ def truthful_reply(
             if (confirmation_claim and not negated_confirmation) or readiness_claim:
                 continue
         kept.append(sentence)
-    # Legacy v7 path only; the v8 reducer never calls this. A fully struck v7
-    # answer falls back to its neutral runtime-owned copy.
+    # Used for the evidence-history and deep-review results, which carry no validated
+    # turn. A fully struck answer is replaced by neutral runtime-owned copy.
     return ' '.join(kept).strip() or 'Your message has been recorded. We can continue your report.'
 
 

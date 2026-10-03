@@ -31,7 +31,7 @@ from backend.domain.model_gateway import (
     ModelRole,
     ModelTextContent,
 )
-from backend.services.agent import AgentTurnContext
+from backend.services.agent import AgentTurnContext, published_prompt_version
 from backend.services.context_budget import build_request_budget
 from backend.services.context_resolver import resolver_for_turn
 
@@ -150,11 +150,7 @@ def execute_isolated_context_plan(
     request = ModelRequest(
         model_profile_id=context.model_profile_id,
         purpose=CLAIMANT_AGENT_PURPOSE,
-        prompt_version=(
-            context.runtime_policy.instruction.prompt_version
-            if context.runtime_policy is not None
-            else 'northwind-fnol-claimant-v7'
-        ),
+        prompt_version=published_prompt_version(context),
         privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
         required_capabilities=ModelCapabilities(
             structured_output=True,

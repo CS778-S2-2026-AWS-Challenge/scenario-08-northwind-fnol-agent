@@ -1,5 +1,4 @@
 import json
-from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -28,8 +27,6 @@ from backend.domain.configuration import (
     ConfigurationState,
     ModelRuntimeConfiguration,
 )
-from backend.domain.external_service_registry import capability_context
-from backend.domain.field_registry import FIELD_REGISTRY_VERSION
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeRetrievalUnavailable, KnowledgeSearch
 from backend.domain.knowledge_admin import KnowledgeSourceRecord, KnowledgeVersionState
 from backend.domain.model_gateway import (
@@ -46,8 +43,6 @@ from backend.domain.model_gateway import (
 from backend.domain.models import (
     ActorReference,
     ActorType,
-    AgentAction,
-    BranchEvaluationResult,
     Channel,
     CustomerNextStep,
     FormSource,
@@ -55,7 +50,6 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     NeededFor,
-    RequirementResolution,
     ResponsibleParty,
     StructuredFormField,
     WorkingClaim,
@@ -65,12 +59,12 @@ from backend.domain.prompt_pack import (
     PromptFragmentDefinition,
     PromptPackManifest,
 )
-from backend.services.agent import AgentEvidenceReference, AgentTurnContext, InvariantGuardedAgent
+from backend.services.agent import AgentEvidenceReference, AgentTurnContext
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
 from backend.services.context_resolver import TurnContextResolver
 from backend.services.isolated_context_executor import _validation_path
-from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
+from backend.services.model_agent import GatewayAgent
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import (
     compose_prompt,
@@ -84,7 +78,6 @@ from backend.services.provider_capability_registry import (
     validate_profile_compatibility,
 )
 from backend.services.request_profile_registry import (
-    V7_INPUT_HARD_LIMIT,
     registered_request_profiles,
     request_profile,
 )
@@ -135,7 +128,7 @@ def _model_record(
             'profile_id': 'qwen-local',
             'purpose': 'agent_turn',
             'privacy_class': 'synthetic_fnol',
-            'prompt_version': 'northwind-fnol-claimant-v7',
+            'prompt_version': 'northwind-fnol-claimant-v8',
             'evaluation_status': 'configured',
             'timeout_seconds': 120.0,
             'structured_output': True,
@@ -158,7 +151,7 @@ def _runtime_policy(snapshot: RuntimeConfigurationSnapshot) -> RuntimeAgentPolic
     return RuntimeAgentPolicySnapshot(
         runtime_snapshot=snapshot,
         instruction=AgentInstructionConfiguration(
-            prompt_version='northwind-fnol-claimant-v7',
+            prompt_version='northwind-fnol-claimant-v8',
             composition_mode='fragmented',
             manifest_version=manifest.prompt_pack_version,
             fragments=[
@@ -173,7 +166,7 @@ def _runtime_policy(snapshot: RuntimeConfigurationSnapshot) -> RuntimeAgentPolic
             policy_version='test-v7',
             allowed_action_codes=list(registered_actions()),
             allowed_tool_names=list(registered_agent_tool_names()),
-            request_profiles=list(registered_request_profiles('northwind-fnol-claimant-v7')),
+            request_profiles=list(registered_request_profiles('northwind-fnol-claimant-v8')),
             provider_capabilities={'qwen-local': provider_capability(model_configuration)},
             schema_registry=load_response_schemas(),
         ),
@@ -393,46 +386,6 @@ def test_router_keeps_authoritative_family_and_resolves_ambiguous_new_claims() -
     assert unresolved.deterministic_response is None
 
 
-def test_prompt_manifest_compiles_one_family_in_stable_order() -> None:
-    route = route_turn(_context('I need a damage assessor for my car.'))
-    first = compose_prompt(route, load_prompt_manifest())
-    second = compose_prompt(route, load_prompt_manifest())
-    assert first == second
-    assert first.prompt_bundle_id == 'claimant-v7:motor:external_support:assessor'
-    refs = [item.fragment_id for item in first.fragment_refs]
-    assert 'family.motor' in refs
-    assert 'family.home' not in refs
-    assert 'capability.assessor' in refs
-    assert (
-        refs.index('core.authority')
-        < refs.index('family.motor')
-        < refs.index('task.external-support')
-    )
-
-
-def test_prompt_composer_ignores_external_capability_terms_during_evidence_review() -> None:
-    route = route_turn(
-        _context(
-            'Please review this repair assessment PDF and summarise what it supports.',
-            evidence=(
-                AgentEvidenceReference(
-                    evidence_id='ev_assessment',
-                    media_type='application/pdf',
-                ),
-            ),
-        )
-    )
-
-    bundle = compose_prompt(route, load_prompt_manifest())
-
-    assert route.task is TurnTask.EVIDENCE_CURRENT
-    refs = [item.fragment_id for item in bundle.fragment_refs]
-    assert 'task.evidence-current' in refs
-    assert 'task.external-support' not in refs
-    assert 'capability.assessor' not in refs
-    assert 'capability.repair' not in refs
-
-
 def test_prompt_composer_rejects_a_selected_fragment_outside_its_applicability() -> None:
     route = route_turn(_context('My car was damaged.'))
     manifest = load_prompt_manifest()
@@ -445,45 +398,6 @@ def test_prompt_composer_rejects_a_selected_fragment_outside_its_applicability()
 
     with pytest.raises(ValueError, match='does not apply to product family'):
         compose_prompt(route, manifest.model_copy(update={'fragments': fragments}))
-
-
-def test_prompt_composer_rejects_missing_conflicting_and_over_budget_fragments() -> None:
-    route = route_turn(_context('My car was damaged.'))
-    manifest = load_prompt_manifest()
-
-    without_family = manifest.model_copy(
-        update={
-            'fragments': [item for item in manifest.fragments if item.fragment_id != 'family.motor']
-        }
-    )
-    with pytest.raises(ValueError, match='unknown fragments'):
-        compose_prompt(route, without_family)
-
-    conflicting = manifest.model_copy(
-        update={
-            'fragments': [
-                item.model_copy(update={'conflicts_with': ['task.intake']})
-                if item.fragment_id == 'family.motor'
-                else item
-                for item in manifest.fragments
-            ]
-        }
-    )
-    with pytest.raises(ValueError, match='conflict'):
-        compose_prompt(route, conflicting)
-
-    over_budget = manifest.model_copy(
-        update={
-            'fragments': [
-                item.model_copy(update={'max_tokens': 1})
-                if item.fragment_id == 'core.authority'
-                else item
-                for item in manifest.fragments
-            ]
-        }
-    )
-    with pytest.raises(ValueError, match='token limit'):
-        compose_prompt(route, over_budget)
 
 
 @pytest.mark.parametrize(
@@ -590,88 +504,6 @@ def test_request_budget_rejects_single_and_cumulative_overflow(
         assert budget().turn_cumulative_tokens == 301
 
 
-@pytest.mark.parametrize(
-    ('family', 'message', 'expected_fragment'),
-    [
-        ('motor', 'My car was damaged.', 'family.motor'),
-        ('home', 'A pipe flooded my home.', 'family.home'),
-        ('contents', 'My laptop was stolen.', 'family.contents'),
-    ],
-)
-def test_each_product_family_compiles_only_its_own_fragment(
-    family: str,
-    message: str,
-    expected_fragment: str,
-) -> None:
-    plan = plan_model_turn(_context(message, incident_type=family))
-
-    assert plan is not None
-    family_refs = [item for item in plan.fragment_refs if item.startswith('family.')]
-    assert family_refs == [f'{expected_fragment}@v1']
-
-
-@pytest.mark.parametrize(
-    ('message', 'service_identity'),
-    [
-        ('Please arrange a damage assessment.', 'vehicle_damage_assessment_routing'),
-        ('Please help me book a repairer.', 'vehicle_repairer_booking'),
-        ('I need the police reporting details.', 'police_105_reporting_guidance'),
-    ],
-)
-def test_external_support_offers_only_registry_candidates_pending_consent(
-    message: str,
-    service_identity: str,
-) -> None:
-    context = replace(
-        _context(message),
-        external_services=capability_context('motor'),
-        selected_external_service_ids=(service_identity,),
-    )
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                structured_output={
-                    **_answer_output(),
-                    'service_offer_ids': [service_identity],
-                },
-                completion_status=ModelCompletionStatus.COMPLETE,
-            )
-        ]
-    )
-
-    proposal = GatewayAgent(gateway).propose_turn(context)
-
-    request_context = json.loads(gateway.requests[0].messages[1].content or '{}')
-    offered_services = request_context['external.services']
-    assert service_identity in {item['service_identity'] for item in offered_services}
-    assert 1 <= len(offered_services) <= 3
-    assert proposal.customer_next_step.status == 'external_service_consent_required'
-    assert proposal.external_service_intents == [
-        {'service_identity': service_identity, 'requested_action': 'submit_request'}
-    ]
-    assert proposal.state_changes == []
-
-
-def test_image_review_does_not_load_unrelated_external_service_context() -> None:
-    context = replace(
-        _context(
-            'Please inspect this damage photo.',
-            evidence=(AgentEvidenceReference(evidence_id='ev_photo', media_type='image/jpeg'),),
-        ),
-        external_services=capability_context('motor'),
-    )
-
-    plan = plan_model_turn(context)
-
-    assert plan is not None
-    assert plan.route.task is TurnTask.EVIDENCE_CURRENT
-    assert plan.request_profile.output_limit == 400
-    assert 'external.services' not in plan.context_payload
-    assert all(
-        entry.resource_id != 'external.services' for entry in plan.context_plan.catalogue_entries
-    )
-
-
 def test_request_profiles_fail_closed_against_provider_capabilities() -> None:
     configuration = ModelRuntimeConfiguration.model_validate(_model_record().values)
     capability = provider_capability(configuration)
@@ -744,65 +576,6 @@ def test_model_turn_planning_fails_before_transport_when_release_inputs_are_inco
         plan_model_turn(media_context)
 
 
-def test_ordinary_model_plan_is_single_call_tool_free_and_budgeted() -> None:
-    context = _context('My car was rear-ended this morning.')
-    plan = plan_model_turn(context)
-    assert plan is not None
-    assert plan.request_profile.profile_id == 'claimant.intake.v1'
-    assert plan.request_profile.max_model_invocations == 1
-    assert plan.request_profile.tool_names == []
-    assert (
-        plan.request_budget.raw_input_tokens
-        <= plan.request_budget.hard_limit
-        == V7_INPUT_HARD_LIMIT
-    )
-    assert plan.request_budget.reserved_output_tokens == 180
-    assert plan.context_payload['message.latest'] == 'My car was rear-ended this morning.'
-    assert plan.context_plan.estimated_tokens == estimate_json_tokens(plan.context_payload)
-    assert all(
-        'inline_value' not in item.model_dump(mode='json')
-        for item in plan.context_plan.catalogue_entries
-    )
-    assert plan.cache_plan.segments[0].checkpoint is True
-    assert plan.cache_plan.layout_version == 'test-cache-v7'
-    assert len(plan.cache_plan.prefix_fingerprint) == 64
-    assert plan.cache_plan.tool_manifest_id.endswith(':none')
-    repeated = plan_model_turn(context)
-    assert repeated is not None
-    assert plan.cache_plan == repeated.cache_plan
-
-
-def test_cache_prefix_fingerprint_tracks_actual_published_schema_content() -> None:
-    context = _context('My car was rear-ended this morning.')
-    original = plan_model_turn(context)
-    assert original is not None
-    policy = context.runtime_policy
-    assert policy is not None
-    schemas = deepcopy(policy.tool_policy.schema_registry)
-    schemas['claimant.intake-patch.v1'] = {
-        **schemas['claimant.intake-patch.v1'],
-        'description': 'A distinct published schema revision.',
-    }
-    changed_policy = replace(
-        policy,
-        tool_policy=policy.tool_policy.model_copy(update={'schema_registry': schemas}),
-    )
-
-    changed = plan_model_turn(replace(context, runtime_policy=changed_policy))
-
-    assert changed is not None
-    assert changed.cache_plan.prefix_fingerprint != original.cache_plan.prefix_fingerprint
-
-
-def test_current_status_uses_one_tool_free_answer_profile_without_older_history() -> None:
-    plan = plan_model_turn(_context('What is the status of my claim?'))
-
-    assert plan is not None
-    assert plan.request_profile.profile_id == 'claimant.answer.v1'
-    assert plan.request_profile.tool_names == []
-    assert plan.request_profile.max_model_invocations == 1
-
-
 def test_recent_history_does_not_repeat_the_trigger_message() -> None:
     current = _messages(1)[0].model_copy(
         update={'message_id': 'msg_v7', 'content': {'type': 'text', 'text': 'Current status?'}}
@@ -823,119 +596,6 @@ def test_recent_history_does_not_repeat_the_trigger_message() -> None:
         'History message 2.',
         'History message 3.',
     ]
-
-
-def test_policy_and_rag_lookup_resolves_only_the_published_turn_reference() -> None:
-    calls: list[tuple[str, int]] = []
-
-    def load_policy(limit: int) -> dict[str, object]:
-        calls.append(('policy', limit))
-        return {'status': 'evidence_found', 'facts': {'coverage_sections': ['damage']}}
-
-    def load_knowledge(limit: int) -> dict[str, object]:
-        calls.append(('knowledge', limit))
-        return {'status': 'evidence_found', 'chunks': [{'chunk_id': 'chk_policy'}]}
-
-    context = replace(
-        _context('Does my policy cover this collision?'),
-        policy_context_loader=load_policy,
-        knowledge_context_loader=load_knowledge,
-    )
-    plan = plan_model_turn(context)
-    assert plan is not None
-    reference = next(
-        item for item in plan.context_plan.references if item.resource_type == 'policy_version'
-    )
-    assert calls == []
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                tool_calls=[
-                    ModelToolCall(
-                        call_id='call_policy',
-                        name='context.resolve',
-                        arguments={
-                            'ref': reference.ref,
-                            'selector': 'matching_facts_and_guidance',
-                            'max_tokens': 300,
-                        },
-                    )
-                ],
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-            ModelResponse(
-                structured_output=_answer_output(),
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-        ]
-    )
-
-    proposal = GatewayAgent(gateway).propose_turn(context)
-
-    assert [item[0] for item in calls] == ['policy', 'knowledge']
-    assert proposal.runtime_trace is not None
-    assert proposal.runtime_trace.resolved_ref_count == 1
-    assert proposal.runtime_trace.tool_calls == 1
-
-
-@pytest.mark.parametrize(
-    ('outcome', 'published', 'expected_status'),
-    [
-        ('evidence_found', True, 'evidence_found'),
-        ('empty', True, 'no_evidence'),
-        ('unavailable', True, 'unavailable'),
-        ('evidence_found', False, 'unavailable'),
-    ],
-)
-def test_v7_knowledge_lookup_uses_only_the_release_selected_source(
-    outcome: str,
-    published: bool,
-    expected_status: str,
-) -> None:
-    context = _context('Does my policy cover this collision?')
-    snapshot = context.runtime_configuration_snapshot
-    assert snapshot is not None
-    if published:
-        context = replace(
-            context,
-            runtime_configuration_snapshot=replace(
-                snapshot,
-                knowledge=MappingProxyType({'motor': _knowledge_source()}),
-            ),
-        )
-    reference = 'ctxref:ses_v7:policy.current'
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                tool_calls=[
-                    ModelToolCall(
-                        call_id='call_release_knowledge',
-                        name='context.resolve',
-                        arguments={
-                            'ref': reference,
-                            'selector': 'matching_facts_and_guidance',
-                            'max_tokens': 300,
-                        },
-                    )
-                ],
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-            ModelResponse(
-                structured_output=_answer_output(),
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-        ]
-    )
-    retriever = _KnowledgeRetriever(outcome)
-
-    proposal = KnowledgeGroundedAgent(GatewayAgent(gateway), retriever).propose_turn(context)
-
-    tool_message = gateway.requests[1].messages[-1]
-    assert tool_message.content is not None
-    resolved = json.loads(tool_message.content)
-    assert resolved['content']['approved_guidance']['status'] == expected_status
-    assert proposal.runtime_trace is not None
-    assert len(retriever.requests) == (1 if published else 0)
 
 
 def test_evidence_history_uses_claimant_scoped_lazy_source_and_narrow_proposal() -> None:
@@ -1218,85 +878,6 @@ def test_context_reference_resolver_enforces_manifest_selector_and_limit() -> No
         stale.resolve(reference.ref, 'page', 8)
 
 
-def test_provider_gateway_capabilities_remain_separate_from_v7_profiles() -> None:
-    assert ModelCapabilities(structured_output=True, tools=True).tools is True
-    assert request_profile('claimant.intake.v1').tool_names == []
-
-
-@pytest.mark.parametrize(
-    ('message', 'expected_task'),
-    [
-        ('My car was rear-ended this morning.', TurnTask.INTAKE),
-        ('Actually, change the location to Queen Street.', TurnTask.CORRECTION),
-        ('Yes, that is right.', TurnTask.CONFIRMATION),
-    ],
-)
-def test_v7_ordinary_turn_makes_exactly_one_tool_free_bounded_call(
-    message: str,
-    expected_task: TurnTask,
-) -> None:
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                structured_output=_intake_output(),
-                completion_status=ModelCompletionStatus.COMPLETE,
-            )
-        ]
-    )
-
-    proposal = GatewayAgent(gateway).propose_turn(_context(message))
-
-    assert len(gateway.requests) == 1
-    assert gateway.requests[0].tools == []
-    assert gateway.requests[0].max_output_tokens == 180
-    assert proposal.runtime_trace is not None
-    assert proposal.runtime_trace.request_profile_id == 'claimant.intake.v1'
-    assert proposal.runtime_trace.route == f'motor:{expected_task.value}'
-    assert len(proposal.runtime_trace.invocations) == 1
-    assert all(
-        item.get('authority_scope') == 'claim:clm_v7:revision:1'
-        for item in proposal.runtime_trace.context_load_decisions
-    )
-
-
-@pytest.mark.parametrize(
-    ('ready', 'expected_action', 'expected_status'),
-    [
-        (True, 'claim.prepare_creation', 'ready_to_create'),
-        (False, 'conversation.answer', 'more_information_required'),
-    ],
-)
-def test_v7_claim_creation_route_keeps_readiness_under_runtime_control(
-    ready: bool,
-    expected_action: str,
-    expected_status: str,
-) -> None:
-    branch_evaluation = BranchEvaluationResult(
-        claim_id='clm_v7',
-        evaluated_against_claim_revision=1,
-        field_registry_version='test-fields-v1',
-        branch_rules_version='test-branches-v1',
-        selected_family='motor',
-        requirements=RequirementResolution(ready=True),
-        recomputation_reason='test',
-    )
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                structured_output={**_answer_output(), 'ready': ready},
-                completion_status=ModelCompletionStatus.COMPLETE,
-            )
-        ]
-    )
-    context = replace(_context('Proceed with this report.'), branch_evaluation=branch_evaluation)
-
-    proposal = GatewayAgent(gateway).propose_turn(context)
-
-    assert proposal.action_code == expected_action
-    assert proposal.customer_next_step.status == expected_status
-    assert proposal.state_changes == []
-
-
 def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
     context = _context('My car was rear-ended this morning.')
     assert context.runtime_policy is not None
@@ -1314,25 +895,6 @@ def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
     assert plan.field_contract is not None
     assert plan.field_contract.registry_version == branch_evaluation.field_registry_version
     assert plan.field_contract.branch_rules_version == branch_evaluation.branch_rules_version
-
-
-def test_intake_field_contract_rejects_a_mismatched_branch_registry() -> None:
-    branch_evaluation = BranchEvaluationResult(
-        claim_id='clm_v7',
-        evaluated_against_claim_revision=1,
-        field_registry_version=FIELD_REGISTRY_VERSION,
-        branch_rules_version='unrelated-branch-rules-v7',
-        selected_family='motor',
-        requirements=RequirementResolution(ready=False),
-        recomputation_reason='test',
-    )
-    context = replace(
-        _context('My car was rear-ended this morning.'),
-        branch_evaluation=branch_evaluation,
-    )
-
-    with pytest.raises(ValueError, match='branch-rule versions do not match'):
-        plan_model_turn(context)
 
 
 @pytest.mark.parametrize(
@@ -1401,65 +963,6 @@ def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
     assert error.value.code is expected_code
 
 
-def test_v7_rejects_an_unregistered_optional_offer_without_rejecting_safe_prose() -> None:
-    context = replace(
-        _context('Please arrange a damage assessment.'),
-        external_services=capability_context('motor'),
-    )
-    response = ModelResponse(
-        structured_output={**_answer_output(), 'service_offer_ids': ['not_registered']},
-        completion_status=ModelCompletionStatus.COMPLETE,
-    )
-
-    proposal = GatewayAgent(_RecordingGateway([response])).propose_turn(context)
-
-    assert proposal.customer_response == _answer_output()['reply']
-    assert proposal.external_service_intents == []
-    assert proposal.customer_next_step.status == 'continue_current_report'
-
-
-def test_v7_replaces_executional_prose_before_consent_with_runtime_owned_copy() -> None:
-    service_identity = 'vehicle_damage_assessment_routing'
-    context = replace(
-        _context('Please arrange a damage assessment.'),
-        external_services=capability_context('motor'),
-        selected_external_service_ids=(service_identity,),
-    )
-    response = ModelResponse(
-        structured_output={
-            **_answer_output(),
-            'reply': 'I have arranged a damage assessment for you.',
-        },
-        completion_status=ModelCompletionStatus.COMPLETE,
-    )
-
-    proposal = GatewayAgent(_RecordingGateway([response])).propose_turn(context)
-
-    assert 'arranged' not in proposal.customer_response
-    assert proposal.customer_response
-    assert proposal.external_service_intents == [
-        {'service_identity': service_identity, 'requested_action': 'submit_request'}
-    ]
-
-
-def test_v7_human_handoff_preserves_interrupt_while_provider_answers() -> None:
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                structured_output=_answer_output(), completion_status=ModelCompletionStatus.COMPLETE
-            )
-        ]
-    )
-
-    proposal = InvariantGuardedAgent(GatewayAgent(gateway)).propose_turn(
-        _context('I want to speak to a person.')
-    )
-
-    assert proposal.action is AgentAction.HANDOFF
-    assert 'HUMAN_SUPPORT_REQUESTED' in proposal.reason_codes
-    assert len(gateway.requests) == 1
-
-
 def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
     gateway = _FailingRecordingGateway(
         ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True)
@@ -1470,125 +973,6 @@ def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
 
     assert error.value.code is ModelGatewayErrorCode.TIMEOUT
     assert len(gateway.requests) == 1
-
-
-def test_v7_field_contract_uses_one_bounded_repair_without_tools() -> None:
-    invalid = {
-        **_intake_output(),
-        'field_changes': [
-            {
-                'field_code': 'incident.injury_or_danger',
-                'value': 'maybe',
-                'reported_text': 'I am not injured.',
-            }
-        ],
-    }
-    corrected = {
-        **invalid,
-        'reply': 'An attempted rewrite that Runtime must ignore.',
-        'field_changes': [
-            {
-                'field_code': 'incident.injury_or_danger',
-                'value': False,
-                'reported_text': 'I am not injured.',
-            }
-        ],
-    }
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                structured_output=invalid,
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-            ModelResponse(
-                structured_output=corrected,
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-        ]
-    )
-
-    proposal = GatewayAgent(gateway).propose_turn(
-        _context('My car was rear-ended and I am not injured.')
-    )
-
-    assert len(gateway.requests) == 2
-    assert gateway.requests[1].tools == []
-    assert proposal.form_changes[0].value is False
-    assert proposal.customer_response == invalid['reply']
-    assert proposal.runtime_trace is not None
-    assert proposal.runtime_trace.repair_attempted is True
-    assert proposal.runtime_trace.repair_outcome == 'corrected'
-
-
-def test_v7_field_contract_fails_after_one_unsuccessful_repair() -> None:
-    invalid = {
-        **_intake_output(),
-        'field_changes': [{'field_code': 'incident.injury_or_danger', 'value': 'maybe'}],
-    }
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                structured_output=invalid,
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-            ModelResponse(
-                structured_output=invalid,
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-        ]
-    )
-
-    with pytest.raises(ModelGatewayError) as error:
-        GatewayAgent(gateway).propose_turn(_context('My car was rear-ended.'))
-
-    assert error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
-    assert len(gateway.requests) == 2
-
-
-def test_v7_lookup_allows_one_bounded_resolve_and_one_continuation() -> None:
-    reference = 'ctxref:ses_v7:conversation.older'
-    gateway = _RecordingGateway(
-        [
-            ModelResponse(
-                tool_calls=[
-                    ModelToolCall(
-                        call_id='call_v7',
-                        name='context.resolve',
-                        arguments={'ref': reference, 'selector': 'page', 'max_tokens': 120},
-                    )
-                ],
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-            ModelResponse(
-                structured_output=_answer_output(),
-                completion_status=ModelCompletionStatus.COMPLETE,
-            ),
-        ]
-    )
-
-    proposal = GatewayAgent(gateway).propose_turn(
-        _context('What is the status of my claim?', conversation_messages=_messages(6))
-    )
-
-    assert len(gateway.requests) == 2
-    assert [tool.name for tool in gateway.requests[0].tools] == ['context.resolve']
-    assert gateway.requests[1].tools == []
-    continuation_payload = json.loads(gateway.requests[1].messages[-1].content or '{}')
-    assert 'content' in continuation_payload
-    assert proposal.runtime_trace is not None
-    assert len(proposal.runtime_trace.invocations) == 2
-    assert set(proposal.runtime_trace.tool_output) == {
-        'ref',
-        'selector',
-        'next_cursor',
-        'truncated',
-        'actual_tokens',
-    }
-    assert proposal.runtime_trace.tool_output['ref'] == reference
-    assert proposal.runtime_trace.tool_output['selector'] == 'page'
-    assert proposal.runtime_trace.tool_output['actual_tokens'] > 0
-    assert 'content' not in proposal.runtime_trace.tool_output
-    assert proposal.runtime_trace.request_budget['turn_cumulative_tokens'] <= 3000
 
 
 def test_v7_lookup_rejects_a_missing_required_context_continuation() -> None:
@@ -1849,15 +1233,3 @@ def test_v7_isolated_review_rejects_tools_incomplete_and_unsourced_results(
     assert error.value.code is expected_code
     if expected_code is ModelGatewayErrorCode.MALFORMED_RESPONSE:
         assert error.value.diagnostic_code == 'output_schema_validation'
-
-
-def test_v7_authority_budget_overflow_returns_model_free_safe_clarification() -> None:
-    gateway = _RecordingGateway([])
-
-    proposal = GatewayAgent(gateway).propose_turn(_context('A' * 20_000))
-
-    assert gateway.requests == []
-    assert proposal.reason_codes == ['CONTEXT_BUDGET_EXCEEDED']
-    assert proposal.proposal_source.value == 'controlled_agent'
-    assert proposal.action_code is None
-    assert proposal.runtime_trace is None

@@ -1,16 +1,12 @@
 """Stable request profiles for the claimant Runtime.
 
-The v8 claimant route uses one result envelope for ordinary, media, and lookup
-turns.  The older task profiles remain registered solely for the explicit v7
-rollback set.
+The claimant route uses one result envelope for ordinary, media, and lookup turns;
+evidence history and deep review keep their narrow result shapes.
 """
 
-from backend.domain.agent_context_runtime import RequestProfile, TurnTask
+from backend.domain.agent_context_runtime import RequestProfile
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 
-# The earlier v7 Home intake baseline was 3955, before the vocabulary expansion.
-# The claimant schema includes the registered branch field vocabulary. Keep a
-# bounded ceiling while allowing the complete commercial FNOL contract.
-V7_INPUT_HARD_LIMIT = 8000
 # Interactive latency is dominated by output tokens (about 120 tokens/s measured
 # on openrouter-gpt4o); input prefill is a small share. Input ceilings therefore
 # leave headroom for long conversations while output limits stay tight.
@@ -27,24 +23,6 @@ _PROFILES = {
         # Dense envelope with every list at its cap estimates 6361 tokens
         # (tests/test_request_profile_budgets.py); operating cap, not a proof.
         output_limit=7500,
-    ),
-    'claimant.intake.v1': RequestProfile(
-        profile_id='claimant.intake.v1',
-        version='v1',
-        schema_id='claimant.intake-patch.v1',
-        max_model_invocations=1,
-        max_model_selected_tools=0,
-        input_hard_limit=V7_INPUT_HARD_LIMIT,
-        output_limit=4500,
-    ),
-    'claimant.answer.v1': RequestProfile(
-        profile_id='claimant.answer.v1',
-        version='v1',
-        schema_id='claimant.answer.v1',
-        max_model_invocations=1,
-        max_model_selected_tools=0,
-        input_hard_limit=V7_INPUT_HARD_LIMIT,
-        output_limit=4500,
     ),
     'claimant.media.v1': RequestProfile(
         profile_id='claimant.media.v1',
@@ -78,15 +56,6 @@ _PROFILES = {
         output_limit=300,
         requires_tool_continuation=True,
     ),
-    'claimant.external.v1': RequestProfile(
-        profile_id='claimant.external.v1',
-        version='v1',
-        schema_id='claimant.external-offer.v1',
-        max_model_invocations=1,
-        max_model_selected_tools=0,
-        input_hard_limit=V7_INPUT_HARD_LIMIT,
-        output_limit=4500,
-    ),
     'claimant.deep-review.v1': RequestProfile(
         profile_id='claimant.deep-review.v1',
         version='v1',
@@ -97,36 +66,6 @@ _PROFILES = {
         output_limit=1200,
         isolated=True,
     ),
-    'claimant.creation.v1': RequestProfile(
-        profile_id='claimant.creation.v1',
-        version='v1',
-        schema_id='claimant.claim-creation.v1',
-        max_model_invocations=1,
-        max_model_selected_tools=0,
-        input_hard_limit=V7_INPUT_HARD_LIMIT,
-        output_limit=4500,
-    ),
-    'claimant.handoff.v1': RequestProfile(
-        profile_id='claimant.handoff.v1',
-        version='v1',
-        schema_id='claimant.handoff.v1',
-        max_model_invocations=1,
-        max_model_selected_tools=0,
-        input_hard_limit=V7_INPUT_HARD_LIMIT,
-        output_limit=4500,
-    ),
-}
-
-_TASK_PROFILE = {
-    TurnTask.INTAKE: 'claimant.intake.v1',
-    TurnTask.CORRECTION: 'claimant.intake.v1',
-    TurnTask.CONFIRMATION: 'claimant.intake.v1',
-    TurnTask.STATUS_QUESTION: 'claimant.answer.v1',
-    TurnTask.CLAIM_CREATION: 'claimant.creation.v1',
-    TurnTask.EVIDENCE_CURRENT: 'claimant.media.v1',
-    TurnTask.EVIDENCE_HISTORY: 'claimant.evidence-history.v1',
-    TurnTask.EXTERNAL_SUPPORT: 'claimant.external.v1',
-    TurnTask.HUMAN_HANDOFF: 'claimant.handoff.v1',
 }
 
 
@@ -135,43 +74,6 @@ def request_profile(profile_id: str) -> RequestProfile:
         return _PROFILES[profile_id]
     except KeyError as error:
         raise ValueError(f'Unknown request profile: {profile_id}.') from error
-
-
-def request_profile_for_task(
-    task: TurnTask,
-    *,
-    has_current_media: bool = False,
-    isolated_review: bool = False,
-    needs_lookup: bool = False,
-    profiles: tuple[RequestProfile, ...] | list[RequestProfile] | None = None,
-) -> RequestProfile:
-    registry = {
-        item.profile_id: item
-        for item in (
-            profiles
-            if profiles is not None
-            else registered_request_profiles('northwind-fnol-claimant-v7')
-        )
-    }
-
-    def profile(name: str) -> RequestProfile:
-        try:
-            return registry[name]
-        except KeyError as error:
-            raise ValueError(f'The published request profile is missing: {name}.') from error
-
-    if isolated_review:
-        return profile('claimant.deep-review.v1')
-    if needs_lookup:
-        return profile('claimant.lookup.v1').model_copy(update={'schema_id': 'claimant.answer.v1'})
-    if has_current_media and task in {TurnTask.INTAKE, TurnTask.CORRECTION}:
-        return profile('claimant.media.v1').model_copy(
-            update={'schema_id': 'claimant.intake-patch.v1'}
-        )
-    selected = profile(_TASK_PROFILE[task])
-    if task is TurnTask.EVIDENCE_CURRENT:
-        selected = selected.model_copy(update={'schema_id': 'claimant.intake-patch.v1'})
-    return selected
 
 
 def request_profile_for_intents(
@@ -210,28 +112,13 @@ def request_profile_for_intents(
 
 
 def registered_request_profiles(
-    prompt_version: str = 'northwind-fnol-claimant-v8',
+    prompt_version: str = CLAIMANT_V8_PROMPT_ID,
 ) -> tuple[RequestProfile, ...]:
-    if prompt_version == 'northwind-fnol-claimant-v7':
-        legacy = []
-        for key in sorted(_PROFILES):
-            if key == 'claimant.turn.v1':
-                continue
-            profile = _PROFILES[key]
-            if key not in {'claimant.evidence-history.v1', 'claimant.deep-review.v1'}:
-                profile = profile.model_copy(
-                    update={'input_hard_limit': V7_INPUT_HARD_LIMIT, 'output_limit': 180}
-                )
-            if key == 'claimant.lookup.v1':
-                profile = profile.model_copy(
-                    update={'schema_id': 'claimant.answer.v1', 'output_limit': 300}
-                )
-            elif key == 'claimant.media.v1':
-                profile = profile.model_copy(
-                    update={'schema_id': 'claimant.intake-patch.v1', 'output_limit': 400}
-                )
-            legacy.append(profile)
-        return tuple(legacy)
+    if prompt_version != CLAIMANT_V8_PROMPT_ID:
+        raise ValueError(
+            f'Request profiles exist only for {CLAIMANT_V8_PROMPT_ID}; '
+            f'{prompt_version} is archived.'
+        )
     active = {
         'claimant.turn.v1',
         'claimant.media.v1',

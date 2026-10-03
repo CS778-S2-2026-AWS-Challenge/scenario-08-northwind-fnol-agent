@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -7,11 +8,11 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.core.errors import ApiError
-from backend.domain.agent_action_registry import registered_actions
 from backend.domain.configuration import (
     ConfigurationImpact,
     ConfigurationRecord,
     ConfigurationState,
+    ModelRuntimeBinding,
 )
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
 from backend.domain.models import (
@@ -22,6 +23,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.release import ConfigurationReference, ReleaseSetRecord, ReleaseSetState
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.release_set import ReleaseSetRepository
@@ -30,12 +32,12 @@ from backend.services.agent import (
     AgentTurnContext,
     FeatureControlledAgent,
 )
+from backend.services.initial_runtime_release import repository_release_values
 from backend.services.model_agent import KnowledgeGroundedAgent
 from backend.services.runtime_agent_policy import (
     RuntimeAgentPolicyResolver,
     enforce_agent_proposal,
     parse_agent_configuration,
-    registered_agent_tool_names,
 )
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -45,30 +47,48 @@ from backend.services.runtime_configuration import (
 FIXED_TIME = datetime(2026, 9, 7, 10, 0, tzinfo=UTC)
 
 
+_BINDING = ModelRuntimeBinding(
+    profile_id='qwen-local',
+    protocol='openai_compatible',
+    provider='qwen-local',
+    model_identifier='qwen3.8-27b',
+    base_url='http://model.example.test/v1',
+    credential_environment_variable=None,
+    purpose='agent_turn',
+    privacy_class='synthetic_fnol',
+    prompt_version=CLAIMANT_V8_PROMPT_ID,
+    structured_output=True,
+    tools=True,
+    image_input=False,
+    document_input=False,
+)
+_BINDINGS = (
+    _BINDING,
+    _BINDING.model_copy(
+        update={
+            'profile_id': 'openrouter-gpt4o-mini',
+            'provider': 'openrouter',
+            'model_identifier': 'openai/gpt-4o-mini',
+            'base_url': 'https://openrouter.ai/api/v1',
+            'credential_environment_variable': 'NORTHWIND_MODEL_API_KEY',
+        }
+    ),
+)
+_RELEASE_VALUES = repository_release_values(_BINDINGS)
+_VERSION_KEYS = {
+    'agent_tool_policy': 'policy_version',
+    'agent_rule': 'rules_version',
+    'feature': 'feature_version',
+}
+
+
 def _values(domain: str, version: str) -> dict[str, object]:
-    values: dict[str, dict[str, object]] = {
-        'agent_instruction': {
-            'prompt_version': 'northwind-fnol-motor-claimant-v4',
-            'purpose': 'claimant_agent',
-            'system_prompt': 'Follow the published Northwind claimant instruction.',
-        },
-        'agent_tool_policy': {
-            'policy_version': version,
-            'allowed_action_codes': list(registered_actions()),
-            'allowed_tool_names': list(registered_agent_tool_names()),
-        },
-        'agent_rule': {
-            'rules_version': version,
-            'disabled_rule_ids': [],
-            'observation_rule_ids': [],
-        },
-        'feature': {
-            'feature_version': version,
-            'model_assisted_turns': True,
-            'knowledge_retrieval': True,
-        },
-    }
-    return values[domain]
+    """Return the repository's complete current release values for one slot."""
+
+    values = deepcopy(_RELEASE_VALUES[domain])
+    if domain in _VERSION_KEYS:
+        values[_VERSION_KEYS[domain]] = version
+    return values
 
 
 def _configuration(domain: str, version: str = 'policy-v1') -> ConfigurationRecord:
@@ -100,8 +120,15 @@ def _release(
             continue
         record = _configuration(domain, version)
         if value_overrides is not None and domain in value_overrides:
-            record = record.model_copy(update={'values': value_overrides[domain]})
+            record = record.model_copy(
+                update={'values': {**record.values, **value_overrides[domain]}}
+            )
         records[domain] = record
+    for binding in _BINDINGS:
+        slot = f'model:{binding.profile_id}'
+        records[slot] = _configuration(slot, version).model_copy(
+            update={'domain': 'model', 'configuration_key': binding.profile_id}
+        )
     for record in records.values():
         configurations.create(record)
     release = ReleaseSetRecord(
@@ -520,5 +547,7 @@ def test_message_turn_persists_exact_release_and_configuration_versions() -> Non
         'agent_tool_policy',
         'agent_rule',
         'feature',
+        'model:qwen-local',
+        'model:openrouter-gpt4o-mini',
     }
     assert all(reference.revision == 1 for reference in provenance.configurations.values())
