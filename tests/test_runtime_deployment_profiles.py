@@ -63,24 +63,59 @@ def test_fixture_example_passes_the_real_startup_preflight() -> None:
     }
 
 
-def test_fixture_example_enables_the_development_identity_boundary() -> None:
+def test_fixture_example_is_a_test_environment_with_the_developer_identity() -> None:
     values = load_environment_example(EXAMPLES / 'fixture.env.example')
 
     with isolated_environment(values):
         settings = Settings.from_environment()
 
-    assert settings.environment == 'development'
+    assert settings.environment == 'test'
     assert settings.identity_mode is IdentityMode.DEVELOPER
 
 
-def test_local_mvp_example_enables_the_development_identity_boundary() -> None:
+def test_local_mvp_example_uses_the_normal_identity() -> None:
     values = load_environment_example(EXAMPLES / 'local-mvp.env.example')
 
     with isolated_environment(values):
         settings = Settings.from_environment()
 
     assert settings.environment == 'development'
-    assert settings.identity_mode is IdentityMode.DEVELOPER
+    assert settings.identity_mode is IdentityMode.NORMAL
+
+
+@pytest.mark.parametrize(
+    ('filename', 'override', 'message'),
+    [
+        (
+            'fixture.env.example',
+            {'NORTHWIND_ENVIRONMENT': 'development'},
+            'developer is allowed only',
+        ),
+        (
+            'local-minio.env.example',
+            {'NORTHWIND_ENVIRONMENT': 'development'},
+            'fixture is allowed only',
+        ),
+        (
+            'local-mvp.env.example',
+            {'NORTHWIND_ENVIRONMENT': ''},
+            'NORTHWIND_ENVIRONMENT is required',
+        ),
+        (
+            'local-mvp.env.example',
+            {'AGENT_RUNTIME_PROFILE': ''},
+            'AGENT_RUNTIME_PROFILE is required',
+        ),
+        ('local-mvp.env.example', {'DATA_RUNTIME_PROFILE': ''}, 'DATA_RUNTIME_PROFILE is required'),
+    ],
+)
+def test_startup_refuses_missing_settings_and_test_doubles_outside_tests(
+    filename: str, override: dict[str, str], message: str
+) -> None:
+    values = load_environment_example(EXAMPLES / filename) | override
+
+    with isolated_environment(values), pytest.raises(ValueError, match=message):
+        Settings.from_environment()
 
 
 def test_parsed_environment_can_be_inspected_with_a_process_accessible_override() -> None:
@@ -261,6 +296,7 @@ def test_aws_profile_refuses_cross_provider_and_model_settings_without_leaking_t
     }
     values.update(sentinels)
     values['AGENT_RUNTIME_PROFILE'] = 'model_gateway'
+    values['MODEL_PROMPT_VERSION'] = 'northwind-fnol-claimant-v8'
     original_environment = {name: os.environ.get(name) for name in sentinels}
 
     def forbidden_adapter(*_args: object, **_kwargs: object) -> None:

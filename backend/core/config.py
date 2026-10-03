@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from backend.domain.configuration import ModelRuntimeBinding
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 
 
 class DataRuntimeProfile(str, Enum):
@@ -126,6 +127,31 @@ def _model_runtime_bindings_setting(name: str) -> tuple[ModelRuntimeBinding, ...
         ) from error
 
 
+def _required_setting(name: str, allowed: tuple[str, ...]) -> str:
+    """Return a required environment setting, refusing to start when it is missing."""
+
+    value = os.getenv(name, '').strip().lower()
+    if not value:
+        raise ValueError(f'{name} is required; set it to one of: {", ".join(allowed)}.')
+    if value not in allowed:
+        raise ValueError(f'{name} must be exactly one of: {", ".join(allowed)}.')
+    return value
+
+
+def _model_prompt_version(agent_runtime_profile: 'AgentRuntimeProfile') -> str:
+    """Return the prompt version when no model binding supplies one."""
+
+    value = os.getenv('MODEL_PROMPT_VERSION', '').strip()
+    if value:
+        return value
+    if agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
+        raise ValueError(
+            'MODEL_PROMPT_VERSION is required when no model binding is selected; '
+            f'the supported version is {CLAIMANT_V8_PROMPT_ID}.'
+        )
+    return CLAIMANT_V8_PROMPT_ID
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str = 'development'
@@ -155,7 +181,7 @@ class Settings:
     model_provider: str = 'qwen-local'
     model_purpose: str = 'agent_turn'
     model_privacy_class: str = 'synthetic_fnol'
-    model_prompt_version: str = 'northwind-fnol-claimant-v6'
+    model_prompt_version: str = CLAIMANT_V8_PROMPT_ID
     model_evaluation_status: str = 'configured'
     model_base_url: str = ''
     model_identifier: str = ''
@@ -251,7 +277,11 @@ class Settings:
 
     @classmethod
     def from_environment(cls) -> 'Settings':
-        environment = os.getenv('NORTHWIND_ENVIRONMENT', 'development').strip().lower()
+        # A missing runtime setting stops startup instead of selecting a default:
+        # a default here would silently run another environment, data store, or agent.
+        environment = _required_setting(
+            'NORTHWIND_ENVIRONMENT', ('development', 'test', 'staging', 'production')
+        )
         raw_identity_mode = os.getenv(
             'NORTHWIND_IDENTITY_MODE',
             IdentityMode.NORMAL.value,
@@ -263,18 +293,25 @@ class Settings:
             raise ValueError(
                 f'NORTHWIND_IDENTITY_MODE must be exactly one of: {allowed}.'
             ) from error
-        raw_profile = os.getenv('DATA_RUNTIME_PROFILE', DataRuntimeProfile.FIXTURE.value)
-        try:
-            data_runtime_profile = DataRuntimeProfile(raw_profile.strip().lower())
-        except ValueError as error:
-            allowed = ', '.join(profile.value for profile in DataRuntimeProfile)
-            raise ValueError(f'DATA_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
-        raw_agent_profile = os.getenv('AGENT_RUNTIME_PROFILE', AgentRuntimeProfile.CONTROLLED.value)
-        try:
-            agent_runtime_profile = AgentRuntimeProfile(raw_agent_profile.strip().lower())
-        except ValueError as error:
-            allowed = ', '.join(profile.value for profile in AgentRuntimeProfile)
-            raise ValueError(f'AGENT_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
+        data_runtime_profile = DataRuntimeProfile(
+            _required_setting(
+                'DATA_RUNTIME_PROFILE', tuple(profile.value for profile in DataRuntimeProfile)
+            )
+        )
+        agent_runtime_profile = AgentRuntimeProfile(
+            _required_setting(
+                'AGENT_RUNTIME_PROFILE', tuple(profile.value for profile in AgentRuntimeProfile)
+            )
+        )
+        # Test doubles (fixed bearer tokens, in-memory stores) never start outside tests.
+        if identity_mode is IdentityMode.DEVELOPER and environment != 'test':
+            raise ValueError(
+                'NORTHWIND_IDENTITY_MODE=developer is allowed only with NORTHWIND_ENVIRONMENT=test.'
+            )
+        if data_runtime_profile is DataRuntimeProfile.FIXTURE and environment != 'test':
+            raise ValueError(
+                'DATA_RUNTIME_PROFILE=fixture is allowed only with NORTHWIND_ENVIRONMENT=test.'
+            )
         model_runtime_bindings = _model_runtime_bindings_setting('MODEL_RUNTIME_BINDINGS_PATH')
         model_profile_id = os.getenv('MODEL_PROFILE_ID', 'openrouter-gpt4o-mini').strip()
         selected_binding = next(
@@ -378,7 +415,7 @@ class Settings:
             model_prompt_version=(
                 selected_binding.prompt_version
                 if selected_binding
-                else os.getenv('MODEL_PROMPT_VERSION', 'northwind-fnol-claimant-v6').strip()
+                else _model_prompt_version(agent_runtime_profile)
             ),
             model_evaluation_status=os.getenv('MODEL_EVALUATION_STATUS', 'configured').strip()
             if selected_binding is None

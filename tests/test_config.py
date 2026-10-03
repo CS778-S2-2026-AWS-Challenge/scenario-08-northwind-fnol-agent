@@ -111,6 +111,7 @@ def test_synthetic_tokens_must_be_pairwise_distinct(
 
 def test_production_hides_interactive_api_docs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('NORTHWIND_ENVIRONMENT', 'production')
+    monkeypatch.setenv('DATA_RUNTIME_PROFILE', 'mongodb')
 
     settings = Settings.from_environment()
 
