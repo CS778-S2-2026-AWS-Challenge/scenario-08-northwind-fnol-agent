@@ -345,36 +345,6 @@ def _build_external_attempt(
     return attempt
 
 
-def _record_external_attempt(
-    repository: PersistenceRepository,
-    *,
-    task: ExternalTaskRecord,
-    request: ExternalTaskRequest,
-    customer_id: str,
-    claim_revision: int,
-    outcome: ExternalTaskOperationStatus,
-    failure_code: ExternalTaskFailureCode | None,
-    delivery: ExternalTaskDelivery,
-    delivery_evidence: str | None,
-) -> None:
-    """Append the provider outcome for the next immutable task attempt."""
-    attempt = _build_external_attempt(
-        repository,
-        task=task,
-        request=request,
-        customer_id=customer_id,
-        claim_revision=claim_revision,
-        outcome=outcome,
-        failure_code=failure_code,
-        delivery=delivery,
-        delivery_evidence=delivery_evidence,
-    )
-    try:
-        repository.save_external_task_attempt(attempt, customer_id)
-    except (IdempotencyConflict, KeyError) as conflict:
-        raise _idempotency_error() from conflict
-
-
 def _record_external_acceptance(
     repository: PersistenceRepository,
     *,

@@ -48,7 +48,6 @@ them:
 
 ## Current Engineering Documents
 
-- [Agent Runtime v6 Third-party Service Plan](../v6-plan.md)
 - [Agent Action to Claim Context Command Boundary](agent-action-command-boundary.md)
 - [Agent Context Contract](agent-context-contract.md)
 - [Agent Behaviour and Action Brief](agent-behaviour-action-brief.md)
@@ -91,7 +90,7 @@ them:
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
 Task-specific implementation and decision records belong in the relevant Issue, Discussion, or
-current engineering document. The repository no longer keeps a root `work_record/` directory;
+current engineering document. The former root `work_record/` directory is archived under `archive/pre-mvp/`;
 durable records must be discoverable from the current documentation index or GitHub discussion.
 
 Generated contract snapshots are mechanical drift sentinels. The current AuditEvent
@@ -214,8 +213,16 @@ Demonstration:
 - [Issue #1155 Workbench Control Inventory and Verification](archive/sprint-5/validation/issue-1155-workbench-control-inventory.md)
 - [Issue #1155 Workbench Browser Run Record at 943366f8](archive/sprint-5/validation/issue-1155-workbench-browser-run-943366f8.json)
 
-Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
-evidence. They must not silently override current requirements or contracts.
+### Superseded runtime artefacts and pre-MVP material
+
+Superseded prompt versions and model bindings are archived and no code may reference them. The
+runtime accepts only the current prompt version.
+
+- [Superseded claimant prompts and model bindings](archive/prompts/)
+
+Static demonstrators, earlier scripts, the Agent Runtime v6 third-party service plan, and the
+former `work_record/` notes are kept under [archive/pre-mvp/](archive/pre-mvp/). They are historical
+evidence and must not silently override current requirements or contracts.
 
 - [Unified recovery policy manifest](contracts/recovery-policy-registry.json) — generated immutable policy coordinates.
 - [Recovery reducer replay matrix](contracts/recovery-replay-matrix.json) — deterministic source/event/transition vectors for #1076.

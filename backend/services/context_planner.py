@@ -585,25 +585,3 @@ def plan_context(
         budget_limit=budget_limit,
         summary_state_mismatch=summary_state_mismatch,
     )
-
-
-def build_verified_summary(
-    context: AgentTurnContext,
-    message_ids: list[str],
-    summary: str,
-) -> VerifiedConversationSummary:
-    if not message_ids:
-        raise ValueError('A verified summary requires source messages.')
-    timestamp = datetime.now(UTC).isoformat()
-    return VerifiedConversationSummary(
-        summary_id=f'summary:{context.session_id}:{context.claim.revision}',
-        claim_id=context.claim.claim_id,
-        session_id=context.session_id,
-        source_message_ids=message_ids,
-        covered_message_range=f'{message_ids[0]}..{message_ids[-1]}',
-        generator_profile_and_version='deterministic-claim-projection@v1',
-        claim_revision_at_generation=context.claim.revision,
-        summary=summary,
-        verified_against_claim_revision=context.claim.revision,
-        created_at=timestamp,
-    )

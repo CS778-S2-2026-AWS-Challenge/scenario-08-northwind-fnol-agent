@@ -1,7 +1,7 @@
 """Server-side dispatch for bounded, read-only Staff Agent tools."""
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
@@ -57,12 +57,6 @@ def _field_text(claim: Any, field_code: str) -> str | None:
     if field is None or field.value is None:
         return None
     return str(field.value).strip()
-
-
-def _date_matches(value: str | None, expected: date | None) -> bool:
-    if expected is None:
-        return True
-    return value is not None and value[:10] == expected.isoformat()
 
 
 def _evidence_projection(record: Any) -> dict[str, Any]:

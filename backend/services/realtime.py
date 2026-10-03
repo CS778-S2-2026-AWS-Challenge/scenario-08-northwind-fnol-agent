@@ -353,12 +353,6 @@ class RealtimeDispatcher:
         for subscription in subscriptions:
             subscription.offer(event)
 
-    def _require_resync(self, reason: str) -> None:
-        with self._lock:
-            subscriptions = tuple(self._subscriptions)
-        for subscription in subscriptions:
-            subscription.require_resync(reason)
-
     def _begin_recovery(self, reason: str) -> None:
         with self._lock:
             self._state = RealtimeDispatcherState.GAP_RECOVERING

@@ -30,7 +30,7 @@ The project is in Sprint 3 and is advancing the MVP into a repeatable Validation
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
-The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
+The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`; historical demonstrators are archived under `docs/archive/pre-mvp/`.
 
 Frontend and frontend-runtime design work follows the [Frontend and Runtime Quality Standard](docs/frontend-and-runtime-quality-standard.md). Read it before changing claimant or Workbench routes, components, tokens, state handling, Agent integration, or Runtime-facing behavior; historical single-page prototypes are migration evidence only.
 
@@ -52,7 +52,6 @@ authorisation.
 | `workbench/` | React and Vite Claims Workbench with independent staff authentication |
 | `admin/` | React and Vite Control Plane console backed by the authenticated Admin API |
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
-| `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
 | `.circleci/` | Setup pipeline (`config.yml`) and the backend, frontend, documentation, and GitHub-automation quality jobs it creates (`continue_config.yml`) |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
