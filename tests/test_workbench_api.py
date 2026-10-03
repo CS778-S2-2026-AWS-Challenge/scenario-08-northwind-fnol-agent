@@ -994,6 +994,7 @@ def test_staff_lists_claims_for_workbench_queue(
     assert payload['page'] == {'next_cursor': None}
     item = next(item for item in payload['items'] if item['claim_id'] == claim_id)
     assert item['claimant']['customer_id'] == 'cus_demo'
+    assert item['claimant']['display_name'] is None
     assert item['work_summary']['queue_key'] == 'processing'
     assert item['priority_projection']['level'] == 'standard'
     assert item['work_summary']['primary_action_code'] is None
@@ -1250,6 +1251,91 @@ def test_workbench_operational_views_overlap_one_active_queue(
     assert item['work_summary']['queue_key'] == 'processing'
     assert counts['processing'] == 1
     assert counts['human_requests'] == 1
+
+
+def test_active_claims_use_oldest_status_entry_then_updated_at_fallback(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    first_human, _, _ = _request_staff_support(
+        client,
+        auth_headers,
+        repository,
+        key_suffix='active-oldest-human-first',
+    )
+    second_human, _, _ = _request_staff_support(
+        client,
+        auth_headers,
+        repository,
+        key_suffix='active-oldest-human-second',
+    )
+    early = datetime(2026, 9, 9, 10, tzinfo=UTC)
+    late = datetime(2026, 9, 9, 12, tzinfo=UTC)
+    for claim_id, entered_at in ((first_human, late), (second_human, early)):
+        handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
+        repository.save_handoff(
+            handoff.model_copy(update={'created_at': entered_at}),
+            'cus_demo',
+        )
+
+    pending_ids: list[str] = []
+    for index, updated_at in enumerate((late, early)):
+        created = client.post(
+            '/api/v1/claims',
+            headers={
+                **auth_headers,
+                'Idempotency-Key': f'active-pending-fallback-{index}',
+            },
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        assert created.status_code == 201
+        claim_id = created.json()['claim']['claim_id']
+        pending_ids.append(claim_id)
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        repository._claims[claim_id] = claim.model_copy(
+            update={
+                'updated_at': updated_at,
+                'claim_state': claim.claim_state.model_copy(
+                    update={'workflow_state': WorkflowState.READY_FOR_NEXT}
+                ),
+            }
+        )
+
+    human_response = client.get(
+        '/api/v1/workbench/claims',
+        params={'view': 'active_claims', 'active_status': 'human_assistance'},
+        headers=staff_auth_headers,
+    )
+    pending_response = client.get(
+        '/api/v1/workbench/claims',
+        params={'view': 'active_claims', 'active_status': 'pending_creation'},
+        headers=staff_auth_headers,
+    )
+
+    assert human_response.status_code == 200
+    assert [item['claim_id'] for item in human_response.json()['items']] == [
+        second_human,
+        first_human,
+    ]
+    assert all(
+        item['claimant']['display_name'] == 'Demo Claimant One'
+        for item in human_response.json()['items']
+    )
+    assert [item['active_claim']['entered_at'] for item in human_response.json()['items']] == [
+        early.isoformat().replace('+00:00', 'Z'),
+        late.isoformat().replace('+00:00', 'Z'),
+    ]
+    assert pending_response.status_code == 200
+    assert [item['claim_id'] for item in pending_response.json()['items']] == [
+        pending_ids[1],
+        pending_ids[0],
+    ]
+    assert all(
+        item['active_claim']['entered_at'] is None for item in pending_response.json()['items']
+    )
 
 
 def test_workbench_filters_counts_by_assignee_next_action_and_update_window(

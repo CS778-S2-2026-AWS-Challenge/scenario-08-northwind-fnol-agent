@@ -91,6 +91,10 @@ from backend.domain.workbench import (
     WorkbenchActionInput,
     WorkbenchActionInputChoice,
     WorkbenchActionInputCondition,
+    WorkbenchActiveClaimCounts,
+    WorkbenchActiveClaimProjection,
+    WorkbenchActiveClaimStatus,
+    WorkbenchActiveClaimStatusCount,
     WorkbenchActivityEvent,
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
@@ -159,6 +163,7 @@ from backend.domain.workbench_action_registry import (
     handoff_resolution_defaults,
     work_item_defaults,
 )
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.claim_data import (
     project_claim_participants,
@@ -191,6 +196,20 @@ _HANDOFF_PRIORITY = {
     HandoffPriority.STANDARD: WorkPriorityLevel.STANDARD,
 }
 
+_ACTIVE_CLAIM_STATUS_RANK = {
+    WorkbenchActiveClaimStatus.URGENT: 0,
+    WorkbenchActiveClaimStatus.HUMAN_ASSISTANCE: 1,
+    WorkbenchActiveClaimStatus.PROFESSIONAL_REVIEW: 2,
+    WorkbenchActiveClaimStatus.PENDING_CREATION: 3,
+}
+
+_ACTIVE_CLAIM_STATUS_LABELS = {
+    WorkbenchActiveClaimStatus.URGENT: 'Urgent',
+    WorkbenchActiveClaimStatus.HUMAN_ASSISTANCE: 'Human assistance',
+    WorkbenchActiveClaimStatus.PROFESSIONAL_REVIEW: 'Professional review',
+    WorkbenchActiveClaimStatus.PENDING_CREATION: 'Pending creation',
+}
+
 _QUEUE_VIEW_LABELS: dict[WorkbenchQueueView, str] = {
     WorkbenchQueueView.ALL: 'All active work',
     WorkbenchQueueView.PROCESSING: 'Processing',
@@ -200,6 +219,7 @@ _QUEUE_VIEW_LABELS: dict[WorkbenchQueueView, str] = {
     WorkbenchQueueView.COMPLETED: 'Completed',
     WorkbenchQueueView.ABANDONED: 'Abandoned',
     WorkbenchQueueView.CLOSED: 'Closed',
+    WorkbenchQueueView.ACTIVE_CLAIMS: 'Active claims',
     WorkbenchQueueView.URGENT: 'Urgent',
     WorkbenchQueueView.HUMAN_REQUESTS: 'Staff assistance',
     WorkbenchQueueView.INCOMPLETE_CLAIMS: 'Incomplete claims',
@@ -469,6 +489,60 @@ def _priority(
         reasons=reasons,
         computed_at=computed_at,
     )
+
+
+def _active_claim_projection(
+    lifecycle: ClaimLifecycleState,
+    priority: WorkbenchPriorityProjection,
+    active_handoffs: Sequence[HandoffRecord],
+) -> WorkbenchActiveClaimProjection | None:
+    """Classify active staff work once, using the product-defined precedence."""
+
+    urgent_handoffs = [
+        handoff
+        for handoff in active_handoffs
+        if _HANDOFF_PRIORITY[handoff.priority]
+        in {WorkPriorityLevel.IMMEDIATE, WorkPriorityLevel.URGENT}
+    ]
+    if priority.level in {WorkPriorityLevel.IMMEDIATE, WorkPriorityLevel.URGENT}:
+        return WorkbenchActiveClaimProjection(
+            status=WorkbenchActiveClaimStatus.URGENT,
+            entered_at=min(
+                (handoff.created_at for handoff in urgent_handoffs),
+                default=None,
+            ),
+        )
+
+    human_handoffs = [
+        handoff
+        for handoff in active_handoffs
+        if handoff.support_need is SupportNeed.HUMAN_REQUESTED
+    ]
+    if human_handoffs:
+        return WorkbenchActiveClaimProjection(
+            status=WorkbenchActiveClaimStatus.HUMAN_ASSISTANCE,
+            entered_at=min(handoff.created_at for handoff in human_handoffs),
+        )
+
+    if lifecycle is ClaimLifecycleState.PROFESSIONAL_REVIEW:
+        professional_handoffs = [
+            handoff
+            for handoff in active_handoffs
+            if handoff.type is HandoffType.PROFESSIONAL_REVIEW
+        ]
+        return WorkbenchActiveClaimProjection(
+            status=WorkbenchActiveClaimStatus.PROFESSIONAL_REVIEW,
+            entered_at=min(
+                (handoff.created_at for handoff in professional_handoffs),
+                default=None,
+            ),
+        )
+
+    if lifecycle is ClaimLifecycleState.READY_TO_CREATE:
+        return WorkbenchActiveClaimProjection(
+            status=WorkbenchActiveClaimStatus.PENDING_CREATION,
+        )
+    return None
 
 
 def _responsibility(value: ResponsibleParty | None) -> WorkbenchResponsibility:
@@ -1874,6 +1948,13 @@ def get_workbench_claim_filter_metadata(
             WorkbenchFilterOption(value=value.value, label=value.value.capitalize())
             for value in WorkPriorityLevel
         ],
+        active_claim_statuses=[
+            WorkbenchFilterOption(
+                value=value.value,
+                label=_ACTIVE_CLAIM_STATUS_LABELS[value],
+            )
+            for value in WorkbenchActiveClaimStatus
+        ],
         tags=[
             WorkbenchTagFilterOption(
                 value=definition.code,
@@ -1895,6 +1976,8 @@ def _matches_view(
         return item.work_summary.queue_key.value in {queue.value for queue in _ACTIVE_QUEUE_VIEWS}
     if view in _ACTIVE_QUEUE_VIEWS or view in _TERMINAL_QUEUE_VIEWS:
         return item.work_summary.queue_key.value == view.value
+    if view is WorkbenchQueueView.ACTIVE_CLAIMS:
+        return item.active_claim is not None
     if view is WorkbenchQueueView.URGENT:
         return item.priority_projection.level in {
             WorkPriorityLevel.IMMEDIATE,
@@ -2137,6 +2220,7 @@ def _build_projection(
         review_signals=repository.list_review_signals(claim.claim_id, claim.customer_id),
         signal_decisions=repository.list_signal_decisions(claim.claim_id),
     )
+    priority_projection = _priority(claim, active_handoffs, computed_at)
     base = dict(
         claim_id=claim.claim_id,
         display_reference=claim.external_claim.claim_number
@@ -2152,7 +2236,12 @@ def _build_projection(
         terminal_disposition=claim.terminal_disposition,
         workflow_state=claim.claim_state.workflow_state,
         ownership=ownership,
-        priority_projection=_priority(claim, active_handoffs, computed_at),
+        priority_projection=priority_projection,
+        active_claim=_active_claim_projection(
+            lifecycle,
+            priority_projection,
+            active_handoffs,
+        ),
         work_summary=work_summary,
         integration_summary=integration_summary,
         tags=tags,
@@ -2282,6 +2371,7 @@ def list_workbench_claims(
     repository: PersistenceRepository,
     principal: Principal,
     view: WorkbenchQueueView | None = None,
+    active_status: WorkbenchActiveClaimStatus | None = None,
     workflow_state: WorkflowState | None = None,
     priority: WorkPriorityLevel | None = None,
     assignee_id: str | None = None,
@@ -2293,6 +2383,7 @@ def list_workbench_claims(
     limit: int = 25,
     cursor: str | None = None,
     ownership: str | None = None,
+    identity_repository: IdentityRepository | None = None,
 ) -> WorkbenchClaimListResponse:
     require_staff_capability(principal, 'workbench:read')
     for field_name, value in (
@@ -2322,6 +2413,7 @@ def list_workbench_claims(
                 details=[ErrorDetail(field='tag', reason=tag)],
             ) from error
     filtered_items: list[WorkbenchClaimListItem] = []
+    active_claim_navigation_total = 0
     for claim in repository.list_claims_internal():
         if ownership == 'unassigned' and not claim_acceptance_eligible(
             claim, repository.list_handoffs(claim.claim_id, claim.customer_id)
@@ -2329,6 +2421,18 @@ def list_workbench_claims(
             continue
         projected = _build_projection(repository, principal, claim, include_detail=False)
         assert isinstance(projected, WorkbenchClaimListItem)
+        if view is WorkbenchQueueView.ACTIVE_CLAIMS and identity_repository is not None:
+            account = identity_repository.get_account(claim.customer_id)
+            if account is not None:
+                projected = projected.model_copy(
+                    update={
+                        'claimant': projected.claimant.model_copy(
+                            update={'display_name': account.display_name}
+                        )
+                    }
+                )
+        if projected.active_claim is not None:
+            active_claim_navigation_total += 1
         if workflow_state is not None and projected.workflow_state is not workflow_state:
             continue
         if priority is not None and projected.priority_projection.level is not priority:
@@ -2359,18 +2463,31 @@ def list_workbench_claims(
             items=[],
             limitation='Queue totals are temporarily unavailable.',
         )
+    active_claim_counts = _calculate_active_claim_counts(
+        filtered_items,
+        navigation_total=active_claim_navigation_total,
+    )
     items = [
         item
         for item in filtered_items
         if (ownership == 'unassigned' and view is None) or _matches_view(repository, item, view)
     ]
-    items.sort(
-        key=lambda item: (
-            item.priority_projection.rank,
-            item.priority_projection.due_at or item.created_at,
-            item.claim_id,
+    if active_status is not None:
+        items = [
+            item
+            for item in items
+            if item.active_claim is not None and item.active_claim.status is active_status
+        ]
+    if view is WorkbenchQueueView.ACTIVE_CLAIMS or active_status is not None:
+        items.sort(key=_active_claim_sort_key)
+    else:
+        items.sort(
+            key=lambda item: (
+                item.priority_projection.rank,
+                item.priority_projection.due_at or item.created_at,
+                item.claim_id,
+            )
         )
-    )
     offset = decode_cursor(cursor)
     page_items = items[offset : offset + limit]
     next_offset = offset + len(page_items)
@@ -2379,6 +2496,7 @@ def list_workbench_claims(
         items=page_items,
         page={'next_cursor': next_cursor},
         view_counts=view_counts,
+        active_claim_counts=active_claim_counts,
     )
 
 
@@ -2396,6 +2514,40 @@ def _calculate_view_counts(
             for view in WorkbenchQueueView
         ],
         limitation=None,
+    )
+
+
+def _calculate_active_claim_counts(
+    items: Sequence[WorkbenchClaimListItem],
+    *,
+    navigation_total: int,
+) -> WorkbenchActiveClaimCounts:
+    active_items = [item for item in items if item.active_claim is not None]
+    return WorkbenchActiveClaimCounts(
+        status=WorkbenchViewCountStatus.AVAILABLE,
+        total=len(active_items),
+        navigation_total=navigation_total,
+        items=[
+            WorkbenchActiveClaimStatusCount(
+                status=status,
+                count=sum(
+                    item.active_claim is not None and item.active_claim.status is status
+                    for item in active_items
+                ),
+            )
+            for status in WorkbenchActiveClaimStatus
+        ],
+    )
+
+
+def _active_claim_sort_key(item: WorkbenchClaimListItem) -> tuple[int, datetime, str]:
+    active_claim = item.active_claim
+    if active_claim is None:
+        return len(_ACTIVE_CLAIM_STATUS_RANK), item.updated_at, item.claim_id
+    return (
+        _ACTIVE_CLAIM_STATUS_RANK[active_claim.status],
+        active_claim.entered_at or item.updated_at,
+        item.claim_id,
     )
 
 
