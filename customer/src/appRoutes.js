@@ -29,6 +29,12 @@ export function historyClaimIdFromPath(pathname) {
   return match ? decodeURIComponent(match[1]) : null
 }
 
+export function workspaceClaimIdFromPath(pathname) {
+  const match = pathname?.match(/^\/claims\/([^/]+)$/)
+  if (!match || match[1] === 'new') return null
+  return decodeURIComponent(match[1])
+}
+
 export function routeForPage(page, {
   profileSection = null,
   historyClaimId = null,

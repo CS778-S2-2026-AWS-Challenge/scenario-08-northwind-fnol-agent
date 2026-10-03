@@ -86,7 +86,12 @@ import './styles/profile-responsive.css'
 import './styles/claim-history.css'
 import './styles/case-panel.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
-import { historyClaimIdFromPath, pageForPath, routeForPage as routeForAppPage } from './appRoutes.js'
+import {
+  historyClaimIdFromPath,
+  pageForPath,
+  routeForPage as routeForAppPage,
+  workspaceClaimIdFromPath,
+} from './appRoutes.js'
 import { claimHeading, claimStartedLabel } from './claimHeading.js'
 import { claimantModelChoices } from './modelProducts.js'
 import { captureComposerRect, playComposerHandoff } from './composerHandoff.js'
@@ -286,6 +291,10 @@ async function fetchClaimHistory({ signal } = {}) {
   return [...claimsById.values()]
 }
 
+function hasConversationHistory(claim) {
+  return Boolean(claim.can_resume || claim.conversation_session_id)
+}
+
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -344,6 +353,9 @@ function App() {
   const [conversationHistoryOpen, setConversationHistoryOpen] = useState(false)
   const [selectedHistoryClaimId, setSelectedHistoryClaimId] = useState(() => (
     historyClaimIdFromPath(globalThis.location?.pathname)
+  ))
+  const [workspaceRouteClaimId, setWorkspaceRouteClaimId] = useState(() => (
+    workspaceClaimIdFromPath(globalThis.location?.pathname)
   ))
   // The case panel opens on demand; it opens by itself only for the summary check.
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -461,12 +473,12 @@ function App() {
   const isWorkspaceActive = workspaceActive && (hasStarted || draftWorkspaceActive)
   const savedReports = claimHistory === null
     ? null
-    : claimHistory.filter((item) => item.can_resume)
+    : claimHistory.filter(hasConversationHistory)
   const conversationReports = claim
     ? claimHistory?.some((item) => item.claim_id === claim.claim_id)
       ? claimHistory
           .map((item) => item.claim_id === claim.claim_id ? claim : item)
-          .filter((item) => item.claim_id === claim.claim_id || item.can_resume)
+          .filter((item) => item.claim_id === claim.claim_id || hasConversationHistory(item))
       : [claim, ...(savedReports || [])]
     : (savedReports || [])
   const homepageConversationReports = claim ? conversationReports : (savedReports || [])
@@ -584,10 +596,14 @@ function App() {
       return
     }
     confirmedClaimProjections.current.set(createdClaim.claim_id, createdClaim)
-    setClaimHistory((current) => [
-      createdClaim,
-      ...(current || []).filter((item) => item.claim_id !== createdClaim.claim_id),
-    ])
+    setClaimHistory((current) => {
+      const history = current || []
+      const alreadyListed = history.some((item) => item.claim_id === createdClaim.claim_id)
+      if (!alreadyListed) return [createdClaim, ...history]
+      return history.map((item) => (
+        item.claim_id === createdClaim.claim_id ? createdClaim : item
+      ))
+    })
     setClaimHistoryError('')
   }
 
@@ -694,8 +710,10 @@ function App() {
       const nextProfileSection = profileSectionFromPath(path)
       const nextPage = pageForPath(path, { authenticated: Boolean(account) })
       const opensDraftWorkspace = path === '/claims/new'
+      const routedClaimId = workspaceClaimIdFromPath(path)
       setDraftWorkspaceActive(opensDraftWorkspace)
-      setWorkspaceActive(opensDraftWorkspace || (path.startsWith('/claims/') && Boolean(claim)))
+      setWorkspaceActive(opensDraftWorkspace || Boolean(routedClaimId))
+      setWorkspaceRouteClaimId(routedClaimId)
       setProfileReturnClaimId(
         nextPage === 'account' ? globalThis.history?.state?.profileReturnClaimId || null : null,
       )
@@ -708,8 +726,8 @@ function App() {
           ? profilePathForSection(nextProfileSection)
           : nextPage === 'home' && path === '/claims/new'
             ? '/claims/new'
-            : nextPage === 'home' && path.startsWith('/claims/') && claim?.claim_id
-            ? `/claims/${claim.claim_id}`
+            : nextPage === 'home' && routedClaimId
+            ? `/claims/${encodeURIComponent(routedClaimId)}`
             : routeForPage(nextPage)
       if (path !== canonicalPath) {
         globalThis.history?.replaceState({ northwindRoute: nextPage }, '', canonicalPath)
@@ -722,13 +740,22 @@ function App() {
   }, [account, claim?.claim_id, hasStarted, page])
 
   useEffect(() => {
+    if (page === 'home' && workspaceRouteClaimId && claim?.claim_id !== workspaceRouteClaimId) return
     const expectedPath = routeForPage(page)
     if (globalThis.location?.pathname !== expectedPath) {
       globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
     }
   // routeForPage reads exactly the route state listed here.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftWorkspaceActive, isWorkspaceActive, page, claim?.claim_id, profileSection, selectedHistoryClaimId])
+  }, [
+    draftWorkspaceActive,
+    isWorkspaceActive,
+    page,
+    claim?.claim_id,
+    profileSection,
+    selectedHistoryClaimId,
+    workspaceRouteClaimId,
+  ])
 
   const claimOperationBusy = [
     'starting',
@@ -1060,9 +1087,22 @@ function App() {
   function beginClaimTransition(claimId) {
     let resolve
     const completion = new Promise((next) => { resolve = next })
-    const transition = { claimId, completion, resolve }
+    const transition = {
+      claimId,
+      completion,
+      identityKey: currentClaimantIdentityKey(),
+      resolve,
+    }
     claimTransitionRef.current = transition
     return transition
+  }
+
+  function isClaimTransitionCurrent(transition) {
+    return Boolean(
+      transition
+      && claimTransitionRef.current === transition
+      && currentClaimantIdentityKey() === transition.identityKey,
+    )
   }
 
   function finishClaimTransition(transition) {
@@ -2353,6 +2393,7 @@ function App() {
     setMobileView('chat')
     setDraftWorkspaceActive(stayInWorkspace)
     setWorkspaceActive(stayInWorkspace)
+    setWorkspaceRouteClaimId(null)
     setDraft('')
     setError('')
     setFailedMessage(null)
@@ -2941,6 +2982,7 @@ function App() {
     const transition = beginClaimTransition(claimId)
     try {
       const savedClaim = await getClaim(claimId)
+      if (!isClaimTransitionCurrent(transition)) return
       const canResume = savedClaim.can_resume ?? savedClaim.customer_next_step?.can_resume
       if (canResume === false) {
         if (hasClaimantAccessToken()) {
@@ -2953,8 +2995,11 @@ function App() {
         return
       }
       const session = await resumeClaimSession({ claimId })
+      if (!isClaimTransitionCurrent(transition)) return
       const current = await getClaim(claimId)
+      if (!isClaimTransitionCurrent(transition)) return
       const conversation = await getClaimMessages(claimId, session.session_id)
+      if (!isClaimTransitionCurrent(transition)) return
       clearComposerAttachments()
       replaceActiveClaimContext(current, session.session_id)
       if (session.model_profile_id) setSelectedModel(session.model_profile_id)
@@ -2975,9 +3020,11 @@ function App() {
       setSelectedHistoryClaimId(null)
       setMobileView('chat')
       setWorkspaceActive(true)
+      setWorkspaceRouteClaimId(claimId)
       setPageState('home')
       setStatus('idle')
     } catch (requestError) {
+      if (!isClaimTransitionCurrent(transition)) return
       if (!hasClaimantAccessToken() && isPermanentAnonymousResumeFailure(requestError)) {
         setClaimHistory(forgetAnonymousConversation(claimId))
         setError('This conversation is no longer available in this browser session, so it was removed from history.')
@@ -3009,6 +3056,7 @@ function App() {
   function resumeHomepageConversation(claimId) {
     closeConversationHistorySidebar()
     if (claimId === claim?.claim_id && sessionId) {
+      setWorkspaceRouteClaimId(claimId)
       setError('')
       setWorkspaceView('chat')
       setSelectedHistoryClaimId(null)
@@ -3021,6 +3069,15 @@ function App() {
       }
       return
     }
+    const savedConversation = claimHistory?.find((item) => item.claim_id === claimId)
+    if (savedConversation?.conversation_session_id) {
+      setWorkspaceRouteClaimId(claimId)
+      setSelectedHistoryClaimId(null)
+      setPageState('home')
+      openClaimMessagesById(claimId)
+      return
+    }
+    setWorkspaceRouteClaimId(null)
     resumeSavedReport(claimId)
   }
 
@@ -3133,6 +3190,7 @@ function App() {
     setWorkspaceView('chat')
     setMobileView('chat')
     setWorkspaceActive(false)
+    setWorkspaceRouteClaimId(null)
     setPage('home', { replace: true })
     setAuthStatus('idle')
   }
@@ -3183,18 +3241,23 @@ function App() {
   }
 
   async function openClaimMessagesById(claimId) {
-    if (!claimId || claimMessagesOpeningRef.current === claimId) return
-    claimMessagesOpeningRef.current = claimId
+    if (
+      !claimId
+      || (
+        claimMessagesOpeningRef.current?.claimId === claimId
+        && isClaimTransitionCurrent(claimMessagesOpeningRef.current)
+      )
+    ) return
     setError('')
     setStatus('opening-claim-messages')
     const transition = beginClaimTransition(claimId)
+    claimMessagesOpeningRef.current = transition
     try {
       const current = await getClaim(claimId)
+      if (!isClaimTransitionCurrent(transition)) return
       const conversationSessionId = current.conversation_session_id
-      if (!conversationSessionId) {
-        throw new Error('Messages are not available for this Claim yet.')
-      }
       const conversation = await getClaimMessages(claimId, conversationSessionId)
+      if (!isClaimTransitionCurrent(transition)) return
       clearComposerAttachments()
       replaceActiveClaimContext(current, conversationSessionId)
       commitMessages(conversation.items)
@@ -3211,9 +3274,11 @@ function App() {
       setWorkspaceActive(true)
       setStatus('idle')
     } catch (requestError) {
-      showError(requestError)
+      if (isClaimTransitionCurrent(transition)) showError(requestError)
     } finally {
-      claimMessagesOpeningRef.current = null
+      if (claimMessagesOpeningRef.current === transition) {
+        claimMessagesOpeningRef.current = null
+      }
       finishClaimTransition(transition)
     }
   }
@@ -3238,6 +3303,17 @@ function App() {
   // Opening is a route command. The ref prevents duplicate work under Strict Mode.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.customer_id, page, selectedHistoryClaimId])
+
+  useEffect(() => {
+    if (
+      page !== 'home'
+      || !workspaceRouteClaimId
+      || claim?.claim_id === workspaceRouteClaimId
+    ) return
+    openClaimMessagesById(workspaceRouteClaimId)
+  // Opening is a route command. The ref prevents duplicate work under Strict Mode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.customer_id, page, workspaceRouteClaimId, claim?.claim_id])
 
   function openCurrentClaimDocuments() {
     setWorkspaceView('chat')
@@ -4438,6 +4514,8 @@ function App() {
                 ? 'Message Northwind about this Claim'
                 : assistanceState?.key === 'response_needed' ? 'Reply to Northwind staff' : inputLabel}
               busy={isBusy}
+              disabled={Boolean(claim && !sessionId)}
+              disabledNote="This conversation is saved. Open it from conversation history to continue sending messages."
               hint={isFocusedClaimMessages
                 ? null
                 : assistanceState?.key === 'reply_sent'

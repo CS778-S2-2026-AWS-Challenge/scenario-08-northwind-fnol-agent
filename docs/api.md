@@ -1671,8 +1671,9 @@ Response `200` uses the standard collection envelope. Each item contains
 `customer_next_step`, `created_at`, `updated_at`, and `can_resume`.
 
 `conversation_session_id` is the claimant-owned active conversation identifier. Clients use it
-with the claimant message endpoint to reopen Claim-scoped staff communication. It is `null` when
-the Claim has no active conversation and does not expose staff routing or ownership data.
+as the write and realtime authority for the current conversation. Complete conversation readback
+uses the Claim message collection. The identifier is `null` when the Claim has no active
+conversation and does not expose staff routing or ownership data.
 
 ### `GET /api/v1/claims/{claim_id}`
 
@@ -2093,9 +2094,20 @@ response. Selection state (`required_now`, `candidate_now`, or `pending_later` i
 is separate from the stored value state. The projection is `null` when the Claim has no applied
 branch evaluation.
 
+### `GET /api/v1/claims/{claim_id}/messages`
+
+Returns the complete claimant-visible conversation for an owned Claim across all of its Sessions,
+ordered oldest-first. Supported query parameters are `before`, `after`, `limit`, and `cursor`.
+The response uses the standard collection envelope. Staff-only notes and hidden system messages
+are excluded before pagination. This read-only collection does not select or create an active
+Session; the active `conversation_session_id` remains the authority for writes and realtime events.
+
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 
-Returns claimant-visible messages ordered newest-last by default. Supported query: `before`, `after`, `limit`, and `cursor`. Staff-only notes and hidden system messages are excluded.
+Returns claimant-visible messages for one owned Session, ordered oldest-first. Supported query
+parameters are `before`, `after`, `limit`, and `cursor`. Staff-only notes and hidden system
+messages are excluded before pagination. This compatibility collection remains Session-scoped;
+clients that restore a Claim conversation use the Claim message collection instead.
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/events`
 
@@ -2119,9 +2131,9 @@ data: {"event_id":"4","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8",
 
 This event is a resource hint, not a second Claim projection. It contains no messages, handoff
 packet, internal signals, staff identity, model metadata, or hidden reasoning. After receiving it,
-the claimant client reloads `GET /claims/{claim_id}` and the active session's message list through
-their existing visibility-filtered endpoints. The server sends comment-only keep-alives; clients
-ignore them and reconnect with bounded backoff if the transport closes. This route is a migration
+the claimant client reloads `GET /claims/{claim_id}` and the Claim message collection through their
+existing visibility-filtered endpoints. The server sends comment-only keep-alives; clients ignore
+them and reconnect with bounded backoff if the transport closes. This route is a migration
 compatibility boundary, not a second event store.
 
 ### `GET /api/v1/realtime/events`
