@@ -11,6 +11,11 @@ version: 2.1
 #   opens a GitHub issue when it fails.
 
 parameters:
+  # Pipeline parameters set by the trigger are carried into the continuation, so every
+  # parameter of .circleci/config.yml must be declared here too.
+  nightly:
+    type: boolean
+    default: false
   run-backend:
     type: boolean
     default: false

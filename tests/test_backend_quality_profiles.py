@@ -20,10 +20,14 @@ def test_setup_config_plans_before_continuing() -> None:
     assert 'configuration_path: .circleci/continue_config.yml' in SETUP
 
 
-def test_every_planned_parameter_is_declared_by_the_continuation() -> None:
+def test_every_planned_and_trigger_parameter_is_declared_by_the_continuation() -> None:
+    # CircleCI rejects a continuation that receives an undeclared parameter, and the
+    # trigger's own parameters (such as the schedule's `nightly`) are carried over.
     parameters = CONTINUE.split('\nexecutors:', 1)[0]
+    setup_parameters = re.findall(r'^  ([a-z-]+):\n    type:', SETUP.split('\njobs:', 1)[0], re.M)
 
-    for name in plan([], branch='main', scheduled=False):
+    assert setup_parameters == ['nightly']
+    for name in [*plan([], branch='main', scheduled=False), *setup_parameters]:
         assert re.search(rf'^  {re.escape(name)}:\n    type: boolean$', parameters, re.M), name
 
 
