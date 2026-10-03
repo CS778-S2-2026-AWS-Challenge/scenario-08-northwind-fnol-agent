@@ -7,9 +7,11 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from backend.domain.agent_v8 import V8Escalation, V8NorthwindQuestion
 from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse
+from backend.domain.models import RuntimeInvocationTrace, RuntimeTraceRecord
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import InvariantGuardedAgent
 from backend.services.turn_proposal_validation import ValidatedTurn
@@ -231,3 +233,20 @@ def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
     assert turn['agent_message']['content']['text'] == HONEST_REWRITE['reply']
     claim = repository.get_claim(journey.claim_id, 'cus_demo')
     assert claim is not None and claim.form['property.ongoing_risk'].value == 'active_leak'
+
+
+def test_a_recall_after_a_tool_continuation_fits_the_turn_trace() -> None:
+    # Proposal, context.resolve continuation, consistency recall and
+    # field-contract repair: a turn's trace holds all four calls.
+    calls = [RuntimeInvocationTrace(ordinal=index, latency_ms=10) for index in range(1, 5)]
+    trace = RuntimeTraceRecord(
+        trace_id='trace_recall',
+        claim_id='clm_recall',
+        session_id='ses_recall',
+        model_profile_id='openrouter-gpt4o-mini',
+        trigger_message_id='msg_recall',
+        invocations=calls,
+    )
+    assert [call.ordinal for call in trace.invocations] == [1, 2, 3, 4]
+    with pytest.raises(ValidationError):
+        RuntimeInvocationTrace(ordinal=5, latency_ms=10)

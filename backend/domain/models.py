@@ -1700,9 +1700,13 @@ class ModelDecisionProvenance(ContractModel):
 
 
 class RuntimeInvocationTrace(ContractModel):
-    """Bounded provider metadata for one staged Runtime invocation."""
+    """Bounded provider metadata for one staged Runtime invocation.
 
-    ordinal: int = Field(ge=1, le=2)
+    A turn makes at most four calls: the proposal, one tool continuation, one
+    consistency recall and one field-contract repair.
+    """
+
+    ordinal: int = Field(ge=1, le=4)
     provider_model: str | None = Field(default=None, max_length=300)
     provider_request_id: str | None = Field(default=None, max_length=500)
     finish_reason: str | None = Field(default=None, max_length=100)
@@ -1747,7 +1751,7 @@ class RuntimeTraceRecord(ContractModel):
     model_profile_id: str
     trigger_message_id: str
     evidence: list[RuntimeEvidenceTrace] = Field(default_factory=list, max_length=20)
-    invocations: list[RuntimeInvocationTrace] = Field(min_length=0, max_length=2)
+    invocations: list[RuntimeInvocationTrace] = Field(min_length=0, max_length=4)
     deterministic_response_id: str | None = Field(default=None, max_length=120)
     tool_call_id: str | None = None
     tool_name: str | None = Field(

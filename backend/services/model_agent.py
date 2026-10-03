@@ -1736,7 +1736,9 @@ class GatewayAgent:
                     exchange_completion,
                 )
                 invocations.append(
-                    _runtime_invocation_trace(2, response, observations[-1].latency_ms)
+                    _runtime_invocation_trace(
+                        len(invocations) + 1, response, observations[-1].latency_ms
+                    )
                 )
                 if (
                     response.tool_calls
