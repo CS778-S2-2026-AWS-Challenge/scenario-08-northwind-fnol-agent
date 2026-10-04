@@ -8,10 +8,12 @@ from jsonschema import Draft202012Validator
 
 from backend.adapters.model_gateway import OpenAICompatibleModelGateway, _google_provider_schema
 from backend.domain.agent_v8 import V8FieldChange, V8TurnProposal
+from backend.domain.evidence import REGISTERED_EVIDENCE_KINDS
 from backend.domain.external_service_registry import capability_context
 from backend.domain.turn_field_contract import TurnFieldContractViolation
 from backend.services.agent import AgentEvidenceReference
 from backend.services.model_request_planner import plan_model_turn
+from backend.services.prompt_composer import load_response_schema
 from backend.services.turn_field_contract import validate_field_changes
 from tests.journey_v8_support import envelope, fact
 from tests.test_turn_proposal_v8 import v8_context
@@ -109,3 +111,11 @@ def test_google_wire_value_union_does_not_replace_runtime_field_type_authority()
         == []
     )
     assert [item.field_code for item in rejected] == ['vehicle.drivable']
+
+
+def test_the_model_chooses_document_kinds_only_from_the_registered_kinds() -> None:
+    properties = cast(dict[str, Any], load_response_schema('claimant.turn.v1')['properties'])
+
+    for key in ('document_requests', 'evidence_interpretations'):
+        document_kind = properties[key]['items']['properties']['document_kind']
+        assert document_kind == {'enum': sorted(REGISTERED_EVIDENCE_KINDS), 'type': 'string'}
