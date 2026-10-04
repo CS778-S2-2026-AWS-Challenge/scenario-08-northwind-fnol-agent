@@ -156,7 +156,6 @@ def _model_context_size_metrics(
         'conversation_history_chars': sum(
             len(message.content) for message in context.conversation_messages
         ),
-        'knowledge_citation_chars': sum(len(item.text) for item in context.knowledge_results),
         'tool_result_chars': len(
             json.dumps(list(context.tool_results), separators=(',', ':'), sort_keys=True)
         ),

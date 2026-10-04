@@ -782,37 +782,6 @@ def test_summary_fact_removed_from_claim_state_is_not_reintroduced() -> None:
     assert 'conversation.summary' not in plan.context_payload
 
 
-def test_verified_summary_and_knowledge_stay_separate_bounded_context_resources() -> None:
-    timestamp = datetime.now(UTC)
-    summary = VerifiedConversationSummary(
-        summary_id='sum_current',
-        claim_id='clm_v7',
-        session_id='ses_v7',
-        source_message_ids=['msg_old'],
-        covered_message_range='msg_old..msg_old',
-        generator_profile_and_version='deterministic-verified-compactor@v1',
-        claim_revision_at_generation=1,
-        summary=json.dumps({'confirmed_claim_facts': {}}),
-        verified_against_claim_revision=1,
-        created_at=timestamp.isoformat(),
-    )
-    context = replace(
-        _context('Does my policy cover this collision?'),
-        rolling_summary=summary,
-        knowledge_results=(_knowledge_chunk(),),
-    )
-
-    plan = plan_model_turn(context)
-
-    assert plan is not None
-    assert plan.context_payload['conversation.summary']['summary_id'] == 'sum_current'
-    knowledge_reference = next(
-        item for item in plan.context_plan.references if item.resource_type == 'knowledge_chunk'
-    )
-    assert knowledge_reference.available_selectors == ['matching_chunks']
-    assert 'knowledge.results' not in plan.context_payload
-
-
 def test_context_planner_refuses_to_truncate_authority_context() -> None:
     context = _context('A' * 3000)
     route = route_turn(context)

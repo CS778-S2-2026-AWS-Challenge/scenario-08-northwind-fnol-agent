@@ -9,7 +9,6 @@ from backend.core.errors import ApiError
 from backend.domain.agent_action_registry import action_contract
 from backend.domain.agent_context_runtime import TurnFamilyResolution, VerifiedConversationSummary
 from backend.domain.intake import infer_controlled_product_family, next_requirement_field
-from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.domain.models import (
     AgentAction,
@@ -306,9 +305,6 @@ class AgentTurnContext:
     ) = None
     safety_interrupt: SafetyInterrupt | None = None
     open_handoffs: tuple[HandoffRecord, ...] = ()
-    knowledge_results: tuple[KnowledgeChunk, ...] = ()
-    knowledge_status: str = 'not_requested'
-    knowledge_limitations: tuple[str, ...] = ()
     provenance_messages: tuple[MessageRecord, ...] = ()
     conversation_messages: tuple[MessageRecord, ...] = ()
     older_message_loader: Callable[[int], tuple[MessageRecord, ...]] | None = None

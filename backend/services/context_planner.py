@@ -357,28 +357,6 @@ def _catalogue(
                 cache_segment='service-registry',
             )
         )
-    if context.knowledge_results:
-        knowledge = [
-            {
-                'document_id': item.document_id,
-                'chunk_id': item.chunk_id,
-                'title': item.title,
-                'version': item.version,
-                'text': item.text[:1200],
-            }
-            for item in context.knowledge_results[:3]
-        ]
-        entries.append(
-            ContextCatalogueEntry(
-                resource_id='knowledge.results',
-                resource_type='knowledge',
-                load_mode=ContextLoadMode.REFERENCE,
-                priority=4,
-                estimated_tokens=estimate_json_tokens(knowledge),
-                authority_scope=claim_scope,
-                selectors=['matching_chunks'],
-            )
-        )
     if 'policy-search' in route.capability_ids and (
         context.policy_context_loader is not None or context.knowledge_context_loader is not None
     ):
@@ -505,7 +483,6 @@ def plan_context(
         if wants_reference:
             resource_type = {
                 'recent_messages': 'message_range',
-                'knowledge': 'knowledge_chunk',
                 'evidence': 'evidence',
                 'claim_history': 'claim_history',
                 'policy': 'policy_version',

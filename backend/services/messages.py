@@ -3068,33 +3068,8 @@ def submit_message(
                 )
             _record, tool_result = context_outcome
             context_tool_results.append(tool_result)
-        if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
-            try:
-                proposal = agent.propose_turn(
-                    replace(agent_context, tool_results=tuple(context_tool_results))
-                )
-            except ModelGatewayError as model_error:
-                return recover_model_failure(model_error)
-            if runtime_policy is not None:
-                enforce_agent_proposal(runtime_policy, proposal)
-            replanned_authority = validate_proposal(proposal)
-            if replanned_authority.outcome is AuthorityOutcome.AUTHORISED:
-                _validate_tool_requests(proposal, branch_evaluation)
-            if replanned_authority.outcome is AuthorityOutcome.AUTHORISED and any(
-                request.get('tool') in _CONTEXT_TOOL_OPERATIONS
-                for request in proposal.required_tools
-            ):
-                raise ApiError(
-                    status_code=503,
-                    code='AGENT_TOOL_NOT_PERMITTED',
-                    message='The Agent attempted a second context-tool round.',
-                )
-            proposal = replace(
-                proposal,
-                tool_results=[*context_tool_results, *proposal.tool_results],
-            )
-        else:
-            proposal = replace(proposal, tool_results=context_tool_results)
+        # Only the keyword agent requests context tools; a model proposal never carries any.
+        proposal = replace(proposal, tool_results=context_tool_results)
     proposal = _validate_evidence_history_action(repository, claim, proposal)
     _validate_failed_retrieval_changes(proposal, message_text)
 
