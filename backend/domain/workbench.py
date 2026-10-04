@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import Field
 
@@ -366,6 +366,8 @@ class WorkbenchWorkSummary(ContractModel):
     risk_signals: list[WorkbenchRiskSignal] = Field(default_factory=list)
     incomplete_context: WorkbenchIncompleteContext | None = None
     unread_claimant_messages: int = Field(default=0, ge=0)
+    # Set once a handler has written to the claimant: whose turn it is now.
+    conversation_turn: Literal['waiting_on_claimant', 'claimant_replied'] | None = None
     last_claimant_activity_at: datetime | None = None
     external_wait_count: int = Field(default=0, ge=0)
 
@@ -562,6 +564,8 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     open_items: list[StaffOpenItem] = Field(default_factory=list)
     # What the assistant read each claimant file to be, by Evidence id.
     file_readings: dict[str, str] = Field(default_factory=dict)
+    # Evidence ids whose reading a handler set (it overrides the assistant's).
+    staff_file_readings: list[str] = Field(default_factory=list)
 
 
 class WorkbenchFieldItem(ContractModel):

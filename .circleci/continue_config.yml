@@ -391,6 +391,7 @@ jobs:
 
             node tests/browser/p12_3_claimant_workbench_recovery.cjs
             node tests/browser/pr975_claimant_profile.cjs
+            node tests/browser/claimant_layout_widths.cjs
       - store_artifacts:
           path: browser-evidence
           destination: p12-browser-evidence

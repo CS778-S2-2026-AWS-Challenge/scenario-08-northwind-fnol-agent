@@ -113,6 +113,8 @@ class ValidatedTurn:
     northwind_questions: tuple[V8NorthwindQuestion, ...] = ()
     turn_ending: str | None = None
     scope_note: str | None = None
+    # Retrieved policy excerpts the reply cites, as the knowledge loader returned them.
+    cited_clauses: tuple[Mapping[str, object], ...] = ()
     # Service identities the model proposed but Runtime refused this turn.
     rejected_services: tuple[str, ...] = ()
     # Structural proposals only; the reducer validates them against the final
@@ -770,6 +772,12 @@ def validate_turn_proposal(
         northwind_questions=tuple(proposal.northwind_questions),
         turn_ending=proposal.turn_ending,
         scope_note=proposal.scope_note,
+        cited_clauses=tuple(
+            source
+            for ref in dict.fromkeys(proposal.cited_sources)
+            for source in authorized_policy_sources
+            if source.get('chunk_id') == ref
+        ),
         rejected_services=tuple(rejected_services),
         policy_judgment_proposals=tuple(proposal.policy_judgment_proposals),
         policy_judgment_sources=tuple(authorized_policy_sources),

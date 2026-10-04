@@ -24,6 +24,7 @@ def _wire_envelope(**kwargs: Any) -> dict[str, Any]:
         'northwind_questions': [],
         'turn_ending': 'question',
         'scope_note': None,
+        'cited_sources': [],
     }
 
 

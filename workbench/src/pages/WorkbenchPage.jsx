@@ -14,6 +14,7 @@ import { translate as t, useLanguage } from '../i18n.js'
 import { actionFailureMessage, failureReason, failureReference } from '../failure.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import { revisionNotice as buildRevisionNotice, mutationResultRevision } from '../revision.js'
+import { openWaitingCount } from '../waiting-list.js'
 import ConversationsPage from './ConversationsPage.jsx'
 
 const MAX_MESSAGE_READBACK_PAGES = 100
@@ -67,6 +68,8 @@ export default function WorkbenchPage() {
   const realtimeSeenEventIdsRef = useRef(new Set())
   const realtimeHandlersRef = useRef({})
   const currentSectionRef = useRef('summary')
+  // Claims whose waiting list has already been shown on taking them.
+  const waitingListShownRef = useRef(new Set())
   const isConversationsRef = useRef(false)
   const resourceRequestIds = useRef({})
   const conversationRequestId = useRef(0)
@@ -1434,6 +1437,21 @@ export default function WorkbenchPage() {
     ))
   }
 
+  useEffect(() => {
+    // Taking a claim opens its waiting list first: once the handler can settle
+    // items and some are open, the claim shows that page before the usual work.
+    if (!detail || detail.claim_id !== claimId || isConversations || currentSection !== 'summary') return
+    if (waitingListShownRef.current.has(detail.claim_id)) return
+    const canSettle = (detail.allowed_actions || []).some((action) => (
+      action.action_code === 'conversation.answer_claimant_question' && canSubmitProjectedAction(action)
+    ))
+    if (!canSettle || openWaitingCount(detail.open_items || []) === 0) return
+    waitingListShownRef.current.add(detail.claim_id)
+    changeSection('waiting')
+    // changeSection is recreated each render; the guards above keep this to once per claim.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail, claimId, isConversations, currentSection])
+
   function changeSection(section) {
     if (!claimId) return
     tabs.update(claimId, { section, ...(section === 'conversation' ? {} : { sessionId: null }) })
@@ -1580,15 +1598,15 @@ export default function WorkbenchPage() {
     return { mutationResult, claimReadback }
   }
 
-  async function answerQuestion(action, answer) {
-    await runClaimMutation('Sending the answer to the claimant', (current) => {
+  async function answerQuestion(action, decision) {
+    await runClaimMutation('Settling the waiting-list item', (current) => {
       const projected = findProjectedAction(
         current.allowed_actions,
         'conversation.answer_claimant_question',
         action?.target_ref,
       )
       if (!canSubmitProjectedAction(projected)) {
-        const error = new Error('This question has already been answered or is no longer yours to answer. Refresh the Claim.')
+        const error = new Error('This item has already been settled or is no longer yours to settle. Refresh the Claim.')
         error.code = 'STALE_PROJECTED_ACTION'
         throw error
       }
@@ -1597,8 +1615,24 @@ export default function WorkbenchPage() {
         current.claim_id,
         projected.target_ref,
         current.revision,
-        answer,
+        decision,
       )
+    })
+  }
+
+  async function correctReading(action, kind) {
+    await runClaimMutation('Changing the file type', (current) => {
+      const projected = findProjectedAction(
+        current.allowed_actions,
+        'evidence.correct_reading',
+        action?.target_ref,
+      )
+      if (!canSubmitProjectedAction(projected)) {
+        const error = new Error('This file can no longer be changed here. Refresh the Claim.')
+        error.code = 'STALE_PROJECTED_ACTION'
+        throw error
+      }
+      return workbenchApi.correctEvidenceReading(token, current.claim_id, projected.target_ref, current.revision, kind)
     })
   }
 
@@ -2478,6 +2512,7 @@ export default function WorkbenchPage() {
                   onAccept={isDraftQueue ? undefined : acceptHandoff}
                   onAcceptClaim={isDraftQueue ? undefined : acceptClaim}
                   onAnswerQuestion={isDraftQueue ? undefined : answerQuestion}
+                  onCorrectReading={isDraftQueue ? undefined : correctReading}
                   onResolve={isDraftQueue ? undefined : resolveHandoff}
                   onSignalDecision={isDraftQueue ? undefined : decideSignal}
                   onCreateAction={isDraftQueue ? undefined : createStaffAction}
@@ -2613,6 +2648,7 @@ function QueueMetadataState({ loading, error, onRetry }) {
 
 const CLAIM_SECTIONS = new Set([
   'summary',
+  'waiting',
   'conversation',
   'fields',
   'evidence',

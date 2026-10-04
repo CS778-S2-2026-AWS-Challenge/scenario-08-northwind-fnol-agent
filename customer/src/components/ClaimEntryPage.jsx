@@ -5,6 +5,8 @@ import MessageComposer from './MessageComposer.jsx'
 export default function ClaimEntryPage({
   composer,
   failure = null,
+  continueCard = null,
+  onContinue,
   onOpenHowItWorks,
 }) {
   return (
@@ -26,6 +28,13 @@ export default function ClaimEntryPage({
               showModelControl
             />
             {failure}
+            {continueCard && (
+              <button className="entry-continue-card" type="button" onClick={() => onContinue(continueCard.claimId)}>
+                <span className="entry-continue-kicker">Continue your claim</span>
+                <strong>{continueCard.title}</strong>
+                <span>{continueCard.detail}</span>
+              </button>
+            )}
           </section>
           <div className="entry-tertiary-links">
             <button className="text-link entry-process-link" type="button" onClick={onOpenHowItWorks}>

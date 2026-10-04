@@ -4,17 +4,32 @@ import { documentTaskTitle } from './claimDocumentProjection.js'
 // (claim.open_items). Nothing here decides state; it only words it.
 //
 //   claimant     a document the claimant will send, or said they do not have
-//   northwind    a question the claims team will answer
+//   northwind    a waiting-list item: a question, or a request to be contacted,
+//                that the claims team handles once the report is submitted
 //   third_party  a document Northwind gets from a service (police, assessor)
 
+const WAITING_KINDS = new Set(['question', 'contact_request'])
+
+export function isWaitingListItem(item) {
+  return WAITING_KINDS.has(item?.kind)
+}
+
 export function openItemTitle(item) {
+  if (item.kind === 'contact_request') return item.subject || 'Someone from Northwind to contact you'
   if (item.kind === 'question') return item.subject
   return documentTaskTitle({ kind: item.subject })
 }
 
 export function openItemStatusText(item) {
+  if (item.kind === 'contact_request') {
+    if (item.state === 'done') return 'Northwind contacted you'
+    if (item.state === 'declined') return 'Northwind replied'
+    return 'The claims team will contact you after you submit'
+  }
   if (item.kind === 'question') {
-    return item.state === 'done' ? 'Answered by Northwind' : 'Waiting for Northwind to answer'
+    if (item.state === 'done') return 'Answered by Northwind'
+    if (item.state === 'declined') return 'Northwind replied'
+    return 'The claims team will answer after you submit'
   }
   if (item.state === 'done') return 'Received'
   if (item.state === 'not_available') return 'You said you do not have this'
@@ -40,7 +55,7 @@ export function openItemGroups(items) {
   const all = items || []
   return [
     { key: 'claimant', title: 'For you to send', items: all.filter((item) => item.owner === 'claimant') },
-    { key: 'northwind', title: 'Northwind is answering', items: all.filter((item) => item.owner === 'northwind') },
+    { key: 'northwind', title: 'For the claims team', items: all.filter((item) => item.owner === 'northwind') },
     { key: 'third_party', title: 'Northwind is getting', items: all.filter((item) => item.owner === 'third_party') },
   ].filter((group) => group.items.length > 0)
 }
@@ -71,13 +86,26 @@ export function receiptsByMessage(items) {
 }
 
 export function receiptText(item) {
-  if (item.kind === 'question') {
-    return item.state === 'done'
-      ? `Northwind answered: ${item.answer}`
-      : `Passed to the claims team: ${item.subject}`
+  if (isWaitingListItem(item)) {
+    if (item.state === 'done' && item.kind === 'question') return `Northwind answered: ${item.answer}`
+    if (item.state === 'done') return `Northwind contacted you: ${openItemTitle(item)}`
+    if (item.state === 'declined') return `Northwind replied: ${item.answer}`
+    return `For the claims team: ${openItemTitle(item)}`
   }
   if (item.state === 'done') return `Received: ${openItemTitle(item)}`
   if (item.state === 'not_available') return `Noted that you do not have: ${openItemTitle(item)}`
   if (item.owner === 'third_party') return `Northwind will get: ${openItemTitle(item)}`
-  return `Added to your to-do: ${openItemTitle(item)}`
+  return `To do: ${openItemTitle(item)}`
+}
+
+// The receipt as a chip: a mark, short text, and whether it is the claimant's to do.
+export function receiptChip(item) {
+  const owed = item.kind === 'document' && item.owner === 'claimant' && item.state === 'open'
+  const settled = item.state !== 'open'
+  return {
+    mark: settled ? '✓' : isWaitingListItem(item) ? '→' : '+',
+    text: receiptText(item),
+    owed,
+    settled,
+  }
 }

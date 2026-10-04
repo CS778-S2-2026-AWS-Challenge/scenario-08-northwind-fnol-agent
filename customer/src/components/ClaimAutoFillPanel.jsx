@@ -109,6 +109,7 @@ export default function ClaimAutoFillPanel({
   busy = false,
   onBusyChange = () => {},
   onClaimReadback,
+  onPresenceChange = () => {},
 }) {
   const choiceId = useId()
   const mountedRef = useRef(true)
@@ -410,6 +411,13 @@ export default function ClaimAutoFillPanel({
   useEffect(() => {
     if (hasPresentation) presentationRef.current?.scrollIntoView?.({ block: 'nearest' })
   }, [choice?.kind, error, failure, hasPresentation, notices.length])
+
+  const needsClaimant = Boolean(error || failure || choice)
+  useEffect(() => {
+    // The workspace offers saved details as a chip only while the claimant has
+    // something to choose or fix; a plain notice stays in the panel.
+    onPresenceChange(needsClaimant)
+  }, [needsClaimant, onPresenceChange])
 
   if (!hasPresentation) return null
 

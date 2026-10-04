@@ -45,7 +45,10 @@ QUESTION = {
     'question_id': 'nwq_hire',
     'question': 'Is my hire car covered?',
     'claimant_wording': 'will you pay for a hire car',
-    'model_view': 'No hire-car clause in the excerpts.',
+    'kind': 'question',
+    'proposed_answer': 'Yes, hire car cover applies for up to 14 days.',
+    'basis': 'MTR-BEN-03 Hire car; the policy includes the hire car option.',
+    'contact_preference': None,
 }
 
 
@@ -162,7 +165,8 @@ def test_open_items_follow_stored_records_and_the_models_file_reading() -> None:
         ('question', OpenItemOwner.NORTHWIND, OpenItemState.OPEN),
     ]
     assert items[0].opened_in_message_id == opened.message_id
-    assert items[1].model_view == QUESTION['model_view']
+    assert items[1].proposed_answer == QUESTION['proposed_answer']
+    assert items[1].basis == QUESTION['basis']
 
     # The model reads the chat file as the quote; a staff update answers the question.
     read = _agent_message(
@@ -232,7 +236,7 @@ def test_staff_answer_a_question_once_and_it_reaches_the_claimant() -> None:
         _staff(),
         claim.claim_id,
         'nwq_hire',
-        AnswerClaimantQuestionRequest(answer='Yes, hire car cover applies for 14 days.'),
+        AnswerClaimantQuestionRequest(decision='approve'),
         'answer-1',
         str(detail.revision),
     )
@@ -251,7 +255,7 @@ def test_staff_answer_a_question_once_and_it_reaches_the_claimant() -> None:
             _staff(),
             claim.claim_id,
             'nwq_hire',
-            AnswerClaimantQuestionRequest(answer='Again.'),
+            AnswerClaimantQuestionRequest(decision='edit', text='Again.'),
             'answer-2',
             str(after.revision),
         )
@@ -279,7 +283,7 @@ def test_a_turn_records_its_facts_and_opens_items_the_claimant_can_see(
                     reply='Thanks, I have that. Send the quote when you have it.',
                 ),
                 'northwind_questions': [
-                    {key: QUESTION[key] for key in ('question', 'claimant_wording', 'model_view')}
+                    {key: value for key, value in QUESTION.items() if key != 'question_id'}
                 ],
                 'turn_ending': 'card',
             }
@@ -303,13 +307,13 @@ def test_a_turn_records_its_facts_and_opens_items_the_claimant_can_see(
         ('question', 'northwind', 'open'),
     ]
     assert {item['opened_in_message_id'] for item in items} == {turn['agent_message']['message_id']}
-    assert 'model_view' not in items[1]
+    assert 'proposed_answer' not in items[1] and 'basis' not in items[1]
 
 
 def test_a_question_already_with_the_claims_team_is_not_passed_on_twice(
     app: FastAPI, client: TestClient, repository: FixtureRepository
 ) -> None:
-    passed_on = {key: QUESTION[key] for key in ('question', 'claimant_wording', 'model_view')}
+    passed_on = {key: value for key, value in QUESTION.items() if key != 'question_id'}
     provider = V8JourneyProvider(
         [
             {

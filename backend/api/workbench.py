@@ -79,6 +79,11 @@ from backend.services.claimant_questions import (
     AnswerClaimantQuestionResponse,
     answer_claimant_question,
 )
+from backend.services.evidence_readings import (
+    CorrectEvidenceReadingRequest,
+    CorrectEvidenceReadingResponse,
+    correct_evidence_reading,
+)
 from backend.services.ownership import (
     create_cowork_request,
     create_transfer_request,
@@ -250,6 +255,30 @@ def take_claim(
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> WorkbenchClaimDetail:
     return accept_claim(repository_for(request), principal, claim_id, idempotency_key, if_match)
+
+
+@router.post(
+    '/{claim_id}/evidence/{evidence_id}/reading',
+    response_model=CorrectEvidenceReadingResponse,
+)
+def correct_reading(
+    claim_id: str,
+    evidence_id: str,
+    payload: CorrectEvidenceReadingRequest,
+    request: Request,
+    principal: Principal = Depends(require_workbench_write),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> CorrectEvidenceReadingResponse:
+    return correct_evidence_reading(
+        repository_for(request),
+        principal,
+        claim_id,
+        evidence_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
 
 
 @router.post(

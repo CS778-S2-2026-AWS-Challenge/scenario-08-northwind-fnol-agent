@@ -13,7 +13,7 @@ import SourceSummary from './SourceSummary.jsx'
 import { TagList } from './TagList.jsx'
 import { ClaimDecisionSummary } from './ClaimDecision.jsx'
 
-export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, readOnly = false, onAccept, onAcceptClaim, onResolve, onOwnershipAction, onReopen, onClaimDecision, onAnswerQuestion, onSection, onRetry }) {
+export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, readOnly = false, onAccept, onAcceptClaim, onResolve, onOwnershipAction, onReopen, onClaimDecision, onSection, onRetry }) {
   const [handoffState, collaborationState] = supportingState
   const allowedActions = (detail.allowed_actions || []).filter((action) => {
     if (action.target_type === 'handoff' && actionContextUnavailable(handoffState)) return false
@@ -46,7 +46,7 @@ export default function Overview({ detail, handoffs, collaborationRequests, supp
       <IntegrationSummary summary={detail.integration_summary} />
       <SourceSummary summary={detail.source_summary} />
       <MissingInformation items={detail.work_summary?.missing_information || []} />
-      <OpenItems items={detail.open_items || []} actions={allowedActions} readOnly={readOnly} onAnswer={onAnswerQuestion} />
+      <OpenItems items={detail.open_items || []} onOpenWaitingList={onSection ? () => onSection('waiting') : undefined} />
 
       {!readOnly && <details className="purpose-disclosure">
         <summary>{t('Ownership and handoff actions')}</summary>

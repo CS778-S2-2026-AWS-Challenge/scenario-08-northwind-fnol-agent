@@ -10,10 +10,13 @@ import ExternalServiceRecords from './ExternalServiceRecords.jsx'
 import Overview from './Overview.jsx'
 import ReferenceRecords from './ReferenceRecords.jsx'
 import ResourceBoundary from './ResourceBoundary.jsx'
+import WaitingList from './WaitingList.jsx'
+import { openWaitingCount } from '../waiting-list.js'
 import { SignalReviews } from './ReviewActions.jsx'
 
 const SECTIONS = [
   ['summary', 'Overview'],
+  ['waiting', 'Waiting list'],
   ['conversation', 'Conversation'],
   ['fields', 'Claim information'],
   ['evidence', 'Evidence'],
@@ -23,7 +26,7 @@ const SECTIONS = [
   ['activity', 'Activity'],
 ]
 
-export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, externalActionNotices = [], section, conversationSessionId, draft, profile, readOnly = false, onSection, onDraft, onAccept, onAcceptClaim, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onClaimDecision, onAnswerQuestion, onExternalTaskAction, onRetry, onRetrySection, onRetryExternalActionContext }) {
+export default function ClaimWorkspace({ detail, resources = {}, loading, error, stale, externalActionNotices = [], section, conversationSessionId, draft, profile, readOnly = false, onSection, onDraft, onAccept, onAcceptClaim, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen, onClaimDecision, onAnswerQuestion, onCorrectReading, onExternalTaskAction, onRetry, onRetrySection, onRetryExternalActionContext }) {
   if (loading && !detail) return <main className="claim-state" role="status"><span className="loading-mark" /><p>{t('Loading Claim...')}</p></main>
   if (error && !detail) return <ClaimUnavailable error={error} onRetry={onRetry} />
   if (!detail) return <EmptyWorkspace />
@@ -42,6 +45,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
         ),
       }
     : baseInteractionDetail
+  const waitingCount = openWaitingCount(detail.open_items || [])
   const externalActions = resourceActionContextUnavailable(resources.externalRequests)
     ? []
     : interactionDetail.allowed_actions
@@ -72,13 +76,14 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
       )}
       {section !== 'conversation' && <ClaimHeader detail={detail} />}
       <nav className="section-tabs" aria-label={t('Claim sections')} role="tablist">
-        {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{t(label)}</button>)}
+        {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{t(label)}{value === 'waiting' && waitingCount > 0 && <span className="count-badge">{waitingCount}</span>}</button>)}
       </nav>
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
-        {section === 'summary' && <Overview key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} supportingState={[resources.handoffs, resources.collaborationRequests]} profile={profile} readOnly={readOnly} onAccept={onAccept} onAcceptClaim={onAcceptClaim} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onClaimDecision={onClaimDecision} onAnswerQuestion={onAnswerQuestion} onSection={onSection} onRetry={onRetry} />}
+        {section === 'summary' && <Overview key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} supportingState={[resources.handoffs, resources.collaborationRequests]} profile={profile} readOnly={readOnly} onAccept={onAccept} onAcceptClaim={onAcceptClaim} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onClaimDecision={onClaimDecision} onSection={onSection} onRetry={onRetry} />}
+        {section === 'waiting' && <WaitingList key={detail.claim_id} items={detail.open_items || []} actions={interactionDetail.allowed_actions} readOnly={readOnly} onDecide={onAnswerQuestion} />}
         {section === 'conversation' && <Conversation key={detail.claim_id} detail={interactionDetail} handoffs={resources.handoffs?.items || []} profile={profile} resource={resources.messages} requestedSessionId={conversationSessionId} draft={draft} readOnly={readOnly} onDraft={onDraft} onAccept={onAccept} onResolve={onResolve} onSend={onSend} onRetry={onRetrySection} />}
         {section === 'fields' && <ClaimFields resource={resources.fields} onRetry={onRetrySection} />}
-        {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} readings={detail.file_readings || {}} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
+        {section === 'evidence' && <ResourceBoundary resource={resources.evidence} onRetry={onRetrySection}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} readings={detail.file_readings || {}} staffReadings={detail.staff_file_readings || []} actions={interactionDetail.allowed_actions} onLoadEvidence={onLoadEvidence} onCorrectReading={readOnly ? undefined : onCorrectReading} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals} onRetry={onRetrySection}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}
         {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests} onRetry={onRetrySection}><ExternalServiceRecords records={resources.externalRequests?.items || []} capabilities={detail.external_capabilities || []} allowedActions={externalActions} claimRevision={interactionDetail.revision} onAction={readOnly ? undefined : onExternalTaskAction} /></ResourceBoundary>}
         {section === 'signals' && <ResourceBoundary resource={resources.signals} onRetry={onRetrySection}><SignalReviews key={detail.claim_id} signals={resources.signals?.items || []} allowedActions={interactionDetail.allowed_actions} onDecision={readOnly ? undefined : onSignalDecision} /></ResourceBoundary>}
@@ -107,6 +112,13 @@ function ClaimHeader({ detail }) {
         {identity.incidentSummary && identity.incidentSummary !== identity.title
           ? <p className="claim-heading__summary">{identity.incidentSummary}</p>
           : null}
+        {detail.work_summary?.conversation_turn && (
+          <p className={`claim-heading__turn ${detail.work_summary.conversation_turn === 'claimant_replied' ? 'is-replied' : ''}`}>
+            {detail.work_summary.conversation_turn === 'claimant_replied'
+              ? `${t('Claimant replied')} · ${detail.work_summary.unread_claimant_messages}`
+              : t('Waiting on the claimant')}
+          </p>
+        )}
         <div className="claim-heading__meta">
           {detail.terminal_disposition && <span>{t('Terminal')}: {words(detail.terminal_disposition.value)}</span>}
           <span>{words(detail.lifecycle_state)}</span>

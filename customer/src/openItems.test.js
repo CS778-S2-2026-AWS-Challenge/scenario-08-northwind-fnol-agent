@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   claimantOwedItems,
   openItemGroups,
+  openItemStatusText,
   openItemsBarText,
   receiptText,
   receiptsByMessage,
@@ -42,10 +43,24 @@ describe('open items', () => {
   it('puts a receipt under the reply that opened each item', () => {
     const receipts = receiptsByMessage([quote, hireCar])
     expect(receipts.get('a1')).toEqual([quote])
-    expect(receiptText(quote)).toBe('Added to your to-do: Repair quote')
-    expect(receiptText(hireCar)).toBe('Passed to the claims team: Is my hire car covered?')
+    expect(receiptText(quote)).toBe('To do: Repair quote')
+    expect(receiptText(hireCar)).toBe('For the claims team: Is my hire car covered?')
     expect(receiptText({ ...hireCar, state: 'done', answer: 'Yes, up to 14 days.' })).toBe(
       'Northwind answered: Yes, up to 14 days.',
     )
+  })
+})
+
+describe('waiting-list items', () => {
+  it('words questions and contact requests for after submission', () => {
+    const question = { item_id: 'q', kind: 'question', owner: 'northwind', state: 'open', subject: 'Will you pay for a hire car?' }
+    const contact = { item_id: 'c', kind: 'contact_request', owner: 'northwind', state: 'open', subject: 'Please call me' }
+    expect(openItemStatusText(question)).toBe('The claims team will answer after you submit')
+    expect(openItemStatusText(contact)).toBe('The claims team will contact you after you submit')
+    expect(receiptText(contact)).toBe('For the claims team: Please call me')
+    expect(receiptText({ ...question, state: 'declined', answer: 'We will explain on the phone.' }))
+      .toBe('Northwind replied: We will explain on the phone.')
+    expect(receiptText({ ...contact, state: 'done' })).toBe('Northwind contacted you: Please call me')
+    expect(openItemStatusText({ ...contact, state: 'done' })).toBe('Northwind contacted you')
   })
 })

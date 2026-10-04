@@ -20,7 +20,6 @@ import {
   logoutClaimant,
   pauseClaimSession,
   requestId,
-  requestHumanSupport,
   promoteAnonymousClaim,
   requestAssessorRouting,
   registerClaimant,
@@ -45,21 +44,23 @@ import {
   ConversationStart,
   StaffMessageRow,
 } from './components/ConversationMessages.jsx'
-import RecordedFactsCard from './components/RecordedFactsCard.jsx'
+import TurnAttachments from './components/TurnAttachments.jsx'
+import PanelSection from './components/PanelSection.jsx'
+import CaseStatus from './components/CaseStatus.jsx'
+import { caseStatus } from './caseStatus.js'
+import { PinnedCard, PinnedClause, PinnedFile, SubmitSteps } from './components/PinnedCard.jsx'
 import { fieldLabel, fieldSourceLabel, fieldStatusLabel, fieldValueText } from './claimFieldPresentation.js'
 import { evidenceFileStatusLabel, messageText } from './messagePresentation.js'
 import {
   factCardsByAgentMessage,
   fileReadings,
   notedProgress,
-  progressLabel,
   turnRecord,
 } from './recordedFacts.js'
 import { receiptsByMessage } from './openItems.js'
-import { OpenItemsBar, OpenItemsSection, TurnReceipts } from './components/OpenItems.jsx'
+import { OpenItemsBar, OpenItemsSection } from './components/OpenItems.jsx'
 import { modelAttachmentCompatibility } from './attachmentModelCompatibility.js'
 import ExternalServiceAction from './components/ExternalServiceAction.jsx'
-import ExternalServicesPage from './components/ExternalServicesPage.jsx'
 import EvidenceHistory from './components/EvidenceHistory.jsx'
 import ClaimHistory, { ClaimFeatureDirectory } from './components/ClaimHistory.jsx'
 import ClaimDocuments from './components/ClaimDocuments.jsx'
@@ -85,10 +86,12 @@ import './styles/profile-assets.css'
 import './styles/profile-responsive.css'
 import './styles/claim-history.css'
 import './styles/case-panel.css'
+import './styles/claimant-tidy.css'
 import { profilePathForSection, profileSectionFromPath } from './profileRoutes.js'
 import { historyClaimIdFromPath, pageForPath, routeForPage as routeForAppPage } from './appRoutes.js'
 import { claimHeading, claimStartedLabel } from './claimHeading.js'
 import { claimantModelChoices } from './modelProducts.js'
+import { continueClaimCard } from './continueClaim.js'
 import { captureComposerRect, playComposerHandoff } from './composerHandoff.js'
 import ClaimEntryPage from './components/ClaimEntryPage.jsx'
 import ClaimantAvatar from './components/ClaimantAvatar.jsx'
@@ -101,11 +104,36 @@ import {
   readAnonymousConversationHistory,
   rememberAnonymousConversation,
 } from './anonymousConversationHistory.js'
-import {
-  ConversationActionCard,
-  ConversationEvent,
-  ConversationInfoPanel,
-} from './components/ConversationContext.jsx'
+import { ConversationEvent } from './components/ConversationContext.jsx'
+
+// The claimant's help button sends this as an ordinary message; the assistant
+// decides whether it goes on the waiting list or straight to a person.
+const HELP_MESSAGE = "I'd like to talk to someone at Northwind."
+
+// From this width the case panel docks beside the conversation instead of floating.
+const DOCKED_PANEL_QUERY = '(min-width: 1440px)'
+const PANEL_SECTIONS_KEY = 'northwind.casePanelSections'
+const DEFAULT_PANEL_SECTIONS = { openItems: true, facts: true, files: true }
+
+function readPanelSections() {
+  try {
+    const stored = JSON.parse(globalThis.localStorage?.getItem(PANEL_SECTIONS_KEY) || 'null')
+    return stored && typeof stored === 'object' ? { ...DEFAULT_PANEL_SECTIONS, ...stored } : DEFAULT_PANEL_SECTIONS
+  } catch {
+    return DEFAULT_PANEL_SECTIONS
+  }
+}
+
+// How far a pull on the phone sheet's handle must travel to change its height.
+const SHEET_DISMISS_DISTANCE = 48
+
+// What the next-step chip under the latest reply says for each step.
+const NEXT_STEP_CHIPS = {
+  'review-details': 'Check your details',
+  'payout-contact': 'Add payout and contact details',
+  'review-agreement': 'Review and agree',
+  'create-claim': 'Submit your claim',
+}
 
 const PERMANENT_ANONYMOUS_RESUME_FAILURES = new Set([
   'AUTHENTICATION_REQUIRED',
@@ -348,6 +376,15 @@ function App() {
   // The case panel opens on demand; it opens by itself only for the summary check.
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [panelFocus, setPanelFocus] = useState(null)
+  // One pinned item at the top of the case panel: { kind, id }.
+  const [pinned, setPinned] = useState(null)
+  const [railOpen, setRailOpen] = useState(true)
+  // Which case-panel sections are open; the claimant's choice is remembered.
+  const [panelSections, setPanelSections] = useState(readPanelSections)
+  const [autoFillPresent, setAutoFillPresent] = useState(false)
+  // Phones: the case sheet rests at half height and can be pulled to full.
+  const [sheetFull, setSheetFull] = useState(false)
+  const sheetTouchStart = useRef(null)
   const [queuedText, setQueuedText] = useState('')
   const [sendQueuedText, setSendQueuedText] = useState(false)
   const [mobileView, setMobileView] = useState('chat')
@@ -376,8 +413,6 @@ function App() {
   const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
   const [realtimeHealth, setRealtimeHealth] = useState('healthy')
   const [resumeContext, setResumeContext] = useState(null)
-  const [expandedConversationPanels, setExpandedConversationPanels] = useState({})
-  const [externalCapabilitiesOpen, setExternalCapabilitiesOpen] = useState(false)
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
     consentChecked: false,
@@ -397,7 +432,6 @@ function App() {
   const activeTurnProgressRef = useRef(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
-  const pendingSupportRequest = useRef(null)
   const pendingAgreementAcceptance = useRef(null)
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
@@ -432,10 +466,6 @@ function App() {
   const autoOpenedReview = useRef(null)
   const conversationPanelRef = useRef(null)
   const messageListRef = useRef(null)
-  const externalCapabilitiesDialogRef = useRef(null)
-  const externalCapabilitiesHeadingRef = useRef(null)
-  const externalCapabilitiesTriggerRef = useRef(null)
-  const restoreCapabilityTriggerFocus = useRef(false)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
@@ -653,10 +683,10 @@ function App() {
     playComposerHandoff(conversationPanelRef.current?.querySelector('.workspace-composer'), fromRect)
   }, [isWorkspaceActive])
 
-  const claimantModels = useMemo(() => claimantModelChoices(runtimeCapabilities.models, {
-    selectedModelId: selectedModel,
-    defaultModelId: runtimeCapabilities.default_model_profile_id,
-  }), [runtimeCapabilities, selectedModel])
+  const claimantModels = useMemo(
+    () => claimantModelChoices(runtimeCapabilities.models),
+    [runtimeCapabilities],
+  )
   // Which service handles this conversation, named as the claimant chose it and
   // as the provider runs it (for example "Northwind Assist (openai/gpt-4o)").
   const processedBy = useMemo(() => {
@@ -827,19 +857,60 @@ function App() {
   const openItems = useMemo(() => claim?.open_items || [], [claim?.open_items])
   const receipts = useMemo(() => receiptsByMessage(openItems), [openItems])
   const readings = useMemo(() => fileReadings(messages), [messages])
+  const citedClauses = useMemo(() => {
+    const clauses = new Map()
+    for (const message of messages) {
+      for (const clause of turnRecord(message)?.cited_clauses || []) {
+        if (clause?.chunk_id) clauses.set(clause.chunk_id, clause)
+      }
+    }
+    return clauses
+  }, [messages])
   const missingNowLabels = (dynamicForm?.requirements?.missing_required_now || []).map(fieldLabel)
 
   useEffect(() => {
-    // The summary check is the one moment the panel opens by itself, once per check.
-    const identity = conversationActionKind === 'review-details' ? conversationAction?.identity : null
+    // Review and submit is the one flow the panel opens by itself: once per step,
+    // with the step pinned on top while the conversation stays in view.
+    // A check whose details are all on the latest reply's chips is done there instead.
+    const identity = NEXT_STEP_CHIPS[visibleConversationActionKind] ? conversationAction?.identity : null
     if (!identity || autoOpenedReview.current === identity) return
     autoOpenedReview.current = identity
     setDetailsOpen(true)
-    setPanelFocus('facts')
-  }, [conversationActionKind, conversationAction?.identity])
+    setPinned({ kind: 'submit' })
+  }, [visibleConversationActionKind, conversationAction?.identity])
+
+  useEffect(() => {
+    // Below the docked width the panel floats: Esc or a click outside closes it.
+    if (!detailsOpen) return undefined
+    const floating = () => !globalThis.matchMedia?.(DOCKED_PANEL_QUERY).matches
+    function closeOnEscape(event) {
+      if (event.key === 'Escape' && floating()) setDetailsOpen(false)
+    }
+    function closeOnOutsideClick(event) {
+      if (!floating()) return
+      const target = event.target
+      if (target.closest?.('.intake-details-panel, .case-status, .turn-chips, .open-items-bar, dialog')) return
+      setDetailsOpen(false)
+    }
+    globalThis.document?.addEventListener('keydown', closeOnEscape)
+    globalThis.document?.addEventListener('mousedown', closeOnOutsideClick)
+    return () => {
+      globalThis.document?.removeEventListener('keydown', closeOnEscape)
+      globalThis.document?.removeEventListener('mousedown', closeOnOutsideClick)
+    }
+  }, [detailsOpen])
+
+  useEffect(() => {
+    // Once the claim is lodged, the submitted page replaces the pinned flow.
+    if (claim?.external_claim?.creation_status !== 'created' || pinned?.kind !== 'submit') return
+    setPinned(null)
+    setWorkspaceView('agreement')
+  }, [claim?.external_claim?.creation_status, pinned?.kind])
 
   useEffect(() => {
     if (!panelFocus || !detailsOpen) return
+    const sectionKey = { 'open-items': 'openItems', facts: 'facts', files: 'files' }[panelFocus]
+    if (sectionKey) setPanelSections((current) => (current[sectionKey] ? current : { ...current, [sectionKey]: true }))
     globalThis.requestAnimationFrame?.(() => {
       globalThis.document?.getElementById(`case-panel-${panelFocus}`)?.scrollIntoView?.({ block: 'start' })
     })
@@ -873,6 +944,31 @@ function App() {
   function openCasePanel(section = null) {
     setDetailsOpen(true)
     setPanelFocus(section)
+  }
+
+  function togglePanelSection(key) {
+    setPanelSections((current) => {
+      const next = { ...current, [key]: !current[key] }
+      try {
+        globalThis.localStorage?.setItem(PANEL_SECTIONS_KEY, JSON.stringify(next))
+      } catch {
+        // Storage can be unavailable; the choice then lasts for this visit.
+      }
+      return next
+    })
+  }
+
+  function pinToPanel(item) {
+    setPinned(item)
+    setSheetFull(false)
+    setDetailsOpen(true)
+    setMobileView('details')
+  }
+
+  function askForHelp() {
+    if (isBusy) return
+    setDraft(HELP_MESSAGE)
+    setSendQueuedText(true)
   }
   const accountCustomerId = account?.customer_id || null
   const accountRevision = account?.revision || null
@@ -933,33 +1029,6 @@ function App() {
       controller.abort()
     }
   }, [accountCustomerId, accountRevision, claim?.claim_id, conversationActionKind])
-  useEffect(() => {
-    const dialog = externalCapabilitiesDialogRef.current
-    if (!dialog) return
-    if (externalCapabilitiesOpen) {
-      if (!dialog.open) {
-        if (typeof dialog.showModal === 'function') dialog.showModal()
-        else dialog.setAttribute('open', '')
-      }
-      globalThis.requestAnimationFrame(() => externalCapabilitiesHeadingRef.current?.focus())
-      return
-    }
-    if (dialog.open) {
-      if (typeof dialog.close === 'function') dialog.close()
-      else dialog.removeAttribute('open')
-    }
-    if (restoreCapabilityTriggerFocus.current) {
-      restoreCapabilityTriggerFocus.current = false
-      globalThis.requestAnimationFrame(() => {
-        const trigger = externalCapabilitiesTriggerRef.current
-        const focusTarget = trigger && !trigger.closest('[hidden]')
-          ? trigger
-          : null
-        focusTarget?.focus()
-      })
-    }
-  }, [externalCapabilitiesOpen])
-
   useEffect(() => {
     followLatestMessages.current = true
     forceLatestMessages.current = true
@@ -2098,7 +2167,7 @@ function App() {
         setHandoff(null)
         setEvidenceItems([])
         setResumeContext(null)
-        setExpandedConversationPanels({})
+        setPinned(null)
         setWorkspaceView('chat')
         setMobileView('chat')
         setWorkspaceActive(true)
@@ -2318,7 +2387,6 @@ function App() {
     clearComposerAttachments()
     pendingSubmission.current = null
     pendingConfirmation.current = null
-    pendingSupportRequest.current = null
     pendingClaimCreation.current = null
     pendingExternalService.current = null
     latestEvidenceRevision.current = 0
@@ -2339,8 +2407,7 @@ function App() {
     setEvidenceSyncNotice('')
     setResumeContext(null)
     setRecoveryFailure(null)
-    setExpandedConversationPanels({})
-    setExternalCapabilitiesOpen(false)
+    setPinned(null)
     setExternalServiceInteraction({
       claimId: null,
       consentChecked: false,
@@ -2495,13 +2562,6 @@ function App() {
     }
   }
 
-  function confirmProposedFields() {
-    return confirmFields([
-      ...proposedFields.map(([fieldCode]) => fieldCode),
-      ...(proposedContentsItems.length > 0 ? ['contents.items'] : []),
-    ])
-  }
-
   async function confirmFields(fieldCodes) {
     if (!claim || fieldCodes.length === 0 || isBusy) return
     setError('')
@@ -2596,30 +2656,6 @@ function App() {
     } catch (requestError) {
       showError(requestError)
       return false
-    }
-  }
-
-  async function requestSupport() {
-    if (!claim || isBusy || handoff) return
-    setError('')
-    setAssistanceReplyReview(null)
-    setStatus('requesting-support')
-    try {
-      if (!pendingSupportRequest.current) {
-        pendingSupportRequest.current = { idempotencyKey: requestId('support') }
-      }
-      const response = await requestHumanSupport({
-        claimId: claim.claim_id,
-        revision: claim.revision,
-        idempotencyKey: pendingSupportRequest.current.idempotencyKey,
-      })
-      setClaimRevision(response.revision, response.primary_action)
-      setNextStep(response.customer_next_step)
-      setHandoff(response.handoff)
-      pendingSupportRequest.current = null
-      setStatus('idle')
-    } catch (requestError) {
-      showError(requestError)
     }
   }
 
@@ -2750,40 +2786,6 @@ function App() {
         claimId: claim.claim_id,
         ...visibleFailure,
       })
-      showError(requestError)
-    }
-  }
-
-  async function createConfirmedClaim() {
-    if (
-      !claim
-      || isBusy
-      || claim.primary_action?.action_code !== 'claimant.create_claim'
-      || !claim.primary_action.available
-      || Number(claim.primary_action.claim_revision) !== Number(claim.revision)
-    ) return
-    setError('')
-    setStatus('creating-claim')
-    try {
-      if (!pendingClaimCreation.current) {
-        pendingClaimCreation.current = { idempotencyKey: requestId('claim-creation') }
-      }
-      const response = await createExternalClaim({
-        claimId: claim.claim_id,
-        revision: claim.revision,
-        idempotencyKey: pendingClaimCreation.current.idempotencyKey,
-      })
-      setClaim((current) => ({
-        ...current,
-        revision: response.revision,
-        external_claim: response.external_claim,
-        external_service_action: response.external_service_action,
-        primary_action: response.primary_action,
-      }))
-      setNextStep(response.customer_next_step)
-      pendingClaimCreation.current = null
-      setStatus('idle')
-    } catch (requestError) {
       showError(requestError)
     }
   }
@@ -3129,7 +3131,7 @@ function App() {
     setStatus('idle')
     setEvidenceItems([])
     setResumeContext(null)
-    setExpandedConversationPanels({})
+    setPinned(null)
     setWorkspaceView('chat')
     setMobileView('chat')
     setWorkspaceActive(false)
@@ -3238,13 +3240,6 @@ function App() {
   // Opening is a route command. The ref prevents duplicate work under Strict Mode.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.customer_id, page, selectedHistoryClaimId])
-
-  function openCurrentClaimDocuments() {
-    setWorkspaceView('chat')
-    setDetailsOpen(true)
-    setPanelFocus('files')
-    setMobileView('details')
-  }
 
   function leaveWorkspaceUtility() {
     setWorkspaceView('chat')
@@ -3445,7 +3440,7 @@ function App() {
           )
         }
         setRealtimeHealth('healthy')
-        setWorkspaceView('agreement')
+        pinToPanel({ kind: 'submit' })
       } catch (readbackError) {
         setRealtimeHealth('stale')
         throw readbackError
@@ -3470,11 +3465,6 @@ function App() {
     }
   }
 
-  function conversationPanelExpanded(panel) {
-    if (!claim?.claim_id) return false
-    return Boolean(expandedConversationPanels[`${claim.claim_id}:${panel}`])
-  }
-
   function handleMessageListScroll(event) {
     const messageList = event.currentTarget
     followLatestMessages.current = (
@@ -3482,52 +3472,42 @@ function App() {
     )
   }
 
-  function closeExternalCapabilities() {
-    restoreCapabilityTriggerFocus.current = true
-    setExternalCapabilitiesOpen(false)
-  }
-
-  function toggleConversationPanel(panel) {
-    if (!claim?.claim_id) return
-    const panelKey = `${claim.claim_id}:${panel}`
-    setExpandedConversationPanels((current) => ({
-      ...current,
-      [panelKey]: !current[panelKey],
-    }))
-  }
-
-  function openClaimDetailsFromConversation() {
-    setDetailsOpen(true)
-    setMobileView('details')
-  }
-
-  function renderConversationAction() {
-    if (conversationActionKind === 'external-service' && claim?.external_service_action) {
-      return (
-        <ExternalServiceAction
-          key={conversationAction.identity}
-          action={claim.external_service_action}
-          consentChecked={serviceConsentChecked}
-          setConsentChecked={setServiceConsentChecked}
-          onRequest={requestVehicleAssessment}
-          status={status}
-          error={serviceError}
-          expanded={conversationPanelExpanded('external-service')}
-          onToggle={() => toggleConversationPanel('external-service')}
-        />
-      )
-    }
+  // The review-and-submit steps, shown pinned at the top of the case panel while
+  // the conversation stays visible: check, payout and contact, agree, submit.
+  function renderSubmitStep() {
     if (conversationActionKind === 'review-details') {
-      const reviewItemCount = conversationAction.requiredItems.length
+      const items = conversationAction.requiredItems
       return (
-        <ConversationActionCard
-          key={conversationAction.identity}
-          icon="≡"
-          title="Review claim details"
-          description={`${reviewItemCount} ${reviewItemCount === 1 ? 'detail needs' : 'details need'} your confirmation before we continue.`}
-          status={`${reviewItemCount} to review`}
-          onClick={openClaimDetailsFromConversation}
-        />
+        <div className="pinned-review" key={conversationAction.identity}>
+          <p>
+            {items.length === 1
+              ? '1 detail needs your check before you submit.'
+              : `${items.length} details need your check before you submit.`}
+          </p>
+          {items.length > 0 && (
+            <dl className="pinned-review-list">
+              {items.map((code) => (
+                <div key={code}>
+                  <dt>{fieldLabel(code)}</dt>
+                  <dd>{form[code] ? fieldValueText(form[code]) : 'Still needed'}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          <div className="pinned-actions">
+            <button
+              className="primary-button"
+              type="button"
+              disabled={isBusy || items.length === 0}
+              onClick={() => confirmFields(items)}
+            >
+              All correct
+            </button>
+            <button className="secondary-button" type="button" onClick={() => setPanelFocus('facts')}>
+              Change a detail
+            </button>
+          </div>
+        </div>
       )
     }
     if (conversationActionKind === 'payout-contact') {
@@ -3547,29 +3527,114 @@ function App() {
         />
       )
     }
-    if (conversationActionKind === 'review-agreement') {
+    if (conversationActionKind === 'review-agreement' || conversationActionKind === 'create-claim') {
       return (
-        <ConversationActionCard
-          key={conversationAction.identity}
-          icon="→"
-          title="Agreement & confirmation"
-          description="Your payout destination and contact preference are saved. Continue to Step 4."
-          status="Step 4 ready"
-          onClick={() => setWorkspaceView('agreement')}
+        <AgreementConfirmationPanel
+          claim={claim}
+          busy={isBusy}
+          status={status}
+          submissionError={agreementSubmissionError?.claimId === claim?.claim_id
+            ? agreementSubmissionError
+            : null}
+          onSubmit={submitAgreementAndCreate}
+          onReviewInformation={() => setPanelFocus('facts')}
+          onReturnToConversation={() => setPinned(null)}
         />
       )
     }
-    if (conversationActionKind === 'create-claim') {
+    return <p className="pinned-empty">Nothing to submit right now. Keep telling the assistant what happened.</p>
+  }
+
+  function renderPinned() {
+    if (!pinned) return null
+    const close = () => setPinned(null)
+    if (pinned.kind === 'submit') {
       return (
-        <ConversationActionCard
-          key={conversationAction.identity}
-          icon="✓"
-          title="Create your claim"
-          description="Your required details are complete and ready to send to Northwind."
-          status={status === 'creating-claim' ? 'Creating…' : 'Ready'}
-          onClick={createConfirmedClaim}
-          disabled={isBusy}
-        />
+        <PinnedCard kicker="Review and submit" title={NEXT_STEP_CHIPS[conversationActionKind] || 'Your claim'} onClose={close}>
+          {NEXT_STEP_CHIPS[conversationActionKind] && <SubmitSteps current={conversationActionKind} />}
+          {renderSubmitStep()}
+        </PinnedCard>
+      )
+    }
+    if (pinned.kind === 'service') {
+      const fromMessage = messageExternalServiceActions.find((action) => (
+        (action.offer_id || action.service_identity) === pinned.id
+      ))
+      const claimService = pinned.id === 'claim-service' ? claim?.external_service_action : null
+      const action = fromMessage || claimService
+      if (!action) return null
+      return (
+        <PinnedCard kicker="Service" title={action.service_name} onClose={close}>
+          {fromMessage ? (
+            <ExternalServiceAction
+              action={fromMessage}
+              consentChecked={Boolean(offerConsentChecks[fromMessage.offer_id])}
+              setConsentChecked={(checked) => setOfferConsentChecks((current) => ({
+                ...current,
+                [fromMessage.offer_id]: checked,
+              }))}
+              onRequest={() => decideMessageExternalService(fromMessage, 'grant')}
+              onDecline={() => decideMessageExternalService(fromMessage, 'decline')}
+              onWithdraw={() => decideMessageExternalService(fromMessage, 'withdraw')}
+              status={status}
+              error={offerErrors[fromMessage.offer_id] || null}
+              expanded
+              onToggle={() => {}}
+            />
+          ) : (
+            <ExternalServiceAction
+              key={conversationAction?.identity}
+              action={claimService}
+              consentChecked={serviceConsentChecked}
+              setConsentChecked={setServiceConsentChecked}
+              onRequest={requestVehicleAssessment}
+              status={status}
+              error={serviceError}
+              expanded
+              onToggle={() => {}}
+            />
+          )}
+        </PinnedCard>
+      )
+    }
+    if (pinned.kind === 'file') {
+      const evidence = evidenceItems.find((item) => item.evidence_id === pinned.id)
+      return (
+        <PinnedCard kicker="File" title={evidence?.original_filename || 'Attached file'} onClose={close}>
+          <PinnedFile
+            evidence={evidence}
+            previewFile={evidencePreviewFiles.current?.get(pinned.id)}
+            reading={readings.get(pinned.id)}
+          />
+        </PinnedCard>
+      )
+    }
+    if (pinned.kind === 'clause') {
+      const clause = citedClauses.get(pinned.id)
+      if (!clause) return null
+      return (
+        <PinnedCard kicker="Your policy" title={clause.section_path || clause.title} onClose={close}>
+          <PinnedClause clause={clause} />
+        </PinnedCard>
+      )
+    }
+    if (pinned.kind === 'services') {
+      return (
+        <PinnedCard kicker="Available support" title="Third-party services" onClose={close}>
+          <div className="service-capability-list">
+            {(claim?.external_capabilities || []).map((capability) => (
+              <article className="service-capability" key={capability.service_identity}>
+                <h4>{capability.service_name}</h4>
+                <p>{capability.purpose}</p>
+                <p className="service-limitation">{capability.result_semantics}</p>
+                <div className="service-capability-actions">
+                  {capability.official_url && <a href={capability.official_url} target="_blank" rel="noreferrer">Official information</a>}
+                  {capability.official_phone && <a href={`tel:${capability.official_phone}`}>Call {capability.official_phone}</a>}
+                </div>
+              </article>
+            ))}
+          </div>
+        </PinnedCard>
       )
     }
     return null
@@ -3586,31 +3651,8 @@ function App() {
     ? `Open Profile for ${profileDisplayName} (${profileEmail})`
     : 'Open Profile and preferences'
 
-  function openClaimWorkspacePage(destination) {
-    if (destination === 'overview') {
-      setWorkspaceView('chat')
-      setMobileView('chat')
-      return
-    }
-    if (destination === 'documents') {
-      openCurrentClaimDocuments()
-      return
-    }
-    if (destination === 'history') {
-      openClaimHistory()
-      return
-    }
-    if (destination === 'privacy') {
-      setWorkspaceView('privacy')
-      setMobileView('chat')
-      return
-    }
-    setWorkspaceView('external-services')
-    setMobileView('chat')
-  }
-
   const showsClaimDetails = !isFocusedClaimMessages
-    && (workspaceView === 'chat' || workspaceView === 'external-services')
+    && workspaceView === 'chat'
   const claimDetailsExpanded = detailsOpen && showsClaimDetails
 
   return (
@@ -3638,6 +3680,11 @@ function App() {
         </div>
         {!isWorkspaceActive && page === 'home' && (
           <nav className="entry-header-actions" aria-label="Account">
+            {account && (
+              <button className="entry-header-account" type="button" onClick={openClaimHistory}>
+                My claims
+              </button>
+            )}
             <button className="entry-header-link" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
               {account ? 'Profile' : 'Log in'}
             </button>
@@ -3657,15 +3704,15 @@ function App() {
             {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
         )}
-        {isWorkspaceActive && claim && !isFocusedClaimMessages && !['login', 'register'].includes(page) && (
+        {isWorkspaceActive && !isFocusedClaimMessages && !['login', 'register'].includes(page) && (
           <div className="header-actions">
-            {status === 'requesting-support' || handoff ? (
-              <span className="header-assistance-chip">
-                <span aria-hidden="true">●</span>
-                {assistanceState?.title || 'Staff assistance active'}
-              </span>
-            ) : (
-              <button className="support-button" type="button" onClick={requestSupport} disabled={isBusy}>
+            {account && (
+              <button className="header-my-claims" type="button" onClick={openClaimHistory}>
+                My claims
+              </button>
+            )}
+            {!handoff && (
+              <button className="support-button" type="button" onClick={askForHelp} disabled={isBusy}>
                 Staff assistance
               </button>
             )}
@@ -3937,29 +3984,46 @@ function App() {
               <p className="message-failure-detail">{failedMessage.message}</p>
             </article>
           )}
+          continueCard={continueClaimCard(homepageConversationReports)}
+          onContinue={resumeHomepageConversation}
           onOpenHowItWorks={() => setPage('how-it-works')}
         />
       ) : (
         <main
-          className={`intake-page ${claimDetailsExpanded ? 'details-open' : 'details-closed'} ${isFocusedClaimMessages ? 'claim-messages-focus' : ''} ${workspaceView === 'privacy' ? 'privacy-view' : ''} ${arrivingFromEntry ? 'is-arriving' : ''}`}
+          className={`intake-page ${claimDetailsExpanded ? 'details-open' : 'details-closed'} ${workspaceView !== 'chat' ? 'is-utility-view' : ''} ${isFocusedClaimMessages ? 'claim-messages-focus' : ''} ${workspaceView === 'privacy' ? 'privacy-view' : ''} ${arrivingFromEntry ? 'is-arriving' : ''}`}
           onAnimationEnd={(event) => {
             if (event.target.classList?.contains('message-list')) setArrivingFromEntry(false)
           }}
         >
-          {!isFocusedClaimMessages && <aside className={`intake-history mobile-view-${mobileView}`} aria-label="Conversation history">
+          {!isFocusedClaimMessages && <aside className={`intake-history mobile-view-${mobileView} ${railOpen ? 'is-rail-open' : 'is-rail-collapsed'}`} aria-label="Conversation history">
             <button className="mobile-history-back" type="button" onClick={() => setMobileView('chat')}>
               Back to conversation
             </button>
             <div className="history-actions" aria-label="Claim tools">
               <button
+                className="rail-toggle"
                 type="button"
+                aria-expanded={railOpen}
+                aria-label={railOpen ? 'Hide conversations' : 'Show conversations'}
+                onClick={() => setRailOpen((open) => !open)}
+              >
+                <span className="rail-icon" aria-hidden="true">☰</span>
+              </button>
+              <button
+                type="button"
+                aria-label={status === 'pausing-session' ? 'Saving...' : 'New chat'}
                 onClick={() => startNewChat({ stayInWorkspace: true })}
                 disabled={isBusy}
               >
-                {status === 'pausing-session' ? 'Saving...' : 'New chat'}
+                <span className="rail-icon" aria-hidden="true">+</span>
+                <span className="rail-label">{status === 'pausing-session' ? 'Saving...' : 'New chat'}</span>
+              </button>
+              <button type="button" aria-label="My claims" onClick={openClaimHistory}>
+                <span className="rail-icon" aria-hidden="true">≡</span>
+                <span className="rail-label">My claims</span>
               </button>
               <button
-                className={workspaceView === 'privacy' ? 'is-active' : undefined}
+                className={workspaceView === 'privacy' ? 'is-active rail-secondary' : 'rail-secondary'}
                 type="button"
                 aria-current={workspaceView === 'privacy' ? 'page' : undefined}
                 onClick={() => {
@@ -3967,16 +4031,7 @@ function App() {
                   setMobileView('chat')
                 }}
               >
-                Privacy &amp; your data
-              </button>
-              <button type="button" onClick={openClaimHistory}>Claim history</button>
-              <button
-                className={workspaceView === 'external-services' ? 'is-active' : undefined}
-                type="button"
-                aria-current={workspaceView === 'external-services' ? 'page' : undefined}
-                onClick={() => openClaimWorkspacePage('external-services')}
-              >
-                External services
+                <span className="rail-label">Privacy &amp; your data</span>
               </button>
             </div>
             <div className="intake-history-label">Conversation history</div>
@@ -4040,7 +4095,7 @@ function App() {
                   onViewClaim={claim ? () => openClaimFeatures(claim) : null}
                 />
               ) : (
-                ['agreement', 'external-services'].includes(workspaceView) ? null : (
+                workspaceView === 'agreement' ? null : (
                   <>
                     <h1>
                       {workspaceView === 'history'
@@ -4115,19 +4170,15 @@ function App() {
                     setWorkspaceView('chat')
                   }}
                   onReturnToConversation={() => setWorkspaceView('chat')}
+                  stillNeeded={openItems.some((item) => item.state === 'open') && (
+                    <div className="claim-submitted-owed">
+                      <OpenItemsSection items={openItems.filter((item) => item.state === 'open')} onUpload={uploadForOpenItem} busy={isBusy} />
+                    </div>
+                  )}
                 />
               )}
               {workspaceView === 'claim-evidence' && selectedHistoryClaim && (
                 <EvidenceHistory claimId={selectedHistoryClaim.claim_id} />
-              )}
-              {workspaceView === 'external-services' && (
-                <ExternalServicesPage
-                  action={claim?.external_service_action || null}
-                  messageActions={messageExternalServiceActions}
-                  claim={claim}
-                  onBackToOverview={() => openClaimWorkspacePage('overview')}
-                  onWhatToProvide={() => openClaimWorkspacePage('documents')}
-                />
               )}
               {workspaceView === 'files' && (
                 account ? (
@@ -4162,34 +4213,20 @@ function App() {
                   </div>
                 </div>
               )}
-              {claim && claim.external_claim?.creation_status === 'created' ? (
-                <ol className="claim-stage-line" aria-label="Claim progress">
-                  <li className="is-done">Lodged</li>
-                  <li className={claim.claim_decision ? 'is-done' : 'is-current'}>With a claims handler</li>
-                  <li className={claim.claim_decision ? 'is-done' : ''}>Decision</li>
-                </ol>
-              ) : claim && (
-                <div className="claim-status">{handoff ? 'Staff assistance active' : 'In progress'}</div>
-              )}
               {claim && showsClaimDetails && (
-                <span className="case-panel-toggle-wrap">
-                  <button
-                    className="case-panel-toggle"
-                    type="button"
-                    aria-expanded={claimDetailsExpanded}
-                    aria-controls="claim-details-body"
-                    aria-describedby={missingNowLabels.length > 0 ? 'case-panel-toggle-detail' : undefined}
-                    onClick={() => setDetailsOpen((open) => !open)}
-                  >
-                    <span>{recordedProgress ? `Noted ${recordedProgress.noted}/${recordedProgress.total}` : 'Your claim'}</span>
-                    <span aria-hidden="true">{claimDetailsExpanded ? '›' : '‹'}</span>
-                  </button>
-                  {missingNowLabels.length > 0 && (
-                    <span className="case-panel-toggle-detail" id="case-panel-toggle-detail" role="tooltip">
-                      Still needed: {missingNowLabels.join(', ')}
-                    </span>
-                  )}
-                </span>
+                <CaseStatus
+                  status={caseStatus({
+                    claim,
+                    assistanceState,
+                    isUrgentSupport,
+                    progress: recordedProgress,
+                    handlerAssigned: claim.handler_assigned,
+                  })}
+                  missingLabels={claim.external_claim ? [] : missingNowLabels}
+                  syncNotice={realtimeSyncNotice || evidenceSyncNotice || null}
+                  panelOpen={claimDetailsExpanded}
+                  onTogglePanel={() => setDetailsOpen((open) => !open)}
+                />
               )}
             </div>
 
@@ -4231,7 +4268,7 @@ function App() {
                     >
                       {message.recovery && !messages.some((reply) => reply.actor === 'agent' && !reply.recovery && reply.in_reply_to === message.message_id) && (
                         <div className="message-recovery" role="status">
-                          <p>{message.recovery.claimant_projection}</p>
+                          <p className="message-recovery-text">{message.recovery.claimant_projection}</p>
                           {developerModeEnabled() && (
                             <small className="message-recovery-code">{message.recovery.rule_id}</small>
                           )}
@@ -4239,7 +4276,7 @@ function App() {
                             <p className="message-state" role="alert">{recoveryFailure.message}</p>
                           )}
                           {message.client_message_id && message.recovery.resume_triggers?.includes('explicit_retry_request') && (
-                            <button type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
+                            <button className="text-button message-recovery-retry" type="button" disabled={isBusy} onClick={(event) => sendMessage(event, message)}>Retry response</button>
                           )}
                         </div>
                       )}
@@ -4257,70 +4294,47 @@ function App() {
                     </div>
                   )
                 }
-                const recordedFacts = factCards.get(message.message_id)
+                const record = turnRecord(message)
+                const isLatestReply = item.key === lastAgentMessageId
                 return (
                   <AgentMessageRow
                     key={item.key}
                     message={message}
                     activity={messageActivities[message.message_id]}
                   >
-                        {recordedFacts && (
-                          <RecordedFactsCard
-                            facts={recordedFacts}
-                            fieldInputs={dynamicForm?.field_inputs}
-                            progress={recordedProgress}
-                            latest={message.message_id === latestFactCardId}
-                            busy={isBusy}
-                            onConfirm={confirmFields}
-                            onSave={(fact, value) => saveFieldValue(fact.fieldCode, fact.field, value)}
-                          />
-                        )}
-                        <TurnReceipts
-                          items={receipts.get(message.message_id)}
-                          scopeNote={turnRecord(message)?.scope_note}
-                          onUpload={uploadForOpenItem}
-                          busy={isBusy}
-                        />
-                        {(message.message_actions || []).map((action) => (
-                          <div className="conversation-agent-action" key={action.offer_id || action.service_identity}>
-                            <ExternalServiceAction
-                              action={action}
-                              consentChecked={Boolean(offerConsentChecks[action.offer_id])}
-                              setConsentChecked={(checked) => setOfferConsentChecks((current) => ({
-                                ...current,
-                                [action.offer_id]: checked,
-                              }))}
-                              onRequest={() => decideMessageExternalService(action, 'grant')}
-                              onDecline={() => decideMessageExternalService(action, 'decline')}
-                              onWithdraw={() => decideMessageExternalService(action, 'withdraw')}
-                              status={status}
-                              error={offerErrors[action.offer_id] || null}
-                              expanded={conversationPanelExpanded(action.offer_id)}
-                              onToggle={() => toggleConversationPanel(action.offer_id)}
-                            />
-                          </div>
-                        ))}
-                        {item.key === lastAgentMessageId && visibleConversationActionKind && (
-                          <div className="conversation-agent-action">
-                            {renderConversationAction()}
-                          </div>
-                        )}
+                    <TurnAttachments
+                      facts={factCards.get(message.message_id) || []}
+                      fieldInputs={dynamicForm?.field_inputs}
+                      receipts={receipts.get(message.message_id) || []}
+                      scopeNote={record?.scope_note}
+                      services={[
+                        ...(message.message_actions || []),
+                        ...(isLatestReply && visibleConversationActionKind === 'external-service' && claim?.external_service_action
+                          ? [{ ...claim.external_service_action, offer_id: 'claim-service' }]
+                          : []),
+                      ]}
+                      fileReads={(record?.file_reads || []).filter((read) => read?.evidence_id && read?.kind)}
+                      clauses={record?.cited_clauses || []}
+                      nextStep={isLatestReply && NEXT_STEP_CHIPS[visibleConversationActionKind]
+                        ? { pin: 'submit', label: NEXT_STEP_CHIPS[visibleConversationActionKind] }
+                        : null}
+                      busy={isBusy}
+                      onConfirmFacts={confirmFields}
+                      onSaveFact={(fact, value) => saveFieldValue(fact.fieldCode, fact.field, value)}
+                      onUpload={uploadForOpenItem}
+                      onOpenReceipt={() => openCasePanel('open-items')}
+                      onPin={pinToPanel}
+                    />
                   </AgentMessageRow>
                 )
               })}
-              {!lastAgentMessageId && visibleConversationActionKind && (
-                <div className="conversation-agent-action is-standalone">
-                  {renderConversationAction()}
-                </div>
-              )}
-              {account && claim && !isFocusedClaimMessages && (
-                <ClaimAutoFillPanel
-                  key={`${account.customer_id}:${claim.claim_id}`}
-                  account={account}
-                  claim={claim}
-                  busy={claimOperationBusy}
-                  onBusyChange={setAutoFillBusy}
-                  onClaimReadback={applyClaimSnapshot}
+              {((!lastAgentMessageId && NEXT_STEP_CHIPS[visibleConversationActionKind])
+                || (autoFillPresent && pinned?.kind !== 'autofill')) && (
+                <TurnAttachments
+                  nextStep={!lastAgentMessageId && NEXT_STEP_CHIPS[visibleConversationActionKind]
+                    ? { pin: 'submit', label: NEXT_STEP_CHIPS[visibleConversationActionKind] }
+                    : autoFillPresent ? { pin: 'autofill', label: 'Use your saved details' } : null}
+                  onPin={pinToPanel}
                 />
               )}
               {pendingMessage && (
@@ -4359,6 +4373,8 @@ function App() {
                           attachments={failedMessage.attachments}
                           previewFiles={evidencePreviewFiles.current}
                         />
+                      </div>
+                      <div className="message-recovery is-failed">
                         <p className="message-state">{failedMessage.deliveryState || 'Not sent'}</p>
                         <p className="message-failure-detail">{failedMessage.message}</p>
                       </div>
@@ -4376,57 +4392,19 @@ function App() {
                 />
               )}
 
-              {assistanceState && !isUrgentSupport && (
-                <ConversationEvent
-                  icon={assistanceState.key === 'completed' ? '✓' : '●'}
-                  title={assistanceState.title}
-                  detail={assistanceState.description}
-                  tone={assistanceState.key === 'response_needed' ? 'attention' : 'info'}
-                />
+              {assistanceState?.key === 'completed' && (
+                <ConversationEvent title={assistanceState.title} detail={assistanceState.description} />
               )}
-
               {claim?.external_claim && (
-                <>
-                  <ConversationEvent
-                    icon={claim.external_claim.creation_status === 'failed' ? '!' : '✓'}
-                    title={claim.external_claim.creation_status === 'created'
-                      ? `Claim ${claim.external_claim.claim_number} created`
-                      : claim.external_claim.creation_status === 'pending'
-                        ? 'Claim creation in progress'
-                        : 'Claim creation needs attention'}
-                    tone={claim.external_claim.creation_status === 'failed' ? 'attention' : 'success'}
-                  />
-                  <ConversationInfoPanel
-                    title="Claim details"
-                    summary={[claim.external_claim.claim_number, claim.external_claim.route]
-                      .filter(Boolean)
-                      .join(' · ')}
-                    expanded={conversationPanelExpanded('claim-created')}
-                    onToggle={() => toggleConversationPanel('claim-created')}
-                  >
-                    <dl className="conversation-detail-list">
-                      {claim.external_claim.route && (
-                        <div><dt>Route</dt><dd>{claim.external_claim.route}</dd></div>
-                      )}
-                      {claim.external_claim.next_step && (
-                        <div><dt>Next step</dt><dd>{claim.external_claim.next_step}</dd></div>
-                      )}
-                      {claim.external_claim.expected_by && (
-                        <div>
-                          <dt>Expected by</dt>
-                          <dd>{new Date(claim.external_claim.expected_by).toLocaleString()}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  </ConversationInfoPanel>
-                </>
-              )}
-
-              {realtimeSyncNotice && (
-                <ConversationEvent icon="●" title={realtimeSyncNotice} tone="info" />
-              )}
-              {evidenceSyncNotice && (
-                <ConversationEvent icon="●" title={evidenceSyncNotice} tone="info" />
+                <ConversationEvent
+                  icon={claim.external_claim.creation_status === 'failed' ? '!' : '✓'}
+                  title={claim.external_claim.creation_status === 'created'
+                    ? `Claim ${claim.external_claim.claim_number} lodged`
+                    : claim.external_claim.creation_status === 'pending'
+                      ? 'Claim submission in progress'
+                      : 'Claim submission needs attention'}
+                  tone={claim.external_claim.creation_status === 'failed' ? 'attention' : 'success'}
+                />
               )}
             </div>
 
@@ -4493,15 +4471,31 @@ function App() {
           </section>
 
           <aside
-            className={`claim-panel intake-details-panel mobile-view-${mobileView} ${claimDetailsExpanded ? 'is-open' : 'is-collapsed'}`}
+            className={`claim-panel intake-details-panel mobile-view-${mobileView} ${claimDetailsExpanded ? 'is-open' : 'is-collapsed'} ${sheetFull ? 'is-sheet-full' : ''}`}
             aria-label="Claim details"
             aria-hidden={!claimDetailsExpanded}
             hidden={!showsClaimDetails}
           >
             <div className="claim-details-sticky-header">
+              <button
+                className="sheet-grab"
+                type="button"
+                aria-label={sheetFull ? 'Show less of your claim' : 'Show more of your claim'}
+                onClick={() => setSheetFull((full) => !full)}
+                onTouchStart={(event) => { sheetTouchStart.current = event.touches[0]?.clientY ?? null }}
+                onTouchEnd={(event) => {
+                  const start = sheetTouchStart.current
+                  const end = event.changedTouches[0]?.clientY
+                  sheetTouchStart.current = null
+                  if (start === null || end === undefined) return
+                  if (end - start > SHEET_DISMISS_DISTANCE) {
+                    if (sheetFull) setSheetFull(false)
+                    else setDetailsOpen(false)
+                  } else if (start - end > SHEET_DISMISS_DISTANCE) setSheetFull(true)
+                }}
+              />
               <div className="claim-details-toolbar">
                 <h2>Your claim</h2>
-                {recordedProgress && <span className="case-panel-progress">{progressLabel(recordedProgress)}</span>}
                 <button
                   className="claim-details-collapse"
                   type="button"
@@ -4519,10 +4513,36 @@ function App() {
               </div>
             </div>
             <div id="claim-details-body" hidden={!detailsOpen}>
+              {detailsOpen && renderPinned()}
+              {account && claim && !isFocusedClaimMessages && (
+                <div className="pinned-autofill" hidden={!detailsOpen || pinned?.kind !== 'autofill'}>
+                  <ClaimAutoFillPanel
+                    key={`${account.customer_id}:${claim.claim_id}`}
+                    account={account}
+                    claim={claim}
+                    busy={claimOperationBusy}
+                    onBusyChange={setAutoFillBusy}
+                    onClaimReadback={applyClaimSnapshot}
+                    onPresenceChange={setAutoFillPresent}
+                  />
+                </div>
+              )}
               {detailsOpen && (
               <>
-              <OpenItemsSection items={openItems} onUpload={uploadForOpenItem} busy={isBusy} />
-              <section className="case-panel-section" id="case-panel-facts" aria-label="What we have so far">
+              <OpenItemsSection
+                items={openItems}
+                onUpload={uploadForOpenItem}
+                busy={isBusy}
+                open={panelSections.openItems}
+                onToggle={() => togglePanelSection('openItems')}
+              />
+              <PanelSection
+                id="facts"
+                title="What we know"
+                label="What we have so far"
+                open={panelSections.facts}
+                onToggle={() => togglePanelSection('facts')}
+              >
                 <ClaimReviewPanel
                   form={form}
                   contentsItems={contentsItems}
@@ -4535,19 +4555,17 @@ function App() {
                   beginEdit={beginEdit}
                   cancelEdit={() => setEditingField(null)}
                   saveFieldCorrection={saveFieldCorrection}
-                  confirmProposedFields={confirmProposedFields}
+                  confirmField={(fieldCode) => confirmFields([fieldCode])}
                   fieldLabel={fieldLabel}
                   fieldStatusLabel={fieldStatusLabel}
                   fieldSourceLabel={fieldSourceLabel}
                   fieldValueText={fieldValueText}
                   busy={isBusy}
                   status={status}
-                  stepActive={conversationActionKind === 'review-details'}
                   conversationEmpty={isNewConversationEmpty}
-                  onViewNextSteps={() => setPanelFocus('files')}
+                  onViewNextSteps={() => setPanelFocus('facts')}
+                  showHeading={false}
                 />
-              </section>
-              <section className="case-panel-section" id="case-panel-files" aria-label="Files and next steps">
                 <ClaimNextStepsPanel
                   form={form}
                   dynamicForm={dynamicForm}
@@ -4561,6 +4579,13 @@ function App() {
                   busy={isBusy}
                   status={status}
                 />
+              </PanelSection>
+              <PanelSection
+                id="files"
+                title="Files"
+                open={panelSections.files}
+                onToggle={() => togglePanelSection('files')}
+              >
                 {showsClaimDetails && (
                   <ClaimDocuments
                     items={evidenceItems}
@@ -4571,85 +4596,30 @@ function App() {
                       item.kind,
                       item.evidence_id,
                     )}
+                    readings={readings}
                     compact
                   />
                 )}
                 {claim?.external_capabilities?.length > 0 && (
-                  <details className="next-steps-more-options">
-                    <summary>
-                      <span>More options</span>
-                      <span>{claim.external_capabilities.length}</span>
-                    </summary>
-                    <button
-                      ref={externalCapabilitiesTriggerRef}
-                      className="external-capabilities-trigger"
-                      type="button"
-                      aria-haspopup="dialog"
-                      onClick={() => setExternalCapabilitiesOpen(true)}
-                    >
-                      <strong>Use a third-party service</strong>
-                      <span>
-                        View {claim.external_capabilities.length}{' '}
-                        {claim.external_capabilities.length === 1 ? 'option' : 'options'}
-                        <span aria-hidden="true">›</span>
-                      </span>
-                    </button>
-                  </details>
+                  <button
+                    className="case-panel-link"
+                    type="button"
+                    onClick={() => pinToPanel({ kind: 'services' })}
+                  >
+                    <span>Available third-party services</span>
+                    <span aria-hidden="true">›</span>
+                  </button>
                 )}
-              </section>
+              </PanelSection>
               {processedBy && <p className="case-panel-processed-by">Handled by {processedBy}</p>}
               </>
               )}
             </div>
           </aside>
-          {claim?.external_capabilities?.length > 0 && (
-            <ExternalCapabilityCatalogue
-              capabilities={claim.external_capabilities}
-              dialogRef={externalCapabilitiesDialogRef}
-              headingRef={externalCapabilitiesHeadingRef}
-              onClose={closeExternalCapabilities}
-            />
-          )}
         </main>
       )}
     </div>
   )
 }
 
-function ExternalCapabilityCatalogue({ capabilities, dialogRef, headingRef, onClose }) {
-  return (
-    <dialog
-      ref={dialogRef}
-      className="external-capabilities-dialog"
-      aria-labelledby="external-capabilities-title"
-      onCancel={(event) => {
-        event.preventDefault()
-        onClose()
-      }}
-    >
-      <div className="external-capabilities-dialog-heading">
-        <div>
-          <p className="transfer-label">Available support</p>
-          <h2 id="external-capabilities-title" ref={headingRef} tabIndex="-1">Third-party services</h2>
-        </div>
-        <button className="external-capabilities-close" type="button" aria-label="Close third-party services" onClick={onClose}>
-          <span aria-hidden="true">×</span>
-        </button>
-      </div>
-      <div className="service-capability-list">
-        {capabilities.map((capability) => (
-          <article className="service-capability" key={capability.service_identity}>
-            <h3>{capability.service_name}</h3>
-            <p>{capability.purpose}</p>
-            <p className="service-limitation">{capability.result_semantics}</p>
-            <div className="service-capability-actions">
-              {capability.official_url && <a href={capability.official_url} target="_blank" rel="noreferrer">Official information</a>}
-              {capability.official_phone && <a href={`tel:${capability.official_phone}`}>Call {capability.official_phone}</a>}
-            </div>
-          </article>
-        ))}
-      </div>
-    </dialog>
-  )
-}
 export default App

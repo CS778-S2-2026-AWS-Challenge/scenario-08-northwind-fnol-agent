@@ -210,7 +210,8 @@ def test_review_allows_fact_questions_offers_by_card_and_real_escalation() -> No
             V8NorthwindQuestion(
                 question='Is my hire car covered?',
                 claimant_wording='is a hire car covered',
-                model_view='Not in the excerpts.',
+                proposed_answer='Yes, for up to 14 days.',
+                basis='Not in the excerpts.',
             ),
         ),
     )
