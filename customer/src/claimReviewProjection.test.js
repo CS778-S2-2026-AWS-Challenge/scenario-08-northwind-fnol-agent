@@ -77,7 +77,6 @@ describe('claim review projection', () => {
         missing_required_now: ['incident.occurred_at', 'incident.occurred_at'],
         pending_later: ['property.address'],
         current_action_total: 5,
-        current_action_satisfied: 3,
       },
     }
 

@@ -28,7 +28,6 @@ function panelProps(overrides = {}) {
       requirements: {
         ready: false,
         current_action_total: 8,
-        current_action_satisfied: 4,
         missing_required_now: [
           'incident.injury_or_danger',
           'incident.occurred_at',
@@ -244,7 +243,7 @@ describe('ClaimSummaryProgress', () => {
   it('renders the server-owned captured count as an accessible progress indicator', () => {
     render(
       <ClaimSummaryProgress
-        dynamicForm={{ requirements: { ready: false, current_action_total: 11, current_action_satisfied: 3, missing_required_now: ['a', 'b', 'c', 'd', 'e', 'f'] } }}
+        dynamicForm={{ requirements: { ready: false, current_action_total: 11, missing_required_now: ['a', 'b', 'c', 'd', 'e', 'f'] } }}
       />,
     )
 

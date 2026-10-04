@@ -13326,12 +13326,6 @@
             "title": "By State",
             "type": "object"
           },
-          "current_action_satisfied": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Current Action Satisfied",
-            "type": "integer"
-          },
           "current_action_total": {
             "default": 0,
             "minimum": 0.0,

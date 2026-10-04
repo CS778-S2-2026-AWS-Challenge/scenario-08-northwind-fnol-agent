@@ -1386,9 +1386,6 @@ class BranchRuleEvaluator:
             # longer gate creation behind a separate confirmation stage.
             ready_pending_confirmation=False,
             current_action_total=sum(len(items) for items in by_state.values()),
-            current_action_satisfied=len(satisfied)
-            + len(by_state['unavailable'])
-            + len(by_state['pending_generation']),
         )
 
     @staticmethod

@@ -266,7 +266,6 @@ function dynamicForm({ value = '8pm', valueState = 'proposed' } = {}) {
     requirements: {
       ready: false,
       current_action_total: 2,
-      current_action_satisfied: 1,
       satisfied: ['incident.description'],
       next_required_item: 'incident.occurred_at',
       pending_later: ['property.address'],
@@ -297,7 +296,6 @@ function readyDynamicForm() {
     requirements: {
       ready: true,
       current_action_total: 9,
-      current_action_satisfied: 9,
       satisfied: [
         'claim.product_family',
         'incident.description',
@@ -3744,7 +3742,6 @@ describe('claimant intake projection', () => {
         requirements: {
           ready: false,
           current_action_total: 3,
-          current_action_satisfied: 3,
           satisfied: ['incident.injury_or_danger', 'vehicle.drivable', 'incident.cause'],
           next_required_item: null,
           pending_later: [],
@@ -4142,7 +4139,6 @@ describe('claimant intake projection', () => {
         claim_revision: 2,
         requirements: {
           current_action_total: 5,
-          current_action_satisfied: 0,
           missing_required_now: ['incident.occurred_at', 'incident.description', 'loss.description'],
           by_state: { proposed: ['incident.location', 'vehicle.drivable'] },
         },

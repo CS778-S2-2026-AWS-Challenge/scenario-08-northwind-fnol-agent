@@ -3043,7 +3043,6 @@ class RequirementResolution(ContractModel):
     ready: bool = False
     ready_pending_confirmation: bool = False
     current_action_total: int = Field(default=0, ge=0)
-    current_action_satisfied: int = Field(default=0, ge=0)
 
 
 class BranchEvaluationResult(ContractModel):
