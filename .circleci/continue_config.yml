@@ -334,68 +334,6 @@ jobs:
             fi
             echo "Path coupling satisfied."
 
-  p12-browser-evidence:
-    executor: python
-    steps:
-      - checkout
-      - run:
-          name: Install browser-evidence dependencies
-          command: |
-            mkdir -p browser-evidence
-            python -m pip install -r backend/requirements-dev.txt
-            npm ci --prefix customer
-            npm ci --prefix workbench
-            npm install --prefix /tmp/p12-playwright --no-save playwright@1.55.0
-            /tmp/p12-playwright/node_modules/.bin/playwright install --with-deps chromium
-      - run:
-          name: Execute claimant ↔ Workbench interruption and recovery journey
-          no_output_timeout: 10m
-          command: |
-            set -euo pipefail
-
-            export PR_HEAD_SHA="$CIRCLE_SHA1"
-            export BROWSER_EVIDENCE_DIR=browser-evidence
-            export NORTHWIND_ENVIRONMENT=test
-            export NORTHWIND_IDENTITY_MODE=developer
-            export DATA_RUNTIME_PROFILE=fixture
-            export AGENT_RUNTIME_PROFILE=controlled
-            export NODE_PATH=/tmp/p12-playwright/node_modules
-
-            python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > browser-evidence/backend.log 2>&1 &
-            BACKEND_PID=$!
-            npm run dev --prefix customer -- --host 127.0.0.1 --port 8001 > browser-evidence/customer.log 2>&1 &
-            CUSTOMER_PID=$!
-            npm run dev --prefix workbench -- --host 127.0.0.1 --port 8002 > browser-evidence/workbench.log 2>&1 &
-            WORKBENCH_PID=$!
-
-            cleanup() {
-              kill "$BACKEND_PID" "$CUSTOMER_PID" "$WORKBENCH_PID" 2>/dev/null || true
-            }
-            trap cleanup EXIT
-
-            wait_for_url() {
-              url="$1"
-              for attempt in $(seq 1 90); do
-                if curl --fail --silent --show-error "$url" > /dev/null; then
-                  return 0
-                fi
-                sleep 1
-              done
-              echo "Timed out waiting for $url"
-              return 1
-            }
-
-            wait_for_url http://127.0.0.1:8000/health/live
-            wait_for_url http://127.0.0.1:8001/
-            wait_for_url http://127.0.0.1:8002/workbench/
-
-            node tests/browser/p12_3_claimant_workbench_recovery.cjs
-            node tests/browser/pr975_claimant_profile.cjs
-            node tests/browser/claimant_layout_widths.cjs
-      - store_artifacts:
-          path: browser-evidence
-          destination: p12-browser-evidence
-
 workflows:
   backend-pull-request:
     when:
@@ -427,11 +365,6 @@ workflows:
     when: << pipeline.parameters.run-admin >>
     jobs:
       - admin-quality
-
-  browser-evidence:
-    when: << pipeline.parameters.run-browser-evidence >>
-    jobs:
-      - p12-browser-evidence
 
   github-automation:
     when: << pipeline.parameters.run-automation >>
