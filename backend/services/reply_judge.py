@@ -1,11 +1,13 @@
 """A second model reads each reply against what the turn actually did.
 
-Regex rules match English wording and miss a rephrased promise. The judge gets
-the reply and a ledger of the turn's structured parts (services offered or
-refused, escalation, questions passed to the claims team, declared ending) and
-names the problems it finds. Runtime still never edits the reply: problems send
-the turn back to the turn model once (``reply_consistency``). When the judge is
-not configured or its call fails, the existing rules are used instead.
+Whether a reply says something the turn does not back is a judgement about
+meaning, so a model makes it. The judge gets the reply and a ledger of the
+turn's structured parts (services offered or refused, escalation, questions
+passed to the claims team, declared ending) and names the problems it finds.
+Runtime still never edits the reply: problems send the turn back to the turn
+model once (``reply_consistency``). When the judge is not configured or its call
+fails, no rule stands in: the reply is shown and the turn is logged as not
+reviewed.
 """
 
 from __future__ import annotations
@@ -28,8 +30,8 @@ from backend.domain.model_gateway import (
 logger = logging.getLogger(__name__)
 
 REPLY_REVIEW_PURPOSE = 'reply_review'
-REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v1'
-# Longest a review call may take; a turn with less time left uses the rules.
+REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v2'
+# Longest a review call may take; it runs after the turn's own model calls.
 REPLY_JUDGE_TIMEOUT_SECONDS = 20.0
 
 PROBLEM_KINDS = (
@@ -55,8 +57,8 @@ a service such as towing, repairs, an assessor or a rental car. Services are off
 insurance company.
 - claims_escalation_without_one: escalation is null and the reply says it escalated, referred or \
 passed the claim to a person.
-- promises_answer_without_question: questions_passed_on is empty and the reply says the claims \
-team will confirm, answer or check something for the claimant.
+- promises_answer_without_question: the reply says the claims team will confirm, answer or check \
+something for the claimant, and that thing is not one of questions_passed_on.
 - claims_documents_block_lodging: the reply says a photo, quote or other document is needed \
 before the claim can be lodged or submitted. Documents never block lodging; asking for one, or \
 saying it helps, is fine.
@@ -98,7 +100,10 @@ def turn_ledger(validated: Any) -> dict[str, object]:
             {'kind': item.document_kind, 'stance': item.stance}
             for item in validated.document_requests
         ],
-        'questions_passed_on': [item.question for item in validated.northwind_questions],
+        'questions_passed_on': [
+            *(item.question for item in validated.northwind_questions),
+            *getattr(validated, 'earlier_open_questions', ()),
+        ],
         'summary_fields': list(validated.summary_fields),
         'next_question': (
             validated.next_question.wording if validated.next_question is not None else None
@@ -107,7 +112,7 @@ def turn_ledger(validated: Any) -> dict[str, object]:
 
 
 class ReplyJudge:
-    """Ask the review model for problems; None means "use the rules instead"."""
+    """Ask the review model for problems; None means the words were not reviewed."""
 
     def __init__(self, gateway_factory: Callable[[], ModelGateway]) -> None:
         self._gateway_factory = gateway_factory

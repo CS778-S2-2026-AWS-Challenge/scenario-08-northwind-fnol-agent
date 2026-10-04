@@ -22,6 +22,11 @@ NZ = ZoneInfo('Pacific/Auckland')
 MAX_PAST = timedelta(days=730)
 FUTURE_TOLERANCE = timedelta(hours=1)
 PARTS_OF_DAY = ('morning', 'afternoon', 'evening', 'night')
+# The model writes New Zealand clock time but may copy the report's offset onto
+# a date on the other side of a daylight-saving change ("5 September at
+# 4:10pm" written +13:00). With either NZ offset the clock time is kept and the
+# offset that applies on that date is stored; other offsets are converted.
+NZ_OFFSETS = (timedelta(hours=12), timedelta(hours=13))
 
 _MOMENT = re.compile(
     r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$'
@@ -34,7 +39,11 @@ def _moment(text: str, reported_at: datetime) -> str | None:
         parsed = datetime.fromisoformat(text.replace('Z', '+00:00').replace(' ', 'T', 1))
     except ValueError:
         return None
-    moment = (parsed if parsed.tzinfo else parsed.replace(tzinfo=NZ)).astimezone(NZ)
+    moment = (
+        parsed.replace(tzinfo=NZ)
+        if parsed.tzinfo is None or parsed.utcoffset() in NZ_OFFSETS
+        else parsed.astimezone(NZ)
+    )
     if moment > reported_at + FUTURE_TOLERANCE or reported_at - moment > MAX_PAST:
         return None
     offset = moment.strftime('%z')

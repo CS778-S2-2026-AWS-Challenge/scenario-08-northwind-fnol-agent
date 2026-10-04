@@ -107,8 +107,12 @@ from backend.services.model_request_planner import (
     prepare_model_family_context,
 )
 from backend.services.prompt_composer import load_response_schema
-from backend.services.reply_consistency import keep_recorded_parts, review_reply
-from backend.services.reply_judge import REPLY_JUDGE_TIMEOUT_SECONDS, ReplyJudge
+from backend.services.reply_consistency import (
+    ConsistencyReview,
+    keep_recorded_parts,
+    review_reply,
+)
+from backend.services.reply_judge import ReplyJudge
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
@@ -583,16 +587,25 @@ class GatewayAgent:
         if limit is not None and (datetime.now(UTC) - started_at).total_seconds() >= limit:
             raise ModelGatewayError(ModelGatewayErrorCode.TIMEOUT, retryable=True)
 
-    def _judge_within_time(self, started_at: datetime) -> ReplyJudge | None:
-        """The review model, only when a whole review call fits in the turn's time.
+    def _review(self, validated: ValidatedTurn, context: AgentTurnContext) -> ConsistencyReview:
+        """Review the reply after the turn's model calls.
 
-        Otherwise the reply is reviewed by the built-in rules, which take no time.
+        The turn time limit caps the turn's own model calls; the review model runs
+        after them with its own timeout, so a reply is never left to rules because
+        the turn was slow.
         """
-        limit = self._turn_time_limit_seconds
-        if self._reply_judge is None or limit is None:
-            return self._reply_judge
-        remaining = limit - (datetime.now(UTC) - started_at).total_seconds()
-        return self._reply_judge if remaining >= REPLY_JUDGE_TIMEOUT_SECONDS else None
+
+        review = review_reply(validated, self._reply_judge)
+        logger.info(
+            'agent_turn_reply_review',
+            extra={
+                'claim_id': context.claim.claim_id,
+                'trigger_message_id': context.trigger_message_id,
+                'words_reviewed': review.words_reviewed,
+                'problems': [item.kind for item in review.inconsistencies],
+            },
+        )
+        return review
 
     def _complete(self, request: ModelRequest, context: AgentTurnContext) -> ModelResponse:
         snapshot = context.runtime_configuration_snapshot
@@ -927,6 +940,14 @@ class GatewayAgent:
                 validated_turn = replace(
                     validated_turn, rejected=[*optional_rejections, *validated_turn.rejected]
                 )
+            validated_turn = replace(
+                validated_turn,
+                earlier_open_questions=tuple(
+                    str(item.get('question'))
+                    for item in getattr(context, 'northwind_questions', ())
+                    if item.get('state') == 'open' and item.get('question')
+                ),
+            )
             form_changes = validated_turn.form_changes
             contents_changes = validated_turn.contents_item_changes
             service_offer_ids = list(validated_turn.service_identities)
@@ -1478,9 +1499,7 @@ class GatewayAgent:
                 )
                 validated_turn = result.validated_turn
                 review = (
-                    review_reply(validated_turn, self._judge_within_time(started_at))
-                    if validated_turn is not None
-                    else None
+                    self._review(validated_turn, context) if validated_turn is not None else None
                 )
                 if review is not None and validated_turn is not None and not review.consistent:
                     # The words contradict the ledger. Hand the ruling back to
@@ -1568,7 +1587,7 @@ class GatewayAgent:
                         request_budgets=request_budgets,
                     )
                     second_review = (
-                        review_reply(result.validated_turn, self._judge_within_time(started_at))
+                        self._review(result.validated_turn, context)
                         if result.validated_turn is not None
                         else None
                     )

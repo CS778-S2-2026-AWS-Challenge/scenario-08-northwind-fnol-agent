@@ -5,56 +5,21 @@ the whole turn goes back to the model once with the ruling attached so it can
 say the same thing truthfully.
 
 Two kinds of check run. Structural checks compare the turn's own parts (a
-summary with no fields). Wording
-checks -- a refused service named, an arrangement or escalation claimed, a
-service asked about in words, the claimant sent to "their insurer", an answer
-promised with no question passed on -- are made by the review model
-(``reply_judge``) when one is configured; the English patterns below are the
-fallback when it is not, or when its call fails.
+summary with no fields, a declared ending the reply does not match). Whether
+the words say something the ledger does not back -- a refused service named, an
+arrangement or escalation claimed, a service asked about in words, the claimant
+sent to "their insurer", an answer promised that no question passed on backs --
+is a judgement about meaning, made only by the review model (``reply_judge``).
+When the review model is not configured or its call fails, no rule stands in
+for it: the reply is shown and the turn is recorded as not reviewed.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
-from backend.domain.external_service_registry import SERVICE_REGISTRY
 from backend.services.reply_judge import ReplyJudge
-from backend.services.turn_proposal_validation import _EXECUTION_CLAIM, ValidatedTurn
-
-_GENERIC_SERVICE_WORDS = frozenset(
-    {'vehicle', 'home', 'contents', 'information', 'guidance', 'reporting', 'specialist'}
-)
-# Sending the report to the claims team is the model's own future act, not a
-# third-party promise -- but only as intent ("I'll send it"), never as a
-# completed action ("I submitted it") the model cannot actually perform:
-# Claim creation is a separate, claimant-confirmed API call this validator has
-# no visibility into, so a past-tense or present-perfect submission claim is
-# never truthful within this same turn.
-_SUBMISSION_INTENT_VERB = re.compile(
-    r"\b(?:will|(?:i|we)(?:'ll|’ll))\s+(?:\S+\s+){0,2}?(?:submit|send)\b",  # noqa: RUF001
-    re.IGNORECASE,
-)
-
-
-_SERVICE_QUESTION = re.compile(
-    r'\b(?:need|want|like|require)\b[^?]{0,60}\b(?:services?|assistance|help|guidance|support)\b',
-    re.IGNORECASE,
-)
-_OTHER_INSURER = re.compile(
-    r'\b(?:contact|ask|check with|speak (?:to|with)|reach out to|call)\b[^.?!]{0,40}'
-    r'\b(?:your|the)\s+(?:insurer|insurance (?:company|provider))\b',
-    re.IGNORECASE,
-)
-_PROMISED_ANSWER = re.compile(
-    r'\b(?:claims team|team|we|someone|a claims (?:handler|professional))\b[^.?!]{0,30}?'
-    r"(?:\bwill|'ll|’ll)\s+(?:\S+\s+){0,2}?(?:confirm|answer|check|get back|let you know)\b",  # noqa: RUF001
-    re.IGNORECASE,
-)
-_ESCALATION_CLAIM = re.compile(
-    r"\b(?:i|we)(?:'ve|’ve| have)?\s+(?:escalated|referred|passed|flagged|forwarded)\b",  # noqa: RUF001
-    re.IGNORECASE,
-)
+from backend.services.turn_proposal_validation import ValidatedTurn
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +41,9 @@ SOFT_PROBLEMS = frozenset(
 @dataclass(frozen=True, slots=True)
 class ConsistencyReview:
     inconsistencies: tuple[ReplyInconsistency, ...] = field(default_factory=tuple)
+    # False when the review model did not read the words (not configured, or
+    # its call failed); only the structural checks ran.
+    words_reviewed: bool = True
 
     @property
     def consistent(self) -> bool:
@@ -108,15 +76,6 @@ class ConsistencyReview:
                 ),
             }
         }
-
-
-def _service_terms(identity: str) -> set[str]:
-    entry = SERVICE_REGISTRY.get(identity)
-    if entry is None:
-        return {identity.casefold()}
-    name = entry.service_name.casefold()
-    words = {word for word in re.findall(r'[a-z]+', name) if word not in _GENERIC_SERVICE_WORDS}
-    return {name, *words}
 
 
 def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
@@ -171,83 +130,14 @@ def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
 
 
 def review_reply(validated: ValidatedTurn, judge: ReplyJudge | None = None) -> ConsistencyReview:
-    """Compare the reply against the services and claims Runtime accepted."""
+    """Structural checks, plus the review model's reading of the words."""
 
     problems = _structural_problems(validated)
     found = judge.problems(validated) if judge is not None else None
-    if found is not None:
-        problems.extend(ReplyInconsistency(kind=kind, detail=detail) for kind, detail in found)
-        return ConsistencyReview(tuple(problems))
-    problems.extend(_wording_problems(validated))
+    if found is None:
+        return ConsistencyReview(tuple(problems), words_reviewed=False)
+    problems.extend(ReplyInconsistency(kind=kind, detail=detail) for kind, detail in found)
     return ConsistencyReview(tuple(problems))
-
-
-def _wording_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
-    """English patterns used when no review model is available."""
-
-    problems: list[ReplyInconsistency] = []
-    lowered = validated.reply.casefold()
-    for identity in validated.rejected_services:
-        hits = [term for term in _service_terms(identity) if term and term in lowered]
-        if hits:
-            problems.append(
-                ReplyInconsistency(
-                    kind='names_rejected_service',
-                    detail=f'{identity}: {", ".join(sorted(hits))}',
-                )
-            )
-    # An arrangement claim is never true within this turn, offered service or not: the model's
-    # offer_service only creates a pending card, and arranging, booking, approving, completing
-    # or contacting only happens after the claimant grants that card their own consent -- a
-    # separate turn this validator has no visibility into. Submitting the report is the model's
-    # own future job, so "I'll send it" is exempt; a question ("Shall I send it?") asserts
-    # nothing either way.
-    for sentence in re.split(r'(?<=[.!?])\s+', validated.reply.strip()):
-        if sentence.rstrip().endswith('?'):
-            continue
-        match = _EXECUTION_CLAIM.search(sentence)
-        if match is None or _SUBMISSION_INTENT_VERB.search(sentence):
-            continue
-        problems.append(
-            ReplyInconsistency(kind='claims_arrangement_without_service', detail=match.group(0))
-        )
-        break
-    sentences = re.split(r'(?<=[.!?])\s+', validated.reply.strip())
-    if not validated.service_identities:
-        # Services are offered as cards, which are the consent request. Asking in
-        # words ("Do you need any repair services?") promises something no card
-        # backs, and skips the rule that services wait for a confirmed account.
-        for sentence in sentences:
-            if sentence.rstrip().endswith('?') and _SERVICE_QUESTION.search(sentence):
-                problems.append(
-                    ReplyInconsistency(kind='offers_service_in_words', detail=sentence.strip())
-                )
-                break
-    for sentence in sentences:
-        match = _OTHER_INSURER.search(sentence)
-        if match is not None:
-            # Northwind is the claimant's insurer.
-            problems.append(ReplyInconsistency(kind='refers_to_insurer', detail=match.group(0)))
-            break
-    if validated.escalation is None:
-        for sentence in sentences:
-            match = _ESCALATION_CLAIM.search(sentence)
-            if match is not None and not sentence.rstrip().endswith('?'):
-                problems.append(
-                    ReplyInconsistency(kind='claims_escalation_without_one', detail=match.group(0))
-                )
-                break
-    if not validated.northwind_questions:
-        for sentence in sentences:
-            match = _PROMISED_ANSWER.search(sentence)
-            if match is not None and not sentence.rstrip().endswith('?'):
-                problems.append(
-                    ReplyInconsistency(
-                        kind='promises_answer_without_question', detail=match.group(0)
-                    )
-                )
-                break
-    return problems
 
 
 # What the claimant said is recorded from the first answer; a rewrite is asked
