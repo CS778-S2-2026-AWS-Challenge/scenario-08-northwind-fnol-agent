@@ -226,6 +226,7 @@ def test_model_profile_can_change_between_turns_without_new_claim(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_provider='openrouter',
         model_protocol_adapter='openai_compatible',
         model_profile_id='qwen-local',
         model_base_url='http://model.example.test/v1',
@@ -289,6 +290,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_provider='openrouter',
         model_protocol_adapter='openai_compatible',
         model_profile_id='qwen-local',
         model_base_url='http://100.71.25.5:8080/v1',
@@ -372,6 +374,7 @@ def test_model_catalog_filters_unpublished_and_invalid_profiles_before_bootstrap
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_provider='openrouter',
         model_profile_id='qwen-local',
         model_protocol_adapter='openai_compatible',
         model_base_url='http://model.example.test/v1',
@@ -470,7 +473,8 @@ def test_model_catalog_returns_empty_for_controlled_runtime_directly() -> None:
     )
 
     assert model_catalog(request) == []
-    assert select_model_profile(request, 'requested-profile') == 'requested-profile'
+    # The keyword agent calls no model, so its sessions record controlled, not the request.
+    assert select_model_profile(request, 'requested-profile') == 'controlled'
 
 
 def test_model_catalog_raises_when_active_snapshot_is_unavailable() -> None:
@@ -485,6 +489,9 @@ def test_model_catalog_raises_when_active_snapshot_is_unavailable() -> None:
                     environment='test',
                     identity_mode=IdentityMode.DEVELOPER,
                     agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+                    model_protocol_adapter='openai_compatible',
+                    model_profile_id='openrouter-gpt4o-mini',
+                    model_provider='openrouter',
                     model_base_url='http://model.example.test/v1',
                     model_identifier='qwen3.8-27b',
                 ),
@@ -539,6 +546,9 @@ def test_model_catalog_reads_profiles_from_an_active_release_snapshot() -> None:
                     environment='test',
                     identity_mode=IdentityMode.DEVELOPER,
                     agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+                    model_protocol_adapter='openai_compatible',
+                    model_profile_id='openrouter-gpt4o-mini',
+                    model_provider='openrouter',
                     model_base_url='http://model.example.test/v1',
                     model_identifier='qwen3.8-27b',
                 ),
