@@ -573,12 +573,12 @@ return `401`. Logout revokes the server-side session and returns `204`. Account 
 derived from the authenticated principal and never accept a customer identifier in their path
 or payload. The Profile projection contains `legal_name`, optional `preferred_name`, optional
 `date_of_birth`, email, phone, and optional `residential_address`, plus `revision` and
-`updated_at`. `display_name` remains a transitional projection only: it is always derived from
-preferred name when present and otherwise legal name. A legacy PATCH may send `display_name` as
-the legal-name alias; it cannot disagree with `legal_name`. New clients send the projected
-revision in `If-Match`; a stale revision returns `409 REVISION_CONFLICT`.
-Profile text is whitespace-normalized before validation. Blank legal name, compatibility display
-name, preferred name, or residential address returns `422 VALIDATION_ERROR` and does not change
+`updated_at`. `display_name` is a read-only projection: it is always derived from preferred name
+when present and otherwise legal name, and a PATCH that sends it returns `422 VALIDATION_ERROR`.
+The PATCH requires the projected revision in `If-Match`; a missing revision returns
+`409 REVISION_REQUIRED` and a stale one `409 REVISION_CONFLICT`.
+Profile text is whitespace-normalized before validation. Blank legal name, preferred name, or
+residential address returns `422 VALIDATION_ERROR` and does not change
 the stored profile or revision. Email updates are normalized to lowercase, and an email already
 owned by another account returns `409 RESOURCE_CONFLICT` without changing the stored profile or
 revision.
@@ -586,10 +586,9 @@ revision.
 Preferences PATCH accepts the Account projection's revision in `If-Match` and commits the
 communication preferences with a compare-and-set Account write. A stale supplied revision, or a
 repository conflict after the service read, returns retryable `409 REVISION_CONFLICT` with
-`current_revision`; the attempted preferences and Account revision are not committed. During the
-legacy-client transition the header remains optional and an omitted header uses the revision read
-at the start of the request, while still retaining repository compare-and-set protection. New
-clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
+`current_revision`; the attempted preferences and Account revision are not committed. The header
+is required; a request without it returns `409 REVISION_REQUIRED`, so an edit made from a stale
+Account projection is always rejected explicitly.
 
 The `claim_auto_fill_preferences` Account member contains exactly five booleans:
 `personal_details`, `policy_number`, `saved_assets`, `payment_details`, and
@@ -1547,7 +1546,6 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims/{claim_id}/sessions/{session_id}` | Read resumable session state |
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
-| `GET` | `/claims/{claim_id}/sessions/{session_id}/events` | Stream claimant-safe Claim and conversation change notifications |
 | `GET` | `/realtime/events` | Open the claimant's multiplexed durable-event stream |
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
@@ -2098,41 +2096,12 @@ branch evaluation.
 
 Returns claimant-visible messages ordered newest-last by default. Supported query: `before`, `after`, `limit`, and `cursor`. Staff-only notes and hidden system messages are excluded.
 
-### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/events`
-
-Opens a `text/event-stream` connection for the authenticated claimant or the browser's current
-anonymous claimant session. The Claim and session ownership checks are identical to the ordinary
-claimant read boundary. This compatibility route retains `after_revision` and the `claim.updated`
-wire shape for the current claimant client, but its event source is the process-level realtime
-dispatcher. It performs no per-connection repository polling. The server rejects a revision newer
-than the current Claim with `409 INVALID_EVENT_CURSOR` and the current revision. It also accepts an
-opaque durable cursor through `cursor`; `Last-Event-ID` is interpreted as a non-negative legacy
-revision when numeric and as a durable cursor otherwise. The claimant client keeps numeric
-`claim.updated` IDs in `after_revision` and keeps only opaque IDs as durable replay cursors.
-
-When shared Claim State advances, the stream emits `claim.updated`:
-
-```text
-id: 4
-event: claim.updated
-data: {"event_id":"4","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8","claim_revision":4,"resources":["claim","messages"],"emitted_at":"2026-09-03T05:10:00Z"}
-```
-
-This event is a resource hint, not a second Claim projection. It contains no messages, handoff
-packet, internal signals, staff identity, model metadata, or hidden reasoning. After receiving it,
-the claimant client reloads `GET /claims/{claim_id}` and the active session's message list through
-their existing visibility-filtered endpoints. The server sends comment-only keep-alives; clients
-ignore them and reconnect with bounded backoff if the transport closes. This route is a migration
-compatibility boundary, not a second event store.
-
 ### `GET /api/v1/realtime/events`
 
 Opens one claimant-scoped, multiplexed `text/event-stream` for all Claims owned by the
 authenticated customer. `GET /api/v1/workbench/realtime/events` provides the corresponding staff
 stream. Both accept the last acknowledged opaque cursor in `Last-Event-ID` or the `cursor` query
 parameter; the header takes precedence. A connection without a cursor receives future events only.
-The legacy Claim stream above accepts both forms because it carries numeric compatibility
-`claim.updated` events and opaque durable progress events on one connection.
 
 The normal delivery is `resources.changed`:
 
@@ -4767,6 +4736,7 @@ Returns readiness without secrets or private configuration:
 {
   "status": "degraded",
   "checks": {
+    "environment": "test",
     "persistence": "using_fixture",
     "data_runtime_profile": "fixture",
     "object_storage_adapter": "fixture",
@@ -4790,8 +4760,9 @@ reporting `unavailable` makes overall readiness `unavailable`; otherwise the cur
 fixture/model combination remains `degraded`. A fixture is not reported as a real
 connected service.
 
-`data_runtime_profile` and `object_storage_adapter` identify the single selected runtime
-bundle and object-store adapter. They are labels only; connection credentials, endpoints,
+`environment` is the configured `NORTHWIND_ENVIRONMENT`; the Control Plane console preselects it
+as the default environment. `data_runtime_profile` and `object_storage_adapter` identify the
+single selected runtime bundle and object-store adapter. They are labels only; connection credentials, endpoints,
 physical keys, and provider payloads are never returned. A process must report one profile and
 must not combine capabilities from another profile.
 
