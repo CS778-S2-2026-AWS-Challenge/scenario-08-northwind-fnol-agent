@@ -57,7 +57,16 @@ _CONTEXT_RESOLVE_TOOL = ModelTool(
         'properties': {
             'ref': {'type': 'string'},
             'selector': {'type': 'string'},
-            'max_tokens': {'type': 'integer', 'minimum': 1, 'maximum': 600},
+            'max_tokens': {'type': 'integer', 'minimum': 1, 'maximum': 1200},
+            'clause_ids': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'maxItems': 3,
+                'description': (
+                    'Policy clause IDs selected from policy_clause_directory; '
+                    'policy references only.'
+                ),
+            },
         },
     },
 )
@@ -303,6 +312,7 @@ def plan_model_turn(
         reserved_tokens=reserved,
         summary=summary or context.rolling_summary,
         field_contract=field_contract,
+        include_policy_clause_directory=profile.profile_id == 'claimant.lookup.v1',
     )
     recent_history_tokens = next(
         (

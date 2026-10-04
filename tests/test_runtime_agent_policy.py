@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -6,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import IdentityMode, Settings
+from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.core.errors import ApiError
 from backend.domain.configuration import (
     ConfigurationImpact,
@@ -16,10 +17,16 @@ from backend.domain.configuration import (
 )
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
 from backend.domain.models import (
+    ActorReference,
+    ActorType,
     AgentAction,
     Channel,
     CustomerNextStep,
+    FormSource,
+    FormStatus,
+    NeededFor,
     ResponsibleParty,
+    StructuredFormField,
     WorkingClaim,
 )
 from backend.domain.release import ConfigurationReference, ReleaseSetRecord, ReleaseSetState
@@ -205,6 +212,14 @@ class _UnexpectedRetriever:
 
     def search(self, _query: KnowledgeSearch) -> list[KnowledgeChunk]:
         raise AssertionError('Knowledge retrieval must not run when the feature is disabled.')
+
+    def list_clauses(self, _scope: KnowledgeSearch) -> list[KnowledgeChunk]:
+        raise AssertionError('Clause listing requires an enabled, approved knowledge scope.')
+
+    def get_clauses(
+        self, _scope: KnowledgeSearch, _clause_ids: Sequence[str]
+    ) -> list[KnowledgeChunk]:
+        raise AssertionError('Clause retrieval requires an enabled, approved knowledge scope.')
 
 
 def test_agent_configuration_rejects_unregistered_permissions_and_protected_rule_changes() -> None:
@@ -411,8 +426,12 @@ def test_disabled_knowledge_retrieval_returns_unavailable_without_retriever_io()
     assert provider.last_context is not None
     loader = provider.last_context.knowledge_context_loader
     assert loader is not None
-    assert loader(1000) == {
+    assert loader(1000, ['MOTOR-001']) == {
         'status': 'unavailable',
+        'guidance_status': 'unavailable',
+        'requested_clause_ids': ['MOTOR-001'],
+        'returned_clause_ids': [],
+        'not_found': [],
         'chunks': [],
         'limitations': ['Knowledge retrieval is disabled by published configuration.'],
     }
@@ -483,22 +502,47 @@ def test_fixture_active_queries_ignore_historical_published_revisions() -> None:
 
 
 def test_message_turn_persists_exact_release_and_configuration_versions() -> None:
+    from backend.adapters.model_gateway import ModelGatewayRegistry
+    from backend.services.agent import InvariantGuardedAgent
+    from tests.test_agent_context_runtime_v7 import _RecordingGateway
+
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
     release = _release(configurations, releases)
     claims = FixtureRepository()
+    gateways = ModelGatewayRegistry()
+    gateways.register('openai_compatible', lambda _config: _RecordingGateway([]))
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            model_profile_id=_BINDING.profile_id,
+            model_provider=_BINDING.provider,
+            model_protocol_adapter=_BINDING.protocol,
+            model_base_url=_BINDING.base_url,
+            model_identifier=_BINDING.model_identifier,
+            model_runtime_bindings=_BINDINGS,
+        ),
         repository=claims,
         configuration_repository=configurations,
         release_set_repository=releases,
+        model_gateway_registry=gateways,
     )
+    # Exercise API provenance using a deterministic proposal, with the session
+    # still explicitly selecting a model that belongs to this release.
+    app.state.agent_turn_provider = InvariantGuardedAgent(_RecordingAgent('PROVENANCE'))
     headers = {'Authorization': 'Bearer synthetic-claimant'}
     with TestClient(app) as client:
         created = client.post(
             '/api/v1/claims',
             headers={**headers, 'Idempotency-Key': 'runtime-policy-claim'},
-            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+            json={
+                'channel': 'web_agent',
+                'locale': 'en-NZ',
+                'incident_type': 'motor',
+                'model_profile_id': _BINDING.profile_id,
+            },
         )
         assert created.status_code == 201, created.text
         claim = created.json()['claim']
@@ -545,6 +589,16 @@ def test_knowledge_lookup_names_the_product_when_the_manifest_has_no_single_vers
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
         incident_type='home',
+        form={
+            'claim.product_family': StructuredFormField(
+                value='home',
+                source=FormSource.CLAIMANT,
+                status=FormStatus.CONFIRMED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                updated_at=FIXED_TIME,
+                updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+            ),
+        },
         customer_next_step=CustomerNextStep(
             status='describe_incident',
             summary='Describe the incident.',
@@ -555,7 +609,7 @@ def test_knowledge_lookup_names_the_product_when_the_manifest_has_no_single_vers
     )
     grounded = KnowledgeGroundedAgent(_RecordingAgent('VERSION'), _UnexpectedRetriever())
 
-    result = grounded._v7_knowledge_context(
+    scope = grounded._knowledge_scope(
         AgentTurnContext(
             claim=claim,
             session_id='ses_knowledge_version',
@@ -563,11 +617,15 @@ def test_knowledge_lookup_names_the_product_when_the_manifest_has_no_single_vers
             message_text='What does my policy say?',
             evidence_refs=[],
         ),
-        1000,
     )
+    result = grounded._v7_knowledge_context(scope, 1000, ['HOME-001'])
 
     assert result == {
         'status': 'unavailable',
+        'guidance_status': 'unavailable',
+        'requested_clause_ids': ['HOME-001'],
+        'returned_clause_ids': [],
+        'not_found': [],
         'chunks': [],
         'limitations': ['The approved knowledge manifest has no single version for home.'],
     }

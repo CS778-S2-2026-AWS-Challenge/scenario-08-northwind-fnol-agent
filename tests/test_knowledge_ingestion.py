@@ -46,12 +46,12 @@ The schedule supplies the excess.
 
 def source(**changes: object) -> KnowledgeSource:
     value = KnowledgeSource(
-        document_id='nw-motor-2026-1',
-        source_key='knowledge/policies/MVP-2026.1/motor.md',
+        document_id='nw-motor-fixture',
+        source_key='knowledge/policies/fixture-v1/motor.md',
         title='Northwind Motor Policy',
         document_type='synthetic_policy_wording',
-        version='MVP-2026.1',
-        source_uri='northwind://synthetic-policy/motor/MVP-2026.1',
+        version='fixture-v1',
+        source_uri='northwind://synthetic-policy/motor/fixture-v1',
         jurisdiction='NZ',
         insurer='Northwind Insurance',
         product='motor',
@@ -83,13 +83,13 @@ def test_approved_source_is_indexed_once_with_traceable_chunks() -> None:
     assert second.status == 'unchanged'
     assert first.chunk_count == 3
     assert len(store.writes) == 3
-    chunks_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/chunks.jsonl'
+    chunks_key = 'knowledge/indexed/nw-motor-fixture/fixture-v1/chunks.jsonl'
     chunks = [json.loads(line) for line in store.objects[chunks_key].splitlines()]
-    assert chunks[1]['chunk_id'] == 'nw-motor-2026-1#MTR-COV-01'
+    assert chunks[1]['chunk_id'] == 'nw-motor-fixture#MTR-COV-01'
     assert chunks[1]['section_path'] == 'MTR-COV-01 - Collision cover'
     assert chunks[1]['checksum'] == sha256(POLICY).hexdigest()
     assert chunks[1]['jurisdiction'] == 'NZ'
-    state_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/ingestion.json'
+    state_key = 'knowledge/indexed/nw-motor-fixture/fixture-v1/ingestion.json'
     state = json.loads(store.objects[state_key])
     assert len(state['source_metadata_fingerprint']) == 64
     assert state['pipeline_identity'] == INGESTION_PIPELINE_IDENTITY
@@ -197,7 +197,7 @@ def test_changed_content_cannot_replace_an_existing_version() -> None:
     [b'not-json', b'{}', b'{"source_checksum": "value", "chunk_count": 0}'],
 )
 def test_invalid_existing_ingestion_state_fails_closed(invalid_state: bytes) -> None:
-    state_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/ingestion.json'
+    state_key = 'knowledge/indexed/nw-motor-fixture/fixture-v1/ingestion.json'
     store = MemoryObjectStore({source().source_key: POLICY, state_key: invalid_state})
 
     with pytest.raises(KnowledgeIngestionError, match='state is invalid'):
@@ -231,7 +231,7 @@ def test_instruction_looking_source_text_remains_untrusted_document_content() ->
 
     service(store, governed_source).ingest(governed_source)
 
-    chunks_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/chunks.jsonl'
+    chunks_key = 'knowledge/indexed/nw-motor-fixture/fixture-v1/chunks.jsonl'
     chunks = [json.loads(line) for line in store.objects[chunks_key].splitlines()]
     untrusted_chunk = next(chunk for chunk in chunks if chunk['chunk_id'].endswith('MTR-NOT-01'))
     assert injection_text in untrusted_chunk['text']
@@ -252,7 +252,7 @@ def test_governed_metadata_cannot_drift_under_an_existing_version(
 ) -> None:
     store = MemoryObjectStore({source().source_key: POLICY})
     service(store).ingest(source())
-    chunks_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/chunks.jsonl'
+    chunks_key = 'knowledge/indexed/nw-motor-fixture/fixture-v1/chunks.jsonl'
     original_chunks = store.objects[chunks_key]
     original_writes = list(store.writes)
     changed_source = source(**{field: changed_value})

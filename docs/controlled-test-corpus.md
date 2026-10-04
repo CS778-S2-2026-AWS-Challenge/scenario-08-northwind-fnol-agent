@@ -1,5 +1,10 @@
 # Controlled test corpus standard
 
+Current specification schedules name synthetic wording `2026.2` and stable document IDs
+`nw-policy-{product}-standard`. This version pin is a schedule input, not proof that generated
+PDF materials were rebuilt or that a claimant journey passed. Keep previously dated validation
+claims separate from new material generation and selection measurements.
+
 This standard defines what one controlled test pack contains, how its materials are made, labelled
 and checked, and how the corpus is stored, reviewed and frozen. It serves #1117, the controlled
 slice of #1065, and does not cover the blind corpus, test execution or scoring (#1066).
@@ -681,7 +686,7 @@ has its own pytest tests (`tests/corpus/tools/test_fetch_corpus.py`).
     lapsed before that day.
   - Every other quote is valid for 90 days and stays valid until at least 2026-11-30. A run
     with a live clock therefore does not see it as expired and add `evidence_outstanding`.
-  - Every policy period starts on or after 2026-01-01, when wording version MVP-2026.1 takes
+  - Every policy period starts on or after 2026-01-01, when wording version 2026.2 takes
     effect. The wording says it must not be applied when the schedule's period does not match.
   - A weekday written next to a date matches that date.
   - A current period that does not start on an anniversary of the original inception is a warning

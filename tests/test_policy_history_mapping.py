@@ -2,7 +2,52 @@ import datetime
 import json
 from pathlib import Path
 
+import pytest
+
+from backend.adapters.policy_history import MockPolicyHistoryAdapter, map_policy_provider_payload
+from backend.domain.retrieval import PolicySearchRequest
+
 RETRIEVED_AT = datetime.datetime(2026, 8, 17, 0, 15, tzinfo=datetime.UTC)
+
+
+@pytest.mark.parametrize(
+    ('number', 'product', 'alternative_transport'),
+    [
+        ('NW-MTR-204518', 'motor', True),
+        ('NW-MTR-204519', 'motor', False),
+        ('NW-HOM-204518', 'home', False),
+        ('NW-CON-204518', 'contents', False),
+    ],
+)
+def test_knowledge_schedules_keep_product_and_optional_benefit_distinct(
+    number: str,
+    product: str,
+    alternative_transport: bool,
+) -> None:
+    envelope = MockPolicyHistoryAdapter().search_policy(
+        PolicySearchRequest(
+            claim_id='clm_schedule',
+            policy_reference=number,
+        )
+    )
+    result = map_policy_provider_payload(
+        retrieval_id='ret_schedule',
+        claim_id='clm_schedule',
+        envelope=envelope,
+    )
+    assert result.facts.product == product
+    assert ('alternative_transport' in result.facts.coverage_sections) is alternative_transport
+    assert result.uncertainty == []
+
+
+def test_unknown_schedule_does_not_substitute_a_knowledge_fixture() -> None:
+    with pytest.raises(LookupError):
+        MockPolicyHistoryAdapter().search_policy(
+            PolicySearchRequest(
+                claim_id='clm_schedule',
+                policy_reference='NW-UNKNOWN-204518',
+            )
+        )
 
 
 def collect_keys(value: object) -> set[str]:

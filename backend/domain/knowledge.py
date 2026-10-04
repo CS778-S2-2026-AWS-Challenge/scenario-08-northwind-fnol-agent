@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -29,6 +30,21 @@ class KnowledgeChunk:
     checksum: str
     ingested_at: datetime
     text: str
+
+    @property
+    def clause_id(self) -> str | None:
+        """Identify a clause only when its section heading declares its chunk suffix.
+
+        Returns:
+            The explicit section code, or None for introductions and mismatched headings.
+        """
+        code, separator, heading = self.section_path.partition(' - ')
+        _, marker, suffix = self.chunk_id.partition('#')
+        return (
+            code
+            if code.strip() and separator and heading.strip() and marker and code == suffix
+            else None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +99,38 @@ class KnowledgeRetriever(Protocol):
         raise NotImplementedError
 
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
+        raise NotImplementedError
+
+    def list_clauses(self, scope: KnowledgeSearch) -> list[KnowledgeChunk]:
+        """List full clauses inside the exact metadata scope.
+
+        Args:
+            scope: Applicability filters; text and limit are ignored.
+
+        Returns:
+            Applicable chunks without keyword ranking or text truncation.
+
+        Raises:
+            KnowledgeRetrievalUnavailable: The governed index cannot be read safely.
+        """
+        raise NotImplementedError
+
+    def get_clauses(
+        self, scope: KnowledgeSearch, clause_ids: Sequence[str]
+    ) -> list[KnowledgeChunk]:
+        """Read selected clauses without widening their applicability scope.
+
+        Args:
+            scope: Applicability filters; text and limit are ignored.
+            clause_ids: Exact suffixes after '#' in chunk IDs, in requested order.
+
+        Returns:
+            Full chunks in requested order, deduplicated, omitting unknown or
+            out-of-scope IDs.
+
+        Raises:
+            KnowledgeRetrievalUnavailable: The governed index cannot be read safely.
+        """
         raise NotImplementedError
 
 

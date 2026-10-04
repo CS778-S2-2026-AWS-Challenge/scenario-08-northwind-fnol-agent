@@ -1,15 +1,15 @@
 {
   "manifest_version": "1.0",
-  "corpus_id": "northwind-synthetic-policy-mvp-2026-1",
+  "corpus_id": "northwind-synthetic-policy-2026-2",
   "synthetic": true,
   "documents": [
     {
-      "document_id": "nw-policy-motor-standard-mvp-2026-1",
-      "source_key": "knowledge/policies/MVP-2026.1/northwind-motor-standard-policy-mvp-2026.1.md",
+      "document_id": "nw-policy-motor-standard",
+      "source_key": "knowledge/policies/2026.2/northwind-motor-standard-policy-2026.2.md",
       "title": "Northwind Motor Standard Policy",
       "document_type": "synthetic_policy_wording",
-      "version": "MVP-2026.1",
-      "source_uri": "northwind://synthetic-policy/motor/MVP-2026.1",
+      "version": "2026.2",
+      "source_uri": "northwind://synthetic-policy/motor/2026.2",
       "jurisdiction": "NZ",
       "insurer": "Northwind Insurance",
       "product": "motor",
@@ -18,15 +18,15 @@
       "authority": "northwind_synthetic_demo",
       "visibility": "customer_and_staff",
       "publication_status": "approved",
-      "checksum_sha256": "a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989"
+      "checksum_sha256": "efde65a968727e1c71fd8ae116e011afff694f549b3577e45fcf5dd99d9b8cd5"
     },
     {
-      "document_id": "nw-policy-home-standard-mvp-2026-1",
-      "source_key": "knowledge/policies/MVP-2026.1/northwind-home-standard-policy-mvp-2026.1.md",
+      "document_id": "nw-policy-home-standard",
+      "source_key": "knowledge/policies/2026.2/northwind-home-standard-policy-2026.2.md",
       "title": "Northwind Home Standard Policy",
       "document_type": "synthetic_policy_wording",
-      "version": "MVP-2026.1",
-      "source_uri": "northwind://synthetic-policy/home/MVP-2026.1",
+      "version": "2026.2",
+      "source_uri": "northwind://synthetic-policy/home/2026.2",
       "jurisdiction": "NZ",
       "insurer": "Northwind Insurance",
       "product": "home",
@@ -35,15 +35,15 @@
       "authority": "northwind_synthetic_demo",
       "visibility": "customer_and_staff",
       "publication_status": "approved",
-      "checksum_sha256": "1240612470e1ea03800e87fe6f48b24aa895559f9498daaeffd3d3be13c4eea7"
+      "checksum_sha256": "0648f1199100b63c78e95d0abc401e9dac4a7fb202f6187a8d637b49a28025b1"
     },
     {
-      "document_id": "nw-policy-contents-standard-mvp-2026-1",
-      "source_key": "knowledge/policies/MVP-2026.1/northwind-contents-standard-policy-mvp-2026.1.md",
+      "document_id": "nw-policy-contents-standard",
+      "source_key": "knowledge/policies/2026.2/northwind-contents-standard-policy-2026.2.md",
       "title": "Northwind Contents Standard Policy",
       "document_type": "synthetic_policy_wording",
-      "version": "MVP-2026.1",
-      "source_uri": "northwind://synthetic-policy/contents/MVP-2026.1",
+      "version": "2026.2",
+      "source_uri": "northwind://synthetic-policy/contents/2026.2",
       "jurisdiction": "NZ",
       "insurer": "Northwind Insurance",
       "product": "contents",
@@ -52,7 +52,7 @@
       "authority": "northwind_synthetic_demo",
       "visibility": "customer_and_staff",
       "publication_status": "approved",
-      "checksum_sha256": "041fd8fbf9eafaa2cd1ff13e2998c57ee725f5e32bf61c429abfe4272b87cf40"
+      "checksum_sha256": "d94ef0d9bd9870aec8cb7147ebfc9310395fdbcdaf1cc48ca4d40276b811ac21"
     }
   ]
 }

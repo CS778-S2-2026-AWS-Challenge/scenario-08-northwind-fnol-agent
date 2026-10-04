@@ -52,8 +52,8 @@ def test_request_cannot_supply_governed_metadata(tmp_path: Path) -> None:
     path = write_json(
         tmp_path / 'request.json',
         {
-            'document_id': 'nw-motor-2026-1',
-            'version': 'MVP-2026.1',
+            'document_id': 'nw-motor-fixture',
+            'version': '2026.2',
             'publication_status': 'approved',
         },
     )
@@ -64,7 +64,7 @@ def test_request_cannot_supply_governed_metadata(tmp_path: Path) -> None:
 
 def test_unknown_identity_cannot_resolve_from_manifest() -> None:
     with pytest.raises(ValueError, match='not registered'):
-        resolve_source(IngestionRequest('unknown', 'MVP-2026.1'), load_approved_sources())
+        resolve_source(IngestionRequest('unknown', '2026.2'), load_approved_sources())
 
 
 @pytest.mark.parametrize(

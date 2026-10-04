@@ -1859,6 +1859,26 @@ Policy/RAG, claimant-owned Claim history, claimant-scoped Evidence history, and 
 separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one isolated,
 mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
 rejected before Claim State mutation.
+
+For a lookup with a confirmed product family, `policy_clause_directory` lists clause IDs and
+headings from the validated, scope-matching ingested policy. Its status and limitations are
+explicit when the source is unavailable. The turn pins the product, selected version and effective
+instant for both listing and fetching. A release-selected version remains authoritative; without
+one, the manifest must provide exactly one approved product version.
+
+`context.resolve` accepts optional `clause_ids` (at most three strings) for the policy selector
+`matching_facts_and_guidance`. The policy reference allows at most 1,200 tokens. Runtime returns
+the selected clauses in full alongside the separately retrieved schedule; it never substitutes a
+keyword hit for an unknown ID or truncates an exclusion. `approved_guidance.not_found` lists
+unknown or out-of-scope IDs. Empty selection returns `status: no_evidence`,
+`guidance_status: no_clause_selected`, and no chunks. Unavailable sources remain unavailable.
+Structured results that exceed the reference budget are rejected, not silently shortened.
+The model-visible chunk contains its `chunk_id` and complete `text`; Runtime retains the full
+document, version, source URI, checksum, and section provenance server-side for citation checks.
+Empty schedule metadata arrays are omitted from the bounded result. Runtime trace records requested
+and returned clause IDs separately. Only chunks actually returned during this turn authorize
+citations or advisory policy judgments.
+The internal search endpoint and its keyword ranking retain their existing contract.
 For an intake proposal, Runtime compiles one `TurnFieldContract` from the exact branch evaluation
 and Field Registry snapshot used by that turn. Its contract identity, registry version, branch
 revision, allowed field codes, value types, and enum values drive the prompt projection, provider
@@ -4060,9 +4080,9 @@ Request:
   "question": "How much excess do I have to pay?",
   "jurisdiction": "NZ",
   "visibility": "customer_and_staff",
-  "document_id": "nw-policy-motor-standard-mvp-2026-1",
+  "document_id": "nw-policy-motor-standard",
   "authority": "northwind_synthetic_demo",
-  "version": "MVP-2026.1",
+  "version": "2026.2",
   "insurer": "Northwind Insurance",
   "product": "motor",
   "effective_at": "2026-08-25T00:00:00Z",
@@ -4092,13 +4112,13 @@ Response excerpt:
   "errors": [],
   "results": [
     {
-      "document_id": "nw-policy-motor-standard-mvp-2026-1",
-      "chunk_id": "nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01",
+      "document_id": "nw-policy-motor-standard",
+      "chunk_id": "nw-policy-motor-standard#MTR-EXC-01",
       "title": "Northwind Motor Standard Policy",
-      "section_path": "MTR-EXC-01 - Excesses",
-      "source_uri": "northwind://synthetic-policy/motor/MVP-2026.1",
-      "version": "MVP-2026.1",
-      "checksum": "a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989",
+      "section_path": "MTR-EXC-01 - Excess amounts and not-at-fault claims",
+      "source_uri": "northwind://synthetic-policy/motor/2026.2",
+      "version": "2026.2",
+      "checksum": "efde65a968727e1c71fd8ae116e011afff694f549b3577e45fcf5dd99d9b8cd5",
       "text": "The base excess and any driver, age, use, or other additional excess come only from the matching policy schedule."
     }
   ],

@@ -130,6 +130,50 @@ class PolicyHistoryAdapter(Protocol):
 
 
 _FIXTURE_POLICIES: dict[str, dict[str, Any]] = {
+    'NW-MTR-204518': {
+        'policy_reference': 'NW-MTR-204518',
+        'product': 'motor',
+        'status': 'active',
+        'effective_from': '2026-01-01T00:00:00Z',
+        'effective_to': '2027-01-01T00:00:00Z',
+        'excess_amount': 500.0,
+        'currency': 'NZD',
+        'coverage_sections': [
+            'accidental_damage',
+            'third_party_liability',
+            'alternative_transport',
+        ],
+    },
+    'NW-MTR-204519': {
+        'policy_reference': 'NW-MTR-204519',
+        'product': 'motor',
+        'status': 'active',
+        'effective_from': '2026-01-01T00:00:00Z',
+        'effective_to': '2027-01-01T00:00:00Z',
+        'excess_amount': 500.0,
+        'currency': 'NZD',
+        'coverage_sections': ['accidental_damage', 'third_party_liability'],
+    },
+    'NW-HOM-204518': {
+        'policy_reference': 'NW-HOM-204518',
+        'product': 'home',
+        'status': 'active',
+        'effective_from': '2026-01-01T00:00:00Z',
+        'effective_to': '2027-01-01T00:00:00Z',
+        'excess_amount': 750.0,
+        'currency': 'NZD',
+        'coverage_sections': ['building_damage', 'emergency_repairs', 'temporary_accommodation'],
+    },
+    'NW-CON-204518': {
+        'policy_reference': 'NW-CON-204518',
+        'product': 'contents',
+        'status': 'active',
+        'effective_from': '2026-01-01T00:00:00Z',
+        'effective_to': '2027-01-01T00:00:00Z',
+        'excess_amount': 400.0,
+        'currency': 'NZD',
+        'coverage_sections': ['accidental_damage', 'theft', 'temporary_storage'],
+    },
     'synthetic-policy-101': {
         'policy_reference': 'synthetic-policy-101',
         'product': 'motor',

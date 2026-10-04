@@ -208,7 +208,7 @@ class _LookupThenRecall(GatewayAgent):
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         context = replace(
             context,
-            knowledge_context_loader=lambda _limit: {
+            knowledge_context_loader=lambda _limit, _clause_ids: {
                 'status': 'evidence_found',
                 'chunks': [POLICY_CHUNK],
             },
@@ -253,7 +253,7 @@ POLICY_CHUNK = {
     'title': 'Synthetic motor policy wording',
     'section_path': 'MTR-BEN-04',
     'source_uri': 'fixture://hire-car',
-    'version': 'MVP-2026.1',
+    'version': '2026.2',
     'checksum': 'synthetic-hire-car-checksum',
     'text': 'Hire car cover depends on the optional benefits shown on the schedule.',
 }

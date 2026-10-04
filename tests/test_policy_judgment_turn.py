@@ -48,7 +48,7 @@ class GuidanceAgent(GatewayAgent):
             'title': 'Synthetic standard policy guidance',
             'section_path': clause,
             'source_uri': 'fixture://policy-judgment',
-            'version': 'MVP-2026.1',
+            'version': 'fixture-v1',
             'checksum': 'synthetic-policy-checksum',
             'text': 'Staff must review these circumstances against the applicable policy.',
         }
@@ -56,8 +56,11 @@ class GuidanceAgent(GatewayAgent):
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         context = replace(
             context,
-            knowledge_context_loader=lambda _limit: {
+            knowledge_context_loader=lambda _limit, _clause_ids: {
                 'status': 'evidence_found',
+                'guidance_status': 'evidence_found',
+                'returned_clause_ids': [self.chunk['section_path']],
+                'not_found': [],
                 'chunks': [self.chunk],
             },
         )
@@ -90,7 +93,8 @@ class GuidanceAgent(GatewayAgent):
                             arguments={
                                 'ref': reference.ref,
                                 'selector': 'matching_facts_and_guidance',
-                                'max_tokens': 600,
+                                'max_tokens': 1200,
+                                'clause_ids': [self.chunk['section_path']],
                             },
                         )
                     ],

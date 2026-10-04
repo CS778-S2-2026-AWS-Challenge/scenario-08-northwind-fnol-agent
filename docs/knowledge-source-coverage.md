@@ -1,7 +1,7 @@
 # Knowledge Source Coverage
 
-This document is the Sprint 3 P4.1 source coverage record for the Validation
-Prototype. It identifies the governed knowledge available to P4.2 and keeps
+This document records the current 2026.2 synthetic policy corpus for the Validation
+Prototype. It identifies the governed knowledge available to retrieval and keeps
 policy wording, structured customer-policy data, evidence, and privacy
 governance as separate sources.
 
@@ -9,9 +9,9 @@ governance as separate sources.
 
 | Product | Document ID | Version | Source key | Authority | Effective period | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| `motor` | `nw-policy-motor-standard-mvp-2026-1` | `MVP-2026.1` | `knowledge/policies/MVP-2026.1/northwind-motor-standard-policy-mvp-2026.1.md` | `northwind_synthetic_demo` | 2026-01-01 to 2027-01-01 | approved |
-| `home` | `nw-policy-home-standard-mvp-2026-1` | `MVP-2026.1` | `knowledge/policies/MVP-2026.1/northwind-home-standard-policy-mvp-2026.1.md` | `northwind_synthetic_demo` | 2026-01-01 to 2027-01-01 | approved |
-| `contents` | `nw-policy-contents-standard-mvp-2026-1` | `MVP-2026.1` | `knowledge/policies/MVP-2026.1/northwind-contents-standard-policy-mvp-2026.1.md` | `northwind_synthetic_demo` | 2026-01-01 to 2027-01-01 | approved |
+| `motor` | `nw-policy-motor-standard` | `2026.2` | `knowledge/policies/2026.2/northwind-motor-standard-policy-2026.2.md` | `northwind_synthetic_demo` | 2026-01-01 to 2027-01-01 | approved |
+| `home` | `nw-policy-home-standard` | `2026.2` | `knowledge/policies/2026.2/northwind-home-standard-policy-2026.2.md` | `northwind_synthetic_demo` | 2026-01-01 to 2027-01-01 | approved |
+| `contents` | `nw-policy-contents-standard` | `2026.2` | `knowledge/policies/2026.2/northwind-contents-standard-policy-2026.2.md` | `northwind_synthetic_demo` | 2026-01-01 to 2027-01-01 | approved |
 
 The source metadata and expected checksums are maintained in
 [`config/knowledge-sources.json`](../config/knowledge-sources.json). The
@@ -29,7 +29,7 @@ state, checksum, or metadata does not match the manifest.
 | `home` | Building loss, emergency work, temporary accommodation, natural-hazard coordination, occupancy/use and maintenance restrictions | Home policy schedule: address, occupancy, sum insured, excesses, limits, optional benefits, endorsements, period | Contents cover, vehicle cover, or natural-hazard allocation from wording alone |
 | `contents` | Contents loss, theft, temporary removal/storage, specified items, category sublimits, item/security restrictions | Contents policy schedule: address, occupancy, contents sum insured, category sublimits, specified items, excesses, endorsements, period | Building cover, vehicle cover, or an item's category/value from general wording |
 
-The three policy documents share a synthetic MVP version and common authority
+The three policy documents share version 2026.2 and common authority
 boundaries, but they are not interchangeable. The product filter is mandatory.
 The wording alone cannot prove a customer's cover, payable amount, excess, or
 claim outcome.
@@ -95,9 +95,9 @@ No row in this matrix authorises coverage, fraud, liability, approval, rejection
 or payment. Those decisions remain within the Agent Policy and authorised staff
 boundaries.
 
-## Verification Evidence
+## Historical Verification Evidence
 
-The approved corpus checksums match the manifest for all three products. With
+The preceding corpus was checked for all three products. With
 the local `northwind-knowledge` MinIO bucket configured, the repository's
 synthetic evaluation passed all six cases:
 
@@ -110,3 +110,69 @@ The evaluation covers motor and home citations, a contents citation, the
 structured-schedule boundary, wrong-insurer rejection, and untrusted-query
 instruction rejection. This is local synthetic evidence for the Validation
 Prototype, not evidence of a live policy provider or production compliance.
+
+## Current 2026.2 question inventory
+
+This inventory uses the 100 controlled v1 specs (50 motor, 30 home, 20 contents),
+AT scenario claimant messages and the supplied design's starter questions.
+Questions below are normalized evaluation questions, not verbatim quotations.
+`covered` means wording answers the question, including an explicit limitation;
+it never means the claimant's loss is approved. All rows are covered in 2026.2.
+
+### Motor
+
+| Question | Provenance | Expected clause | Boundary |
+| --- | --- | --- | --- |
+| Will you pay for a rental car during repairs? | Design starter | MTR-BEN-03 | Schedule must include alternative_transport |
+| What about windscreen damage and glass excess? | CTL-M-008, 012, 017, 034, 039; starter | MTR-BEN-04 | No automatic excess waiver |
+| The other driver has no insurance; what happens? | CTL-M-026; starter | MTR-COV-03 | Staff determine recovery |
+| Will this affect my no-claims discount? | Design starter | MTR-BEN-05 | Protection not guaranteed |
+| Must I pay excess if not at fault or hit by hail while parked? | CTL-M-048; starter | MTR-EXC-01 | No automatic waiver |
+| What happens if my car is written off? | Design starter | MTR-SET-01 | Staff decide settlement |
+| Are roof boxes, racks or replacement wheels insured? | CTL-M-001, 002, 042, 043 | MTR-COV-04 | Schedule governs accessories |
+| Will you tow my unsafe car? | CTL-M-014, 029-040; starter | MTR-BEN-01 | Schedule limits |
+| What about lost or stolen keys? | Design starter | MTR-BEN-02 | Schedule limits |
+| What wording applies to collision, storm, flood or hail damage? | CTL-M-001-050; AT-01, 14 | MTR-COV-01 | Applicability requires staff |
+| Are tyres or mechanical breakdown included? | CTL-M-029, 030, 042 | MTR-EXC-05 | Ordinary breakdown excluded |
+| Can I report before the Police report or quote arrives? | CTL-M-023, 024; AT-06, 08 | MTR-CLM-01 | Record pending evidence |
+| Who decides responsibility for other-party damage? | CTL-M-015, 019, 021, 028 | MTR-COV-02 | Staff authority |
+
+### Home
+
+| Question | Provenance | Expected clause | Boundary |
+| --- | --- | --- | --- |
+| Can I arrange emergency plumbing or permanent repairs? | CTL-H-001, 004, 006, 014; starter | HOM-BEN-01 | Permanent work needs agreement |
+| Where can I stay if the home is unliveable? | Design starter | HOM-BEN-02 | Schedule limits |
+| Is sudden water damage different from a slow leak? | AT-02, 15; CTL-H-010, 014-018, 024, 028 | HOM-EXC-02, HOM-BEN-03 | Gradual exception needs endorsement |
+| What wording covers storm, flood, fire or burglary? | CTL-H-001-019, 022; starter | HOM-COV-01 | Applicability requires staff |
+| What happens after earthquake damage? | Design starter | HOM-NHZ-01 | Staff determine statutory allocation |
+| Is it too late to report, or must I wait for evidence? | CTL-H-020, 027 | HOM-CLM-01 | No invented reporting deadline |
+| Are fitted cooktops, carpets and heat pumps home or contents? | CTL-H-012, 021, 023, 026, 030 | HOM-DEF-01 | Schedule resolves classification |
+
+### Contents
+
+| Question | Provenance | Expected clause | Boundary |
+| --- | --- | --- | --- |
+| What about belongings stolen from a car or lost while travelling? | Design starter | CON-COV-03 | No automatic away-from-home entitlement |
+| How do I prove ownership without receipts? | CTL-C-012, 016, 017, 020; starter | CON-CLM-01 | Alternative evidence allowed |
+| Must I report theft to Police? | CTL-C-013, 014, 016, 017, 019; starter | CON-COV-02 | Record pending reference |
+| Is there a limit for jewellery or laptops? | CTL-C-001, 008, 012, 019; starter | CON-LIM-01 | Schedule supplies amounts |
+| Is accidental damage while moving covered? | AT-16 | CON-BEN-02 | Location and period conditions |
+| What wording covers accidental damage, fire, water or theft? | CTL-C-001-020 | CON-COV-01 | Applicability requires staff |
+| Are gradual damage or defective workmanship included? | AT-16; starter | CON-EXC-02, CON-EXC-03 | Exclusions differ from resulting loss |
+| Is my e-bike or appliance contents? | CTL-C-004, 011, 013 | CON-DEF-01 | Schedule resolves classification |
+| Will an item be repaired, replaced or paid in cash? | Design settlement boundary | CON-SET-01 | Staff select method |
+
+## Current retirement and measurement boundary
+
+Only 2026.2 is registered in the live manifest. Superseded sources and their
+withdrawn historical manifest are under [archive/knowledge/](archive/knowledge/).
+Existing object-store objects and citations may remain; approved registration
+controls new retrievals and never falls back to those historical objects.
+
+The keyword-search evaluation is not claimant selection evidence. Measure through
+the normal claimant message API, recording requested, fetched and cited IDs per
+inventory question. Report accuracy per product and every miss with the directory
+titles shown. Motor included, absent-from-schedule, no-clause and store-unavailable
+paths require five runs each. Historical results above do not establish that the
+2026.2 real-model scenarios have passed.

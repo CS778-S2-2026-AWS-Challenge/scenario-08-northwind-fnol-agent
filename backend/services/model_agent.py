@@ -1,6 +1,6 @@
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from time import perf_counter
@@ -48,6 +48,7 @@ from backend.domain.models import (
     AgentAction,
     AgentProposalSource,
     CustomerNextStep,
+    FormStatus,
     ModelDecisionProvenance,
     ProposedContentsItem,
     ProposedFormChange,
@@ -776,11 +777,25 @@ class GatewayAgent:
         knowledge_loader = context.knowledge_context_loader
         if knowledge_loader is not None:
 
-            def load_judgment_guidance(max_tokens: int) -> dict[str, object]:
-                result = knowledge_loader(max_tokens)
+            def load_judgment_guidance(
+                max_tokens: int, clause_ids: Sequence[str]
+            ) -> dict[str, object]:
+                result = knowledge_loader(max_tokens, clause_ids)
                 chunks = result.get('chunks')
                 if result.get('status') == 'evidence_found' and isinstance(chunks, list):
                     judgment_sources.extend(dict(item) for item in chunks if isinstance(item, dict))
+                    # Citation provenance stays server-side; the model needs the
+                    # selected clause identity and its complete wording.
+                    return {
+                        'guidance_status': result['guidance_status'],
+                        'returned_clause_ids': result['returned_clause_ids'],
+                        'not_found': result['not_found'],
+                        'chunks': [
+                            {'chunk_id': item['chunk_id'], 'text': item['text']}
+                            for item in chunks
+                            if isinstance(item, dict)
+                        ],
+                    }
                 return result
 
             context = replace(context, knowledge_context_loader=load_judgment_guidance)
@@ -903,6 +918,10 @@ class GatewayAgent:
         tool_call_id: str | None = None
         tool_arguments: dict[str, object] = {}
         tool_output: dict[str, object] = {}
+        if 'policy_clause_directory' in plan.context_plan.inline_context:
+            tool_output['policy_clause_directory'] = plan.context_plan.inline_context[
+                'policy_clause_directory'
+            ]
         response: ModelResponse | None = None
         request_budgets = [plan.request_budget]
         context_sizes = _model_context_size_metrics(context, context_json)
@@ -952,6 +971,7 @@ class GatewayAgent:
                         ref,
                         selector,
                         max_tokens,
+                        clause_ids=cast(Sequence[str], tool_call.arguments.get('clause_ids', [])),
                     )
                 except (KeyError, TypeError, ValueError) as error:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from error
@@ -964,10 +984,25 @@ class GatewayAgent:
                     'actual_tokens': resolved.actual_tokens,
                 }
                 tool_output = {
-                    key: value
-                    for key, value in continuation_tool_output.items()
-                    if key != 'content'
+                    **tool_output,
+                    **{
+                        key: value
+                        for key, value in continuation_tool_output.items()
+                        if key != 'content'
+                    },
                 }
+                if isinstance(resolved.content, dict):
+                    guidance = resolved.content.get('approved_guidance')
+                    if isinstance(guidance, dict):
+                        if 'clause_ids' in tool_arguments:
+                            tool_output['requested_clause_ids'] = tool_arguments['clause_ids']
+                        for key in (
+                            'returned_clause_ids',
+                            'not_found',
+                            'guidance_status',
+                        ):
+                            if key in guidance:
+                                tool_output[key] = guidance[key]
                 continuation_messages = [
                     *messages,
                     ModelMessage(
@@ -1410,11 +1445,7 @@ class KnowledgeGroundedAgent:
         self._knowledge_catalog = knowledge_catalog
         self._runtime_configuration_resolver = runtime_configuration_resolver
 
-    def _v7_knowledge_context(
-        self,
-        context: AgentTurnContext,
-        max_tokens: int,
-    ) -> dict[str, object]:
+    def _knowledge_scope(self, context: AgentTurnContext) -> KnowledgeSearch | dict[str, object]:
         if (
             context.runtime_policy is not None
             and not context.runtime_policy.features.knowledge_retrieval
@@ -1424,7 +1455,12 @@ class KnowledgeGroundedAgent:
                 'chunks': [],
                 'limitations': ['Knowledge retrieval is disabled by published configuration.'],
             }
-        product = _knowledge_product(context.claim.incident_type)
+        family = context.claim.form.get('claim.product_family')
+        product = (
+            _knowledge_product(str(family.value))
+            if family is not None and family.status is FormStatus.CONFIRMED
+            else None
+        )
         if product is None:
             return {
                 'status': 'no_evidence',
@@ -1473,37 +1509,87 @@ class KnowledgeGroundedAgent:
                     f'The approved knowledge manifest has no single version for {product}.'
                 ],
             }
+        return KnowledgeSearch(
+            text='',
+            jurisdiction='NZ',
+            visibility='customer_and_staff',
+            authority='northwind_synthetic_demo',
+            version=knowledge_version,
+            insurer='Northwind Insurance',
+            product=product,
+            effective_at=datetime.now(UTC),
+            limit=3,
+        )
+
+    def _clause_directory(self, scope: KnowledgeSearch | dict[str, object]) -> dict[str, object]:
+        if isinstance(scope, dict):
+            return {
+                'policy_clause_directory': [],
+                'guidance_status': scope['status'],
+                'limitations': scope['limitations'],
+            }
         try:
-            chunks = self._retriever.search(
-                KnowledgeSearch(
-                    text=(context.message_text or '').strip(),
-                    jurisdiction='NZ',
-                    visibility='customer_and_staff',
-                    authority='northwind_synthetic_demo',
-                    version=knowledge_version,
-                    insurer='Northwind Insurance',
-                    product=product,
-                    effective_at=datetime.now(UTC),
-                    limit=3,
-                )
-            )
+            chunks = self._retriever.list_clauses(scope)
         except KnowledgeRetrievalUnavailable:
             return {
+                'policy_clause_directory': [],
+                'guidance_status': 'unavailable',
+                'limitations': ['Approved knowledge retrieval is temporarily unavailable.'],
+            }
+        return {
+            'policy_clause_directory': [
+                {
+                    'clause_id': chunk.clause_id,
+                    'title': chunk.section_path.partition(' - ')[2],
+                }
+                for chunk in chunks
+            ],
+            'guidance_status': 'available' if chunks else 'no_evidence',
+            'limitations': [],
+        }
+
+    def _v7_knowledge_context(
+        self,
+        scope: KnowledgeSearch | dict[str, object],
+        max_tokens: int,
+        clause_ids: Sequence[str],
+    ) -> dict[str, object]:
+        # The resolver enforces the complete structured-result budget. Never cut
+        # a clause: its final sentence can carry an exclusion or schedule condition.
+        del max_tokens
+        requested = list(dict.fromkeys(clause_ids))
+        trace: dict[str, object] = {
+            'requested_clause_ids': requested,
+            'returned_clause_ids': [],
+            'not_found': [],
+        }
+        if isinstance(scope, dict):
+            return {**scope, **trace, 'guidance_status': scope['status']}
+        if not requested:
+            return {
+                **trace,
+                'status': 'no_evidence',
+                'guidance_status': 'no_clause_selected',
+                'chunks': [],
+                'limitations': [],
+            }
+        try:
+            chunks = self._retriever.get_clauses(scope, requested)
+        except KnowledgeRetrievalUnavailable:
+            return {
+                **trace,
                 'status': 'unavailable',
+                'guidance_status': 'unavailable',
                 'chunks': [],
                 'limitations': ['Approved knowledge retrieval is temporarily unavailable.'],
             }
-        if not chunks:
-            return {
-                'status': 'no_evidence',
-                'chunks': [],
-                'limitations': [
-                    'No applicable approved knowledge was found for the supplied scope and date.'
-                ],
-            }
-        max_chars_per_chunk = max(120, max_tokens * 3 // len(chunks))
+        returned = [chunk.clause_id for chunk in chunks]
         return {
-            'status': 'evidence_found',
+            'status': 'evidence_found' if chunks else 'no_evidence',
+            'guidance_status': 'evidence_found' if chunks else 'no_evidence',
+            'requested_clause_ids': requested,
+            'returned_clause_ids': returned,
+            'not_found': [clause_id for clause_id in requested if clause_id not in returned],
             'chunks': [
                 {
                     'document_id': chunk.document_id,
@@ -1513,7 +1599,7 @@ class KnowledgeGroundedAgent:
                     'source_uri': chunk.source_uri,
                     'version': chunk.version,
                     'checksum': chunk.checksum,
-                    'text': chunk.text[:max_chars_per_chunk],
+                    'text': chunk.text,
                 }
                 for chunk in chunks
             ],
@@ -1526,11 +1612,21 @@ class KnowledgeGroundedAgent:
             and context.runtime_policy.instruction.prompt_version == CLAIMANT_V8_PROMPT_ID
         ):
             source_context = context
+            scope: KnowledgeSearch | dict[str, object] | None = None
+
+            def turn_scope() -> KnowledgeSearch | dict[str, object]:
+                nonlocal scope
+                if scope is None:
+                    scope = self._knowledge_scope(source_context)
+                return scope
+
             context = replace(
                 context,
-                knowledge_context_loader=lambda max_tokens: self._v7_knowledge_context(
-                    source_context,
+                knowledge_clause_directory_loader=lambda: self._clause_directory(turn_scope()),
+                knowledge_context_loader=lambda max_tokens, clause_ids: self._v7_knowledge_context(
+                    turn_scope(),
                     max_tokens,
+                    clause_ids,
                 ),
             )
         return self._provider.propose_turn(context)

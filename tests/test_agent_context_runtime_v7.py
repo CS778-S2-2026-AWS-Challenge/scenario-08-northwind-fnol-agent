@@ -62,7 +62,7 @@ from backend.domain.prompt_pack import (
 from backend.services.agent import AgentEvidenceReference, AgentTurnContext
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
-from backend.services.context_resolver import TurnContextResolver
+from backend.services.context_resolver import TurnContextResolver, resolver_for_turn
 from backend.services.isolated_context_executor import _validation_path
 from backend.services.model_agent import GatewayAgent
 from backend.services.model_request_planner import plan_model_turn
@@ -845,6 +845,123 @@ def test_context_reference_resolver_enforces_manifest_selector_and_limit() -> No
     )
     with pytest.raises(ValueError, match='stale'):
         stale.resolve(reference.ref, 'page', 8)
+
+
+@pytest.mark.parametrize('clause_ids', [['a', 'b', 'c', 'd'], [1], 'MOTOR-001', None])
+def test_policy_resolver_rejects_malformed_clause_selection(clause_ids: object) -> None:
+    reference = ContextReference(
+        ref='ctxref:policy',
+        resource_type='policy_version',
+        version='v1',
+        summary='Policy',
+        available_selectors=['clauses'],
+        max_resolve_tokens=1200,
+    )
+    resolver = TurnContextResolver([reference], {(reference.ref, 'clauses'): {}})
+    with pytest.raises(ValueError, match='at most three strings'):
+        resolver.resolve(reference.ref, 'clauses', 1200, clause_ids)  # type: ignore[arg-type]
+
+
+def test_policy_clause_selection_cannot_be_used_on_history_reference() -> None:
+    reference = ContextReference(
+        ref='ctxref:history',
+        resource_type='message_range',
+        version='v1',
+        summary='History',
+        available_selectors=['page'],
+        max_resolve_tokens=600,
+    )
+    resolver = TurnContextResolver([reference], {(reference.ref, 'page'): {}})
+    with pytest.raises(ValueError, match='not permitted'):
+        resolver.resolve(reference.ref, 'page', 600, ['MOTOR-001'])
+
+
+@pytest.mark.parametrize('selected', [[], ['MOTOR-001', 'MOTOR-002']])
+def test_policy_resolver_passes_selection_and_bounded_limit_without_truncation(
+    selected: list[str],
+) -> None:
+    from unittest.mock import Mock
+
+    full_clause = 'A complete policy clause. ' * 80
+    loader = Mock(return_value={'chunks': [{'text': full_clause}]})
+    context = replace(_context('What does my policy say?'), knowledge_context_loader=loader)
+    plan = plan_model_turn(context)
+    assert plan is not None
+    reference = next(
+        ref for ref in plan.context_plan.references if ref.resource_type == 'policy_version'
+    )
+    assert reference.max_resolve_tokens == 1200
+    result = resolver_for_turn(context, plan.context_plan).resolve(
+        reference.ref,
+        'matching_facts_and_guidance',
+        1200,
+        selected,
+    )
+    loader.assert_called_once_with(1200, selected)
+    assert result.content == {'approved_guidance': {'chunks': [{'text': full_clause}]}}
+    assert not result.truncated
+    with pytest.raises(ValueError, match='exceeds'):
+        resolver_for_turn(context, plan.context_plan).resolve(
+            reference.ref,
+            'matching_facts_and_guidance',
+            10,
+            selected,
+        )
+
+
+@pytest.mark.parametrize(
+    ('lookup', 'status', 'directory_status'),
+    [
+        (True, FormStatus.CONFIRMED, 'available'),
+        (True, FormStatus.CONFIRMED, 'unavailable'),
+        (True, FormStatus.PROPOSED, 'available'),
+        (False, FormStatus.CONFIRMED, 'available'),
+    ],
+)
+def test_policy_directory_is_inline_only_for_confirmed_product_lookup(
+    lookup: bool,
+    status: FormStatus,
+    directory_status: str,
+) -> None:
+    from unittest.mock import Mock
+
+    context = _context('What does my policy say?' if lookup else 'My car was rear-ended.')
+    product = StructuredFormField(
+        value='motor',
+        source=FormSource.CLAIMANT,
+        status=status,
+        needed_for=NeededFor.CURRENT_ACTION,
+        updated_at=datetime.now(UTC),
+        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_v7'),
+    )
+    directory = [{'clause_id': 'MOTOR-001', 'title': 'Accidental damage'}]
+    limitations = ['No approved corpus is available.'] if directory_status == 'unavailable' else []
+    loader = Mock(
+        return_value={
+            'policy_clause_directory': directory if directory_status == 'available' else [],
+            'guidance_status': directory_status,
+            'limitations': limitations,
+        }
+    )
+    context = replace(
+        context,
+        claim=context.claim.model_copy(update={'form': {'claim.product_family': product}}),
+        knowledge_clause_directory_loader=loader,
+        knowledge_context_loader=lambda _limit, _ids: {},
+    )
+    plan = plan_model_turn(context)
+    assert plan is not None
+    if lookup and status is FormStatus.CONFIRMED:
+        loader.assert_called_once_with()
+        assert (
+            plan.context_payload['policy_clause_directory']
+            == loader.return_value['policy_clause_directory']
+        )
+        assert plan.context_payload['policy_clause_directory_status'] == directory_status
+        assert plan.context_payload['policy_clause_directory_limitations'] == limitations
+    else:
+        loader.assert_not_called()
+        assert 'policy_clause_directory' not in plan.context_payload
 
 
 def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:

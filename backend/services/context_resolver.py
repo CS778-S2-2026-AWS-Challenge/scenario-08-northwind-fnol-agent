@@ -1,7 +1,7 @@
 """Turn-scoped bounded resolver for v7 Context References."""
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from backend.domain.agent_context_runtime import ContextPlan, ContextReference
@@ -31,25 +31,43 @@ class TurnContextResolver:
         ],
         *,
         expected_version: str | None = None,
+        policy_sources: dict[tuple[str, str], Callable[[int, Sequence[str]], dict[str, object]]]
+        | None = None,
     ) -> None:
         self._references = {item.ref: item for item in references}
         self._sources = dict(sources)
         self._expected_version = expected_version
+        self._policy_sources = dict(policy_sources or {})
 
-    def resolve(self, ref: str, selector: str, max_tokens: int) -> ResolvedContextChunk:
+    def resolve(
+        self, ref: str, selector: str, max_tokens: int, clause_ids: Sequence[str] = ()
+    ) -> ResolvedContextChunk:
         reference = self._references.get(ref)
         if reference is None or selector not in reference.available_selectors:
             raise ValueError('The Context Reference or selector is not permitted for this turn.')
         if self._expected_version is not None and reference.version != self._expected_version:
             raise ValueError('The Context Reference is stale for the current Claim revision.')
+        if (
+            not isinstance(clause_ids, list | tuple)
+            or len(clause_ids) > 3
+            or any(not isinstance(item, str) for item in clause_ids)
+        ):
+            raise ValueError('Policy clause_ids must contain at most three strings.')
+        if clause_ids and reference.resource_type != 'policy_version':
+            raise ValueError('Policy clause_ids are not permitted for this Context Reference.')
         bounded_limit = min(max_tokens, reference.max_resolve_tokens)
         if bounded_limit < 1:
             raise ValueError('A Context Reference resolution requires a positive token limit.')
-        try:
-            source = self._sources[(ref, selector)]
-        except KeyError as error:
-            raise ValueError('The requested Context Reference is unavailable.') from error
-        value = source() if callable(source) else source
+        policy_source = self._policy_sources.get((ref, selector))
+        value: dict[str, object] | str
+        if policy_source is not None:
+            value = policy_source(bounded_limit, clause_ids)
+        else:
+            try:
+                source = self._sources[(ref, selector)]
+            except KeyError as error:
+                raise ValueError('The requested Context Reference is unavailable.') from error
+            value = source() if callable(source) else source
         if isinstance(value, str):
             encoded = value
             max_chars = bounded_limit * 3
@@ -57,16 +75,27 @@ class TurnContextResolver:
             truncated = len(encoded) > max_chars
         else:
             content = value
-            truncated = estimate_tokens(str(value)) > bounded_limit
+            estimated_tokens = estimate_tokens(json.dumps(value, separators=(',', ':')))
+            truncated = estimated_tokens > bounded_limit
             if truncated:
-                raise ValueError('Structured Context Reference content exceeds its bounded result.')
+                raise ValueError(
+                    'Structured Context Reference content exceeds its bounded result: '
+                    f'{estimated_tokens} > {bounded_limit} tokens.'
+                )
         return ResolvedContextChunk(
             ref=ref,
             selector=selector,
             content=content,
             next_cursor=None,
             truncated=truncated,
-            actual_tokens=min(estimate_tokens(str(content)), bounded_limit),
+            actual_tokens=min(
+                estimate_tokens(
+                    content
+                    if isinstance(content, str)
+                    else json.dumps(content, separators=(',', ':'))
+                ),
+                bounded_limit,
+            ),
         )
 
 
@@ -75,6 +104,7 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
         tuple[str, str],
         dict[str, object] | str | Callable[[], dict[str, object] | str],
     ] = {}
+    policy_sources: dict[tuple[str, str], Callable[[int, Sequence[str]], dict[str, object]]] = {}
     visible_messages = [
         item
         for item in context.conversation_messages
@@ -97,7 +127,8 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
         elif reference.resource_type == 'policy_version':
 
             def load_policy_and_guidance(
-                limit: int = reference.max_resolve_tokens,
+                limit: int,
+                clause_ids: Sequence[str],
             ) -> dict[str, object]:
                 if context.progress_reporter is not None:
                     context.progress_reporter(
@@ -106,14 +137,23 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
                     )
                 result: dict[str, object] = {}
                 if context.policy_context_loader is not None:
-                    result['policy'] = context.policy_context_loader(limit)
+                    policy = context.policy_context_loader(limit)
+                    result['policy'] = {
+                        key: value
+                        for key, value in policy.items()
+                        if value is not None and value != []
+                    }
                 if context.knowledge_context_loader is not None:
-                    result['approved_guidance'] = context.knowledge_context_loader(limit)
+                    result['approved_guidance'] = context.knowledge_context_loader(
+                        limit, clause_ids
+                    )
                 if not result:
                     raise ValueError('The policy Context Reference has no authorised source.')
                 return result
 
-            sources[(reference.ref, 'matching_facts_and_guidance')] = load_policy_and_guidance
+            policy_sources[(reference.ref, 'matching_facts_and_guidance')] = (
+                load_policy_and_guidance
+            )
         elif reference.resource_type == 'claim_history':
             if context.claim_history_context_loader is not None:
 
@@ -165,4 +205,5 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
         plan.references,
         sources,
         expected_version=f'claim-revision-{context.claim.revision}',
+        policy_sources=policy_sources,
     )

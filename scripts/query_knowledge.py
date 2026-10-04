@@ -43,7 +43,7 @@ def main() -> None:
             jurisdiction='NZ',
             visibility='customer_and_staff',
             authority='northwind_synthetic_demo',
-            version='MVP-2026.1',
+            version='2026.2',
             insurer='Northwind Insurance',
             product=arguments.product,
             effective_at=datetime.now(UTC),

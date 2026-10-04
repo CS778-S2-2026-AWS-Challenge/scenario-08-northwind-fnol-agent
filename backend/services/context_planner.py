@@ -413,6 +413,7 @@ def plan_context(
     reserved_tokens: int,
     summary: VerifiedConversationSummary | None = None,
     field_contract: TurnFieldContract | None = None,
+    include_policy_clause_directory: bool = False,
 ) -> ContextPlan:
     catalogue, resource_values, summary_state_mismatch = _catalogue(context, route, summary)
     available = max(0, budget_limit - reserved_tokens)
@@ -431,6 +432,17 @@ def plan_context(
         ),
     }
     inline: dict[str, Any] = {'turn_focus': turn_focus}
+    product = context.claim.form.get('claim.product_family')
+    if (
+        include_policy_clause_directory
+        and product is not None
+        and product.status is FormStatus.CONFIRMED
+        and context.knowledge_clause_directory_loader is not None
+    ):
+        directory = context.knowledge_clause_directory_loader()
+        inline['policy_clause_directory'] = directory['policy_clause_directory']
+        inline['policy_clause_directory_status'] = directory['guidance_status']
+        inline['policy_clause_directory_limitations'] = directory['limitations']
     if field_contract is not None:
         # The provider answer sheet is fixed per registry version, so this is
         # where the model learns which fields this turn takes and each enum's
@@ -497,7 +509,7 @@ def plan_context(
                 summary=f'Bounded {entry.resource_id} context is available on demand.',
                 available_selectors=entry.selectors or ['current'],
                 max_resolve_tokens=min(
-                    600,
+                    1200 if resource_type == 'policy_version' else 600,
                     max(1, available - estimate_json_tokens(inline)),
                 ),
             )
