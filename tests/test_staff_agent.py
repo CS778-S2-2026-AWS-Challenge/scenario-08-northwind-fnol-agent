@@ -111,7 +111,11 @@ def _client(
 ) -> TestClient:
     return TestClient(
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+                model_profile_id='openrouter-gpt4o-mini',
+            ),
             repository=repository,
             agent_turn_provider=ControlledAgent(),
             staff_agent_turn_provider=provider,
@@ -214,6 +218,8 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_provider='openrouter',
         model_profile_id='qwen-local',
         model_base_url='http://model.example.test/v1',
         model_identifier='qwen3.8-27b',
@@ -320,6 +326,8 @@ def _model_gateway_runtime_client(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_profile_id='openrouter-gpt4o-mini',
+        model_provider='openrouter',
         model_protocol_adapter='test_gateway',
         model_base_url='https://model.example.test/v1',
         model_identifier='test-model',

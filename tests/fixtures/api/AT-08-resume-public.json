@@ -65,6 +65,7 @@
     "session_id": "ses_fixture_at08_resume",
     "claim_id": "clm_fixture_at08",
     "status": "active",
+    "model_profile_id": "openrouter-gpt4o-mini",
     "resume": {
       "summary": "Rear-end collision in Newmarket; incident and location are confirmed.",
       "unresolved_questions": [

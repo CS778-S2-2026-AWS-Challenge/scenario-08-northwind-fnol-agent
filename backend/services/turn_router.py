@@ -4,6 +4,7 @@ import re
 
 from backend.domain.agent_context_runtime import TurnIntent, TurnRoute, TurnTask
 from backend.services.agent import AgentTurnContext
+from backend.services.model_profiles import CONTROLLED_MODEL_PROFILE_ID
 from backend.services.turn_family_resolution import resolve_turn_family
 
 _CORRECTION = re.compile(
@@ -44,7 +45,8 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
     # Routing also serves deterministic deployments whose policy release has no
     # model binding. Only a v8 instruction can require model-owned family routing;
     # model execution still validates its selected binding in the request planner.
-    inspect_model = (
+    # A keyword-agent session (``controlled``) calls no model, so there is no binding to read.
+    inspect_model = context.model_profile_id not in {None, CONTROLLED_MODEL_PROFILE_ID} and (
         context.runtime_policy is None
         or context.runtime_policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
     )

@@ -186,6 +186,26 @@ def select_model_profile(request: object, requested: str | None) -> str:
     return selected
 
 
+def select_staff_model_profile(request: object, requested: str | None) -> str:
+    """Select the staff assistant's profile; the assistant always calls a model.
+
+    Without the model gateway there is no published catalogue to check, so the request or the
+    configured MODEL_PROFILE_ID is used as given; with neither, there is no staff model.
+    """
+    settings: Settings = request.app.state.settings  # type: ignore[attr-defined]
+    if settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
+        return select_model_profile(request, requested)
+    selected = requested or settings.model_profile_id
+    if not selected:
+        raise ApiError(
+            status_code=422,
+            code='MODEL_PROFILE_UNAVAILABLE',
+            message='No model profile is deployed for the staff assistant in this Runtime.',
+            retryable=False,
+        )
+    return selected
+
+
 def model_configuration(request: object, profile_id: str) -> ModelRuntimeConfiguration | None:
     """Return one published profile after applying the same catalog boundary."""
     for record in model_catalog(request):
