@@ -612,8 +612,44 @@ export function startClaimSession({ claimId, intent = 'new', idempotencyKey = re
   })
 }
 
-export function getClaimMessages(claimId, sessionId) {
-  return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/messages?limit=100`)
+async function getAllClaimMessagePages(pathForCursor, { signal } = {}) {
+  const messagesById = new Map()
+  const seenCursors = new Set()
+  let cursor
+
+  do {
+    const params = new URLSearchParams({ limit: '100' })
+    if (cursor) params.set('cursor', cursor)
+    const response = await apiRequest(pathForCursor(params), { signal })
+    for (const message of response.items) messagesById.set(message.message_id, message)
+    const nextCursor = response.page?.next_cursor || null
+    if (nextCursor && seenCursors.has(nextCursor)) {
+      throw new ApiRequestError(
+        'Northwind returned an invalid conversation-history page. Try opening the conversation again.',
+        { code: 'INVALID_PAGINATION', retryable: true },
+      )
+    }
+    if (nextCursor) seenCursors.add(nextCursor)
+    cursor = nextCursor
+  } while (cursor)
+
+  return { items: [...messagesById.values()], page: { next_cursor: null } }
+}
+
+export async function getClaimMessages(claimId, sessionId, { signal } = {}) {
+  try {
+    return await getAllClaimMessagePages(
+      (params) => `/api/v1/claims/${claimId}/messages?${params}`,
+      { signal },
+    )
+  } catch (error) {
+    const claimWideRouteIsUnavailable = error instanceof ApiRequestError && error.status === 404
+    if (!claimWideRouteIsUnavailable || !sessionId) throw error
+    return getAllClaimMessagePages(
+      (params) => `/api/v1/claims/${claimId}/sessions/${sessionId}/messages?${params}`,
+      { signal },
+    )
+  }
 }
 
 

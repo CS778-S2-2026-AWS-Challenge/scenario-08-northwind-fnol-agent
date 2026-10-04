@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { historyClaimIdFromPath, pageForPath, routeForPage } from './appRoutes.js'
+import {
+  historyClaimIdFromPath,
+  pageForPath,
+  routeForPage,
+  workspaceClaimIdFromPath,
+} from './appRoutes.js'
 
 describe('claimant app routes', () => {
   it.each([
@@ -26,6 +31,12 @@ describe('claimant app routes', () => {
     expect(historyClaimIdFromPath('/claims/clm_1')).toBeNull()
     expect(routeForPage('claim-messages', { historyClaimId: 'clm/a' })).toBe('/account/claims/clm%2Fa/messages')
     expect(routeForPage('claim-evidence', { historyClaimId: 'clm/a' })).toBe('/account/claims/clm%2Fa/evidence')
+  })
+
+  it('reads the main workspace Claim id without confusing account routes', () => {
+    expect(workspaceClaimIdFromPath('/claims/clm%2Fa')).toBe('clm/a')
+    expect(workspaceClaimIdFromPath('/claims/new')).toBeNull()
+    expect(workspaceClaimIdFromPath('/account/claims/clm_1/messages')).toBeNull()
   })
 
   it('routes home to the start page or the open conversation', () => {
