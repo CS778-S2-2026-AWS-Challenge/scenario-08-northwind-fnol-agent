@@ -100,6 +100,10 @@ explicit so they are not lost when an agent follows only the entry point:
 - **Workflow changes require governance:** agents generally MUST NOT create a new GitHub Actions
   workflow on their own. If a new workflow is genuinely necessary, request Code Owner agreement in
   a Discussion before changing `.github/`; the protected-path review requirement still applies.
+- **No fallbacks, archived versions, bounded compatibility:** a missing runtime setting, profile,
+  or version stops the run instead of selecting a default; a superseded versioned artefact moves to
+  `docs/archive/` and nothing references it; an alias or legacy path needs a named caller and a
+  removal date. See `backend-design.md` section 12.7 in the governance skill.
 - **Temporary validation files stay local:** fixtures and tests created only while implementing a
   single feature for the author's self-validation must not be committed. A fixture or test may be
   committed only when it comes from an explicit design task, has a documented long-term purpose,

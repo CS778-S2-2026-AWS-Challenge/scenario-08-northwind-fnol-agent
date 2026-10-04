@@ -1,7 +1,8 @@
 # §12 Backend design standards
 
 This file defines API design, triggered enterprise fallbacks, architecture,
-data modeling, and code style for the backend.
+data modeling, and code style for the backend. Section 12.7 applies to every
+runtime path in the repository, including the clients and scripts.
 
 ## 12.0 Scope of effect
 
@@ -225,6 +226,29 @@ The Google Python guide's "do not use assert for runtime validation" rule is
   access.
 - Keep claim operations and system administration on separate permission and
   API surfaces. Never return full secret values to the browser.
+
+## 12.7 No default fallbacks, superseded artefacts, or open-ended compatibility layers
+
+These rules apply to the backend, the three clients, and the scripts.
+
+1. **No default fallback.** A setting, profile, prompt version, or data source
+   that selects runtime behaviour is required; when it is missing, startup or
+   the request fails with an error that names it. Code must not substitute a
+   default value, an older version, or a second source so that the run
+   continues. A client renders what the server projects and does not compute
+   a replacement when the projection is missing; the server guarantees the
+   projection instead. Test doubles (developer identity, fixture data) start
+   only in the test environment.
+2. **Superseded versioned artefacts are archived.** When a prompt, schema,
+   binding, or other versioned artefact is replaced, the old version moves
+   under `docs/archive/` in the same PR, and no runtime code, configuration,
+   or test may reference it, not even as a fallback. Only the current version
+   is registered.
+3. **Compatibility layers need a named caller and a removal date.** An alias,
+   translation table, legacy endpoint, or old field name may be added only
+   with a comment that names the caller still producing the old form and the
+   date or issue after which it is removed. A layer whose producer is gone is
+   deleted, together with its tests.
 
 ## §12 References
 
