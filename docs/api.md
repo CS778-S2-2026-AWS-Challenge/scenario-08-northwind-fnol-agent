@@ -79,10 +79,9 @@ token; only its hash, staff ID, creation time, expiry, and revocation state are 
 routes, and a staff session cannot cross into claimant account routes.
 
 Normal-mode local runtimes use the separate SQLite staff identity adapter configured by
-`NORTHWIND_STAFF_IDENTITY_DB_PATH`. Every start provisions the accounts listed in
-`config/staff-seed.json` with `NORTHWIND_STAFF_SEED_PASSWORD` (required; an existing seeded
-account is reset to it) and prints each email and the password; the database stores only the
-salted hash. This is a
+`NORTHWIND_STAFF_IDENTITY_DB_PATH`. Every start provisions the accounts and the shared password
+listed in `config/staff-seed.json` (an existing seeded account is reset to them) and prints each
+email and the password; the database stores only the salted hash. This is a
 real persistent local login path, but it is not an enterprise IdP, SSO, MFA, or recovery
 implementation. Production deployment still requires an approved identity provider adapter.
 

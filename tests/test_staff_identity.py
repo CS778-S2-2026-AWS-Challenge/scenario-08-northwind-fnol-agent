@@ -16,7 +16,7 @@ def _client(tmp_path: Path) -> TestClient:
                 identity_mode=IdentityMode.NORMAL,
                 identity_db_path=str(tmp_path / 'claimant.sqlite3'),
                 staff_identity_db_path=str(tmp_path / 'staff.sqlite3'),
-                staff_seed_password='strong-staff-password',
+                staff_seed_path='config/staff-seed.json',
             )
         )
     )
@@ -26,7 +26,7 @@ def test_staff_login_uses_an_independent_persistent_identity_boundary(tmp_path: 
     with _client(tmp_path) as client:
         login = client.post(
             '/api/v1/staff/auth/sessions',
-            json={'email': 'claims.one@northwind.test', 'password': 'strong-staff-password'},
+            json={'email': 'ysoseri1224@northwind.test', 'password': 'Northwind'},
         )
 
         assert login.status_code == 201
@@ -44,8 +44,8 @@ def test_staff_login_uses_an_independent_persistent_identity_boundary(tmp_path: 
         assert profile.status_code == 200
         assert profile.json() == {
             'staff_id': payload['staff_id'],
-            'display_name': 'Claims Professional One',
-            'email': 'claims.one@northwind.test',
+            'display_name': 'Ysoseri1224',
+            'email': 'ysoseri1224@northwind.test',
             'roles': ['claims_professional'],
             'development_identity': False,
         }
@@ -63,7 +63,7 @@ def test_staff_login_rejects_unknown_credentials(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         response = client.post(
             '/api/v1/staff/auth/sessions',
-            json={'email': 'claims.one@northwind.test', 'password': 'incorrect-password'},
+            json={'email': 'ysoseri1224@northwind.test', 'password': 'incorrect-password'},
         )
 
     assert response.status_code == 401
@@ -77,18 +77,7 @@ def test_every_start_prints_each_seeded_account_with_its_password(
         pass
 
     banner = capsys.readouterr().out
-    for account in load_staff_seed('config/staff-seed.json'):
+    seed = load_staff_seed('config/staff-seed.json')
+    for account in seed.accounts:
         assert account.email in banner
-    assert 'password: strong-staff-password' in banner
-
-
-def test_normal_identity_refuses_to_start_without_the_seed_password(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv('NORTHWIND_ENVIRONMENT', 'test')
-    monkeypatch.setenv('NORTHWIND_IDENTITY_MODE', 'normal')
-    monkeypatch.setenv('DATA_RUNTIME_PROFILE', 'fixture')
-    monkeypatch.delenv('NORTHWIND_STAFF_SEED_PASSWORD', raising=False)
-
-    with pytest.raises(ValueError, match='NORTHWIND_STAFF_SEED_PASSWORD is required'):
-        create_app()
+    assert 'password: Northwind' in banner

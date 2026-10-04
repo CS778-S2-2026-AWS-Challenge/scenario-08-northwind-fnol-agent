@@ -148,10 +148,9 @@ Options: `-BackendOnly` starts only MongoDB/MinIO/backend and skips all three fr
 `-BackendPort` / `-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process.
 `-ReadyTimeoutSeconds` extends the readiness wait on a slow machine.
 
-Workbench accounts: the accounts in `config/staff-seed.json` are provisioned at every start
-with `NORTHWIND_STAFF_SEED_PASSWORD`. The launcher takes it from the shell or `.env`, generates
-one into `.env` when neither has it, and prints every account email and the password in its
-final report. The backend refuses to start in normal identity mode without it.
+Workbench accounts: one per team member, `<GitHub name>@northwind.test` with the password
+`Northwind`, listed in `config/staff-seed.json`. The backend provisions them at every start and
+prints them; the launcher repeats them in its final report.
 
 The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
 ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
@@ -333,9 +332,9 @@ and atomic timeout, malformed, incomplete, and unauthorised-output failures. Thi
 transport is repeatable contract evidence, not a live-provider claim; a live run additionally
 requires an approved endpoint and secret supplied through the documented model environment.
 
-For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin,
-the Workbench seed password, and optional model configuration through the process environment,
-then start the explicit Compose profile:
+For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin
+and optional model configuration through the process environment, then start the explicit Compose
+profile:
 
 ```powershell
 docker compose --profile vp up -d --build

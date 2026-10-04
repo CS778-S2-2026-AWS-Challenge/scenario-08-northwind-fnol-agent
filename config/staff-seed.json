@@ -1,12 +1,30 @@
-[
-  {
-    "email": "claims.one@northwind.test",
-    "display_name": "Claims Professional One",
-    "roles": ["claims_professional"]
-  },
-  {
-    "email": "claims.two@northwind.test",
-    "display_name": "Claims Professional Two",
-    "roles": ["claims_professional"]
-  }
-]
+{
+  "password": "Northwind",
+  "accounts": [
+    {
+      "email": "Ysoseri1224@northwind.test",
+      "display_name": "Ysoseri1224",
+      "roles": ["claims_professional"]
+    },
+    {
+      "email": "liyang6620@northwind.test",
+      "display_name": "liyang6620",
+      "roles": ["claims_professional"]
+    },
+    {
+      "email": "LLL263@northwind.test",
+      "display_name": "LLL263",
+      "roles": ["claims_professional"]
+    },
+    {
+      "email": "jxu316-arch@northwind.test",
+      "display_name": "jxu316-arch",
+      "roles": ["claims_professional"]
+    },
+    {
+      "email": "bdfa123@northwind.test",
+      "display_name": "bdfa123",
+      "roles": ["claims_professional"]
+    }
+  ]
+}

@@ -93,7 +93,6 @@ services:
       NORTHWIND_IDENTITY_DB_PATH: /var/lib/northwind/claimant-identity.sqlite3
       NORTHWIND_STAFF_IDENTITY_DB_PATH: /var/lib/northwind/staff-identity.sqlite3
       NORTHWIND_CONTROL_PLANE_DB_PATH: /var/lib/northwind/control-plane.sqlite3
-      NORTHWIND_STAFF_SEED_PASSWORD: ${NORTHWIND_STAFF_SEED_PASSWORD:-}
       DATA_RUNTIME_PROFILE: local_mvp
       NORTHWIND_MONGODB_URI: mongodb://mongodb:27017/?directConnection=true&replicaSet=rs0
       NORTHWIND_MONGODB_DATABASE: northwind_fnol

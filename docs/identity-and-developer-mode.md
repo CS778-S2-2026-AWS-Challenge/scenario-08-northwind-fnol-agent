@@ -82,9 +82,9 @@ It stores staff accounts and revocable session hashes in a dedicated SQLite data
 from claimant accounts and claimant sessions. The staff login route returns an opaque token once;
 the server resolves it to a provider-neutral `staff` principal with the Workbench scopes.
 
-Staff accounts are seeded, not managed: `config/staff-seed.json` lists them, and every start
-provisions each one with the required `NORTHWIND_STAFF_SEED_PASSWORD` (resetting an existing
-seeded account) and prints its email and the password. Only the salted scrypt password hash is
+Staff accounts are seeded, not managed: `config/staff-seed.json` lists them with one shared
+password, and every start provisions each one (resetting an existing seeded account) and prints
+its email and the password. Only the salted scrypt password hash is
 persisted. The Control Plane is a configuration aid and does not create or edit staff accounts.
 
 Developer mode instead provides one isolated fixture staff account and still accepts the bounded

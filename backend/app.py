@@ -305,17 +305,13 @@ def create_app(
     elif resolved_settings.developer_mode:
         app.state.staff_identity_repository = FixtureStaffIdentityRepository()
     else:
-        if settings is None and not resolved_settings.staff_seed_password:
-            # Staff cannot register and nobody manages accounts in the Control Plane: without
-            # the seeded accounts the Workbench cannot be signed into.
-            raise ValueError(
-                'NORTHWIND_STAFF_SEED_PASSWORD is required to provision the Workbench accounts.'
-            )
         staff_repository = SQLiteStaffIdentityRepository(resolved_settings.staff_identity_db_path)
-        if resolved_settings.staff_seed_password:
+        if resolved_settings.staff_seed_path:
+            # Staff cannot register and nobody manages accounts in the Control Plane: the
+            # seeded accounts are how the Workbench is signed into.
             seed = load_staff_seed(resolved_settings.staff_seed_path)
-            provision_staff_seed(staff_repository, seed, resolved_settings.staff_seed_password)
-            print(staff_seed_banner(seed, resolved_settings.staff_seed_password), flush=True)
+            provision_staff_seed(staff_repository, seed)
+            print(staff_seed_banner(seed), flush=True)
         app.state.staff_identity_repository = staff_repository
     app.state.configuration_repository = resolved_configuration_repository
     app.state.integration_health_repository = integration_health_repository or (

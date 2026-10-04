@@ -227,7 +227,6 @@ foreach ($name in $storageEnv.Keys) { $backendEnv[$name] = $storageEnv[$name] }
 # -Environment would otherwise still let this process inherit from this shell's own $env:.
 $ingestionEnv = $storageEnv.Clone()
 $ingestionEnv.NORTHWIND_SECRETS_TOKEN = $null
-$ingestionEnv.NORTHWIND_STAFF_SEED_PASSWORD = $null
 foreach ($name in $modelSecretNames) { $ingestionEnv[$name] = $null }
 Invoke-TrackedStep 'knowledge source upload' `
     -ArgumentList @('-3.12', 'scripts/upload_knowledge_sources.py', 'config/knowledge-source-corpus') `
@@ -274,21 +273,9 @@ $backendEnv.TURN_TIME_LIMIT_SECONDS = '40'
 # against what the turn actually did. Left empty, replies are shown unreviewed.
 $backendEnv.REPLY_JUDGE_MODEL = 'anthropic/claude-haiku-4.5'
 
-# Workbench accounts (config/staff-seed.json) are provisioned at every start with one password.
-# Take it from this shell, then from .env; generate one into .env when neither has it, so the
-# accounts keep the same password across runs. It is backend-only, like the model credentials.
-$seedPassword = $env:NORTHWIND_STAFF_SEED_PASSWORD
-if (-not $seedPassword -and (Test-Path '.env')) {
-    $seedLine = Get-Content '.env' | Where-Object { $_ -match '^NORTHWIND_STAFF_SEED_PASSWORD=.+' } | Select-Object -First 1
-    if ($seedLine) { $seedPassword = $seedLine.Substring('NORTHWIND_STAFF_SEED_PASSWORD='.Length).Trim() }
-}
-if (-not $seedPassword) {
-    $seedPassword = 'Northwind-' + [guid]::NewGuid().ToString('N').Substring(0, 16)
-    Add-Content -Path '.env' -Value "NORTHWIND_STAFF_SEED_PASSWORD=$seedPassword"
-}
-$backendEnv.NORTHWIND_STAFF_SEED_PASSWORD = $seedPassword
-$frontendEnv.NORTHWIND_STAFF_SEED_PASSWORD = $null
-$staffAccounts = (Get-Content 'config/staff-seed.json' -Raw | ConvertFrom-Json).email -join ', '
+# The backend provisions the Workbench accounts in config/staff-seed.json at every start;
+# the final report repeats them, since the backend runs hidden.
+$staffSeed = Get-Content 'config/staff-seed.json' -Raw | ConvertFrom-Json
 
 # 6. Start the backend. The log config prints the structured diagnostic fields the runtime
 #    attaches to model-turn events, which is what you want to see while testing a journey.
@@ -332,8 +319,8 @@ try {
 
     $report = [ordered]@{
         Backend           = "$readyUrl (ready, PID $($backend.Id))"
-        WorkbenchAccounts = $staffAccounts
-        WorkbenchPassword = $seedPassword
+        WorkbenchAccounts = $staffSeed.accounts.email -join ', '
+        WorkbenchPassword = $staffSeed.password
     }
 
     if ($BackendOnly) {
