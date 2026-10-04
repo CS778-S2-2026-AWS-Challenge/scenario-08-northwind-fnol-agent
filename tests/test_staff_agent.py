@@ -111,7 +111,11 @@ def _client(
 ) -> TestClient:
     return TestClient(
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+                model_profile_id='openrouter-gpt4o-mini',
+            ),
             repository=repository,
             agent_turn_provider=ControlledAgent(),
             staff_agent_turn_provider=provider,

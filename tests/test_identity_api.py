@@ -104,6 +104,8 @@ def test_claim_capabilities_exposes_configured_model_profile() -> None:
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_profile_id='openrouter-gpt4o-mini',
+        model_provider='openrouter',
         model_identifier='gpt54-mini',
         model_protocol_adapter='openai_compatible',
         model_base_url='https://model.example.invalid',

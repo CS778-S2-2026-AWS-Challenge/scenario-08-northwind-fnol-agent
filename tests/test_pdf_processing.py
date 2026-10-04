@@ -34,10 +34,12 @@ from backend.services.evidence import (
     reserve_evidence_processing,
 )
 from backend.services.pdf_processing import (
-    PDF_MODEL_PROFILE_ID,
     PDF_PROCESSING_PROMPT_VERSION,
     PdfEvidenceProcessor,
 )
+
+# The governed OpenRouter GPT-4o profile these tests configure for PDF reading.
+PDF_PROFILE = 'openrouter-gpt4o-mini'
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 PDF = b'%PDF-1.4\nNorthwind simulated police reference NZP-1042\n%%EOF\n'
@@ -132,7 +134,7 @@ def _processor(
         resolvers.append(resolver)
         return gateway
 
-    return PdfEvidenceProcessor(repository, storage, factory), resolvers
+    return PdfEvidenceProcessor(repository, storage, factory, PDF_PROFILE), resolvers
 
 
 def _evidence(repository: FixtureRepository, claim_id: str, evidence_id: str) -> Any:
@@ -182,7 +184,7 @@ def test_pdf_processing_proposes_registered_fact_with_bounded_provenance() -> No
     assert proposal.status.value == 'proposed'
     assert proposal.source.value == 'document'
     assert proposal.source_refs == [evidence_id, f'evidence:{evidence_id}:material:1']
-    assert stored.provenance['processing_model_profile_id'] == PDF_MODEL_PROFILE_ID
+    assert stored.provenance['processing_model_profile_id'] == PDF_PROFILE
     assert stored.provenance['processing_prompt_version'] == PDF_PROCESSING_PROMPT_VERSION
     assert stored.provenance['processing_provider_model'] == 'openai/gpt-4o'
     assert stored.provenance['processing_provider_request_id'] == 'provider-request-1'
@@ -516,7 +518,9 @@ def test_persistent_model_runtime_composes_and_runs_one_pdf_worker(
             data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,
             agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
             model_base_url='https://openrouter.example/v1',
-            model_profile_id=PDF_MODEL_PROFILE_ID,
+            model_profile_id=PDF_PROFILE,
+            pdf_model_profile_id=PDF_PROFILE,
+            model_protocol_adapter='openai_compatible',
             model_provider='openrouter',
             model_identifier='openai/gpt-4o',
             model_supports_document_input=True,

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -265,27 +266,42 @@ def test_model_binding_manifest_rejects_a_missing_private_endpoint(
         Settings.from_environment()
 
 
+# The model settings Settings requires with the model gateway, which it no longer defaults.
+_MODEL_GATEWAY: dict[str, Any] = {
+    'agent_runtime_profile': AgentRuntimeProfile.MODEL_GATEWAY,
+    'model_protocol_adapter': 'openai_compatible',
+    'model_profile_id': 'local-agent-turn',
+    'model_provider': 'local-runtime',
+}
+
+
 def test_model_gateway_runtime_requires_endpoint_and_model() -> None:
     with pytest.raises(ValueError, match='MODEL_BASE_URL'):
-        Settings(agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY)
+        Settings(**_MODEL_GATEWAY)
 
 
 def test_model_gateway_runtime_requires_adapter_model_and_positive_timeout() -> None:
     with pytest.raises(ValueError, match='MODEL_PROTOCOL_ADAPTER'):
         Settings(
-            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
-            model_protocol_adapter='',
+            **{**_MODEL_GATEWAY, 'model_protocol_adapter': ''},
             model_base_url='http://127.0.0.1:11434/v1',
             model_identifier='local-model',
         )
+    for missing in ('model_profile_id', 'model_provider'):
+        with pytest.raises(ValueError, match=missing.upper()):
+            Settings(
+                **{**_MODEL_GATEWAY, missing: ''},
+                model_base_url='http://127.0.0.1:11434/v1',
+                model_identifier='local-model',
+            )
     with pytest.raises(ValueError, match='MODEL_IDENTIFIER'):
         Settings(
-            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            **_MODEL_GATEWAY,
             model_base_url='http://127.0.0.1:11434/v1',
         )
     with pytest.raises(ValueError, match='MODEL_TIMEOUT_SECONDS'):
         Settings(
-            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            **_MODEL_GATEWAY,
             model_base_url='http://127.0.0.1:11434/v1',
             model_identifier='local-model',
             model_timeout_seconds=0,
@@ -295,7 +311,7 @@ def test_model_gateway_runtime_requires_adapter_model_and_positive_timeout() -> 
 def test_model_gateway_runtime_rejects_unknown_evaluation_status() -> None:
     with pytest.raises(ValueError, match='MODEL_EVALUATION_STATUS'):
         Settings(
-            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            **_MODEL_GATEWAY,
             model_base_url='http://127.0.0.1:11434/v1',
             model_identifier='local-model',
             model_evaluation_status='untested',

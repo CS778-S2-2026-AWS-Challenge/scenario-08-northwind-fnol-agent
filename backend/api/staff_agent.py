@@ -23,7 +23,7 @@ from backend.services.model_profiles import (
     default_model_profile_id,
     model_catalog,
     model_runtime_status,
-    select_model_profile,
+    select_staff_model_profile,
 )
 from backend.services.staff_agent import (
     StaffAgentTurnProvider,
@@ -103,7 +103,7 @@ def create_session(
         repository_for(request),
         principal,
         payload,
-        model_profile_selector=lambda requested: select_model_profile(request, requested),
+        model_profile_selector=lambda requested: select_staff_model_profile(request, requested),
     )
 
 

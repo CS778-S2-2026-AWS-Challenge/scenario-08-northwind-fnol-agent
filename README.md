@@ -133,10 +133,14 @@ Fetching and parsing the bundle is a config-layer integration point
    exit codes;
 3. ingests the approved knowledge corpus into that MinIO so retrieval is real, not the fixture
    stub;
-4. starts the backend on `DATA_RUNTIME_PROFILE=local_mvp` with the `model_gateway` runtime
+4. runs `scripts/migrate_record_shapes.py --apply`, which brings records stored by earlier
+   versions to the current shapes once (later runs see its marker and exit at once). If it
+   refuses because an unfinished claim creation still covers old evidence, or cannot reach
+   MongoDB, the launcher stops and prints the script's report instead of starting the backend;
+5. starts the backend on `DATA_RUNTIME_PROFILE=local_mvp` with the `model_gateway` runtime
    profile against the shared `config/model-runtime-bindings.json` (currently OpenRouter
    `openai/gpt-4o`), and polls `/health/ready` until it actually reports ready;
-5. starts the claimant, Workbench, and Admin frontends and polls each one's page until it
+6. starts the claimant, Workbench, and Admin frontends and polls each one's page until it
    actually responds.
 
 Every step fails loudly on its real exit code or health check instead of printing a PID and
@@ -164,7 +168,21 @@ fixtures are separate from triage and policy-provider failure-switch scenarios.
 
 Workbench accounts: one per team member, `<GitHub name>@northwind.test` with the password
 `Northwind`, listed in `config/staff-seed.json`. The backend provisions them at every start and
-prints them; the launcher repeats them in its final report.
+prints them; the launcher repeats them in its final report. The former
+`NORTHWIND_STAFF_BOOTSTRAP_*` settings are no longer read.
+
+Required settings: the backend refuses to start without `NORTHWIND_ENVIRONMENT`,
+`DATA_RUNTIME_PROFILE` and `AGENT_RUNTIME_PROFILE`, and with `AGENT_RUNTIME_PROFILE=model_gateway`
+it also needs `MODEL_PROFILE_ID`; the error names the missing setting. `PDF_MODEL_PROFILE_ID`
+selects the published profile that reads PDF evidence; while it is empty, PDF reading is off.
+`start-dev.ps1` sets all of them. With `docker compose`, copy the values from `.env.example`
+into your own `.env`. If you start the backend by hand, set them yourself, as in the manual steps
+below.
+
+Existing local data: records written before the October 2026 cleanup must be migrated once.
+`start-dev.ps1` does it on every start (it is a no-op after the first run). Without the launcher,
+stop the backend and run `py -3.12 scripts/migrate_record_shapes.py --apply` once with the same
+`NORTHWIND_MONGODB_*` settings the backend uses.
 
 The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
 ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
@@ -223,11 +241,14 @@ $env:NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 $env:AGENT_RUNTIME_PROFILE = 'model_gateway'
 $env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$env:PDF_MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
 $env:MODEL_TIMEOUT_SECONDS = '30'
 $env:TURN_TIME_LIMIT_SECONDS = '40'
 $env:REPLY_JUDGE_MODEL = 'anthropic/claude-haiku-4.5'
 
-# 5. Backend (in this shell). Poll http://127.0.0.1:8000/health/ready before trusting it.
+# 5. Migrate records stored by earlier versions (a no-op once done), then start the backend in
+#    this shell. Poll http://127.0.0.1:8000/health/ready before trusting it.
+py -3.12 scripts/migrate_record_shapes.py --apply
 py -3.12 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --log-config scripts/dev-logging.json
 
 # 6. Claimant frontend (in a second shell; it proxies /api to port 8000).
