@@ -46,7 +46,6 @@ const api = vi.hoisted(() => ({
   completeEvidenceUpload: vi.fn(),
   resumeClaimSession: vi.fn(),
   startClaimSession: vi.fn(),
-  streamClaimUpdates: vi.fn(() => new Promise(() => {})),
   streamRealtimeEvents: vi.fn(() => new Promise(() => {})),
   submitClaimMessage: vi.fn(),
   setClaimantAccessToken: vi.fn(),
@@ -267,7 +266,6 @@ function dynamicForm({ value = '8pm', valueState = 'proposed' } = {}) {
     requirements: {
       ready: false,
       current_action_total: 2,
-      current_action_satisfied: 1,
       satisfied: ['incident.description'],
       next_required_item: 'incident.occurred_at',
       pending_later: ['property.address'],
@@ -298,7 +296,6 @@ function readyDynamicForm() {
     requirements: {
       ready: true,
       current_action_total: 9,
-      current_action_satisfied: 9,
       satisfied: [
         'claim.product_family',
         'incident.description',
@@ -1035,10 +1032,12 @@ describe('claimant intake projection', () => {
         phone: '+64 21 555 123',
       },
       preferences: { email: true, sms: false },
+      revision: 3,
     }
     const updatedAccount = {
       ...initialAccount,
       profile: { ...initialAccount.profile, display_name: 'Iris', preferred_name: 'Iris' },
+      revision: 4,
     }
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue(initialAccount)
@@ -1058,7 +1057,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByLabelText('Preferred name'), 'Iris')
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
 
-    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' })
+    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' }, 3)
     expect(await screen.findByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
     expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(api.createClaim).not.toHaveBeenCalled()
@@ -2114,7 +2113,6 @@ describe('claimant intake projection', () => {
     expect(document.querySelector('.case-status')).toBeVisible()
     expect(screen.getByText('Conversation history')).toBeInTheDocument()
     await waitFor(() => expect(api.streamRealtimeEvents).toHaveBeenCalled())
-    expect(api.streamClaimUpdates).not.toHaveBeenCalled()
     expect(api.streamRealtimeEvents.mock.calls.at(-1)[0]).toEqual(expect.objectContaining({
       cursor: null,
       signal: expect.any(AbortSignal),
@@ -3744,7 +3742,6 @@ describe('claimant intake projection', () => {
         requirements: {
           ready: false,
           current_action_total: 3,
-          current_action_satisfied: 3,
           satisfied: ['incident.injury_or_danger', 'vehicle.drivable', 'incident.cause'],
           next_required_item: null,
           pending_later: [],
@@ -4142,7 +4139,6 @@ describe('claimant intake projection', () => {
         claim_revision: 2,
         requirements: {
           current_action_total: 5,
-          current_action_satisfied: 0,
           missing_required_now: ['incident.occurred_at', 'incident.description', 'loss.description'],
           by_state: { proposed: ['incident.location', 'vehicle.drivable'] },
         },

@@ -24,7 +24,7 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
-from backend.domain.evidence import REGISTERED_EVIDENCE_KINDS, canonical_evidence_kind
+from backend.domain.evidence import REGISTERED_EVIDENCE_KINDS
 from backend.domain.ids import new_id
 from backend.domain.models import (
     ActorType,
@@ -90,7 +90,7 @@ def correct_evidence_reading(
                 message='The idempotency key was reused with a different request.',
             )
         return CorrectEvidenceReadingResponse.model_validate(existing.response_payload)
-    kind = canonical_evidence_kind(payload.kind)
+    kind = payload.kind
     if kind not in REGISTERED_EVIDENCE_KINDS:
         raise ApiError(
             status_code=422, code='VALIDATION_ERROR', message='Choose a registered file type.'

@@ -433,9 +433,6 @@ LEGACY_CLAIMANT_TURN_MODEL_FAILURE_RULE = RecoveryRule(
     audit_event_type='AGENT_TURN_RECOVERY',
 )
 
-# Backward-compatible symbol for code/tests that imported the old name.
-CLAIMANT_TURN_MODEL_FAILURE_RULE = LEGACY_CLAIMANT_TURN_MODEL_FAILURE_RULE
-
 
 MODEL_TIMEOUT_RULE = RecoveryRule(
     rule_id='claimant_turn.model_timeout',

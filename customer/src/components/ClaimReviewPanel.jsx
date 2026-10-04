@@ -231,20 +231,13 @@ function FieldEditor({ fieldCode, field, fieldLabel, editValue, setEditValue, ca
   )
 }
 
-function claimProgressStats(form, contentsItems, dynamicForm) {
+function claimProgressStats(dynamicForm) {
+  // The server evaluates the rules when the Claim starts, so the requirements are always here.
   const requirements = claimReviewRequirements(dynamicForm)
-  const fallbackComplete = [...Object.values(form || {}), ...(contentsItems || [])]
-    .filter((item) => item.status === 'confirmed').length
-  const fallbackTotal = new Set([
-    ...Object.keys(form || {}),
-    ...requirements.missingRequiredNow,
-  ]).size + (contentsItems || []).length
   // Given details count as noted whether or not the claimant has checked them yet,
   // matching the progress on the "Just noted" card in the conversation.
-  const complete = requirements.currentActionTotal !== null
-    ? requirements.currentActionTotal - requirements.missingRequiredNow.length
-    : requirements.currentActionSatisfied ?? fallbackComplete
-  const total = requirements.currentActionTotal ?? fallbackTotal
+  const total = requirements.currentActionTotal ?? 0
+  const complete = total - requirements.missingRequiredNow.length
   return {
     complete: Math.min(complete, total),
     maximum: Math.max(total, 1),
@@ -253,8 +246,8 @@ function claimProgressStats(form, contentsItems, dynamicForm) {
   }
 }
 
-export function ClaimSummaryProgress({ form, contentsItems, dynamicForm }) {
-  const { complete, maximum, total } = claimProgressStats(form, contentsItems, dynamicForm)
+export function ClaimSummaryProgress({ dynamicForm }) {
+  const { complete, maximum, total } = claimProgressStats(dynamicForm)
 
   return (
     <section className="claim-summary-progress" aria-label="Claim information progress">

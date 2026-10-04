@@ -228,7 +228,7 @@ def test_evidence_mutation_rejects_revision_jump_without_partial_write() -> None
     evidence = EvidenceRecord(
         evidence_id='evd_tx',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,

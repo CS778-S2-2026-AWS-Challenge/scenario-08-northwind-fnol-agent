@@ -41,7 +41,6 @@ from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
 from backend.api.identity import router as identity_router
 from backend.api.integrations import router as integrations_router
-from backend.api.legacy import router as legacy_router
 from backend.api.realtime import claimant_router as realtime_claimant_router
 from backend.api.realtime import workbench_router as realtime_workbench_router
 from backend.api.staff_agent import router as staff_agent_router
@@ -122,7 +121,6 @@ from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_profiles import model_configuration
 from backend.services.pdf_processing import (
-    PDF_MODEL_PROFILE_ID,
     PDF_PROCESSING_PRIVACY_CLASS,
     PDF_PROCESSING_PROMPT_VERSION,
     PDF_PROCESSING_PURPOSE,
@@ -152,6 +150,7 @@ from backend.services.staff_agent import (
     ProfileSelectingStaffAgent,
     StaffAgentTurnProvider,
 )
+from backend.services.staff_seed import load_staff_seed, provision_staff_seed, staff_seed_banner
 from backend.services.workbench import TRIAGE_AMOUNT_THRESHOLD
 
 
@@ -306,13 +305,12 @@ def create_app(
         app.state.staff_identity_repository = FixtureStaffIdentityRepository()
     else:
         staff_repository = SQLiteStaffIdentityRepository(resolved_settings.staff_identity_db_path)
-        if resolved_settings.staff_bootstrap_email:
-            staff_repository.provision_account(
-                resolved_settings.staff_bootstrap_email,
-                resolved_settings.staff_bootstrap_password,
-                resolved_settings.staff_bootstrap_display_name,
-                ('claims_professional',),
-            )
+        if resolved_settings.staff_seed_path:
+            # Staff cannot register and nobody manages accounts in the Control Plane: the
+            # seeded accounts are how the Workbench is signed into.
+            seed = load_staff_seed(resolved_settings.staff_seed_path)
+            provision_staff_seed(staff_repository, seed)
+            print(staff_seed_banner(seed), flush=True)
         app.state.staff_identity_repository = staff_repository
     app.state.configuration_repository = resolved_configuration_repository
     app.state.integration_health_repository = integration_health_repository or (
@@ -372,8 +370,12 @@ def create_app(
         def pdf_gateway(
             evidence_resolver: ModelEvidenceContentResolver,
         ) -> ModelGateway:
+            if not resolved_settings.pdf_model_profile_id:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             try:
-                configuration = model_configuration(SimpleNamespace(app=app), PDF_MODEL_PROFILE_ID)
+                configuration = model_configuration(
+                    SimpleNamespace(app=app), resolved_settings.pdf_model_profile_id
+                )
             except (RuntimeConfigurationResolutionError, ValueError):
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
             if (
@@ -398,17 +400,8 @@ def create_app(
             bundle.repository,
             bundle.evidence_storage,
             pdf_gateway,
+            resolved_settings.pdf_model_profile_id,
         )
-
-        def published_instruction() -> str | None:
-            try:
-                record = app.state.runtime_configuration_resolver.resolve('agent_instruction')
-            except RuntimeConfigurationResolutionError:
-                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
-            if record is None:
-                return None
-            value = record.values.get('system_prompt', record.values.get('instructions'))
-            return value if isinstance(value, str) and value.strip() else None
 
         def reply_judge_gateway() -> ModelGateway:
             # The review model shares the turn model's provider connection; only
@@ -447,7 +440,6 @@ def create_app(
             KnowledgeGroundedAgent(
                 GatewayAgent(
                     model_gateway,
-                    published_instruction,
                     model_operations,
                     reply_judge,
                     resolved_settings.turn_time_limit_seconds or None,
@@ -595,7 +587,6 @@ def create_app(
     app.include_router(staff_feedback_router)
     app.include_router(staff_presence_router)
     app.include_router(staff_agent_router)
-    app.include_router(legacy_router)
     app.include_router(capabilities_router)
     app.include_router(claims_router)
     app.include_router(realtime_claimant_router)

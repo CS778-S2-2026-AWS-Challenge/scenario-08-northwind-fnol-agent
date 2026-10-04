@@ -32,7 +32,7 @@ import re
 from collections.abc import Iterable
 from typing import Any, cast
 
-IMAGE_KINDS = {'incident_photo', 'item_photo', 'incident_image', 'photo'}
+IMAGE_KINDS = {'incident_photo', 'item_photo'}
 UNREADABLE_TRANSFORMS = {'blur'}
 BROKEN_TRANSFORMS = {'truncate', 'to_tiff'}
 METHODS = {'per_image', 'model_check_with_sampling'}

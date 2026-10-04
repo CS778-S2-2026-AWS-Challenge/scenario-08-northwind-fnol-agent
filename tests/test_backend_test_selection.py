@@ -165,7 +165,8 @@ def test_map_build_attributes_lines_to_test_files() -> None:
 
 
 def test_static_check_helpers() -> None:
-    assert changed_python_files(['scripts/select_backend_tests.py', 'gone.py']) == (
+    archived = 'docs/archive/pre-mvp/pre_archive/test_demo_app.py'
+    assert changed_python_files(['scripts/select_backend_tests.py', 'gone.py', archived]) == (
         'scripts/select_backend_tests.py',
     )
     assert needs_openapi_check(['backend/api/claims.py'])

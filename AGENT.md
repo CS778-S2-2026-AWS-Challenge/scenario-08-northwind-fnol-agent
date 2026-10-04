@@ -105,6 +105,25 @@ explicit so they are not lost when an agent follows only the entry point:
   committed only when it comes from an explicit design task, has a documented long-term purpose,
   uses the formal contract, and provides repeatable acceptance or regression value.
 
+## No fallbacks, archived versions, bounded compatibility
+
+These rules apply to the backend, the three clients, and the scripts.
+
+1. **No default fallback.** A setting, profile, prompt version, or data source that selects
+   runtime behaviour is required; when it is missing, startup or the request fails with an error
+   that names it. Code must not substitute a default value, an older version, or a second source
+   so that the run continues. A client renders what the server projects and does not compute a
+   replacement when the projection is missing; the server guarantees the projection instead. Test
+   doubles (developer identity, fixture data) start only in the test environment.
+2. **Superseded versioned artefacts are archived.** When a prompt, schema, binding, or other
+   versioned artefact is replaced, the old version moves under `docs/archive/` in the same PR, and
+   no runtime code, configuration, or test may reference it, not even as a fallback. Only the
+   current version is registered.
+3. **Compatibility layers need a named caller and a removal date.** An alias, translation table,
+   legacy endpoint, or old field name may be added only with a comment that names the caller still
+   producing the old form and the date or issue after which it is removed. A layer whose producer
+   is gone is deleted, together with its tests.
+
 ## Test writing and CI scope
 
 Reuse comes first. Pull-request CI runs the existing tests that execute your changed lines, and
@@ -130,7 +149,7 @@ A newer commit for the same PR supersedes older CI runs. See
 The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
 archived under [docs/archive/governance/](docs/archive/governance/) and are historical
 reference only. Where an archived document disagrees with the skill, the skill prevails
-without exception. Do not maintain a separate or conflicting rule set in this file.
+without exception. Rules stated in this file must not conflict with the skill.
 
 If an instruction conflicts with the current user's explicit authorisation, or if the required
 source of truth is unavailable or contradictory, stop before changing repository or GitHub

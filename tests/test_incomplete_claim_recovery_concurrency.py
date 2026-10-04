@@ -112,7 +112,7 @@ def test_fixture_pause_and_evidence_from_same_revision_commit_exactly_one_bundle
     evidence = EvidenceRecord(
         evidence_id='evd_pause_evidence_race',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,

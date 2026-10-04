@@ -23,6 +23,7 @@ from backend.domain.models import (
     RuntimeConfigurationProvenance,
 )
 from backend.domain.prompt_pack import PromptFragmentDefinition, PromptPackManifest
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 from backend.services.agent import AgentProposal
 from backend.services.prompt_composer import (
     estimate_tokens,
@@ -228,17 +229,18 @@ class RuntimeAgentPolicyResolver:
         assert isinstance(controlled_rules, ControlledRulesConfiguration)
         assert isinstance(features, AgentFeatureSettingsConfiguration)
 
-        if instruction.prompt_version in {
-            'northwind-fnol-claimant-v7',
-            'northwind-fnol-claimant-v8',
-        }:
-            self._validate_complete_v7_release(
-                snapshot,
-                instruction,
-                tool_policy,
-                controlled_rules,
-                features,
+        if instruction.prompt_version != CLAIMANT_V8_PROMPT_ID:
+            raise RuntimeConfigurationResolutionError(
+                f'The published Agent instruction uses {instruction.prompt_version}; only '
+                f'{CLAIMANT_V8_PROMPT_ID} is supported and superseded versions are archived.'
             )
+        self._validate_complete_release(
+            snapshot,
+            instruction,
+            tool_policy,
+            controlled_rules,
+            features,
+        )
 
         model_record = snapshot.model()
         if model_record is not None:
@@ -256,15 +258,13 @@ class RuntimeAgentPolicyResolver:
         )
 
     @staticmethod
-    def _validate_complete_v7_release(
+    def _validate_complete_release(
         snapshot: RuntimeConfigurationSnapshot,
         instruction: AgentInstructionConfiguration,
         tool_policy: AgentToolPolicyConfiguration,
         controlled_rules: ControlledRulesConfiguration,
         features: AgentFeatureSettingsConfiguration,
     ) -> None:
-        if instruction.composition_mode != 'fragmented' or instruction.manifest_version is None:
-            raise RuntimeConfigurationResolutionError('The v7 Prompt Pack is incomplete.')
         PromptPackManifest(
             prompt_pack_version=instruction.manifest_version,
             fragments=[
@@ -275,25 +275,23 @@ class RuntimeAgentPolicyResolver:
             ],
         )
         if any(estimate_tokens(item.content) > item.max_tokens for item in instruction.fragments):
-            raise RuntimeConfigurationResolutionError(
-                'A published v7 Prompt fragment exceeds budget.'
-            )
+            raise RuntimeConfigurationResolutionError('A published Prompt fragment exceeds budget.')
 
         expected_profiles = list(registered_request_profiles(instruction.prompt_version))
         if tool_policy.request_profiles != expected_profiles:
             raise RuntimeConfigurationResolutionError(
-                'The v7 Request Profile registry is incomplete or incompatible.'
+                'The Request Profile registry is incomplete or incompatible.'
             )
         required_schemas = {item.schema_id for item in tool_policy.request_profiles}
         if not required_schemas.issubset(tool_policy.schema_registry):
-            raise RuntimeConfigurationResolutionError('The v7 schema registry is incomplete.')
+            raise RuntimeConfigurationResolutionError('The schema registry is incomplete.')
         canonical_schemas = load_response_schemas()
         if any(
             tool_policy.schema_registry[schema_id] != canonical_schemas.get(schema_id)
             for schema_id in required_schemas
         ):
             raise RuntimeConfigurationResolutionError(
-                'The v7 schema registry is incompatible with its versioned contracts.'
+                'The schema registry is incompatible with its versioned contracts.'
             )
 
         model_records = {
@@ -303,7 +301,7 @@ class RuntimeAgentPolicyResolver:
         }
         if set(tool_policy.provider_capabilities) != set(model_records):
             raise RuntimeConfigurationResolutionError(
-                'The v7 provider capability registry does not match the model catalogue.'
+                'The provider capability registry does not match the model catalogue.'
             )
         for profile_id, record in model_records.items():
             capability = tool_policy.provider_capabilities[profile_id]
@@ -315,11 +313,11 @@ class RuntimeAgentPolicyResolver:
                 )
             except (ValidationError, ValueError) as error:
                 raise RuntimeConfigurationResolutionError(
-                    'A v7 model binding is incompatible with the atomic Agent release.'
+                    'A model binding is incompatible with the atomic Agent release.'
                 ) from error
             if record.values.get('prompt_version') != instruction.prompt_version:
                 raise RuntimeConfigurationResolutionError(
-                    'A v7 model binding is incompatible with the atomic Agent release.'
+                    'A model binding is incompatible with the atomic Agent release.'
                 )
 
         if (

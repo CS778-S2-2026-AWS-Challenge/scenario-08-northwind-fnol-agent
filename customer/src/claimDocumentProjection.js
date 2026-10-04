@@ -23,13 +23,12 @@ export const DOCUMENT_UPLOAD_CONSTRAINTS = {
   summary: 'JPG, PNG or PDF · up to 10 MB each',
 }
 
-const PHOTO_KINDS = new Set(['incident_image', 'incident_photo', 'item_photo', 'photo'])
+const PHOTO_KINDS = new Set(['incident_photo', 'item_photo'])
 
 const DOCUMENT_TITLES = {
   agency_incident_record: 'Incident record',
   assessment_report: 'Assessment report',
   document: 'Supporting document',
-  incident_image: 'Photos of the damage',
   incident_photo: 'Photos of the damage',
   incident_report: 'Incident report',
   item_photo: 'Photos of the damage',
@@ -44,7 +43,6 @@ const DOCUMENT_TITLES = {
 const DOCUMENT_DESCRIPTIONS = {
   agency_incident_record: 'This record can help Northwind confirm what happened and assess your claim.',
   assessment_report: 'An assessment report can help Northwind understand the damage and next steps.',
-  incident_image: 'Clear photos help Northwind understand the damage and assess your claim faster.',
   incident_photo: 'Clear photos help Northwind understand the damage and assess your claim faster.',
   incident_report: 'An incident report can help Northwind confirm the details of what happened.',
   item_photo: 'Clear photos help Northwind understand the damage and assess your claim faster.',

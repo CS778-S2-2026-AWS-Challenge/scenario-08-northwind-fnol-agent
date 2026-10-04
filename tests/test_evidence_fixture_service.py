@@ -152,7 +152,7 @@ def test_an_unregistered_state_combination_is_rejected_rather_than_guessed() -> 
     record = EvidenceRecord(
         evidence_id='evd_invalid',
         claim_id='clm_invalid',
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.AWAITING_UPLOAD,
         source=EvidenceSource.CLAIMANT,

@@ -72,7 +72,6 @@ def test_model_observation_records_bounded_sizes_and_provider_usage(
             context_sizes={
                 'claim_context_chars': 4200,
                 'conversation_history_chars': 700,
-                'knowledge_citation_chars': 0,
                 'tool_result_chars': 350,
                 'external_service_chars': 120,
                 'unbounded_private_size': 999,

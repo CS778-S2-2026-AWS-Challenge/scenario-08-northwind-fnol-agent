@@ -41,6 +41,7 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import PolicyRetrievalRecord, RetrievalKind, RetrievalRecord
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.retrieval_review import persist_retrieval_record
 
 CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
@@ -648,7 +649,11 @@ def seed_scenario(
     seed_active_session = active_session.model_copy(
         update={'context_revision': min(active_session.context_revision, starting_revision)}
     )
-    repository.create_claim(seed_claim, seed_active_session)
+    repository.create_claim(
+        seed_claim,
+        seed_active_session,
+        build_applied_branch_evaluation(seed_claim, recomputation_reason='claim_seeded'),
+    )
     for session in scenario.sessions:
         if session.session_id != active_session.session_id:
             repository.save_session(session)

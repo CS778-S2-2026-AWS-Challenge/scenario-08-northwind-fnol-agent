@@ -2861,7 +2861,7 @@ class ClaimantSession(ContractModel):
     session_id: str
     claim_id: str
     status: SessionStatus
-    model_profile_id: str = Field(default='openrouter-gpt4o-mini', min_length=1, max_length=100)
+    model_profile_id: str = Field(min_length=1, max_length=100)
     resume: ResumePackage
     started_at: datetime
     last_active_at: datetime
@@ -3043,7 +3043,6 @@ class RequirementResolution(ContractModel):
     ready: bool = False
     ready_pending_confirmation: bool = False
     current_action_total: int = Field(default=0, ge=0)
-    current_action_satisfied: int = Field(default=0, ge=0)
 
 
 class BranchEvaluationResult(ContractModel):

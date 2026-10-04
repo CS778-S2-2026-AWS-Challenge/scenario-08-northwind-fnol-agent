@@ -155,7 +155,7 @@ def test_evidence_mutation_cannot_switch_authoritative_active_session() -> None:
     evidence = EvidenceRecord(
         evidence_id='evd_non_authoritative_session',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,

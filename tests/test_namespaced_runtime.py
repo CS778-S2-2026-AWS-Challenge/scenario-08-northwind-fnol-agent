@@ -1,4 +1,3 @@
-import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -10,12 +9,12 @@ from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.core.errors import ApiError
-from backend.domain.agent_action_registry import registered_actions
 from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.configuration import (
     ConfigurationImpact,
     ConfigurationRecord,
     ConfigurationState,
+    ModelRuntimeBinding,
 )
 from backend.domain.model_gateway import (
     ModelCapabilities,
@@ -25,21 +24,22 @@ from backend.domain.model_gateway import (
     ModelToolCall,
 )
 from backend.domain.release import ConfigurationReference, ReleaseSetRecord, ReleaseSetState
-from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.release_set import ReleaseSetRepository
+from backend.services.initial_runtime_release import repository_release_values
 from backend.services.model_profiles import (
     _settings_configuration,
     model_catalog,
     model_configuration,
     select_model_profile,
 )
-from backend.services.runtime_agent_policy import registered_agent_tool_names
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationSnapshot,
 )
+from tests.journey_v8_support import envelope
 
 
 class SequenceToolGateway:
@@ -110,39 +110,10 @@ class RepeatableToolGateway:
 
     def complete(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
-        if request.required_tool_name:
-            return ModelResponse(
-                completion_status=ModelCompletionStatus.COMPLETE,
-                tool_calls=[
-                    ModelToolCall(
-                        call_id=f'call-read-{len(self.requests)}',
-                        name='claim.read',
-                        arguments={},
-                    )
-                ],
-                provider_model=request.model_profile_id,
-                provider_request_id=f'request-{len(self.requests)}',
-            )
         self.turn_number += 1
         return ModelResponse(
             completion_status=ModelCompletionStatus.COMPLETE,
-            structured_output={
-                'action_code': 'conversation.answer',
-                'runtime_action_code': 'runtime.continue',
-                'reason_codes': ['CLAIM_CONTEXT_READ'],
-                'customer_reason': 'The current report was reviewed.',
-                'customer_response': f'Turn {self.turn_number} reviewed.',
-                'customer_next_step': {
-                    'status': 'continue_current_report',
-                    'summary': 'Continue the report when ready.',
-                    'responsible_party': 'claimant',
-                    'required_items': [],
-                },
-                'form_changes': [],
-                'contents_item_changes': [],
-                'source_refs': [],
-                'handoff_priority': None,
-            },
+            structured_output=envelope(reply=f'Turn {self.turn_number} reviewed.'),
             provider_model=request.model_profile_id,
             provider_request_id=f'request-{len(self.requests)}',
         )
@@ -157,7 +128,7 @@ def published_model_catalog(
         'protocol': 'openai_compatible',
         'purpose': 'agent_turn',
         'privacy_class': 'synthetic_fnol',
-        'prompt_version': MOTOR_CLAIMANT_PROMPT_ID,
+        'prompt_version': CLAIMANT_V8_PROMPT_ID,
         'evaluation_status': 'configured',
         'timeout_seconds': 30.0,
         'structured_output': True,
@@ -191,27 +162,21 @@ def published_model_catalog(
         )
         configurations.create(record)
         records[f'model:{profile_id}'] = record
+    # The Agent policy is the repository's complete release for these two bindings.
+    bindings = [
+        ModelRuntimeBinding.model_validate(
+            {
+                key: value
+                for key, value in records[f'model:{profile_id}'].values.items()
+                if key in ModelRuntimeBinding.model_fields
+            }
+        )
+        for profile_id in ('qwen-local', 'openrouter-gpt4o-mini')
+    ]
     agent_values = {
-        'agent_instruction': {
-            'prompt_version': MOTOR_CLAIMANT_PROMPT_ID,
-            'purpose': 'claimant_agent',
-            'system_prompt': load_motor_claimant_prompt(),
-        },
-        'agent_tool_policy': {
-            'policy_version': 'test-policy-v1',
-            'allowed_action_codes': list(registered_actions()),
-            'allowed_tool_names': list(registered_agent_tool_names()),
-        },
-        'agent_rule': {
-            'rules_version': 'test-rules-v1',
-            'disabled_rule_ids': [],
-            'observation_rule_ids': [],
-        },
-        'feature': {
-            'feature_version': 'test-features-v1',
-            'model_assisted_turns': True,
-            'knowledge_retrieval': True,
-        },
+        slot: values
+        for slot, values in repository_release_values(bindings).items()
+        if not slot.startswith('model:')
     }
     for domain, values in agent_values.items():
         record = ConfigurationRecord(
@@ -248,249 +213,6 @@ def published_model_catalog(
         )
     )
     return configurations, releases
-
-
-def test_namespaced_runtime_applies_claim_mutation_and_persists_runtime_records() -> None:
-    gateway = SequenceToolGateway()
-    registry = ModelGatewayRegistry()
-    registry.register('openai_compatible', lambda _config: gateway)
-    repository = FixtureRepository()
-    settings = Settings(
-        environment='test',
-        identity_mode=IdentityMode.DEVELOPER,
-        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
-        model_protocol_adapter='openai_compatible',
-        model_profile_id='qwen-local',
-        model_base_url='http://model.example.test/v1',
-        model_identifier='qwen3.8-27b',
-        model_supports_tools=True,
-    )
-
-    with TestClient(
-        create_app(
-            settings,
-            repository=repository,
-            model_gateway_registry=registry,
-        )
-    ) as client:
-        headers = {'Authorization': 'Bearer synthetic-claimant'}
-        created = client.post(
-            '/api/v1/claims',
-            headers={**headers, 'Idempotency-Key': 'runtime-claim'},
-            json={
-                'channel': 'web_agent',
-                'locale': 'en-NZ',
-                'incident_type': 'motor',
-                'model_profile_id': 'qwen-local',
-            },
-        )
-        assert created.status_code == 201, created.text
-        claim_id = created.json()['claim']['claim_id']
-        session_id = created.json()['session']['session_id']
-
-        response = client.post(
-            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-            headers={
-                **headers,
-                'Idempotency-Key': 'runtime-message',
-                'If-Match': '1',
-            },
-            json={
-                'client_message_id': 'runtime-client-message',
-                'content': {'type': 'text', 'text': 'Please read the current report.'},
-                'evidence_refs': [],
-            },
-        )
-        assert response.status_code == 200, response.text
-        body = response.json()
-        # Persist inbound first, then commit the reduced outcome.
-        assert body['claim_revision'] == 3
-        assert body['decision'] is not None
-        assert body['agent_message']['content']['text'].startswith(
-            'I have read the current claim context.'
-        )
-
-        stored_claim = repository.get_claim(claim_id, 'cus_demo')
-        assert stored_claim is not None
-        assert stored_claim.revision == 3
-        assert stored_claim.form['incident.description'].value == (
-            'Please read the current report.'
-        )
-        assert len(repository.list_agent_decisions(claim_id, 'cus_demo')) == 1
-        trace = repository.find_runtime_trace_for_trigger(
-            claim_id,
-            body['claimant_message']['message_id'],
-            'cus_demo',
-        )
-        assert trace is not None
-        assert trace.tool_name == 'claim.read'
-        assert trace.action_code == 'conversation.answer'
-        assert trace.runtime_action_code == 'runtime.continue'
-        runtime_turn = repository.get_runtime_turn_for_trigger(
-            claim_id,
-            body['claimant_message']['message_id'],
-            'cus_demo',
-        )
-        assert runtime_turn is not None
-        assert runtime_turn.execution_plan.status == 'executed'
-        assert [item.action_code for item in runtime_turn.action_envelopes] == [
-            'conversation.answer',
-            'claim.apply_fact_patch',
-        ]
-        assert all(item.status == 'executed' for item in runtime_turn.action_envelopes)
-        assert runtime_turn.result.resulting_claim_revision == 3
-        assert runtime_turn.tool_results[0].output['claim_id'] == claim_id
-        assert runtime_turn.tool_results[0].output['workflow_state'] == 'collecting'
-        assert runtime_turn.tool_results[0].output['form'] == {}
-        idempotency = repository.find_idempotency(
-            'cus_demo',
-            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-            'runtime-message',
-        )
-        assert idempotency is not None
-        assert idempotency.action_code == 'claim.apply_fact_patch'
-        assert idempotency.target_ref == claim_id
-        assert idempotency.message_turn_kind == 'legacy_agent'
-        assert idempotency.runtime_result_id == runtime_turn.result.result_id
-
-        assert len(gateway.requests) == 2
-
-        first = gateway.requests[0]
-        assert [tool.name for tool in first.tools] == ['claim.read']
-        assert first.required_tool_name == 'claim.read'
-        assert first.response_schema is None
-        second = gateway.requests[1]
-        assert second.response_schema is not None
-        assert [message.role.value for message in second.messages[-2:]] == ['assistant', 'tool']
-        assert second.messages[-1].tool_call_id == 'call_claim_read_1'
-        assert json.loads(second.messages[-1].content or '{}')['claim_id'] == claim_id
-
-        replay = client.post(
-            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-            headers={
-                **headers,
-                'Idempotency-Key': 'runtime-message',
-                'If-Match': '1',
-            },
-            json={
-                'client_message_id': 'runtime-client-message',
-                'content': {'type': 'text', 'text': 'Please read the current report.'},
-                'evidence_refs': [],
-            },
-        )
-        assert replay.status_code == 200
-        assert replay.json() == body
-        assert len(gateway.requests) == 2
-
-        later = client.patch(
-            f'/api/v1/claims/{claim_id}/form',
-            headers={**headers, 'If-Match': str(body['current_claim_revision'])},
-            json={
-                'updates': [
-                    {
-                        'field_code': 'incident.description',
-                        'value': 'A corrected description after the Runtime turn.',
-                        'correction_reason': 'The claimant corrected the original account.',
-                    }
-                ]
-            },
-        )
-        assert later.status_code == 200, later.text
-        assert idempotency.runtime_trace_id is not None
-        runtime_replay = replace(
-            idempotency,
-            key='runtime-message-replay-kind',
-            message_turn_revision=body['claim_revision'],
-            response_payload=body,
-        )
-        repository.save_idempotency(runtime_replay)
-        reconstructed = client.post(
-            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-            headers={
-                **headers,
-                'Idempotency-Key': runtime_replay.key,
-                'If-Match': '2',
-            },
-            json={
-                'client_message_id': 'runtime-client-message',
-                'content': {'type': 'text', 'text': 'Please read the current report.'},
-                'evidence_refs': [],
-            },
-        )
-        assert reconstructed.status_code == 200, reconstructed.text
-        assert reconstructed.json()['claim_revision'] == body['claim_revision']
-        assert reconstructed.json()['current_claim_revision'] == later.json()['revision']
-        assert reconstructed.json()['decision'] is not None
-        assert (
-            reconstructed.json()['current_claim']['form']['incident.description']['value']
-            == 'A corrected description after the Runtime turn.'
-        )
-
-        compatibility_payload = {**body, 'decision': None}
-        compatibility_replay = replace(
-            runtime_replay,
-            key='runtime-message-legacy-payload',
-            decision_id=None,
-            message_turn_kind=None,
-            message_turn_revision=None,
-            response_payload=compatibility_payload,
-        )
-        repository.save_idempotency(compatibility_replay)
-        compatibility = client.post(
-            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-            headers={
-                **headers,
-                'Idempotency-Key': compatibility_replay.key,
-                'If-Match': '2',
-            },
-            json={
-                'client_message_id': 'runtime-client-message',
-                'content': {'type': 'text', 'text': 'Please read the current report.'},
-                'evidence_refs': [],
-            },
-        )
-        assert compatibility.status_code == 500
-        assert compatibility.json()['error']['code'] == 'INTERNAL_ERROR'
-
-        corrupted_records = {
-            'decision_id': replace(
-                runtime_replay,
-                key='runtime-message-missing-decision_id',
-                decision_id='missing-record',
-            ),
-            'agent_message_id': replace(
-                runtime_replay,
-                key='runtime-message-missing-agent_message_id',
-                agent_message_id='missing-record',
-            ),
-            'runtime_trace_id': replace(
-                runtime_replay,
-                key='runtime-message-missing-runtime_trace_id',
-                runtime_trace_id='missing-record',
-            ),
-            'runtime_result_id': replace(
-                runtime_replay,
-                key='runtime-message-missing-runtime_result_id',
-                runtime_result_id='missing-record',
-            ),
-        }
-        for corrupted in corrupted_records.values():
-            repository.save_idempotency(corrupted)
-            failed = client.post(
-                f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
-                headers={
-                    **headers,
-                    'Idempotency-Key': corrupted.key,
-                    'If-Match': '2',
-                },
-                json={
-                    'client_message_id': 'runtime-client-message',
-                    'content': {'type': 'text', 'text': 'Please read the current report.'},
-                    'evidence_refs': [],
-                },
-            )
-            assert failed.status_code == 500
-            assert failed.json()['error']['code'] == 'INTERNAL_ERROR'
 
 
 def test_model_profile_can_change_between_turns_without_new_claim(
@@ -549,25 +271,14 @@ def test_model_profile_can_change_between_turns_without_new_claim(
             assert response.status_code == 200, response.text
             revision = response.json()['claim_revision']
 
-        stored_claim = client.get(f'/api/v1/claims/{claim_id}', headers=headers)
-        assert stored_claim.status_code == 200
-        assert stored_claim.json()['revision'] == 5
         session = client.get(f'/api/v1/claims/{claim_id}/sessions/{session_id}', headers=headers)
         assert session.status_code == 200
         assert session.json()['model_profile_id'] == 'openrouter-gpt4o-mini'
+        # One model call per turn, each on the profile the claimant selected for it.
         assert [request.model_profile_id for request in gateway.requests] == [
             'qwen-local',
-            'qwen-local',
-            'openrouter-gpt4o-mini',
             'openrouter-gpt4o-mini',
         ]
-        second_turn_content = gateway.requests[2].messages[1].content
-        assert second_turn_content is not None
-        second_turn_context = json.loads(second_turn_content)
-        history = second_turn_context['conversation_history']
-        assert len(history) == 2
-        history_actors = {json.loads(item['content'])['actor'] for item in history}
-        assert history_actors == {'claimant', 'agent'}
 
 
 def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(

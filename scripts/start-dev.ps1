@@ -152,7 +152,7 @@ function Split-CredentialEnvironments {
         'NORTHWIND_SECRETS_TOKEN',
         'NORTHWIND_ENVIRONMENT', 'NORTHWIND_IDENTITY_MODE', 'NORTHWIND_CONTROL_PLANE_DB_PATH',
         'AGENT_RUNTIME_PROFILE', 'DATA_RUNTIME_PROFILE',
-        'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
+        'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'PDF_MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
         'REPLY_JUDGE_MODEL', 'TURN_TIME_LIMIT_SECONDS',
         'NORTHWIND_OBJECT_STORAGE_ADAPTER', 'NORTHWIND_OBJECT_STORAGE_ENDPOINT',
         'NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY',
@@ -262,6 +262,8 @@ $backendEnv.NORTHWIND_CONTROL_PLANE_DB_PATH = $controlPlaneDb
 $backendEnv.AGENT_RUNTIME_PROFILE = 'model_gateway'
 $backendEnv.MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+# PDF evidence is read by the governed OpenRouter GPT-4o profile.
+$backendEnv.PDF_MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
 # A turn makes up to three model calls (reply, one continuation after a lookup,
 # and one rewrite if the reply contradicts the record); a hung provider must not
 # leave the claimant waiting minutes. Typical calls take 3-6 seconds. No further
@@ -272,6 +274,10 @@ $backendEnv.TURN_TIME_LIMIT_SECONDS = '40'
 # A second, smaller model on the same OpenRouter connection reviews each reply
 # against what the turn actually did. Left empty, replies are shown unreviewed.
 $backendEnv.REPLY_JUDGE_MODEL = 'anthropic/claude-haiku-4.5'
+
+# The backend provisions the Workbench accounts in config/staff-seed.json at every start;
+# the final report repeats them, since the backend runs hidden.
+$staffSeed = Get-Content 'config/staff-seed.json' -Raw | ConvertFrom-Json
 
 # 6. Start the backend. The log config prints the structured diagnostic fields the runtime
 #    attaches to model-turn events, which is what you want to see while testing a journey.
@@ -313,7 +319,11 @@ try {
         catch { return $false }
     }
 
-    $report = [ordered]@{ Backend = "$readyUrl (ready, PID $($backend.Id))" }
+    $report = [ordered]@{
+        Backend           = "$readyUrl (ready, PID $($backend.Id))"
+        WorkbenchAccounts = $staffSeed.accounts.email -join ', '
+        WorkbenchPassword = $staffSeed.password
+    }
 
     if ($BackendOnly) {
         [PSCustomObject]$report

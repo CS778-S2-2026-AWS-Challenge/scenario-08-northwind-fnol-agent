@@ -331,9 +331,7 @@ export default function useProfileController({ account, setAccount, enabled = tr
   const saveProfile = useCallback((patch) => runAccountMutation({
     scope: 'profile',
     action: 'your Profile change',
-    execute: () => accountRef.current?.revision == null
-      ? updateAccountProfile(patch)
-      : updateAccountProfile(patch, accountRef.current.revision),
+    execute: () => updateAccountProfile(patch, accountRef.current?.revision),
     matches: (latest) => accountMatchesProfile(latest, patch),
   }), [runAccountMutation])
 

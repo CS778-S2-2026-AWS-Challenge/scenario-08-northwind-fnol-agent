@@ -43,6 +43,10 @@ def explicit_direct_app_developer_identity(
     """
 
     monkeypatch.setenv('DATA_RUNTIME_PROFILE', DataRuntimeProfile.FIXTURE.value)
+    # Startup requires these explicitly (no defaults); tests run as the test environment
+    # with the deterministic agent unless a test sets otherwise in its own body.
+    monkeypatch.setenv('NORTHWIND_ENVIRONMENT', 'test')
+    monkeypatch.setenv('AGENT_RUNTIME_PROFILE', 'controlled')
     filename = request.node.nodeid.split('::', 1)[0].rsplit('/', 1)[-1]
     if filename in {'test_integrations.py', 'test_claimant_external_service.py'}:
         monkeypatch.setenv('NORTHWIND_ENVIRONMENT', 'test')

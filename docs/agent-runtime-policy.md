@@ -127,7 +127,7 @@ The implemented Release Set policy boundary selects four closed configuration co
 
 | Domain | Runtime meaning | Required fields |
 | --- | --- | --- |
-| `agent_instruction` | Immutable Prompt Pack and embedded fragment bodies. | `prompt_version`, `purpose`, `composition_mode`, `manifest_version`, `fragments` |
+| `agent_instruction` | Immutable Prompt Pack and embedded fragment bodies; only `composition_mode: fragmented` is accepted. | `prompt_version`, `purpose`, `composition_mode`, `manifest_version`, `fragments` |
 | `agent_tool_policy` | Action/tool allow-list plus stable model request contracts. | `policy_version`, allow-lists, Request Profiles, provider capabilities, schema registry |
 | `agent_rule` | Controlled rules, deterministic responses, routing, catalogue, and context budget. | `rules_version`, protected overlays, route/catalogue versions, budget policy |
 | `feature` | Runtime feature set and cache layout. | `feature_version`, model/retrieval switches, v7 feature flags, `cache_layout_version` |

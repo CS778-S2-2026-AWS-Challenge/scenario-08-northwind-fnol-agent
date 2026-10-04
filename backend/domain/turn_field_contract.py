@@ -35,23 +35,6 @@ class TurnFieldContract(ContractModel):
     def by_code(self) -> dict[str, TurnFieldDefinition]:
         return {item.field_code: item for item in self.fields}
 
-    def prompt_projection(self) -> dict[str, object]:
-        return {
-            'contract_id': self.contract_id,
-            'registry_version': self.registry_version,
-            'branch_evaluation_revision': self.branch_evaluation_revision,
-            'fields': [
-                {
-                    'code': item.field_code,
-                    'type': item.value_type,
-                    **({'allowed': item.allowed_values} if item.allowed_values else {}),
-                }
-                for item in self.fields
-                if item.selection_state
-                in {FieldSelectionState.REQUIRED_NOW, FieldSelectionState.CANDIDATE_NOW}
-            ],
-        }
-
 
 class TurnFieldViolation(ContractModel):
     field_code: str = Field(min_length=1, max_length=100)

@@ -29,7 +29,7 @@ from backend.services.runtime_configuration import (
 def _binding(
     profile_id: str,
     *,
-    prompt_version: str = 'northwind-fnol-claimant-v7',
+    prompt_version: str = 'northwind-fnol-claimant-v8',
 ) -> ModelRuntimeBinding:
     is_qwen = profile_id == 'qwen-local'
     is_openrouter = profile_id == 'openrouter-gpt4o-mini'
@@ -142,19 +142,15 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         )
     ).resolve_for_turn()
     assert policy is not None
-    assert policy.instruction.prompt_version == 'northwind-fnol-claimant-v7'
+    assert policy.instruction.prompt_version == 'northwind-fnol-claimant-v8'
     assert policy.instruction.composition_mode == 'fragmented'
-    assert len(policy.instruction.fragments) == 23
+    assert len(policy.instruction.fragments) == 16
     assert {item.profile_id for item in policy.tool_policy.request_profiles} == {
-        'claimant.answer.v1',
-        'claimant.creation.v1',
         'claimant.deep-review.v1',
         'claimant.evidence-history.v1',
-        'claimant.external.v1',
-        'claimant.handoff.v1',
-        'claimant.intake.v1',
         'claimant.lookup.v1',
         'claimant.media.v1',
+        'claimant.turn.v1',
     }
     assert set(policy.tool_policy.provider_capabilities) == {
         'qwen-local',
@@ -346,36 +342,6 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
     }
 
 
-def test_repository_managed_release_does_not_cross_prompt_generations() -> None:
-    v6_bindings = (
-        _binding('qwen-local', prompt_version='northwind-fnol-claimant-v6'),
-        _binding('openrouter-gpt4o-mini', prompt_version='northwind-fnol-claimant-v6'),
-    )
-    v6_settings = replace(
-        _settings(),
-        model_runtime_bindings=v6_bindings,
-        model_base_url=v6_bindings[0].base_url,
-        model_identifier=v6_bindings[0].model_identifier,
-    )
-    configurations = ConfigurationRepository()
-    releases = ReleaseSetRepository()
-    knowledge = KnowledgeAdminRepository()
-    v6_release = install_initial_runtime_release(
-        v6_settings,
-        configurations,
-        releases,
-        knowledge,
-    )
-    assert v6_release is not None
-
-    result = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
-
-    assert result is not None
-    assert result.release_set_id == v6_release.release_set_id
-    assert len(releases.list_release_sets('test', 'fixture')) == 1
-    assert len(configurations.list_configurations()) == 6
-
-
 def test_operator_owned_active_release_is_not_replaced() -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
@@ -422,12 +388,14 @@ def test_initial_release_rejects_missing_or_mixed_model_catalogues() -> None:
 
     mixed_versions = replace(
         base,
-        model_runtime_bindings=(
-            _binding('qwen-local'),
-            _binding('openrouter-gpt4o-mini', prompt_version='northwind-fnol-claimant-v6'),
+        model_runtime_bindings=tuple(
+            binding.model_copy(update={'prompt_version': 'northwind-fnol-claimant-v6'})
+            if binding.profile_id == 'openrouter-gpt4o-mini'
+            else binding
+            for binding in base.model_runtime_bindings
         ),
     )
-    with pytest.raises(ValueError, match='cannot mix Prompt versions'):
+    with pytest.raises(ValueError, match='superseded prompt versions are archived'):
         install_initial_runtime_release(
             mixed_versions,
             ConfigurationRepository(),
@@ -561,7 +529,6 @@ def test_v7_release_rejects_versioned_registry_drift(
 @pytest.mark.parametrize(
     ('mutation', 'expected_error'),
     [
-        ('prompt_mode', 'Prompt Pack'),
         ('fragment_budget', 'exceeds budget'),
         ('schema_contract', 'schema registry'),
         ('provider_catalogue', 'model catalogue'),
@@ -598,15 +565,13 @@ def test_v7_atomic_release_rejects_each_incomplete_published_component(
     controlled_rules = policy.controlled_rules
     features = policy.features
 
-    if mutation == 'prompt_mode':
-        instruction = instruction.model_copy(update={'composition_mode': 'single'})
-    elif mutation == 'fragment_budget':
+    if mutation == 'fragment_budget':
         fragments = list(instruction.fragments)
         fragments[0] = fragments[0].model_copy(update={'content': 'oversized ' * 1000})
         instruction = instruction.model_copy(update={'fragments': fragments})
     elif mutation == 'schema_contract':
         schemas = deepcopy(tool_policy.schema_registry)
-        schemas['claimant.answer.v1'] = {'type': 'object'}
+        schemas['claimant.evidence-action.v1'] = {'type': 'object'}
         tool_policy = tool_policy.model_copy(update={'schema_registry': schemas})
     elif mutation == 'provider_catalogue':
         tool_policy = tool_policy.model_copy(update={'provider_capabilities': {}})
@@ -623,7 +588,7 @@ def test_v7_atomic_release_rejects_each_incomplete_published_component(
         features = features.model_copy(update={'fragmented_prompt': False})
 
     with pytest.raises(RuntimeConfigurationResolutionError, match=expected_error):
-        RuntimeAgentPolicyResolver._validate_complete_v7_release(
+        RuntimeAgentPolicyResolver._validate_complete_release(
             snapshot,
             instruction,
             tool_policy,
@@ -755,39 +720,21 @@ def test_capabilities_expose_the_repository_published_model_catalogue(
     assert selection.json()['error']['code'] == 'MODEL_PROFILE_UNAVAILABLE'
 
 
-def test_v6_binding_manifest_installs_a_real_manual_rollback_release() -> None:
-    bindings = (
-        _binding('qwen-local', prompt_version='northwind-fnol-claimant-v6'),
-        _binding('openrouter-gpt4o-mini', prompt_version='northwind-fnol-claimant-v6'),
-    )
-    settings = Settings(
-        environment='test',
-        identity_mode=IdentityMode.DEVELOPER,
-        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
-        model_base_url=bindings[0].base_url,
-        model_identifier=bindings[0].model_identifier,
-        model_supports_tools=True,
-        model_runtime_bindings=bindings,
-    )
-    configurations = ConfigurationRepository()
-    releases = ReleaseSetRepository()
-    release = install_initial_runtime_release(
-        settings,
-        configurations,
-        releases,
-        KnowledgeAdminRepository(),
+@pytest.mark.parametrize('superseded', ['northwind-fnol-claimant-v6', 'northwind-fnol-claimant-v7'])
+def test_superseded_prompt_bindings_cannot_be_published(superseded: str) -> None:
+    base = _settings()
+    archived = replace(
+        base,
+        model_runtime_bindings=tuple(
+            binding.model_copy(update={'prompt_version': superseded})
+            for binding in base.model_runtime_bindings
+        ),
     )
 
-    assert release is not None
-    policy = RuntimeAgentPolicyResolver(
-        RuntimeConfigurationResolver(
-            configurations,
-            releases,
-            environment='test',
-            runtime_profile='fixture',
+    with pytest.raises(ValueError, match='superseded prompt versions are archived'):
+        install_initial_runtime_release(
+            archived,
+            ConfigurationRepository(),
+            ReleaseSetRepository(),
+            KnowledgeAdminRepository(),
         )
-    ).resolve_for_turn()
-    assert policy is not None
-    assert policy.instruction.prompt_version == 'northwind-fnol-claimant-v6'
-    assert policy.instruction.composition_mode == 'single'
-    assert policy.features.verified_rolling_summary is False

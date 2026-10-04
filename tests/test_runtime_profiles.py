@@ -65,7 +65,8 @@ def test_environment_rejects_empty_mixed_and_unknown_profiles(
 ) -> None:
     monkeypatch.setenv('DATA_RUNTIME_PROFILE', value)
 
-    with pytest.raises(ValueError, match='must be exactly one of'):
+    expected = 'is required' if value == '' else 'must be exactly one of'
+    with pytest.raises(ValueError, match=expected):
         Settings.from_environment()
 
 

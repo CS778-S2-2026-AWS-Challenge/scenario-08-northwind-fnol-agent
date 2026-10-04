@@ -66,7 +66,7 @@ def _evidence(
     return EvidenceRecord(
         evidence_id='evd_history',
         claim_id=claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=status,
         file_status=file_status,
         source=source,

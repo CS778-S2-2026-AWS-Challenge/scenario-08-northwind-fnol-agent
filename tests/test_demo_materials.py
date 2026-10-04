@@ -188,7 +188,7 @@ def test_incident_evidence_held_as_a_document_is_not_an_incident_image(
     )
 
     assert note.kind == 'other_document'
-    assert photo.kind == 'incident_image'
+    assert photo.kind == 'incident_photo'
 
 
 def test_only_the_named_family_reaches_the_demonstration_claim(

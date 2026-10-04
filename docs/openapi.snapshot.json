@@ -1339,11 +1339,7 @@
         "description": "Versioned system instruction compiled into claimant model requests.",
         "properties": {
           "composition_mode": {
-            "default": "single",
-            "enum": [
-              "single",
-              "fragmented"
-            ],
+            "const": "fragmented",
             "title": "Composition Mode",
             "type": "string"
           },
@@ -1352,21 +1348,15 @@
               "$ref": "#/components/schemas/PublishedPromptFragment"
             },
             "maxItems": 100,
+            "minItems": 1,
             "title": "Fragments",
             "type": "array"
           },
           "manifest_version": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Manifest Version"
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Manifest Version",
+            "type": "string"
           },
           "prompt_version": {
             "maxLength": 100,
@@ -1379,23 +1369,13 @@
             "default": "claimant_agent",
             "title": "Purpose",
             "type": "string"
-          },
-          "system_prompt": {
-            "anyOf": [
-              {
-                "maxLength": 50000,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "System Prompt"
           }
         },
         "required": [
-          "prompt_version"
+          "prompt_version",
+          "composition_mode",
+          "manifest_version",
+          "fragments"
         ],
         "title": "AgentInstructionConfiguration",
         "type": "object"
@@ -3093,40 +3073,6 @@
           "page"
         ],
         "title": "ClaimListResponse",
-        "type": "object"
-      },
-      "ClaimMessage": {
-        "additionalProperties": false,
-        "properties": {
-          "message": {
-            "maxLength": 5000,
-            "minLength": 1,
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "required": [
-          "message"
-        ],
-        "title": "ClaimMessage",
-        "type": "object"
-      },
-      "ClaimMessageResponse": {
-        "properties": {
-          "received_message": {
-            "title": "Received Message",
-            "type": "string"
-          },
-          "reply": {
-            "title": "Reply",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reply",
-          "received_message"
-        ],
-        "title": "ClaimMessageResponse",
         "type": "object"
       },
       "ClaimPayoutContactSelectionResponse": {
@@ -4858,7 +4804,6 @@
             "type": "string"
           },
           "model_profile_id": {
-            "default": "openrouter-gpt4o-mini",
             "maxLength": 100,
             "minLength": 1,
             "title": "Model Profile Id",
@@ -4884,6 +4829,7 @@
           "session_id",
           "claim_id",
           "status",
+          "model_profile_id",
           "resume",
           "started_at",
           "last_active_at"
@@ -12371,19 +12317,6 @@
             ],
             "title": "Date Of Birth"
           },
-          "display_name": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
           "email": {
             "anyOf": [
               {
@@ -13372,12 +13305,6 @@
             },
             "title": "By State",
             "type": "object"
-          },
-          "current_action_satisfied": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Current Action Satisfied",
-            "type": "integer"
           },
           "current_action_total": {
             "default": 0,
@@ -19716,83 +19643,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/claims/message": {
-      "post": {
-        "deprecated": true,
-        "description": "Keep the connectivity shell working until the versioned routes replace it.",
-        "operationId": "claim_message_api_claims_message_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Northwind-Anonymous-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Northwind-Anonymous-Session"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClaimMessage"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClaimMessageResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Claim Message",
-        "tags": [
-          "temporary-connectivity"
-        ]
-      }
-    },
     "/api/v1/account": {
       "get": {
         "operationId": "read_account_api_v1_account_get",
@@ -24774,128 +24624,6 @@
           }
         },
         "summary": "Read Session",
-        "tags": [
-          "claimant"
-        ]
-      }
-    },
-    "/api/v1/claims/{claim_id}/sessions/{session_id}/events": {
-      "get": {
-        "operationId": "read_claim_events_api_v1_claims__claim_id__sessions__session_id__events_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "claim_id",
-            "required": true,
-            "schema": {
-              "title": "Claim Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "title": "Session Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "after_revision",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "After Revision",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Last-Event-ID",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Last-Event-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Northwind-Anonymous-Session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Northwind-Anonymous-Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "text/event-stream": {}
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Read Claim Events",
         "tags": [
           "claimant"
         ]
@@ -30593,28 +30321,6 @@
         "summary": "Put Presence",
         "tags": [
           "workbench staff"
-        ]
-      }
-    },
-    "/health": {
-      "get": {
-        "deprecated": true,
-        "operationId": "liveness_health_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LivenessResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Liveness",
-        "tags": [
-          "health"
         ]
       }
     },

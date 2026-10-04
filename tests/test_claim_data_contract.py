@@ -403,7 +403,7 @@ def test_home_registered_facts_and_optional_evidence_remain_canonical(
     assert updated.status_code == 200, updated.text
     revision = updated.json()['revision']
     for key, kind, note in (
-        ('home-damage-photo', 'photo', 'Synthetic property damage photo.'),
+        ('home-damage-photo', 'incident_photo', 'Synthetic property damage photo.'),
         ('home-emergency-receipt', 'receipt', 'Synthetic emergency repair receipt.'),
     ):
         response = client.post(
@@ -438,11 +438,11 @@ def test_home_registered_facts_and_optional_evidence_remain_canonical(
     assert 'authorities.police_report_reference' in REGISTERED_FIELD_CODES
     assert claimant.json()['workflow_state'] == 'collecting'
     assert {item['kind'] for item in claimant_evidence.json()['items']} == {
-        'photo',
+        'incident_photo',
         'receipt',
     }
     assert {item['kind'] for item in staff_evidence.json()['items']} == {
-        'photo',
+        'incident_photo',
         'receipt',
     }
     assert all('storage_key' not in item for item in claimant_evidence.json()['items'])

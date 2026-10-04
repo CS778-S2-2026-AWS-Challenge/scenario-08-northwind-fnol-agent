@@ -361,7 +361,7 @@ def test_a_found_policy_without_uncertainty_is_not_complex() -> None:
 def test_document_kinds_follow_the_canonical_names_only() -> None:
     contents = triage_claim(
         _claim(),
-        evidence=[_evidence('incident_image'), _evidence('receipt')],
+        evidence=[_evidence('incident_photo'), _evidence('receipt')],
         handoffs=[],
         policy_records=[_policy()],
         active_branches=['family.contents'],

@@ -1,12 +1,25 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import IdentityMode, Settings
+from backend.core.config import IdentityMode, Settings, load_model_runtime_bindings
 from backend.domain.agent_runtime_configuration import (
     AgentToolPolicyConfiguration,
     ControlledRulesConfiguration,
 )
+from backend.services.initial_runtime_release import repository_release_values
+
+# The instruction is the repository's current Prompt Pack; only bindings whose endpoint is in the
+# file (not an environment-owned URL) are needed to build it.
+_INSTRUCTION_VALUES = repository_release_values(
+    tuple(
+        binding
+        for binding in load_model_runtime_bindings(Path('config/model-runtime-bindings.json'))
+        if binding.base_url
+    )
+)['agent_instruction']
 
 
 def _client() -> TestClient:
@@ -25,11 +38,7 @@ def test_agent_rule_components_are_independent_versioned_records() -> None:
             '/internal/v1/admin/agent-rules/instructions',
             headers=_headers('agent-instruction-create'),
             json={
-                'values': {
-                    'prompt_version': 'northwind-fnol-motor-claimant-v4',
-                    'purpose': 'claimant_agent',
-                    'system_prompt': 'Follow the published claimant Agent policy.',
-                },
+                'values': _INSTRUCTION_VALUES,
                 'reason': 'Publish the claimant instruction reference.',
             },
         )
@@ -144,3 +153,22 @@ def test_agent_rule_endpoint_rejects_a_component_schema_from_another_domain() ->
         )
     assert response.status_code == 422
     assert response.json()['error']['code'] == 'AGENT_CONFIGURATION_INVALID'
+
+
+def test_an_instruction_without_the_prompt_pack_is_rejected_at_publication() -> None:
+    with _client() as client:
+        response = client.post(
+            '/internal/v1/admin/agent-rules/instructions',
+            headers=_headers('agent-instruction-single'),
+            json={
+                'values': {
+                    'prompt_version': 'northwind-fnol-claimant-v8',
+                    'purpose': 'claimant_agent',
+                    'composition_mode': 'single',
+                    'system_prompt': 'Follow the published claimant Agent policy.',
+                },
+                'reason': 'Publish a single system prompt.',
+            },
+        )
+
+    assert response.status_code == 422, response.text

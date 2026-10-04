@@ -86,7 +86,7 @@ def _prepare_upload(
     requirement = client.post(
         f'/api/v1/claims/{claim_id}/evidence',
         headers={**headers, 'Idempotency-Key': 'image-requirement', 'If-Match': '1'},
-        json={'kind': 'incident_image', 'status': 'missing', 'needed_for': ['current_action']},
+        json={'kind': 'incident_photo', 'status': 'missing', 'needed_for': ['current_action']},
     )
     assert requirement.status_code == 201
     evidence_id = str(requirement.json()['evidence']['evidence_id'])
@@ -95,7 +95,7 @@ def _prepare_upload(
         headers={**headers, 'Idempotency-Key': 'image-upload', 'If-Match': '2'},
         json={
             'evidence_id': evidence_id,
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'synthetic-image.png',
             'media_type': media_type,
             'size_bytes': len(content),

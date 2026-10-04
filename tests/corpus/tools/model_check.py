@@ -31,7 +31,7 @@ MODEL = 'openai/gpt-4o'
 ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 SECRETS_ENDPOINT = 'https://ysoseri.us/secret/northwind-dev'
 KEY_FILE = os.path.join(os.path.expanduser('~'), '.config', 'fnol', 'openrouter.key')
-IMAGE_KINDS = {'incident_photo', 'item_photo', 'incident_image', 'photo'}
+IMAGE_KINDS = {'incident_photo', 'item_photo'}
 FACT_HINTS = (
     'incident.description',
     'loss.description',

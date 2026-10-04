@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -39,9 +38,6 @@ def realtime_stream(
     *,
     cursor: str | None,
     claim_id: str | None = None,
-    legacy_session_id: str | None = None,
-    legacy_after_revision: int | None = None,
-    legacy_current_revision: int | None = None,
 ) -> StreamingResponse:
     dispatcher = dispatcher_for(request)
     scope = scope_for(principal, claim_id=claim_id)
@@ -61,50 +57,14 @@ def realtime_stream(
     async def events() -> AsyncIterator[str]:
         last_cursor = cursor
 
-        def format_delivery(
-            event: str,
-            data: dict[str, object],
-            delivery_cursor: str | None,
-        ) -> str:
-            if event != 'resources.changed' or legacy_session_id is None:
-                return _format_sse(event, data, delivery_cursor)
-            revision = data.get('claim_revision')
-            legacy_data = {
-                'event_id': str(revision),
-                'claim_id': data.get('claim_id'),
-                'session_id': legacy_session_id,
-                'claim_revision': revision,
-                'resources': data.get('resources'),
-                'emitted_at': data.get('occurred_at'),
-            }
-            return _format_sse('claim.updated', legacy_data, str(revision))
-
         try:
             yield 'retry: 1500\n: connected\n\n'
-            if (
-                legacy_session_id is not None
-                and legacy_after_revision is not None
-                and legacy_current_revision is not None
-                and legacy_after_revision < legacy_current_revision
-            ):
-                yield _format_sse(
-                    'claim.updated',
-                    {
-                        'event_id': str(legacy_current_revision),
-                        'claim_id': claim_id,
-                        'session_id': legacy_session_id,
-                        'claim_revision': legacy_current_revision,
-                        'resources': ['claim', 'messages'],
-                        'emitted_at': datetime.now(UTC).isoformat(),
-                    },
-                    str(legacy_current_revision),
-                )
             for delivery in replay:
                 if delivery.cursor and not cursor_is_after(delivery.cursor, last_cursor):
                     continue
                 if delivery.cursor:
                     last_cursor = delivery.cursor
-                yield format_delivery(delivery.event, delivery.data, delivery.cursor)
+                yield _format_sse(delivery.event, delivery.data, delivery.cursor)
                 if delivery.event == 'resync_required':
                     return
             while not await request.is_disconnected():
@@ -116,7 +76,7 @@ def realtime_stream(
                     continue
                 if live_delivery.cursor:
                     last_cursor = live_delivery.cursor
-                yield format_delivery(
+                yield _format_sse(
                     live_delivery.event,
                     live_delivery.data,
                     live_delivery.cursor,

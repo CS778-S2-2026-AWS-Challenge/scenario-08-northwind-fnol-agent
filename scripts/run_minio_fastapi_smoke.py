@@ -105,7 +105,7 @@ def main() -> None:
                     'If-Match': '1',
                 },
                 json={
-                    'kind': 'incident_image',
+                    'kind': 'incident_photo',
                     'original_filename': 'synthetic-damage.jpg',
                     'media_type': 'image/jpeg',
                     'size_bytes': len(payload),

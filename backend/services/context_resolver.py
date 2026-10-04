@@ -94,18 +94,6 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
                 ],
                 separators=(',', ':'),
             )
-        elif reference.resource_type == 'knowledge_chunk':
-            sources[(reference.ref, 'matching_chunks')] = {
-                'chunks': [
-                    {
-                        'document_id': item.document_id,
-                        'chunk_id': item.chunk_id,
-                        'version': item.version,
-                        'text': item.text[:900],
-                    }
-                    for item in context.knowledge_results[:3]
-                ]
-            }
         elif reference.resource_type == 'policy_version':
 
             def load_policy_and_guidance(

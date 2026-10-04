@@ -9,13 +9,18 @@ import PageHeader from '../components/PageHeader.jsx'
 import ResourceWorkspace from '../components/ResourceWorkspace.jsx'
 import useAdminCollection from '../hooks/useAdminCollection.js'
 import useMutation from '../hooks/useMutation.js'
+import useRunningRuntime from '../hooks/useRunningRuntime.js'
 import useSelection from '../hooks/useSelection.js'
 
 const SCENARIOS = '[\n  {\n    "scenario_id": "runtime-load",\n    "outcome": "passed",\n    "evidence": "All pinned records resolved as published and compatible."\n  }\n]'
 
 function CreateRelease({ onDone }) {
-  const [environment, setEnvironment] = useState('test')
-  const [runtimeProfile, setRuntimeProfile] = useState('fixture')
+  const running = useRunningRuntime()
+  const [environmentInput, setEnvironment] = useState(null)
+  const [runtimeProfileInput, setRuntimeProfile] = useState(null)
+  // Until the operator edits a field it shows what the backend is running now.
+  const environment = environmentInput ?? running?.environment ?? ''
+  const runtimeProfile = runtimeProfileInput ?? running?.runtimeProfile ?? ''
   const [configurationRefs, setConfigurationRefs] = useState('{}')
   const [integrationRefs, setIntegrationRefs] = useState('{}')
   const [knowledgeRefs, setKnowledgeRefs] = useState('{}')

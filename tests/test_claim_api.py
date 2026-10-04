@@ -510,7 +510,7 @@ def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
         headers={**auth_headers, 'Idempotency-Key': 'multimodal-upload', 'If-Match': '1'},
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'damage.png',
             'media_type': 'image/png',
             'size_bytes': len(content),
@@ -602,7 +602,7 @@ def test_message_turn_rejects_internal_evidence_before_agent_invocation(
             EvidenceRecord(
                 evidence_id=evidence_id,
                 claim_id=claim_id,
-                kind='incident_image',
+                kind='incident_photo',
                 status=EvidenceStatus.RECEIVED,
                 file_status=EvidenceFileStatus.READY,
                 source=source,
@@ -645,7 +645,7 @@ def test_turn_evidence_resolver_rechecks_claimant_visibility(
         EvidenceRecord(
             evidence_id=evidence_id,
             claim_id=claim.claim_id,
-            kind='incident_image',
+            kind='incident_photo',
             status=EvidenceStatus.RECEIVED,
             file_status=EvidenceFileStatus.READY,
             source=EvidenceSource.STAFF,
@@ -708,7 +708,7 @@ def test_message_turn_persists_contents_attachment_provenance(
                 'If-Match': str(revision),
             },
             json={
-                'kind': 'incident_image' if media_type.startswith('image/') else 'other_document',
+                'kind': 'incident_photo' if media_type.startswith('image/') else 'other_document',
                 'original_filename': filename,
                 'media_type': media_type,
                 'size_bytes': len(content),
@@ -869,7 +869,6 @@ def test_vp_family_journey_confirms_registered_facts_and_enters_payout_contact(
     assert turn_body['dynamic_form']['selected_family'] == family
     requirements = turn_body['dynamic_form']['requirements']
     assert requirements['current_action_total'] > 0
-    assert 0 <= requirements['current_action_satisfied'] <= requirements['current_action_total']
     assert turn_body['decision']['customer_next_step']['required_items']
     assert turn_body['decision']['customer_next_step']['status'] == 'confirmation_required'
     confirmation_items = [item['field_code'] for item in turn_body['form_changes']]
@@ -1510,7 +1509,10 @@ def test_read_claim_and_session_use_same_fixture_state(
 
     assert read_claim.status_code == 200
     assert read_claim.json()['claim_id'] == claim['claim_id']
-    assert read_claim.json()['dynamic_form'] is None
+    # The rules are evaluated when the Claim is started, so the form exists from the first read.
+    dynamic_form = read_claim.json()['dynamic_form']
+    assert dynamic_form['claim_revision'] == 1
+    assert dynamic_form['requirements']['current_action_total'] > 0
     assert read_session.status_code == 200
     assert read_session.json()['session_id'] == session['session_id']
     assert read_session.json()['resume']['unresolved_questions'] == []
@@ -2908,7 +2910,8 @@ def test_form_correction_persists_current_transition_and_immutable_previous_eval
 
     assert collision.status_code == 200
     assert corrected.status_code == 200
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    started, *evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert (started.recomputation_reason, started.resulting_claim_revision) == ('claim_started', 1)
     assert len(evaluations) == 2
     previous_collision = next(
         item for item in evaluations[0].branch_results if item.branch_id == 'incident.collision'

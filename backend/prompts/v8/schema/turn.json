@@ -302,8 +302,25 @@
         "additionalProperties": false,
         "properties": {
           "document_kind": {
-            "maxLength": 100,
-            "minLength": 1,
+            "enum": [
+              "agency_incident_record",
+              "assessment_report",
+              "claim_history",
+              "claimant_attachment",
+              "claimant_statement",
+              "document",
+              "external_assessment",
+              "incident_photo",
+              "incident_report",
+              "internal_policy_history",
+              "item_photo",
+              "other_document",
+              "police_report",
+              "policy",
+              "proof_of_ownership",
+              "receipt",
+              "repair_quote"
+            ],
             "type": "string"
           },
           "stance": {
@@ -348,8 +365,25 @@
             "type": "string"
           },
           "document_kind": {
-            "maxLength": 100,
-            "minLength": 1,
+            "enum": [
+              "agency_incident_record",
+              "assessment_report",
+              "claim_history",
+              "claimant_attachment",
+              "claimant_statement",
+              "document",
+              "external_assessment",
+              "incident_photo",
+              "incident_report",
+              "internal_policy_history",
+              "item_photo",
+              "other_document",
+              "police_report",
+              "policy",
+              "proof_of_ownership",
+              "receipt",
+              "repair_quote"
+            ],
             "type": "string"
           }
         },

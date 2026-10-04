@@ -21,7 +21,6 @@ _CONTEXT_SIZE_KEYS = frozenset(
     {
         'claim_context_chars',
         'conversation_history_chars',
-        'knowledge_citation_chars',
         'tool_result_chars',
         'external_service_chars',
     }

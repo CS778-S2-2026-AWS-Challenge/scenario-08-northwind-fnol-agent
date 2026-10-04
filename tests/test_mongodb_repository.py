@@ -133,6 +133,7 @@ from backend.repositories.protocols import (
     with_staff_agent_source,
 )
 from backend.services.account_data import _account_audit
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.external_service_entry import resolve_external_service_entry
 from backend.services.handoff_audit import build_handoff_audit_event
 from backend.services.integrations import (
@@ -492,7 +493,7 @@ def _evidence(claim: WorkingClaim) -> EvidenceRecord:
     return EvidenceRecord(
         evidence_id='evd_mongo_001',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,
@@ -4551,3 +4552,21 @@ def test_mongodb_handoff_audit_insert_failure_rolls_back_transaction(
         if connected:
             client.drop_database(database_name)
         client.close()
+
+
+def test_claim_creation_persists_its_branch_evaluation_across_adapters(
+    mutation_contract_repository: PersistenceRepository,
+) -> None:
+    repository = mutation_contract_repository
+    claim = _claim()
+    other = claim.model_copy(update={'claim_id': 'clm_other_evaluation'})
+    foreign = build_applied_branch_evaluation(other, recomputation_reason='claim_started')
+
+    with pytest.raises(KeyError):
+        repository.create_claim(claim, _session(claim), foreign)
+    assert repository.get_claim(claim.claim_id, claim.customer_id) is None
+
+    evaluation = build_applied_branch_evaluation(claim, recomputation_reason='claim_started')
+    repository.create_claim(claim, _session(claim), evaluation)
+
+    assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == [evaluation]

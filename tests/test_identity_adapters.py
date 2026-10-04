@@ -184,9 +184,14 @@ def test_sqlite_staff_identity_persists_accounts_and_sessions(tmp_path: Path) ->
     )
     assert account.email == 'staff@example.com'
     assert account.display_name == 'Staff'
-    assert (
-        repository.provision_account('STAFF@example.com', 'other', 'Duplicate', ('other',)).staff_id
-        == account.staff_id
+    # Provisioning a seeded account again resets it to the seed values, keeping its identity.
+    reseeded = repository.provision_account('STAFF@example.com', 'other', 'Reseeded', ('other',))
+    assert reseeded.staff_id == account.staff_id
+    assert (reseeded.display_name, reseeded.roles) == ('Reseeded', ('other',))
+    assert reseeded.revision == account.revision + 1
+    assert repository.authenticate('staff@example.com', 'secret') is None
+    account = repository.provision_account(
+        'staff@example.com', 'secret', 'Staff', ('claims_professional', 'supervisor')
     )
     assert repository.authenticate('STAFF@example.com', 'secret') is not None
     assert repository.authenticate('staff@example.com', 'wrong') is None

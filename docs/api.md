@@ -79,9 +79,9 @@ token; only its hash, staff ID, creation time, expiry, and revocation state are 
 routes, and a staff session cannot cross into claimant account routes.
 
 Normal-mode local runtimes use the separate SQLite staff identity adapter configured by
-`NORTHWIND_STAFF_IDENTITY_DB_PATH`. An initial account may be provisioned explicitly with
-`NORTHWIND_STAFF_BOOTSTRAP_EMAIL`, `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD`, and
-`NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME`; the plaintext password is never persisted. This is a
+`NORTHWIND_STAFF_IDENTITY_DB_PATH`. Every start provisions the accounts and the shared password
+listed in `config/staff-seed.json` (an existing seeded account is reset to them) and prints each
+email and the password; the database stores only the salted hash. This is a
 real persistent local login path, but it is not an enterprise IdP, SSO, MFA, or recovery
 implementation. Production deployment still requires an approved identity provider adapter.
 
@@ -351,7 +351,7 @@ AGENT_CONFIGURATION_INVALID`.
 
 | Component path | Configuration domain | Required `values` fields |
 | --- | --- | --- |
-| `instructions` | `agent_instruction` | `prompt_version`, `purpose`, `composition_mode`, `manifest_version`, and embedded `fragments` for v7 |
+| `instructions` | `agent_instruction` | `prompt_version`, `purpose`, `composition_mode` (`fragmented`), `manifest_version`, and embedded `fragments` |
 | `tool_permissions` | `agent_tool_policy` | `policy_version`, action/tool allow-lists, Request Profiles, provider capabilities, and schema registry |
 | `controlled_rules` | `agent_rule` | `rules_version`, protected overlays, route/catalogue versions, deterministic responses, and context budget |
 | `features` | `feature` | `feature_version`, model/retrieval switches, v7 feature flags, and cache layout version |
@@ -572,12 +572,12 @@ return `401`. Logout revokes the server-side session and returns `204`. Account 
 derived from the authenticated principal and never accept a customer identifier in their path
 or payload. The Profile projection contains `legal_name`, optional `preferred_name`, optional
 `date_of_birth`, email, phone, and optional `residential_address`, plus `revision` and
-`updated_at`. `display_name` remains a transitional projection only: it is always derived from
-preferred name when present and otherwise legal name. A legacy PATCH may send `display_name` as
-the legal-name alias; it cannot disagree with `legal_name`. New clients send the projected
-revision in `If-Match`; a stale revision returns `409 REVISION_CONFLICT`.
-Profile text is whitespace-normalized before validation. Blank legal name, compatibility display
-name, preferred name, or residential address returns `422 VALIDATION_ERROR` and does not change
+`updated_at`. `display_name` is a read-only projection: it is always derived from preferred name
+when present and otherwise legal name, and a PATCH that sends it returns `422 VALIDATION_ERROR`.
+The PATCH requires the projected revision in `If-Match`; a missing revision returns
+`409 REVISION_REQUIRED` and a stale one `409 REVISION_CONFLICT`.
+Profile text is whitespace-normalized before validation. Blank legal name, preferred name, or
+residential address returns `422 VALIDATION_ERROR` and does not change
 the stored profile or revision. Email updates are normalized to lowercase, and an email already
 owned by another account returns `409 RESOURCE_CONFLICT` without changing the stored profile or
 revision.
@@ -585,10 +585,9 @@ revision.
 Preferences PATCH accepts the Account projection's revision in `If-Match` and commits the
 communication preferences with a compare-and-set Account write. A stale supplied revision, or a
 repository conflict after the service read, returns retryable `409 REVISION_CONFLICT` with
-`current_revision`; the attempted preferences and Account revision are not committed. During the
-legacy-client transition the header remains optional and an omitted header uses the revision read
-at the start of the request, while still retaining repository compare-and-set protection. New
-clients send `If-Match` so edits made from a stale Account projection are rejected explicitly.
+`current_revision`; the attempted preferences and Account revision are not committed. The header
+is required; a request without it returns `409 REVISION_REQUIRED`, so an edit made from a stale
+Account projection is always rejected explicitly.
 
 The `claim_auto_fill_preferences` Account member contains exactly five booleans:
 `personal_details`, `policy_number`, `saved_assets`, `payment_details`, and
@@ -1171,8 +1170,8 @@ The backend MUST maintain a versioned field registry with validation and display
 
 Every claimant Dynamic Form projection includes deterministic `requirements`: `satisfied`,
 `recorded`, `missing_required_now`, `missing_by_branch`, `pending_later`, `next_required_item`, `ready`,
-`ready_pending_confirmation`, `by_state`, `unresolved`,
-`current_action_total`, and `current_action_satisfied`. `by_state` groups every projected field
+`ready_pending_confirmation`, `by_state`, `unresolved`, and
+`current_action_total`. `by_state` groups every projected field
 code by its seven-state disposition (`missing`, `proposed`, `confirmed_exact`, `confirmed_approx`,
 `disputed`, `unavailable`, `pending_generation`); `unresolved` is the `missing` group, so a client
 can distinguish still-missing fields from fields already settled into a resting state such as
@@ -1216,7 +1215,7 @@ later claimant statement is resolved against existing assertions rather than sil
 
 | Field | Allowed values or rule |
 |---|---|
-| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `document`, `external_assessment`, `incident_image`, `incident_photo`, `incident_report`, `internal_policy_history`, `item_photo`, `other_document`, `photo`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
+| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `document`, `external_assessment`, `incident_photo`, `incident_report`, `internal_policy_history`, `item_photo`, `other_document`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
 | `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |
@@ -1546,7 +1545,6 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims/{claim_id}/sessions/{session_id}` | Read resumable session state |
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
-| `GET` | `/claims/{claim_id}/sessions/{session_id}/events` | Stream claimant-safe Claim and conversation change notifications |
 | `GET` | `/realtime/events` | Open the claimant's multiplexed durable-event stream |
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
@@ -1579,8 +1577,8 @@ credential. Health remains `null` until a controlled provider check records a re
 the page never invokes a paid provider. The frontend uses the default when creating a Session,
 while a message may select another published and runtime-ready profile in the same conversation.
 The repository initial catalogue publishes `qwen-local`, `openrouter-gpt4o-mini`,
-`google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
-selection keeps `openrouter-gpt4o-mini` as the default unless `MODEL_PROFILE_ID` changes.
+`google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; the deployment
+selects its default with the required `MODEL_PROFILE_ID`.
 
 ### `POST /api/v1/claims`
 
@@ -1645,7 +1643,9 @@ Response `201`:
 
 `model_profile_id` may be supplied in the create request. The selected profile must be published,
 configured for claimant use, and declare both structured output and tool calling; otherwise the
-server returns `MODEL_PROFILE_UNAVAILABLE`. A resumed Session keeps the last selected profile by
+server returns `MODEL_PROFILE_UNAVAILABLE`. Without a selection the Session uses the deployment's
+`MODEL_PROFILE_ID`; under the keyword agent (`AGENT_RUNTIME_PROFILE=controlled`), which calls no
+model, the Session records `controlled`. A resumed Session keeps the last selected profile by
 default, and the profile may be changed explicitly on a later message when the replacement is
 published and available.
 
@@ -2097,41 +2097,12 @@ branch evaluation.
 
 Returns claimant-visible messages ordered newest-last by default. Supported query: `before`, `after`, `limit`, and `cursor`. Staff-only notes and hidden system messages are excluded.
 
-### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/events`
-
-Opens a `text/event-stream` connection for the authenticated claimant or the browser's current
-anonymous claimant session. The Claim and session ownership checks are identical to the ordinary
-claimant read boundary. This compatibility route retains `after_revision` and the `claim.updated`
-wire shape for the current claimant client, but its event source is the process-level realtime
-dispatcher. It performs no per-connection repository polling. The server rejects a revision newer
-than the current Claim with `409 INVALID_EVENT_CURSOR` and the current revision. It also accepts an
-opaque durable cursor through `cursor`; `Last-Event-ID` is interpreted as a non-negative legacy
-revision when numeric and as a durable cursor otherwise. The claimant client keeps numeric
-`claim.updated` IDs in `after_revision` and keeps only opaque IDs as durable replay cursors.
-
-When shared Claim State advances, the stream emits `claim.updated`:
-
-```text
-id: 4
-event: claim.updated
-data: {"event_id":"4","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8","claim_revision":4,"resources":["claim","messages"],"emitted_at":"2026-09-03T05:10:00Z"}
-```
-
-This event is a resource hint, not a second Claim projection. It contains no messages, handoff
-packet, internal signals, staff identity, model metadata, or hidden reasoning. After receiving it,
-the claimant client reloads `GET /claims/{claim_id}` and the active session's message list through
-their existing visibility-filtered endpoints. The server sends comment-only keep-alives; clients
-ignore them and reconnect with bounded backoff if the transport closes. This route is a migration
-compatibility boundary, not a second event store.
-
 ### `GET /api/v1/realtime/events`
 
 Opens one claimant-scoped, multiplexed `text/event-stream` for all Claims owned by the
 authenticated customer. `GET /api/v1/workbench/realtime/events` provides the corresponding staff
 stream. Both accept the last acknowledged opaque cursor in `Last-Event-ID` or the `cursor` query
 parameter; the header takes precedence. A connection without a cursor receives future events only.
-The legacy Claim stream above accepts both forms because it carries numeric compatibility
-`claim.updated` events and opaque durable progress events on one connection.
 
 The normal delivery is `resources.changed`:
 
@@ -2634,7 +2605,7 @@ Request:
 ```json
 {
   "evidence_id": "evd_01J4Y7V5QJ",
-  "kind": "incident_image",
+  "kind": "incident_photo",
   "original_filename": "rear-damage.jpg",
   "media_type": "image/jpeg",
   "size_bytes": 1842201
@@ -3142,9 +3113,8 @@ currency outside that table makes the amount unknown.
 
 `coverage_uncertain` comes from an uncertainty on the policy retrieval record for the Claim's
 policy number or `coverage = ambiguous`, never from `coverage = review_required` alone.
-`document_outstanding` compares canonical Evidence kinds (`canonical_evidence_kind` in
-`backend/domain/evidence.py`: `incident_image` and `photo` read as `incident_photo`). A receipt or
-invoice counts as proof of ownership; no other kind stands in for a required kind, so an
+`document_outstanding` compares registered Evidence kinds; each kind has one name (an incident
+photo is `incident_photo`). A receipt or invoice counts as proof of ownership; no other kind stands in for a required kind, so an
 assessment report does not replace a repair quote.
 
 `claim_state.severity` in Workbench projections equals `triage.severity`. Staff cannot change the
@@ -4767,6 +4737,7 @@ Returns readiness without secrets or private configuration:
 {
   "status": "degraded",
   "checks": {
+    "environment": "test",
     "persistence": "using_fixture",
     "data_runtime_profile": "fixture",
     "object_storage_adapter": "fixture",
@@ -4790,8 +4761,9 @@ reporting `unavailable` makes overall readiness `unavailable`; otherwise the cur
 fixture/model combination remains `degraded`. A fixture is not reported as a real
 connected service.
 
-`data_runtime_profile` and `object_storage_adapter` identify the single selected runtime
-bundle and object-store adapter. They are labels only; connection credentials, endpoints,
+`environment` is the configured `NORTHWIND_ENVIRONMENT`; the Control Plane console preselects it
+as the default environment. `data_runtime_profile` and `object_storage_adapter` identify the
+single selected runtime bundle and object-store adapter. They are labels only; connection credentials, endpoints,
 physical keys, and provider payloads are never returned. A process must report one profile and
 must not combine capabilities from another profile.
 

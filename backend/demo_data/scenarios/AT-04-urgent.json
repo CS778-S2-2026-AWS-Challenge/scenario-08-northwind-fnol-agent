@@ -95,7 +95,7 @@
     {
       "evidence_id": "evd_fixture_path_urgent_image",
       "claim_id": "clm_fixture_at04",
-      "kind": "incident_image",
+      "kind": "incident_photo",
       "status": "received",
       "file_status": "ready",
       "original_filename": "urgent-scene.jpg",
@@ -191,7 +191,7 @@
         "evidence": [
           {
             "evidence_id": "evd_fixture_path_urgent_image",
-            "kind": "incident_image",
+            "kind": "incident_photo",
             "status": "received",
             "file_status": "ready",
             "source": "claimant",

@@ -64,7 +64,7 @@ def _populate_demo(
             'If-Match': str(handoff.json()['claim_revision']),
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'synthetic-reset.png',
             'media_type': 'image/png',
             'size_bytes': 100,

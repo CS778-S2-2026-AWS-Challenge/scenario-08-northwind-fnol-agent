@@ -25,7 +25,7 @@ def repository(request: pytest.FixtureRequest) -> FixtureRepository | MongoDBRep
         record = EvidenceRecord(
             evidence_id=f'evd_{number:03d}',
             claim_id='clm_page',
-            kind='photo',
+            kind='incident_photo',
             status=EvidenceStatus.RECEIVED,
             file_status=EvidenceFileStatus.READY if number % 2 else EvidenceFileStatus.PROCESSING,
             media_type='application/pdf' if number % 3 else 'image/png',
@@ -75,7 +75,7 @@ def test_page_limit_bounds(
     assert len(page) == expected
     assert page[0].evidence_id == 'evd_000'
     page[0].kind = 'caller mutation'
-    assert repository.list_evidence_recovery_page(limit=1)[0].kind == 'photo'
+    assert repository.list_evidence_recovery_page(limit=1)[0].kind == 'incident_photo'
 
 
 def test_inconsistent_identity_cannot_repeat_a_cursor(

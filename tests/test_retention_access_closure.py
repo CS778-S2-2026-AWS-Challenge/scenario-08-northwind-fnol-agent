@@ -82,7 +82,7 @@ def _evidence(
     return EvidenceRecord(
         evidence_id=f'evd_{claim.claim_id}',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,
@@ -736,13 +736,6 @@ def test_closed_claimant_routes_use_concealed_absence(
             'GET evidence',
             lambda: client.get(
                 f'/api/v1/claims/{claim_id}/evidence',
-                headers=auth_headers,
-            ),
-        ),
-        (
-            'GET old session event stream',
-            lambda: client.get(
-                (f'/api/v1/claims/{claim_id}/sessions/{session_id}/events'),
                 headers=auth_headers,
             ),
         ),

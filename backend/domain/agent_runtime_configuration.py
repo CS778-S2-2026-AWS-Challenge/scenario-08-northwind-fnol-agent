@@ -25,19 +25,14 @@ class AgentInstructionConfiguration(BaseModel):
 
     prompt_version: str = Field(min_length=1, max_length=100)
     purpose: Literal['claimant_agent'] = 'claimant_agent'
-    composition_mode: Literal['single', 'fragmented'] = 'single'
-    system_prompt: str | None = Field(default=None, min_length=1, max_length=50_000)
-    manifest_version: str | None = Field(default=None, min_length=1, max_length=100)
-    fragments: list[PublishedPromptFragment] = Field(default_factory=list, max_length=100)
+    # Only the fragmented Prompt Pack is executable; the single system_prompt form had no
+    # remaining reader and is no longer accepted.
+    composition_mode: Literal['fragmented']
+    manifest_version: str = Field(min_length=1, max_length=100)
+    fragments: list[PublishedPromptFragment] = Field(min_length=1, max_length=100)
 
     @model_validator(mode='after')
-    def require_one_complete_composition(self) -> 'AgentInstructionConfiguration':
-        if self.composition_mode == 'single':
-            if self.system_prompt is None or self.fragments or self.manifest_version is not None:
-                raise ValueError('A single Prompt configuration requires only system_prompt.')
-            return self
-        if self.system_prompt is not None or self.manifest_version is None or not self.fragments:
-            raise ValueError('A fragmented Prompt configuration requires manifest and fragments.')
+    def require_unique_fragments(self) -> 'AgentInstructionConfiguration':
         fragment_ids = [item.fragment_id for item in self.fragments]
         if len(fragment_ids) != len(set(fragment_ids)):
             raise ValueError('Published Prompt fragment IDs must be unique.')

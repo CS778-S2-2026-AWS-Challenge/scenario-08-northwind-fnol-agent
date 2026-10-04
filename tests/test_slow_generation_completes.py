@@ -15,7 +15,7 @@ from backend.domain.configuration import ModelRuntimeBinding, ModelRuntimeConfig
 from backend.repositories.fixture import FixtureRepository
 from backend.services import model_agent
 from backend.services.agent import InvariantGuardedAgent
-from backend.services.initial_runtime_release import repository_v7_values
+from backend.services.initial_runtime_release import repository_release_values
 from backend.services.model_agent import GatewayAgent
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 
@@ -35,7 +35,7 @@ def test_legitimate_generation_near_configured_timeout_commits_facts(
         )
     ]
     configuration = ModelRuntimeConfiguration.model_validate(
-        repository_v7_values(bindings)['model:openrouter-gpt4o-mini']
+        repository_release_values(bindings)['model:openrouter-gpt4o-mini']
     )
     timeout = (
         Settings().model_timeout_seconds

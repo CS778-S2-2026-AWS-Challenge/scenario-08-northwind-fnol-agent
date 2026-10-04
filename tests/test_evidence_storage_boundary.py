@@ -29,7 +29,7 @@ STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 UPLOAD_PAYLOAD = {
-    'kind': 'incident_image',
+    'kind': 'incident_photo',
     'original_filename': 'damage.jpg',
     'media_type': 'image/jpeg',
     'size_bytes': 2048,

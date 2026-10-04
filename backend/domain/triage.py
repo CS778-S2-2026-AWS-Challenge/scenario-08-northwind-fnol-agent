@@ -16,7 +16,7 @@ from enum import Enum
 
 from backend.domain.branch_registry import BranchRegistrySnapshot
 from backend.domain.currency import to_nzd
-from backend.domain.evidence import canonical_evidence_kind, evidence_kind
+from backend.domain.evidence import evidence_kind
 from backend.domain.field_registry import parse_registered_number
 from backend.domain.models import (
     AssessorRoutingStatus,
@@ -260,7 +260,7 @@ def _outstanding_documents(
     for branch_id in active_branches:
         branch = registry.branch_by_id.get(branch_id)
         if branch is not None:
-            wanted.update(canonical_evidence_kind(kind) for kind in branch.document_requirements)
+            wanted.update(branch.document_requirements)
     received = {
         evidence_kind(item, interpreted_kinds)
         for item in evidence

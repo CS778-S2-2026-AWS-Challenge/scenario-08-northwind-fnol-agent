@@ -62,7 +62,7 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
             'If-Match': '1',
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'day5-damage.jpg',
             'media_type': 'image/jpeg',
             'size_bytes': 2048,

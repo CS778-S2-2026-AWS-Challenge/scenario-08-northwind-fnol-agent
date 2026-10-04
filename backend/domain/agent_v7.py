@@ -1,10 +1,13 @@
-"""Narrow model-output contracts for Agent Context Runtime v7."""
+"""Model-output contracts shared by the evidence-history and deep-review request profiles.
+
+The classes keep their v7-era names; only the shapes still published by the current
+prompt pack remain.
+"""
 
 from typing import Literal
 
 from pydantic import Field
 
-from backend.domain.model_gateway import ModelProposedContentsItem, ModelProposedFormChange
 from backend.domain.models import ContractModel
 
 
@@ -14,27 +17,11 @@ class V7AnswerProposal(ContractModel):
     reason_codes: list[str] = Field(min_length=1, max_length=20)
 
 
-class V7IntakeProposal(V7AnswerProposal):
-    field_changes: list[ModelProposedFormChange] = Field(default_factory=list, max_length=50)
-    contents_item_changes: list[ModelProposedContentsItem] = Field(
-        default_factory=list,
-        max_length=30,
-    )
-
-
-class V7ExternalOfferProposal(V7AnswerProposal):
-    pass
-
-
 class V7EvidenceActionProposal(V7AnswerProposal):
     action: Literal['reuse', 'remove']
     evidence_id: str = Field(min_length=1, max_length=120)
     source_claim_id: str | None = Field(default=None, max_length=120)
     removal_scope: Literal['draft', 'persisted'] | None = None
-
-
-class V7ClaimCreationProposal(V7AnswerProposal):
-    ready: bool
 
 
 class V7SourcedSummaryProposal(ContractModel):

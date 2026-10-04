@@ -94,16 +94,12 @@ export function claimReviewRequirements(dynamicForm) {
       missingRequiredNow: [],
       pendingLater: [],
       currentActionTotal: null,
-      currentActionSatisfied: null,
     }
   }
 
   const total = requirements.current_action_total == null
     ? Number.NaN
     : Number(requirements.current_action_total)
-  const satisfied = requirements.current_action_satisfied == null
-    ? Number.NaN
-    : Number(requirements.current_action_satisfied)
 
   return {
     available: true,
@@ -111,6 +107,5 @@ export function claimReviewRequirements(dynamicForm) {
     missingRequiredNow: uniqueStrings(requirements.missing_required_now),
     pendingLater: uniqueStrings(requirements.pending_later),
     currentActionTotal: Number.isFinite(total) && total >= 0 ? total : null,
-    currentActionSatisfied: Number.isFinite(satisfied) && satisfied >= 0 ? satisfied : null,
   }
 }

@@ -377,3 +377,65 @@ def test_bad_core_remains_atomic_even_when_optional_question_is_malformed(
     assert response.json()['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     claim = repository.get_claim(claim_id, 'cus_demo')
     assert claim is not None and claim.form == {}
+
+
+def _validate_facts(
+    message: str,
+    field_changes: list[dict[str, Any]],
+) -> Any:
+    context = v8_context(message)
+    assert context.branch_evaluation is not None
+    assert context.runtime_policy is not None
+    proposal, _ = parse_turn_proposal(
+        {'reply': 'Noted.', 'reason_codes': ['FACT_RECORDED'], 'field_changes': field_changes}
+    )
+    return validate_turn_proposal(
+        proposal,
+        branch_evaluation=context.branch_evaluation,
+        eligible_service_ids=set(),
+        safety_interrupt=None,
+        field_contract=compile_turn_field_contract(
+            context.branch_evaluation, context.runtime_policy.branch_evaluator().registry
+        ),
+        open_handoffs=(),
+        message_text=context.message_text,
+    )
+
+
+def test_a_fact_citing_evidence_not_attached_to_the_turn_is_rejected() -> None:
+    from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
+
+    with pytest.raises(ModelGatewayError) as error:
+        _validate_facts(
+            'It happened in Wellington.',
+            [
+                {
+                    'field_code': 'incident.location',
+                    'value': 'Wellington',
+                    'reported_text': 'in Wellington',
+                    'source_evidence_id': 'evd_not_attached',
+                }
+            ],
+        )
+
+    assert error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+def test_only_a_fact_the_claimant_stated_is_recorded_as_theirs() -> None:
+    validated = _validate_facts(
+        'It happened in Wellington.',
+        [
+            {
+                'field_code': 'incident.location',
+                'value': 'Wellington',
+                'reported_text': 'in Wellington',
+            },
+            {'field_code': 'incident.description', 'value': 'A rear-end collision'},
+        ],
+    )
+
+    by_code = {change.field_code: change for change in validated.form_changes}
+    assert by_code['incident.location'].source is FormSource.CLAIMANT
+    assert by_code['incident.location'].status is FormStatus.CONFIRMED
+    assert by_code['incident.description'].source is FormSource.INFERENCE
+    assert by_code['incident.description'].status is FormStatus.PROPOSED

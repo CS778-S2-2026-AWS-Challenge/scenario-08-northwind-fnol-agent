@@ -331,6 +331,18 @@ class ValidationSeedGraph:
     staff_presence: StaffPresenceRecord
     expected_presence_revision: int | None
     idempotency: IdempotencyRecord
+    # The rule evaluation of each seeded Claim, written with it so the claimant's dynamic form
+    # exists from the first read.
+    branch_evaluations: tuple[BranchEvaluationRecord, ...] = ()
+
+
+def seeded_branch_evaluations(graph: ValidationSeedGraph) -> dict[str, BranchEvaluationRecord]:
+    """Index the seed graph's branch evaluations by Claim, one per seeded Claim at most."""
+    claim_ids = {claim.claim_id for claim in graph.claims}
+    evaluations = {evaluation.claim_id: evaluation for evaluation in graph.branch_evaluations}
+    if len(evaluations) != len(graph.branch_evaluations) or not set(evaluations) <= claim_ids:
+        raise ValueError('Each validation seed branch evaluation needs its own seeded Claim.')
+    return evaluations
 
 
 def validate_validation_seed_session(claim: WorkingClaim, session: SessionRecord) -> None:
@@ -455,7 +467,12 @@ def validate_staff_agent_execution_source(
 
 
 class ClaimRepository(Protocol):
-    def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
+    def create_claim(
+        self,
+        claim: WorkingClaim,
+        session: SessionRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def claimant_resource_access_open(

@@ -308,7 +308,7 @@
    },
    "planted_indicators": [],
    "innocent_controls": [],
-   "notes": "Plan feature none with condition missing_page. The tax invoice is the only proof of ownership, a required material for contents on main (incident_image and proof_of_ownership). It prints \"Page 1 of 2\"; page 2, with the last line, the total paid and the payment method, is missing. The purchase date, customer and the turntable line with its serial number are on page 1. The missing page is on the invoice rather than a repair quote because main does not require a repair quote for contents. The claimant names the wrong product (house insurance) for a contents item.",
+   "notes": "Plan feature none with condition missing_page. The tax invoice is the only proof of ownership, a required material for contents on main (incident_photo and proof_of_ownership). It prints \"Page 1 of 2\"; page 2, with the last line, the total paid and the payment method, is missing. The purchase date, customer and the turntable line with its serial number are on page 1. The missing page is on the invoice rather than a repair quote because main does not require a repair quote for contents. The claimant names the wrong product (house insurance) for a contents item.",
    "policy_inception_date": "2021-08-01"
   },
   "triage": {

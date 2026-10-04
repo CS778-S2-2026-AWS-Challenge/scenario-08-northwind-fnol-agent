@@ -1,9 +1,11 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.services.staff_seed import load_staff_seed
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -14,9 +16,7 @@ def _client(tmp_path: Path) -> TestClient:
                 identity_mode=IdentityMode.NORMAL,
                 identity_db_path=str(tmp_path / 'claimant.sqlite3'),
                 staff_identity_db_path=str(tmp_path / 'staff.sqlite3'),
-                staff_bootstrap_email='claims@example.test',
-                staff_bootstrap_password='strong-staff-password',
-                staff_bootstrap_display_name='Alex Claims',
+                staff_seed_path='config/staff-seed.json',
             )
         )
     )
@@ -26,7 +26,7 @@ def test_staff_login_uses_an_independent_persistent_identity_boundary(tmp_path: 
     with _client(tmp_path) as client:
         login = client.post(
             '/api/v1/staff/auth/sessions',
-            json={'email': 'claims@example.test', 'password': 'strong-staff-password'},
+            json={'email': 'ysoseri1224@northwind.test', 'password': 'Northwind'},
         )
 
         assert login.status_code == 201
@@ -44,8 +44,8 @@ def test_staff_login_uses_an_independent_persistent_identity_boundary(tmp_path: 
         assert profile.status_code == 200
         assert profile.json() == {
             'staff_id': payload['staff_id'],
-            'display_name': 'Alex Claims',
-            'email': 'claims@example.test',
+            'display_name': 'Ysoseri1224',
+            'email': 'ysoseri1224@northwind.test',
             'roles': ['claims_professional'],
             'development_identity': False,
         }
@@ -63,8 +63,21 @@ def test_staff_login_rejects_unknown_credentials(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         response = client.post(
             '/api/v1/staff/auth/sessions',
-            json={'email': 'claims@example.test', 'password': 'incorrect-password'},
+            json={'email': 'ysoseri1224@northwind.test', 'password': 'incorrect-password'},
         )
 
     assert response.status_code == 401
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+
+
+def test_every_start_prints_each_seeded_account_with_its_password(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with _client(tmp_path):
+        pass
+
+    banner = capsys.readouterr().out
+    seed = load_staff_seed('config/staff-seed.json')
+    for account in seed.accounts:
+        assert account.email in banner
+    assert 'password: Northwind' in banner

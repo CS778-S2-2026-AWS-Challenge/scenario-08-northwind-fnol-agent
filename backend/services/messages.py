@@ -23,7 +23,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
-from backend.domain.evidence import canonical_evidence_kind, evidence_kind
+from backend.domain.evidence import evidence_kind
 from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -1704,13 +1704,13 @@ def _document_projection(
         elif item.status is EvidenceStatus.PENDING:
             # Recorded as owed by the claimant or a third party; not asked again.
             settled.setdefault(
-                canonical_evidence_kind(item.kind),
+                item.kind,
                 'with_third_party'
                 if item.responsible_party is ResponsibleParty.EXTERNAL_PARTY
                 else 'claimant_sends_later',
             )
         elif item.status is EvidenceStatus.UNAVAILABLE:
-            settled.setdefault(canonical_evidence_kind(item.kind), 'claimant_does_not_have')
+            settled.setdefault(item.kind, 'claimant_does_not_have')
     return tuple(
         {
             'kind': kind,
@@ -3068,33 +3068,8 @@ def submit_message(
                 )
             _record, tool_result = context_outcome
             context_tool_results.append(tool_result)
-        if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
-            try:
-                proposal = agent.propose_turn(
-                    replace(agent_context, tool_results=tuple(context_tool_results))
-                )
-            except ModelGatewayError as model_error:
-                return recover_model_failure(model_error)
-            if runtime_policy is not None:
-                enforce_agent_proposal(runtime_policy, proposal)
-            replanned_authority = validate_proposal(proposal)
-            if replanned_authority.outcome is AuthorityOutcome.AUTHORISED:
-                _validate_tool_requests(proposal, branch_evaluation)
-            if replanned_authority.outcome is AuthorityOutcome.AUTHORISED and any(
-                request.get('tool') in _CONTEXT_TOOL_OPERATIONS
-                for request in proposal.required_tools
-            ):
-                raise ApiError(
-                    status_code=503,
-                    code='AGENT_TOOL_NOT_PERMITTED',
-                    message='The Agent attempted a second context-tool round.',
-                )
-            proposal = replace(
-                proposal,
-                tool_results=[*context_tool_results, *proposal.tool_results],
-            )
-        else:
-            proposal = replace(proposal, tool_results=context_tool_results)
+        # Only the keyword agent requests context tools; a model proposal never carries any.
+        proposal = replace(proposal, tool_results=context_tool_results)
     proposal = _validate_evidence_history_action(repository, claim, proposal)
     _validate_failed_retrieval_changes(proposal, message_text)
 

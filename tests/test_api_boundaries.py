@@ -31,7 +31,6 @@ def _assert_error(response_status: int, response_body: dict[str, object], code: 
 
 def test_non_health_routes_declare_the_expected_authentication_boundary(app: FastAPI) -> None:
     expected_dependencies: dict[str, Callable[..., object]] = {
-        '/api/claims/message': require_claimant,
         '/api/v1/claims/{claim_id}/asset-selections': require_claimant_session,
         '/api/v1/claims/{claim_id}/asset-snapshots': require_claimant_session,
         '/api/v1/claims/{claim_id}/auto-fill-suggestions': require_claimant_session,
@@ -172,36 +171,6 @@ def test_integration_routes_reject_other_registered_actor_credentials(client: Te
     for response in (claimant, staff, administrator):
         _assert_error(response.status_code, response.json(), 'ACCESS_DENIED')
     _assert_error(unknown.status_code, unknown.json(), 'AUTHENTICATION_REQUIRED')
-
-
-def test_deprecated_claimant_route_is_not_an_authentication_bypass(client: TestClient) -> None:
-    payload = {'message': 'A synthetic connectivity check.'}
-    allowed = client.post(
-        '/api/claims/message',
-        headers=_bearer('synthetic-claimant'),
-        json=payload,
-    )
-    missing = client.post('/api/claims/message', json=payload)
-    staff = client.post(
-        '/api/claims/message',
-        headers=_bearer('synthetic-staff'),
-        json=payload,
-    )
-    administrator = client.post(
-        '/api/claims/message',
-        headers=_bearer('synthetic-admin'),
-        json=payload,
-    )
-    integration = client.post(
-        '/api/claims/message',
-        headers=_bearer('synthetic-integration'),
-        json=payload,
-    )
-
-    assert allowed.status_code == 200
-    _assert_error(missing.status_code, missing.json(), 'AUTHENTICATION_REQUIRED')
-    for response in (staff, administrator, integration):
-        _assert_error(response.status_code, response.json(), 'ACCESS_DENIED')
 
 
 def test_normal_mode_rejects_synthetic_credentials_even_in_development() -> None:

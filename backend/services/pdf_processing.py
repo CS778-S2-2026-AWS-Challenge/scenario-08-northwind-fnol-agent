@@ -44,7 +44,6 @@ from backend.services.evidence import (
 from backend.services.support import now_utc
 
 PDF_MEDIA_TYPE = 'application/pdf'
-PDF_MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
 PDF_PROCESSING_PURPOSE = 'evidence_processing'
 PDF_PROCESSING_PRIVACY_CLASS = 'synthetic_fnol'
 PDF_PROCESSING_PROMPT_VERSION = 'northwind-evidence-pdf-v1'
@@ -119,6 +118,7 @@ def _candidate_contracts(claim: WorkingClaim, evidence: EvidenceRecord) -> dict[
 def _request(
     evidence: EvidenceRecord,
     contracts: dict[str, object],
+    model_profile_id: str,
 ) -> ModelRequest:
     context = {
         'material_version': evidence.material_version,
@@ -126,7 +126,7 @@ def _request(
         'allowed_field_contracts': contracts,
     }
     return ModelRequest(
-        model_profile_id=PDF_MODEL_PROFILE_ID,
+        model_profile_id=model_profile_id,
         purpose=PDF_PROCESSING_PURPOSE,
         privacy_class=PDF_PROCESSING_PRIVACY_CLASS,
         prompt_version=PDF_PROCESSING_PROMPT_VERSION,
@@ -222,10 +222,12 @@ class PdfEvidenceProcessor:
         repository: PersistenceRepository,
         storage: EvidenceStorage,
         gateway_factory: GatewayFactory,
+        model_profile_id: str,
     ) -> None:
         self._repository = repository
         self._storage = storage
         self._gateway_factory = gateway_factory
+        self._model_profile_id = model_profile_id
 
     def process(self, record: EvidenceRecord, claim_revision: int) -> None:
         claim, reserved, _attempt = reserve_evidence_processing(
@@ -239,7 +241,7 @@ class PdfEvidenceProcessor:
         try:
             content = _read_current_pdf(self._storage, reserved)
             contracts = _candidate_contracts(claim, reserved)
-            request = _request(reserved, contracts)
+            request = _request(reserved, contracts, self._model_profile_id)
             gateway = self._gateway_factory(_SinglePdfResolver(reserved.evidence_id, content))
             response = gateway.complete(request)
             if (
@@ -264,7 +266,7 @@ class PdfEvidenceProcessor:
                     expected_material_version=reserved.material_version,
                     processor_id=PDF_PROCESSOR_ID,
                     processing_provenance={
-                        'processing_model_profile_id': PDF_MODEL_PROFILE_ID,
+                        'processing_model_profile_id': self._model_profile_id,
                         'processing_prompt_version': PDF_PROCESSING_PROMPT_VERSION,
                         'processing_provider_model': response.provider_model,
                         'processing_provider_request_id': response.provider_request_id,
@@ -340,7 +342,7 @@ class PdfEvidenceProcessor:
             expected_material_version=evidence.material_version,
             processor_id=PDF_PROCESSOR_ID,
             processing_provenance={
-                'processing_model_profile_id': PDF_MODEL_PROFILE_ID,
+                'processing_model_profile_id': self._model_profile_id,
                 'processing_prompt_version': PDF_PROCESSING_PROMPT_VERSION,
                 'processing_failure_code': failure_code,
                 'processing_completed_at': now_utc().isoformat(),

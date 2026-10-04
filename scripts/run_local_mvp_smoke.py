@@ -86,7 +86,7 @@ def _first_process(run_id: str) -> tuple[str, str, str, int, list[str], str]:
                     'If-Match': '2',
                 },
                 json={
-                    'kind': 'incident_image',
+                    'kind': 'incident_photo',
                     'original_filename': 'synthetic-damage.jpg',
                     'media_type': 'image/jpeg',
                     'size_bytes': len(evidence_bytes),
@@ -419,6 +419,9 @@ def main() -> None:
     values = load_environment_example(arguments.env_file)
     if values.get('DATA_RUNTIME_PROFILE') != 'local_mvp':
         raise SystemExit('The smoke requires DATA_RUNTIME_PROFILE=local_mvp.')
+    # The smoke drives the API with the synthetic test tokens, which only the developer identity
+    # accepts, and the runtime allows that identity only in the test environment.
+    values = {**values, 'NORTHWIND_ENVIRONMENT': 'test', 'NORTHWIND_IDENTITY_MODE': 'developer'}
     run_id = f'local-mvp-{uuid4().hex[:12]}'
     with isolated_environment(values):
         claim_id, session_id, evidence_id, revision, retrieval_ids, ambiguous_id = _first_process(

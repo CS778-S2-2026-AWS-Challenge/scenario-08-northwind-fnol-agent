@@ -30,7 +30,7 @@ The project is in Sprint 3 and is advancing the MVP into a repeatable Validation
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
-The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
+The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`; historical demonstrators are archived under `docs/archive/pre-mvp/`.
 
 Frontend and frontend-runtime design work follows the [Frontend and Runtime Quality Standard](docs/frontend-and-runtime-quality-standard.md). Read it before changing claimant or Workbench routes, components, tokens, state handling, Agent integration, or Runtime-facing behavior; historical single-page prototypes are migration evidence only.
 
@@ -52,7 +52,6 @@ authorisation.
 | `workbench/` | React and Vite Claims Workbench with independent staff authentication |
 | `admin/` | React and Vite Control Plane console backed by the authenticated Admin API |
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
-| `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
 | `.circleci/` | Setup pipeline (`config.yml`) and the backend, frontend, documentation, and GitHub-automation quality jobs it creates (`continue_config.yml`) |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
@@ -149,20 +148,9 @@ Options: `-BackendOnly` starts only MongoDB/MinIO/backend and skips all three fr
 `-BackendPort` / `-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process.
 `-ReadyTimeoutSeconds` extends the readiness wait on a slow machine.
 
-One-time Workbench staff account bootstrap: to provision the initial claims-professional
-account, set these in the same shell **before** running `.\scripts\start-dev.ps1`:
-
-```powershell
-$env:NORTHWIND_STAFF_BOOTSTRAP_EMAIL='claims@example.test'
-$env:NORTHWIND_STAFF_BOOTSTRAP_PASSWORD='<a strong local password>'
-$env:NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME='Claims Professional'
-```
-
-The bootstrap values only create the account when the email is absent; this is a one-time step,
-not something to set for every run. Clear `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD` from the shell
-immediately afterward — the database stores a salted scrypt hash, not the plaintext password,
-and this variable is not covered by the launcher's credential-removal list the way model
-credentials are.
+Workbench accounts: one per team member, `<GitHub name>@northwind.test` with the password
+`Northwind`, listed in `config/staff-seed.json`. The backend provisions them at every start and
+prints them; the launcher repeats them in its final report.
 
 The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
 ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
@@ -333,20 +321,15 @@ records; refresh them after a conflict rather than bypassing the guard. Run only
 authorized records. Do not use this command for PDF, bulk repairs, or extraction of claim facts.
 
 `start-dev.ps1` above already runs the backend on this persistence path for interactive use. The
-following two smoke-test scripts verify it instead of running it: with the same MongoDB and MinIO
-from `docker-compose.yml` up, `py -3.12 scripts/run_local_mvp_smoke.py` checks MongoDB-backed
+smoke-test script verifies it instead of running it: with the same MongoDB and MinIO from
+`docker-compose.yml` up, `py -3.12 scripts/run_local_mvp_smoke.py` checks MongoDB-backed
 claimant/staff recovery, revision and idempotency behaviour, protected MinIO evidence bytes, and
-governed knowledge retrieval. Policy/history remain synthetic. After those checks pass,
-`py -3.12 scripts/run_local_model_mvp_smoke.py` verifies the merged provider-neutral model path
-against the same MongoDB composition with a deterministic OpenAI-compatible transport. It covers
-accepted-turn provenance, restart recovery, replay without a second model call, stale revisions,
-and atomic timeout, malformed, incomplete, and unauthorised-output failures. This deterministic
-transport is repeatable contract evidence, not a live-provider claim; a live run additionally
-requires an approved endpoint and secret supplied through the documented model environment.
+governed knowledge retrieval. Policy/history remain synthetic. The model-path smoke spoke only the
+superseded v6 response shape and is archived under `docs/archive/prompts/`.
 
-For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin,
-staff bootstrap credentials, and optional model configuration through the process environment,
-then start the explicit Compose profile:
+For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin
+and optional model configuration through the process environment, then start the explicit Compose
+profile:
 
 ```powershell
 docker compose --profile vp up -d --build

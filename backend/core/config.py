@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from backend.domain.configuration import ModelRuntimeBinding
+from backend.prompts import CLAIMANT_V8_PROMPT_ID
 
 
 class DataRuntimeProfile(str, Enum):
@@ -126,6 +127,43 @@ def _model_runtime_bindings_setting(name: str) -> tuple[ModelRuntimeBinding, ...
         ) from error
 
 
+def _required_setting(name: str, allowed: tuple[str, ...]) -> str:
+    """Return a required environment setting, refusing to start when it is missing."""
+
+    value = os.getenv(name, '').strip().lower()
+    if not value:
+        raise ValueError(f'{name} is required; set it to one of: {", ".join(allowed)}.')
+    if value not in allowed:
+        raise ValueError(f'{name} must be exactly one of: {", ".join(allowed)}.')
+    return value
+
+
+def _model_setting(name: str, agent_runtime_profile: 'AgentRuntimeProfile') -> str:
+    """Return a model setting the model gateway needs when no deployment binding supplies it."""
+
+    value = os.getenv(name, '').strip()
+    if not value and agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
+        raise ValueError(
+            f'{name} is required with AGENT_RUNTIME_PROFILE=model_gateway when no model '
+            'runtime binding is selected.'
+        )
+    return value
+
+
+def _model_prompt_version(agent_runtime_profile: 'AgentRuntimeProfile') -> str:
+    """Return the prompt version when no model binding supplies one."""
+
+    value = os.getenv('MODEL_PROMPT_VERSION', '').strip()
+    if value:
+        return value
+    if agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
+        raise ValueError(
+            'MODEL_PROMPT_VERSION is required when no model binding is selected; '
+            f'the supported version is {CLAIMANT_V8_PROMPT_ID}.'
+        )
+    return CLAIMANT_V8_PROMPT_ID
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str = 'development'
@@ -145,17 +183,18 @@ class Settings:
     identity_db_path: str = '.northwind-identity.sqlite3'
     staff_identity_db_path: str = '.northwind-staff-identity.sqlite3'
     control_plane_db_path: str = '.northwind-control-plane.sqlite3'
-    staff_bootstrap_email: str = ''
-    staff_bootstrap_password: str = ''
-    staff_bootstrap_display_name: str = 'Northwind Claims Professional'
+    # Empty provisions no accounts; the runtime environment always uses the committed seed.
+    staff_seed_path: str = ''
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
-    model_protocol_adapter: str = 'openai_compatible'
-    model_profile_id: str = 'openrouter-gpt4o-mini'
-    model_provider: str = 'qwen-local'
+    model_protocol_adapter: str = ''
+    model_profile_id: str = ''
+    model_provider: str = ''
+    # The published profile that reads PDF evidence; empty leaves PDF processing unavailable.
+    pdf_model_profile_id: str = ''
     model_purpose: str = 'agent_turn'
     model_privacy_class: str = 'synthetic_fnol'
-    model_prompt_version: str = 'northwind-fnol-claimant-v6'
+    model_prompt_version: str = CLAIMANT_V8_PROMPT_ID
     model_evaluation_status: str = 'configured'
     model_base_url: str = ''
     model_identifier: str = ''
@@ -212,18 +251,13 @@ class Settings:
             raise ValueError('NORTHWIND_STAFF_SESSION_TTL_MINUTES must be greater than zero.')
         if not self.triage_amount_threshold_nzd > 0:
             raise ValueError('NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD must be greater than zero.')
-        if bool(self.staff_bootstrap_email) != bool(self.staff_bootstrap_password):
-            raise ValueError(
-                'NORTHWIND_STAFF_BOOTSTRAP_EMAIL and '
-                'NORTHWIND_STAFF_BOOTSTRAP_PASSWORD must be configured together.'
-            )
-        if self.staff_bootstrap_password and len(self.staff_bootstrap_password) < 12:
-            raise ValueError(
-                'NORTHWIND_STAFF_BOOTSTRAP_PASSWORD must contain at least 12 characters.'
-            )
         if self.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
             if not self.model_protocol_adapter.strip():
                 raise ValueError('MODEL_PROTOCOL_ADAPTER must not be empty.')
+            if not self.model_profile_id.strip():
+                raise ValueError('MODEL_PROFILE_ID must not be empty.')
+            if not self.model_provider.strip():
+                raise ValueError('MODEL_PROVIDER must not be empty.')
             if not self.model_base_url.strip():
                 raise ValueError('MODEL_BASE_URL must not be empty.')
             if not self.model_identifier.strip():
@@ -251,7 +285,11 @@ class Settings:
 
     @classmethod
     def from_environment(cls) -> 'Settings':
-        environment = os.getenv('NORTHWIND_ENVIRONMENT', 'development').strip().lower()
+        # A missing runtime setting stops startup instead of selecting a default:
+        # a default here would silently run another environment, data store, or agent.
+        environment = _required_setting(
+            'NORTHWIND_ENVIRONMENT', ('development', 'test', 'staging', 'production')
+        )
         raw_identity_mode = os.getenv(
             'NORTHWIND_IDENTITY_MODE',
             IdentityMode.NORMAL.value,
@@ -263,25 +301,36 @@ class Settings:
             raise ValueError(
                 f'NORTHWIND_IDENTITY_MODE must be exactly one of: {allowed}.'
             ) from error
-        raw_profile = os.getenv('DATA_RUNTIME_PROFILE', DataRuntimeProfile.FIXTURE.value)
-        try:
-            data_runtime_profile = DataRuntimeProfile(raw_profile.strip().lower())
-        except ValueError as error:
-            allowed = ', '.join(profile.value for profile in DataRuntimeProfile)
-            raise ValueError(f'DATA_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
-        raw_agent_profile = os.getenv('AGENT_RUNTIME_PROFILE', AgentRuntimeProfile.CONTROLLED.value)
-        try:
-            agent_runtime_profile = AgentRuntimeProfile(raw_agent_profile.strip().lower())
-        except ValueError as error:
-            allowed = ', '.join(profile.value for profile in AgentRuntimeProfile)
-            raise ValueError(f'AGENT_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
+        data_runtime_profile = DataRuntimeProfile(
+            _required_setting(
+                'DATA_RUNTIME_PROFILE', tuple(profile.value for profile in DataRuntimeProfile)
+            )
+        )
+        agent_runtime_profile = AgentRuntimeProfile(
+            _required_setting(
+                'AGENT_RUNTIME_PROFILE', tuple(profile.value for profile in AgentRuntimeProfile)
+            )
+        )
+        # Test doubles (fixed bearer tokens, in-memory stores) never start outside tests.
+        if identity_mode is IdentityMode.DEVELOPER and environment != 'test':
+            raise ValueError(
+                'NORTHWIND_IDENTITY_MODE=developer is allowed only with NORTHWIND_ENVIRONMENT=test.'
+            )
+        if data_runtime_profile is DataRuntimeProfile.FIXTURE and environment != 'test':
+            raise ValueError(
+                'DATA_RUNTIME_PROFILE=fixture is allowed only with NORTHWIND_ENVIRONMENT=test.'
+            )
         model_runtime_bindings = _model_runtime_bindings_setting('MODEL_RUNTIME_BINDINGS_PATH')
-        model_profile_id = os.getenv('MODEL_PROFILE_ID', 'openrouter-gpt4o-mini').strip()
+        model_profile_id = os.getenv('MODEL_PROFILE_ID', '').strip()
+        if agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY and not model_profile_id:
+            raise ValueError(
+                'MODEL_PROFILE_ID is required with AGENT_RUNTIME_PROFILE=model_gateway.'
+            )
         selected_binding = next(
             (item for item in model_runtime_bindings if item.profile_id == model_profile_id),
             None,
         )
-        if model_runtime_bindings and selected_binding is None:
+        if model_runtime_bindings and model_profile_id and selected_binding is None:
             raise ValueError('MODEL_PROFILE_ID must identify a configured deployment binding.')
         credential_environment_variable = (
             selected_binding.credential_environment_variable
@@ -346,24 +395,20 @@ class Settings:
                 'NORTHWIND_CONTROL_PLANE_DB_PATH',
                 '.northwind-control-plane.sqlite3',
             ).strip(),
-            staff_bootstrap_email=os.getenv('NORTHWIND_STAFF_BOOTSTRAP_EMAIL', '').strip().lower(),
-            staff_bootstrap_password=os.getenv('NORTHWIND_STAFF_BOOTSTRAP_PASSWORD', ''),
-            staff_bootstrap_display_name=os.getenv(
-                'NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME',
-                'Northwind Claims Professional',
-            ).strip(),
+            staff_seed_path='config/staff-seed.json',
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,
             model_protocol_adapter=(
                 selected_binding.protocol
                 if selected_binding
-                else os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip()
+                else _model_setting('MODEL_PROTOCOL_ADAPTER', agent_runtime_profile)
             ),
             model_profile_id=model_profile_id,
+            pdf_model_profile_id=os.getenv('PDF_MODEL_PROFILE_ID', '').strip(),
             model_provider=(
                 selected_binding.provider
                 if selected_binding
-                else os.getenv('MODEL_PROVIDER', 'qwen-local').strip()
+                else _model_setting('MODEL_PROVIDER', agent_runtime_profile)
             ),
             model_purpose=(
                 selected_binding.purpose
@@ -378,7 +423,7 @@ class Settings:
             model_prompt_version=(
                 selected_binding.prompt_version
                 if selected_binding
-                else os.getenv('MODEL_PROMPT_VERSION', 'northwind-fnol-claimant-v6').strip()
+                else _model_prompt_version(agent_runtime_profile)
             ),
             model_evaluation_status=os.getenv('MODEL_EVALUATION_STATUS', 'configured').strip()
             if selected_binding is None

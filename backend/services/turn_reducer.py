@@ -14,7 +14,6 @@ from backend.core.errors import ApiError
 from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS, BranchRuleEvaluator
 from backend.domain.evidence import (
     REGISTERED_EVIDENCE_KINDS,
-    canonical_evidence_kind,
     evidence_kind,
 )
 from backend.domain.external_service_registry import ExternalLifecycleStatus
@@ -322,14 +321,14 @@ def document_stance_evidence(
     received, owed or unavailable is skipped.
     """
 
-    known = {canonical_evidence_kind(item.kind) for item in existing} | {
+    known = {item.kind for item in existing} | {
         evidence_kind(item, interpreted) for item in existing
     }
     for request in getattr(validated, 'document_requests', ()):
         shape = _STANCE_RECORDS.get(request.stance)
         if shape is None:
             continue
-        kind = canonical_evidence_kind(request.document_kind)
+        kind = request.document_kind
         if kind in known or kind not in REGISTERED_EVIDENCE_KINDS:
             continue
         status, party, wait_type, summary = shape
@@ -429,10 +428,10 @@ def build_turn_record(
             'file_reads': [
                 {
                     'evidence_id': item.evidence_id,
-                    'kind': canonical_evidence_kind(item.document_kind),
+                    'kind': item.document_kind,
                 }
                 for item in getattr(validated, 'evidence_interpretations', ())
-                if canonical_evidence_kind(item.document_kind) in REGISTERED_EVIDENCE_KINDS
+                if item.document_kind in REGISTERED_EVIDENCE_KINDS
             ],
             'northwind_questions': questions,
             'opened_items': opened,

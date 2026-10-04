@@ -357,28 +357,6 @@ def _catalogue(
                 cache_segment='service-registry',
             )
         )
-    if context.knowledge_results:
-        knowledge = [
-            {
-                'document_id': item.document_id,
-                'chunk_id': item.chunk_id,
-                'title': item.title,
-                'version': item.version,
-                'text': item.text[:1200],
-            }
-            for item in context.knowledge_results[:3]
-        ]
-        entries.append(
-            ContextCatalogueEntry(
-                resource_id='knowledge.results',
-                resource_type='knowledge',
-                load_mode=ContextLoadMode.REFERENCE,
-                priority=4,
-                estimated_tokens=estimate_json_tokens(knowledge),
-                authority_scope=claim_scope,
-                selectors=['matching_chunks'],
-            )
-        )
     if 'policy-search' in route.capability_ids and (
         context.policy_context_loader is not None or context.knowledge_context_loader is not None
     ):
@@ -505,7 +483,6 @@ def plan_context(
         if wants_reference:
             resource_type = {
                 'recent_messages': 'message_range',
-                'knowledge': 'knowledge_chunk',
                 'evidence': 'evidence',
                 'claim_history': 'claim_history',
                 'policy': 'policy_version',
@@ -584,26 +561,4 @@ def plan_context(
         estimated_tokens=estimate_json_tokens(inline),
         budget_limit=budget_limit,
         summary_state_mismatch=summary_state_mismatch,
-    )
-
-
-def build_verified_summary(
-    context: AgentTurnContext,
-    message_ids: list[str],
-    summary: str,
-) -> VerifiedConversationSummary:
-    if not message_ids:
-        raise ValueError('A verified summary requires source messages.')
-    timestamp = datetime.now(UTC).isoformat()
-    return VerifiedConversationSummary(
-        summary_id=f'summary:{context.session_id}:{context.claim.revision}',
-        claim_id=context.claim.claim_id,
-        session_id=context.session_id,
-        source_message_ids=message_ids,
-        covered_message_range=f'{message_ids[0]}..{message_ids[-1]}',
-        generator_profile_and_version='deterministic-claim-projection@v1',
-        claim_revision_at_generation=context.claim.revision,
-        summary=summary,
-        verified_against_claim_revision=context.claim.revision,
-        created_at=timestamp,
     )

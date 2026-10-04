@@ -253,7 +253,7 @@
     {
       "evidence_id": "evd_fixture_at02_damage_photos",
       "claim_id": "clm_fixture_at02",
-      "kind": "incident_image",
+      "kind": "incident_photo",
       "status": "received",
       "file_status": "ready",
       "original_filename": "synthetic-ground-floor-water-damage.jpg",

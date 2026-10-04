@@ -19,8 +19,12 @@ DEFAULT_SNAPSHOT = Path('docs/openapi.snapshot.json')
 
 
 def current_schema() -> str:
-    from backend.main import app
+    from backend.app import create_app
+    from backend.core.config import Settings
 
+    # The schema does not depend on the runtime profile; build it from explicit test
+    # settings instead of the process environment, which startup now requires.
+    app = create_app(Settings(environment='test'))
     return json.dumps(app.openapi(), indent=2, sort_keys=True) + '\n'
 
 
