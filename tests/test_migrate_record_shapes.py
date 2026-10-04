@@ -45,7 +45,7 @@ def _claim_document(claim: WorkingClaim) -> dict[str, Any]:
 
 
 def _stored_records() -> Any:
-    collection = mongomock.MongoClient()['northwind']['northwind_records']
+    collection: Any = mongomock.MongoClient()['northwind']['northwind_records']
     collection.insert_many(
         [
             _claim_document(_claim('clm_unevaluated')),

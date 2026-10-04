@@ -245,15 +245,19 @@ def parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]:
 
 
 def changed_python_files(changed: Sequence[str]) -> tuple[str, ...]:
-    """Return changed Python files that still exist, for scoped static checks."""
+    """Return changed Python files that still exist, for scoped static checks.
 
+    Files under docs/archive/ are historical and never imported, so they are not checked.
+    """
+
+    paths = {_normalise(item) for item in changed}
     return tuple(
         sorted(
-            {
-                path
-                for path in (_normalise(item) for item in changed)
-                if path.endswith('.py') and Path(path).is_file()
-            }
+            path
+            for path in paths
+            if path.endswith('.py')
+            and not path.startswith('docs/archive/')
+            and Path(path).is_file()
         )
     )
 
