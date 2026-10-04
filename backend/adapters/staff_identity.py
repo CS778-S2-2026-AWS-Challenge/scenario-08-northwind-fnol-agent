@@ -111,9 +111,11 @@ class FixtureStaffIdentityRepository(StaffIdentityRepository):
             (item for item in self._accounts.values() if item.email == normalized),
             None,
         )
-        if existing is not None:
-            return deepcopy(existing)
         account = _new_account(normalized, password, display_name, roles)
+        if existing is not None:
+            # A seeded account always matches the seed, so the printed credentials work.
+            account.staff_id = existing.staff_id
+            account.revision = existing.revision + 1
         self._accounts[account.staff_id] = deepcopy(account)
         return account
 
@@ -358,9 +360,25 @@ class SQLiteStaffIdentityRepository(StaffIdentityRepository):
             row = connection.execute(
                 'SELECT * FROM staff_accounts WHERE email = ?', (normalized,)
             ).fetchone()
-            if row is not None:
-                return self._account(row)
             account = _new_account(normalized, password, display_name, roles)
+            if row is not None:
+                # A seeded account always matches the seed, so the printed credentials work.
+                current = self._account(row)
+                account.staff_id = current.staff_id
+                account.revision = current.revision + 1
+                connection.execute(
+                    'UPDATE staff_accounts SET password_hash = ?, display_name = ?, roles = ?, '
+                    'active = 1, revision = ?, updated_at = ? WHERE staff_id = ?',
+                    (
+                        account.password_hash,
+                        account.display_name,
+                        ','.join(account.roles),
+                        account.revision,
+                        account.updated_at.isoformat(),
+                        account.staff_id,
+                    ),
+                )
+                return account
             connection.execute(
                 """
                 INSERT INTO staff_accounts

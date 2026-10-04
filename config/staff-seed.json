@@ -1,0 +1,12 @@
+[
+  {
+    "email": "claims.one@northwind.test",
+    "display_name": "Claims Professional One",
+    "roles": ["claims_professional"]
+  },
+  {
+    "email": "claims.two@northwind.test",
+    "display_name": "Claims Professional Two",
+    "roles": ["claims_professional"]
+  }
+]

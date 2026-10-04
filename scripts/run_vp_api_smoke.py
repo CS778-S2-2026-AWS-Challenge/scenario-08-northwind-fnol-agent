@@ -75,13 +75,11 @@ def _wait_ready(client: httpx.Client) -> dict[str, Any]:
 
 
 def run(base_url: str, compose_directory: Path, *, restart: bool) -> dict[str, Any]:
-    staff_email = os.environ.get('NORTHWIND_STAFF_BOOTSTRAP_EMAIL', '').strip()
-    staff_password = os.environ.get('NORTHWIND_STAFF_BOOTSTRAP_PASSWORD', '')
-    if not staff_email or not staff_password:
-        raise RuntimeError(
-            'Set NORTHWIND_STAFF_BOOTSTRAP_EMAIL and NORTHWIND_STAFF_BOOTSTRAP_PASSWORD '
-            'for the deployed staff account.'
-        )
+    seed_path = Path(__file__).resolve().parents[1] / 'config' / 'staff-seed.json'
+    staff_email = str(json.loads(seed_path.read_text(encoding='utf-8'))[0]['email'])
+    staff_password = os.environ.get('NORTHWIND_STAFF_SEED_PASSWORD', '')
+    if not staff_password:
+        raise RuntimeError('Set NORTHWIND_STAFF_SEED_PASSWORD to the deployed Workbench password.')
 
     run_id = f'vp-smoke-{uuid4().hex[:12]}'
     claimant_email = f'{run_id}@northwind.invalid'

@@ -148,20 +148,10 @@ Options: `-BackendOnly` starts only MongoDB/MinIO/backend and skips all three fr
 `-BackendPort` / `-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process.
 `-ReadyTimeoutSeconds` extends the readiness wait on a slow machine.
 
-One-time Workbench staff account bootstrap: to provision the initial claims-professional
-account, set these in the same shell **before** running `.\scripts\start-dev.ps1`:
-
-```powershell
-$env:NORTHWIND_STAFF_BOOTSTRAP_EMAIL='claims@example.test'
-$env:NORTHWIND_STAFF_BOOTSTRAP_PASSWORD='<a strong local password>'
-$env:NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME='Claims Professional'
-```
-
-The bootstrap values only create the account when the email is absent; this is a one-time step,
-not something to set for every run. Clear `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD` from the shell
-immediately afterward — the database stores a salted scrypt hash, not the plaintext password,
-and this variable is not covered by the launcher's credential-removal list the way model
-credentials are.
+Workbench accounts: the accounts in `config/staff-seed.json` are provisioned at every start
+with `NORTHWIND_STAFF_SEED_PASSWORD`. The launcher takes it from the shell or `.env`, generates
+one into `.env` when neither has it, and prints every account email and the password in its
+final report. The backend refuses to start in normal identity mode without it.
 
 The script starts from a fresh Control Plane database each time (`var/dev/control-plane.sqlite3`,
 ignored by git). The backend only publishes the checked-in model catalogue into an empty Control
@@ -344,7 +334,7 @@ transport is repeatable contract evidence, not a live-provider claim; a live run
 requires an approved endpoint and secret supplied through the documented model environment.
 
 For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin,
-staff bootstrap credentials, and optional model configuration through the process environment,
+the Workbench seed password, and optional model configuration through the process environment,
 then start the explicit Compose profile:
 
 ```powershell

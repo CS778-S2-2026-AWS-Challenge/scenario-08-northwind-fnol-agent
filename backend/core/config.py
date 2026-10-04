@@ -171,9 +171,8 @@ class Settings:
     identity_db_path: str = '.northwind-identity.sqlite3'
     staff_identity_db_path: str = '.northwind-staff-identity.sqlite3'
     control_plane_db_path: str = '.northwind-control-plane.sqlite3'
-    staff_bootstrap_email: str = ''
-    staff_bootstrap_password: str = ''
-    staff_bootstrap_display_name: str = 'Northwind Claims Professional'
+    staff_seed_path: str = 'config/staff-seed.json'
+    staff_seed_password: str = ''
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
     model_protocol_adapter: str = 'openai_compatible'
@@ -238,15 +237,8 @@ class Settings:
             raise ValueError('NORTHWIND_STAFF_SESSION_TTL_MINUTES must be greater than zero.')
         if not self.triage_amount_threshold_nzd > 0:
             raise ValueError('NORTHWIND_TRIAGE_AMOUNT_THRESHOLD_NZD must be greater than zero.')
-        if bool(self.staff_bootstrap_email) != bool(self.staff_bootstrap_password):
-            raise ValueError(
-                'NORTHWIND_STAFF_BOOTSTRAP_EMAIL and '
-                'NORTHWIND_STAFF_BOOTSTRAP_PASSWORD must be configured together.'
-            )
-        if self.staff_bootstrap_password and len(self.staff_bootstrap_password) < 12:
-            raise ValueError(
-                'NORTHWIND_STAFF_BOOTSTRAP_PASSWORD must contain at least 12 characters.'
-            )
+        if self.staff_seed_password and len(self.staff_seed_password) < 12:
+            raise ValueError('NORTHWIND_STAFF_SEED_PASSWORD must contain at least 12 characters.')
         if self.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
             if not self.model_protocol_adapter.strip():
                 raise ValueError('MODEL_PROTOCOL_ADAPTER must not be empty.')
@@ -383,12 +375,10 @@ class Settings:
                 'NORTHWIND_CONTROL_PLANE_DB_PATH',
                 '.northwind-control-plane.sqlite3',
             ).strip(),
-            staff_bootstrap_email=os.getenv('NORTHWIND_STAFF_BOOTSTRAP_EMAIL', '').strip().lower(),
-            staff_bootstrap_password=os.getenv('NORTHWIND_STAFF_BOOTSTRAP_PASSWORD', ''),
-            staff_bootstrap_display_name=os.getenv(
-                'NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME',
-                'Northwind Claims Professional',
+            staff_seed_path=os.getenv(
+                'NORTHWIND_STAFF_SEED_PATH', 'config/staff-seed.json'
             ).strip(),
+            staff_seed_password=os.getenv('NORTHWIND_STAFF_SEED_PASSWORD', ''),
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,
             model_protocol_adapter=(

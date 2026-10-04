@@ -151,6 +151,7 @@ from backend.services.staff_agent import (
     ProfileSelectingStaffAgent,
     StaffAgentTurnProvider,
 )
+from backend.services.staff_seed import load_staff_seed, provision_staff_seed, staff_seed_banner
 from backend.services.workbench import TRIAGE_AMOUNT_THRESHOLD
 
 
@@ -304,14 +305,17 @@ def create_app(
     elif resolved_settings.developer_mode:
         app.state.staff_identity_repository = FixtureStaffIdentityRepository()
     else:
-        staff_repository = SQLiteStaffIdentityRepository(resolved_settings.staff_identity_db_path)
-        if resolved_settings.staff_bootstrap_email:
-            staff_repository.provision_account(
-                resolved_settings.staff_bootstrap_email,
-                resolved_settings.staff_bootstrap_password,
-                resolved_settings.staff_bootstrap_display_name,
-                ('claims_professional',),
+        if settings is None and not resolved_settings.staff_seed_password:
+            # Staff cannot register and nobody manages accounts in the Control Plane: without
+            # the seeded accounts the Workbench cannot be signed into.
+            raise ValueError(
+                'NORTHWIND_STAFF_SEED_PASSWORD is required to provision the Workbench accounts.'
             )
+        staff_repository = SQLiteStaffIdentityRepository(resolved_settings.staff_identity_db_path)
+        if resolved_settings.staff_seed_password:
+            seed = load_staff_seed(resolved_settings.staff_seed_path)
+            provision_staff_seed(staff_repository, seed, resolved_settings.staff_seed_password)
+            print(staff_seed_banner(seed, resolved_settings.staff_seed_password), flush=True)
         app.state.staff_identity_repository = staff_repository
     app.state.configuration_repository = resolved_configuration_repository
     app.state.integration_health_repository = integration_health_repository or (
