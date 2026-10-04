@@ -206,14 +206,9 @@ def create_claim(
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
 ) -> CreateClaimResponse:
-    if payload.model_profile_id is not None:
-        payload = payload.model_copy(
-            update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
-        )
-    elif request.app.state.settings.agent_runtime_profile.value == 'model_gateway':
-        payload = payload.model_copy(
-            update={'model_profile_id': select_model_profile(request, None)}
-        )
+    payload = payload.model_copy(
+        update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
+    )
     return start_claim(repository_for(request), principal, payload, idempotency_key)
 
 

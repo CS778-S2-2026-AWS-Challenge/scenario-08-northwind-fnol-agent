@@ -291,7 +291,8 @@ class AgentTurnContext:
     evidence_refs: list[str]
     evidence: tuple[AgentEvidenceReference, ...] = ()
     evidence_resolver: ModelEvidenceContentResolver | None = None
-    model_profile_id: str = 'openrouter-gpt4o-mini'
+    # None outside a model turn, such as the safety check before any provider call.
+    model_profile_id: str | None = None
     professional_review_required: bool = False
     branch_evaluation: BranchEvaluationResult | None = None
     turn_family_resolution: TurnFamilyResolution | None = None

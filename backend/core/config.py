@@ -187,9 +187,11 @@ class Settings:
     staff_seed_path: str = ''
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
-    model_protocol_adapter: str = 'openai_compatible'
-    model_profile_id: str = 'openrouter-gpt4o-mini'
-    model_provider: str = 'qwen-local'
+    model_protocol_adapter: str = ''
+    model_profile_id: str = ''
+    model_provider: str = ''
+    # The published profile that reads PDF evidence; empty leaves PDF processing unavailable.
+    pdf_model_profile_id: str = ''
     model_purpose: str = 'agent_turn'
     model_privacy_class: str = 'synthetic_fnol'
     model_prompt_version: str = CLAIMANT_V8_PROMPT_ID
@@ -252,6 +254,10 @@ class Settings:
         if self.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
             if not self.model_protocol_adapter.strip():
                 raise ValueError('MODEL_PROTOCOL_ADAPTER must not be empty.')
+            if not self.model_profile_id.strip():
+                raise ValueError('MODEL_PROFILE_ID must not be empty.')
+            if not self.model_provider.strip():
+                raise ValueError('MODEL_PROVIDER must not be empty.')
             if not self.model_base_url.strip():
                 raise ValueError('MODEL_BASE_URL must not be empty.')
             if not self.model_identifier.strip():
@@ -398,6 +404,7 @@ class Settings:
                 else _model_setting('MODEL_PROTOCOL_ADAPTER', agent_runtime_profile)
             ),
             model_profile_id=model_profile_id,
+            pdf_model_profile_id=os.getenv('PDF_MODEL_PROFILE_ID', '').strip(),
             model_provider=(
                 selected_binding.provider
                 if selected_binding

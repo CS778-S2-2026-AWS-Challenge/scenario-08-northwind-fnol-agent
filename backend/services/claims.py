@@ -724,6 +724,14 @@ def pause_session(
     return response
 
 
+def _resolved_model_profile(model_profile_id: str | None) -> str:
+    """Return the session model profile the API resolved; the service has no default."""
+
+    if model_profile_id is None:
+        raise ValueError('The session model profile must be resolved before the session starts.')
+    return model_profile_id
+
+
 def start_claim(
     repository: PersistenceRepository,
     principal: Principal,
@@ -785,7 +793,7 @@ def start_claim(
         session_id=session_id,
         claim_id=claim_id,
         customer_id=principal.subject,
-        model_profile_id=payload.model_profile_id or 'openrouter-gpt4o-mini',
+        model_profile_id=_resolved_model_profile(payload.model_profile_id),
         context_revision=claim.revision,
         started_at=timestamp,
         last_active_at=timestamp,
@@ -1080,7 +1088,7 @@ def start_session(
             model_profile_id=(
                 resume_source.model_profile_id
                 if resume_source is not None and payload.intent != 'new'
-                else (payload.model_profile_id or 'openrouter-gpt4o-mini')
+                else _resolved_model_profile(payload.model_profile_id)
             ),
             summary=resume_source.summary if resume_source is not None else None,
             unresolved_questions=(

@@ -4804,7 +4804,6 @@
             "type": "string"
           },
           "model_profile_id": {
-            "default": "openrouter-gpt4o-mini",
             "maxLength": 100,
             "minLength": 1,
             "title": "Model Profile Id",
@@ -4830,6 +4829,7 @@
           "session_id",
           "claim_id",
           "status",
+          "model_profile_id",
           "resume",
           "started_at",
           "last_active_at"

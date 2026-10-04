@@ -170,7 +170,10 @@ def plan_model_turn(
     runtime_configuration_snapshot = context.runtime_configuration_snapshot
     if runtime_configuration_snapshot is None:
         raise ValueError('A v7 model turn requires one active Runtime configuration snapshot.')
-    model_record = runtime_configuration_snapshot.model(context.model_profile_id)
+    model_profile_id = context.model_profile_id
+    if model_profile_id is None:
+        raise ValueError('A model turn requires the session model profile.')
+    model_record = runtime_configuration_snapshot.model(model_profile_id)
     if model_record is None:
         raise ValueError('The selected model profile is absent from the Runtime snapshot.')
     model_configuration = ModelRuntimeConfiguration.model_validate(model_record.values)
@@ -212,7 +215,7 @@ def plan_model_turn(
         profiles=published_profiles,
     )
     capability = (
-        runtime_policy.tool_policy.provider_capabilities[context.model_profile_id]
+        runtime_policy.tool_policy.provider_capabilities[model_profile_id]
         if runtime_policy is not None
         else provider_capability(model_configuration)
     )
@@ -328,7 +331,7 @@ def plan_model_turn(
     )
     cache_plan = build_cache_plan(
         release_set_id=runtime_configuration_snapshot.release_set_id or 'unpublished',
-        model_profile_id=context.model_profile_id,
+        model_profile_id=model_profile_id,
         claim_revision=context.claim.revision,
         principal_scope=f'customer:{context.claim.customer_id}',
         bundle=bundle,

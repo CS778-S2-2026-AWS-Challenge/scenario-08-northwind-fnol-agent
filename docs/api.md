@@ -1643,7 +1643,9 @@ Response `201`:
 
 `model_profile_id` may be supplied in the create request. The selected profile must be published,
 configured for claimant use, and declare both structured output and tool calling; otherwise the
-server returns `MODEL_PROFILE_UNAVAILABLE`. A resumed Session keeps the last selected profile by
+server returns `MODEL_PROFILE_UNAVAILABLE`. Without a selection the Session uses the deployment's
+`MODEL_PROFILE_ID`; under the keyword agent (`AGENT_RUNTIME_PROFILE=controlled`), which calls no
+model, the Session records `controlled`. A resumed Session keeps the last selected profile by
 default, and the profile may be changed explicitly on a later message when the replacement is
 published and available.
 

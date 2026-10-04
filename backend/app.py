@@ -121,7 +121,6 @@ from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_profiles import model_configuration
 from backend.services.pdf_processing import (
-    PDF_MODEL_PROFILE_ID,
     PDF_PROCESSING_PRIVACY_CLASS,
     PDF_PROCESSING_PROMPT_VERSION,
     PDF_PROCESSING_PURPOSE,
@@ -371,8 +370,12 @@ def create_app(
         def pdf_gateway(
             evidence_resolver: ModelEvidenceContentResolver,
         ) -> ModelGateway:
+            if not resolved_settings.pdf_model_profile_id:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             try:
-                configuration = model_configuration(SimpleNamespace(app=app), PDF_MODEL_PROFILE_ID)
+                configuration = model_configuration(
+                    SimpleNamespace(app=app), resolved_settings.pdf_model_profile_id
+                )
             except (RuntimeConfigurationResolutionError, ValueError):
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
             if (
@@ -397,6 +400,7 @@ def create_app(
             bundle.repository,
             bundle.evidence_storage,
             pdf_gateway,
+            resolved_settings.pdf_model_profile_id,
         )
 
         def reply_judge_gateway() -> ModelGateway:

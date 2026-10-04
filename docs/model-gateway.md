@@ -212,6 +212,7 @@ model and Runtime authority validation before it can affect Claim State.
 | `AGENT_RUNTIME_PROFILE` | `controlled` or `model_gateway` |
 | `MODEL_PROTOCOL_ADAPTER` | Registered adapter name (`openai_compatible`, `bedrock_converse`, or `google_generate_content`); required with `model_gateway` when no binding is selected |
 | `MODEL_PROFILE_ID` | Identifier of the selected model profile; required with `model_gateway` |
+| `PDF_MODEL_PROFILE_ID` | Published profile that reads PDF evidence; it must be the governed OpenRouter `openai/gpt-4o` profile with document input, and PDF processing is unavailable while it is empty |
 | `MODEL_PROVIDER` | Provider label used for internal profile audit context; required with `model_gateway` when no binding is selected |
 | `MODEL_PURPOSE` | Allowed request purpose; `agent_turn` for the claimant Agent |
 | `MODEL_PRIVACY_CLASS` | Allowed data classification for requests |

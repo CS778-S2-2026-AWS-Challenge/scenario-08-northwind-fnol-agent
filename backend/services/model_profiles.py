@@ -26,6 +26,10 @@ class ModelRuntimeStatus:
     unavailable_reason: str | None
 
 
+# The session label for the keyword agent, which calls no model.
+CONTROLLED_MODEL_PROFILE_ID = 'controlled'
+
+
 def model_runtime_status(configuration: ModelRuntimeConfiguration) -> ModelRuntimeStatus:
     """Project publication separately from this process's usable configuration."""
 
@@ -153,12 +157,16 @@ def default_model_profile_id(
 
 
 def select_model_profile(request: object, requested: str | None) -> str:
-    """Validate Session model selection against the current published catalog."""
+    """Validate Session model selection against the current published catalog.
+
+    The keyword agent calls no model, so its sessions record ``controlled`` rather than a
+    model they never used. Otherwise the claimant's choice wins, then MODEL_PROFILE_ID.
+    """
     app = request.app  # type: ignore[attr-defined]
     settings: Settings = app.state.settings
-    selected = requested or settings.model_profile_id
     if settings.agent_runtime_profile is not AgentRuntimeProfile.MODEL_GATEWAY:
-        return selected
+        return CONTROLLED_MODEL_PROFILE_ID
+    selected = requested or settings.model_profile_id
     catalog = model_catalog(request)
     available = {
         configuration.profile_id

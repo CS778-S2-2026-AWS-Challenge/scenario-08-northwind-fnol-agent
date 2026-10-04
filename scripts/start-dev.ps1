@@ -152,7 +152,7 @@ function Split-CredentialEnvironments {
         'NORTHWIND_SECRETS_TOKEN',
         'NORTHWIND_ENVIRONMENT', 'NORTHWIND_IDENTITY_MODE', 'NORTHWIND_CONTROL_PLANE_DB_PATH',
         'AGENT_RUNTIME_PROFILE', 'DATA_RUNTIME_PROFILE',
-        'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
+        'MODEL_RUNTIME_BINDINGS_PATH', 'MODEL_PROFILE_ID', 'PDF_MODEL_PROFILE_ID', 'MODEL_TIMEOUT_SECONDS',
         'REPLY_JUDGE_MODEL', 'TURN_TIME_LIMIT_SECONDS',
         'NORTHWIND_OBJECT_STORAGE_ADAPTER', 'NORTHWIND_OBJECT_STORAGE_ENDPOINT',
         'NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY',
@@ -262,6 +262,8 @@ $backendEnv.NORTHWIND_CONTROL_PLANE_DB_PATH = $controlPlaneDb
 $backendEnv.AGENT_RUNTIME_PROFILE = 'model_gateway'
 $backendEnv.MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
 $backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+# PDF evidence is read by the governed OpenRouter GPT-4o profile.
+$backendEnv.PDF_MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
 # A turn makes up to three model calls (reply, one continuation after a lookup,
 # and one rewrite if the reply contradicts the record); a hung provider must not
 # leave the claimant waiting minutes. Typical calls take 3-6 seconds. No further
