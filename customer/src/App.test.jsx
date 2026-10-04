@@ -1045,11 +1045,15 @@ describe('claimant intake projection', () => {
     api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
     globalThis.history.replaceState({}, '', '/profile/personal-details')
 
-    render(<App />)
+    const { container } = render(<App />)
 
     expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
     expect(globalThis.location.pathname).toBe('/profile/personal-details')
     expect(screen.queryByRole('button', { name: 'Back to claims' })).not.toBeInTheDocument()
+    const profileHeader = container.querySelector('.product-header')
+    expect(profileHeader).not.toHaveClass('is-claim-history-header')
+    expect(within(profileHeader).getByRole('button', { name: 'Back' }))
+      .not.toHaveClass('profile-entry-button')
     expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
     expect(screen.getByText('i•••@gmail.com')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Edit profile' }))
