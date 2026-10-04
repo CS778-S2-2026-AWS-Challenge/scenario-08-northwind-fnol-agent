@@ -210,6 +210,9 @@ class _LookupThenRecall(GatewayAgent):
             context,
             knowledge_context_loader=lambda _limit, _clause_ids: {
                 'status': 'evidence_found',
+                'guidance_status': 'evidence_found',
+                'returned_clause_ids': ['MTR-BEN-04'],
+                'not_found': [],
                 'chunks': [POLICY_CHUNK],
             },
         )
@@ -229,6 +232,7 @@ class _LookupThenRecall(GatewayAgent):
                                 'ref': reference.ref,
                                 'selector': 'matching_facts_and_guidance',
                                 'max_tokens': 600,
+                                'clause_ids': ['MTR-BEN-04'],
                             },
                         )
                     ],
