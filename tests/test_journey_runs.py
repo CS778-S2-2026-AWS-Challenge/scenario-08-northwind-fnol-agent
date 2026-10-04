@@ -557,6 +557,8 @@ def test_the_run_step_schema_lists_response_body_valid_as_required() -> None:
 
 
 _MODEL_ENVIRONMENT = {
+    'MODEL_PROFILE_ID': 'qwen-test',
+    'MODEL_PROVIDER': 'qwen-local',
     'MODEL_PROTOCOL_ADAPTER': 'openai_compatible',
     'MODEL_PROMPT_VERSION': 'northwind-fnol-claimant-v8',
     'MODEL_BASE_URL': 'http://localhost:1/v1',
@@ -595,7 +597,7 @@ def test_a_requested_model_runtime_runs_the_journeys_on_it(
 @pytest.mark.parametrize(
     ('environment', 'message'),
     [
-        ({PROFILE_ENV: 'model_gateway'}, 'MODEL_PROMPT_VERSION'),
+        ({PROFILE_ENV: 'model_gateway'}, 'MODEL_PROFILE_ID'),
         ({PROFILE_ENV: 'gpt'}, 'must be exactly one of'),
     ],
     ids=['unconfigured', 'unknown'],
