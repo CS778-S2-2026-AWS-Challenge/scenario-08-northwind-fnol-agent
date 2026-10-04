@@ -237,7 +237,6 @@ Start or verify the transaction-capable local services, then run the real runtim
 docker compose up -d mongodb mongo-init minio minio-init
 py -3.12 scripts/check_runtime_profile.py deploy/runtime/local-mvp.env.example --expect ready
 py -3.12 scripts/run_local_mvp_smoke.py
-py -3.12 scripts/run_local_model_mvp_smoke.py
 ```
 
 The smoke constructs the application twice. The first instance creates a synthetic Claim, stores a

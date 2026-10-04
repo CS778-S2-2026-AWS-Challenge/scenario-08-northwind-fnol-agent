@@ -218,7 +218,7 @@ Demonstration:
 Superseded prompt versions and model bindings are archived and no code may reference them. The
 runtime accepts only the current prompt version.
 
-- [Superseded claimant prompts and model bindings](archive/prompts/)
+- [Superseded claimant prompts, model bindings and the v6 model-path smoke](archive/prompts/)
 
 Static demonstrators, earlier scripts, the Agent Runtime v6 third-party service plan, and the
 former `work_record/` notes are kept under [archive/pre-mvp/](archive/pre-mvp/). They are historical

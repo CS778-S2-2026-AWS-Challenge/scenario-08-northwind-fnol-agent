@@ -321,16 +321,11 @@ records; refresh them after a conflict rather than bypassing the guard. Run only
 authorized records. Do not use this command for PDF, bulk repairs, or extraction of claim facts.
 
 `start-dev.ps1` above already runs the backend on this persistence path for interactive use. The
-following two smoke-test scripts verify it instead of running it: with the same MongoDB and MinIO
-from `docker-compose.yml` up, `py -3.12 scripts/run_local_mvp_smoke.py` checks MongoDB-backed
+smoke-test script verifies it instead of running it: with the same MongoDB and MinIO from
+`docker-compose.yml` up, `py -3.12 scripts/run_local_mvp_smoke.py` checks MongoDB-backed
 claimant/staff recovery, revision and idempotency behaviour, protected MinIO evidence bytes, and
-governed knowledge retrieval. Policy/history remain synthetic. After those checks pass,
-`py -3.12 scripts/run_local_model_mvp_smoke.py` verifies the merged provider-neutral model path
-against the same MongoDB composition with a deterministic OpenAI-compatible transport. It covers
-accepted-turn provenance, restart recovery, replay without a second model call, stale revisions,
-and atomic timeout, malformed, incomplete, and unauthorised-output failures. This deterministic
-transport is repeatable contract evidence, not a live-provider claim; a live run additionally
-requires an approved endpoint and secret supplied through the documented model environment.
+governed knowledge retrieval. Policy/history remain synthetic. The model-path smoke spoke only the
+superseded v6 response shape and is archived under `docs/archive/prompts/`.
 
 For a single-host Validation Prototype handoff, set the browser-reachable object-storage origin
 and optional model configuration through the process environment, then start the explicit Compose
