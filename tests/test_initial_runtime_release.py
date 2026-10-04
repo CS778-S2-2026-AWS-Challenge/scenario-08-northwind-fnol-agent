@@ -529,7 +529,6 @@ def test_v7_release_rejects_versioned_registry_drift(
 @pytest.mark.parametrize(
     ('mutation', 'expected_error'),
     [
-        ('prompt_mode', 'Prompt Pack'),
         ('fragment_budget', 'exceeds budget'),
         ('schema_contract', 'schema registry'),
         ('provider_catalogue', 'model catalogue'),
@@ -566,9 +565,7 @@ def test_v7_atomic_release_rejects_each_incomplete_published_component(
     controlled_rules = policy.controlled_rules
     features = policy.features
 
-    if mutation == 'prompt_mode':
-        instruction = instruction.model_copy(update={'composition_mode': 'single'})
-    elif mutation == 'fragment_budget':
+    if mutation == 'fragment_budget':
         fragments = list(instruction.fragments)
         fragments[0] = fragments[0].model_copy(update={'content': 'oversized ' * 1000})
         instruction = instruction.model_copy(update={'fragments': fragments})

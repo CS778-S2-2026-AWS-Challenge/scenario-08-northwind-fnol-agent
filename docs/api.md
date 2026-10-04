@@ -351,7 +351,7 @@ AGENT_CONFIGURATION_INVALID`.
 
 | Component path | Configuration domain | Required `values` fields |
 | --- | --- | --- |
-| `instructions` | `agent_instruction` | `prompt_version`, `purpose`, `composition_mode`, `manifest_version`, and embedded `fragments` for v7 |
+| `instructions` | `agent_instruction` | `prompt_version`, `purpose`, `composition_mode` (`fragmented`), `manifest_version`, and embedded `fragments` |
 | `tool_permissions` | `agent_tool_policy` | `policy_version`, action/tool allow-lists, Request Profiles, provider capabilities, and schema registry |
 | `controlled_rules` | `agent_rule` | `rules_version`, protected overlays, route/catalogue versions, deterministic responses, and context budget |
 | `features` | `feature` | `feature_version`, model/retrieval switches, v7 feature flags, and cache layout version |

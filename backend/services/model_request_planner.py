@@ -189,10 +189,7 @@ def plan_model_turn(
     isolated_review = isolated_evidence_review or cross_claim_review
     runtime_policy = context.runtime_policy
     published_profiles = (
-        runtime_policy.tool_policy.request_profiles
-        if runtime_policy is not None
-        and runtime_policy.instruction.composition_mode == 'fragmented'
-        else None
+        runtime_policy.tool_policy.request_profiles if runtime_policy is not None else None
     )
     needs_lookup = route.task is not None and (
         (
@@ -217,15 +214,13 @@ def plan_model_turn(
     capability = (
         runtime_policy.tool_policy.provider_capabilities[context.model_profile_id]
         if runtime_policy is not None
-        and runtime_policy.instruction.composition_mode == 'fragmented'
         else provider_capability(model_configuration)
     )
     validate_capability_binding(model_configuration, capability)
     validate_profile_compatibility(profile, capability)
     field_contract = None
-    if runtime_policy is not None and runtime_policy.instruction.composition_mode == 'fragmented':
+    if runtime_policy is not None:
         instruction = runtime_policy.instruction
-        assert instruction.manifest_version is not None
         manifest = PromptPackManifest(
             prompt_pack_version=instruction.manifest_version,
             fragments=list(instruction.fragments),

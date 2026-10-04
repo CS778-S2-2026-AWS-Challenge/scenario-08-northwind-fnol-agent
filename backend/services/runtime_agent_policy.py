@@ -265,8 +265,6 @@ class RuntimeAgentPolicyResolver:
         controlled_rules: ControlledRulesConfiguration,
         features: AgentFeatureSettingsConfiguration,
     ) -> None:
-        if instruction.composition_mode != 'fragmented' or instruction.manifest_version is None:
-            raise RuntimeConfigurationResolutionError('The Prompt Pack is incomplete.')
         PromptPackManifest(
             prompt_pack_version=instruction.manifest_version,
             fragments=[
