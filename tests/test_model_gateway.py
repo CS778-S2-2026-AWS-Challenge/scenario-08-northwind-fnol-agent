@@ -2352,9 +2352,7 @@ def test_knowledge_grounded_lookup_fits_three_longest_current_clauses_with_sched
                         status=FormStatus.CONFIRMED,
                         needed_for=NeededFor.CURRENT_ACTION,
                         updated_at=datetime.now(UTC),
-                        updated_by=ActorReference(
-                            actor_type=ActorType.CLAIMANT, actor_id='cus_v7'
-                        ),
+                        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_v7'),
                     ),
                 }
             }

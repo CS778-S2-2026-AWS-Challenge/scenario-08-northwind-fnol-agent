@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from unittest.mock import ANY
 
@@ -35,6 +36,14 @@ class ControlledRetriever:
 
     def connection_status(self) -> str:
         return self.connection_state
+
+    def list_clauses(self, scope: KnowledgeSearch) -> list[KnowledgeChunk]:
+        raise AssertionError('The search API must use search, not the clause directory.')
+
+    def get_clauses(
+        self, scope: KnowledgeSearch, clause_ids: Sequence[str]
+    ) -> list[KnowledgeChunk]:
+        raise AssertionError('The search API must use search, not exact clause lookup.')
 
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         self.last_request = request

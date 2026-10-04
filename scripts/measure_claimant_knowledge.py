@@ -326,9 +326,9 @@ def main() -> int:
                 record['cite_hit'] = bool(case['expected']) and set(case['expected']).issubset(
                     record['cited']
                 )
-                record['context_resolve_completed'] = (
-                    (trace or {}).get('tool_name') == 'context.resolve'
-                )
+                record['context_resolve_completed'] = (trace or {}).get(
+                    'tool_name'
+                ) == 'context.resolve'
                 record['runtime_action_code'] = (trace or {}).get('runtime_action_code')
                 record['runtime_reason_codes'] = (trace or {}).get('reason_codes', [])
                 events = list(
