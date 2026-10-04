@@ -27,6 +27,7 @@ from backend.prompts import CLAIMANT_V8_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.release_set import ReleaseSetRepository
+from backend.services import model_agent
 from backend.services.agent import (
     AgentProposal,
     AgentTurnContext,
@@ -392,23 +393,7 @@ def test_disabled_knowledge_retrieval_returns_unavailable_without_retriever_io()
         updated_at=FIXED_TIME,
     )
 
-    class KnowledgeRequestingAgent(_RecordingAgent):
-        def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
-            proposal = super().propose_turn(context)
-            if not context.tool_results:
-                return replace(
-                    proposal,
-                    required_tools=[
-                        {
-                            'tool': 'knowledge_search',
-                            'operation': 'search',
-                            'query': 'What is the approved next step?',
-                        }
-                    ],
-                )
-            return proposal
-
-    provider = KnowledgeRequestingAgent('NO_RETRIEVAL')
+    provider = _RecordingAgent('NO_RETRIEVAL')
     grounded = KnowledgeGroundedAgent(provider, _UnexpectedRetriever())
 
     grounded.propose_turn(
@@ -423,18 +408,14 @@ def test_disabled_knowledge_retrieval_returns_unavailable_without_retriever_io()
         )
     )
 
-    assert provider.calls == 2
     assert provider.last_context is not None
-    assert provider.last_context.knowledge_status == 'unavailable'
-    assert provider.last_context.knowledge_results == ()
-    assert provider.last_context.tool_results == (
-        {
-            'tool': 'knowledge_search',
-            'status': 'unavailable',
-            'source_refs': [],
-            'limitations': ['Knowledge retrieval is disabled by published configuration.'],
-        },
-    )
+    loader = provider.last_context.knowledge_context_loader
+    assert loader is not None
+    assert loader(1000) == {
+        'status': 'unavailable',
+        'chunks': [],
+        'limitations': ['Knowledge retrieval is disabled by published configuration.'],
+    }
 
 
 def test_next_turn_uses_the_next_complete_release_without_mutating_the_prior_snapshot() -> None:
@@ -551,3 +532,42 @@ def test_message_turn_persists_exact_release_and_configuration_versions() -> Non
         'model:openrouter-gpt4o-mini',
     }
     assert all(reference.revision == 1 for reference in provenance.configurations.values())
+
+
+def test_knowledge_lookup_names_the_product_when_the_manifest_has_no_single_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model_agent, 'approved_version_for_product', lambda _product: None)
+    claim = WorkingClaim(
+        claim_id='clm_knowledge_version',
+        customer_id='cus_demo',
+        revision=1,
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        incident_type='home',
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Describe the incident.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=FIXED_TIME,
+        updated_at=FIXED_TIME,
+    )
+    grounded = KnowledgeGroundedAgent(_RecordingAgent('VERSION'), _UnexpectedRetriever())
+
+    result = grounded._v7_knowledge_context(
+        AgentTurnContext(
+            claim=claim,
+            session_id='ses_knowledge_version',
+            trigger_message_id='msg_knowledge_version',
+            message_text='What does my policy say?',
+            evidence_refs=[],
+        ),
+        1000,
+    )
+
+    assert result == {
+        'status': 'unavailable',
+        'chunks': [],
+        'limitations': ['The approved knowledge manifest has no single version for home.'],
+    }

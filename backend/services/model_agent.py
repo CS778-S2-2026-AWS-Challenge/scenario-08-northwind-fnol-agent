@@ -69,6 +69,7 @@ from backend.services.context_budget import build_request_budget
 from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.context_resolver import resolver_for_turn
 from backend.services.isolated_context_executor import execute_isolated_context_plan
+from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_request_planner import (
     context_resolve_tool,
@@ -134,9 +135,6 @@ def _merge_field_contract_repair(
 
 _V7_EVIDENCE_ADAPTER = TypeAdapter(V7EvidenceActionProposal)
 _V7_SOURCED_SUMMARY_ADAPTER = TypeAdapter(V7SourcedSummaryProposal)
-_CONTEXT_TOOL_NAMES = frozenset(
-    {'knowledge_search', 'policy_history', 'claim_history', 'evidence.history'}
-)
 
 _FIELD_DEFINITIONS = build_default_registry().field_by_code
 
@@ -1418,6 +1416,15 @@ class KnowledgeGroundedAgent:
         context: AgentTurnContext,
         max_tokens: int,
     ) -> dict[str, object]:
+        if (
+            context.runtime_policy is not None
+            and not context.runtime_policy.features.knowledge_retrieval
+        ):
+            return {
+                'status': 'unavailable',
+                'chunks': [],
+                'limitations': ['Knowledge retrieval is disabled by published configuration.'],
+            }
         product = _knowledge_product(context.claim.incident_type)
         if product is None:
             return {
@@ -1455,7 +1462,18 @@ class KnowledgeGroundedAgent:
                     'The active Runtime release does not select an approved knowledge version.'
                 ],
             }
-        knowledge_version = published.version if published is not None else 'MVP-2026.1'
+        # The approved manifest names the version when no release selects one; no default.
+        knowledge_version = (
+            published.version if published is not None else approved_version_for_product(product)
+        )
+        if knowledge_version is None:
+            return {
+                'status': 'unavailable',
+                'chunks': [],
+                'limitations': [
+                    f'The approved knowledge manifest has no single version for {product}.'
+                ],
+            }
         try:
             chunks = self._retriever.search(
                 KnowledgeSearch(
@@ -1516,153 +1534,4 @@ class KnowledgeGroundedAgent:
                     max_tokens,
                 ),
             )
-        proposal = self._provider.propose_turn(context)
-        context_requests = [
-            item for item in proposal.required_tools if item.get('tool') in _CONTEXT_TOOL_NAMES
-        ]
-        if context.tool_results and context_requests:
-            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        if len(context_requests) > 1:
-            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        request = next(
-            (
-                item
-                for item in proposal.required_tools
-                if item.get('tool') == 'knowledge_search' and item.get('operation') == 'search'
-            ),
-            None,
-        )
-        if request is None:
-            return proposal
-        if context.runtime_policy is not None and (
-            'knowledge_search' not in context.runtime_policy.tool_policy.allowed_tool_names
-        ):
-            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        if context.tool_results or context.knowledge_status != 'not_requested':
-            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        if (
-            context.runtime_policy is not None
-            and not context.runtime_policy.features.knowledge_retrieval
-        ):
-            tool_result: dict[str, object] = {
-                'tool': 'knowledge_search',
-                'status': 'unavailable',
-                'source_refs': [],
-                'limitations': ['Knowledge retrieval is disabled by published configuration.'],
-            }
-            final = self._provider.propose_turn(
-                replace(
-                    context,
-                    knowledge_status='unavailable',
-                    knowledge_limitations=(
-                        'Knowledge retrieval is disabled by published configuration.',
-                    ),
-                    tool_results=(tool_result,),
-                )
-            )
-            return replace(final, tool_results=[tool_result])
-        product = _knowledge_product(context.claim.incident_type)
-        if product is None:
-            tool_result = {
-                'tool': 'knowledge_search',
-                'status': 'no_evidence',
-                'source_refs': [],
-                'limitations': ['A confirmed product family is required for scoped search.'],
-            }
-            final = self._provider.propose_turn(
-                replace(context, knowledge_status='no_evidence', tool_results=(tool_result,))
-            )
-            return replace(final, tool_results=[tool_result])
-        resolution_error = False
-        if (
-            context.runtime_configuration_snapshot is not None
-            and context.runtime_configuration_snapshot.release_set_id is not None
-        ):
-            try:
-                published = context.runtime_configuration_snapshot.knowledge_for_product(product)
-            except RuntimeConfigurationResolutionError:
-                published = None
-                resolution_error = True
-        elif self._runtime_configuration_resolver is not None:
-            try:
-                published = self._runtime_configuration_resolver.resolve_knowledge(product)
-            except RuntimeConfigurationResolutionError:
-                published = None
-                resolution_error = True
-        else:
-            published = (
-                self._knowledge_catalog.published_for_product(product)
-                if self._knowledge_catalog is not None
-                else None
-            )
-        knowledge_version = published.version if published is not None else 'MVP-2026.1'
-        status = 'unavailable' if resolution_error else 'evidence_found'
-        limitations: tuple[str, ...] = (
-            ('The active runtime release does not select an approved knowledge version.',)
-            if resolution_error
-            else ()
-        )
-        if resolution_error:
-            tool_result = {
-                'tool': 'knowledge_search',
-                'status': status,
-                'source_refs': [],
-                'limitations': list(limitations),
-            }
-            final = self._provider.propose_turn(
-                replace(
-                    context,
-                    knowledge_results=(),
-                    knowledge_status=status,
-                    knowledge_limitations=limitations,
-                    tool_results=(tool_result,),
-                )
-            )
-            return replace(final, tool_results=[tool_result])
-        query = request.get('query')
-        if not isinstance(query, str) or not query.strip() or len(query) > 500:
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
-        try:
-            chunks = tuple(
-                self._retriever.search(
-                    KnowledgeSearch(
-                        text=query.strip(),
-                        jurisdiction='NZ',
-                        visibility='customer_and_staff',
-                        authority='northwind_synthetic_demo',
-                        version=knowledge_version,
-                        insurer='Northwind Insurance',
-                        product=product,
-                        effective_at=datetime.now(UTC),
-                        limit=3,
-                    )
-                )
-            )
-        except KnowledgeRetrievalUnavailable:
-            chunks = ()
-            status = 'unavailable'
-            limitations = ('Approved knowledge retrieval is temporarily unavailable.',)
-        else:
-            if not chunks:
-                status = 'no_evidence'
-                limitations = (
-                    'No applicable approved knowledge was found for the supplied scope and date.',
-                )
-        tool_result = {
-            'tool': 'knowledge_search',
-            'status': status,
-            'source_refs': [chunk.chunk_id for chunk in chunks],
-            'limitations': list(limitations),
-        }
-        final = self._provider.propose_turn(
-            replace(
-                context,
-                knowledge_results=chunks,
-                knowledge_status=status,
-                knowledge_limitations=limitations,
-                tool_results=(tool_result,),
-            )
-        )
-        if any(item.get('tool') in _CONTEXT_TOOL_NAMES for item in final.required_tools):
-            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        return replace(final, tool_results=[tool_result])
+        return self._provider.propose_turn(context)
