@@ -245,6 +245,33 @@ $backendEnv.NORTHWIND_MONGODB_DATABASE = 'northwind_fnol'
 $backendEnv.NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
 $backendEnv.NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 
+# Bring stored records written by earlier versions to the current shapes before the backend reads
+# them. The script runs once (it leaves a marker and later runs exit at once). It refuses, writing
+# nothing, while an unfinished claim creation still covers old evidence, and says how to clear it;
+# a refusal or an unreachable database stops the start here with the script's own report.
+$migrationEnv = @{
+    NORTHWIND_MONGODB_URI        = $backendEnv.NORTHWIND_MONGODB_URI
+    NORTHWIND_MONGODB_DATABASE   = $backendEnv.NORTHWIND_MONGODB_DATABASE
+    NORTHWIND_MONGODB_COLLECTION = $backendEnv.NORTHWIND_MONGODB_COLLECTION
+    NORTHWIND_SECRETS_TOKEN      = $null
+}
+foreach ($name in $modelSecretNames) { $migrationEnv[$name] = $null }
+$migrationReport = New-TemporaryFile
+try {
+    $migration = Start-Process -FilePath 'py' `
+        -ArgumentList @('-3.12', 'scripts/migrate_record_shapes.py', '--apply') `
+        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru -Wait `
+        -Environment $migrationEnv -RedirectStandardOutput $migrationReport
+    $report = (Get-Content $migrationReport -Raw)
+    if ($migration.ExitCode -ne 0) {
+        throw "Stored-record migration did not run (exit code $($migration.ExitCode)); the backend was not started:`n$report"
+    }
+    Write-Host "Stored-record migration: $(($report | ConvertFrom-Json).status)"
+}
+finally {
+    Remove-Item -ErrorAction SilentlyContinue $migrationReport
+}
+
 # 5. Start from a fresh Control Plane so the checked-in model catalogue is what gets published.
 #    The backend only seeds the Release Set into an empty Control Plane; an existing database
 #    from an earlier checkout keeps its old catalogue (old default model, profiles that have
