@@ -5,7 +5,7 @@ description: Repository governance for the Northwind FNOL repository (scenario-0
 
 # Northwind FNOL repository governance
 
-Version: v1.7 · 2026-10-04
+Version: v1.6 · 2026-10-03
 
 This version line is incremented whenever a rule changes substantively. The
 "Governance confirmation" section of the PR template cites the version you read
@@ -79,7 +79,7 @@ messages, and test evidence must be written in English.
 | `docs-standards.md` | §9 Documentation types, English writing style, API documentation policy |
 | `ci-checks.md` | §10 Mechanical CI checks and how new checks attach to the quality profiles |
 | `frontend-design.md` | §11 Frontend design standards (tokens, interaction, accessibility, typography, visuals) |
-| `backend-design.md` | §12 Backend design standards (API design, architecture, data modeling, code style, no fallbacks or open-ended compatibility layers) |
+| `backend-design.md` | §12 Backend design standards (API design, architecture, data modeling, code style) |
 
 ## Scenario quick reference
 
