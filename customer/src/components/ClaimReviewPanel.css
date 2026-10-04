@@ -880,11 +880,11 @@ button.claim-summary-detail:hover:not(:disabled) {
   font-weight: var(--font-weight-semibold);
 }
 
-.summary-field-editor textarea {
+.summary-field-editor textarea,
+.summary-field-editor select {
   width: 100%;
   min-height: calc(var(--size-control-touch) + var(--space-10));
   padding: var(--space-3);
-  resize: vertical;
   border: var(--border-component);
   border-radius: var(--radius-md);
   color: var(--color-text-primary);
@@ -892,6 +892,10 @@ button.claim-summary-detail:hover:not(:disabled) {
   font: inherit;
   font-size: var(--font-size-control);
   line-height: var(--line-height-body);
+}
+
+.summary-field-editor textarea {
+  resize: vertical;
 }
 
 .summary-field-actions {
@@ -933,7 +937,8 @@ button.claim-summary-detail:hover:not(:disabled) {
 .next-steps-more-options summary:focus-visible,
 .claim-known-row button:focus-visible,
 .summary-confirm-action:focus-visible,
-.summary-field-editor textarea:focus-visible {
+.summary-field-editor textarea:focus-visible,
+.summary-field-editor select:focus-visible {
   outline: var(--border-focus);
   outline-offset: var(--space-1);
 }

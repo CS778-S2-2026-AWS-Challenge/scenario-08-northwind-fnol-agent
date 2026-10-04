@@ -5,6 +5,7 @@ import {
   claimReviewSectionId,
   claimReviewSections,
 } from '../claimReviewProjection.js'
+import { fieldInputChoices } from '../recordedFacts.js'
 import './ClaimReviewPanel.css'
 
 const ATTENTION_QUESTIONS = {
@@ -204,18 +205,32 @@ function sectionRenderKey(section) {
   return `${section.id}:${JSON.stringify([section.fields, section.contentsItems])}`
 }
 
-function FieldEditor({ fieldCode, field, fieldLabel, editValue, setEditValue, cancelEdit, saveFieldCorrection, busy, status }) {
+function FieldEditor({ fieldCode, field, fieldInputs, fieldLabel, editValue, setEditValue, cancelEdit, saveFieldCorrection, busy, status }) {
+  const choices = fieldInputChoices(fieldInputs?.[fieldCode])
   return (
     <div className="summary-field-editor">
       <label htmlFor={`summary-field-${fieldCode}`}>{fieldLabel(fieldCode)}</label>
-      <textarea
-        id={`summary-field-${fieldCode}`}
-        aria-label={`Correct ${fieldLabel(fieldCode)}`}
-        value={editValue}
-        onChange={(event) => setEditValue(event.target.value)}
-        rows="3"
-        autoFocus
-      />
+      {choices ? (
+        <select
+          id={`summary-field-${fieldCode}`}
+          aria-label={`Correct ${fieldLabel(fieldCode)}`}
+          value={editValue}
+          onChange={(event) => setEditValue(event.target.value)}
+          autoFocus
+        >
+          {!editValue && <option value="">Choose…</option>}
+          {choices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      ) : (
+        <textarea
+          id={`summary-field-${fieldCode}`}
+          aria-label={`Correct ${fieldLabel(fieldCode)}`}
+          value={editValue}
+          onChange={(event) => setEditValue(event.target.value)}
+          rows="3"
+          autoFocus
+        />
+      )}
       <div className="summary-field-actions">
         <button className="summary-quiet-action" type="button" onClick={cancelEdit} disabled={busy}>Cancel</button>
         <button
@@ -304,6 +319,7 @@ export function ClaimNextStepsPanel({
           <FieldEditor
             fieldCode={fieldCode}
             field={form[fieldCode]}
+            fieldInputs={dynamicForm?.field_inputs}
             fieldLabel={fieldLabel}
             editValue={editValue}
             setEditValue={setEditValue}
@@ -507,6 +523,7 @@ export default function ClaimReviewPanel({
                           key={fieldCode}
                           fieldCode={fieldCode}
                           field={field}
+                          fieldInputs={dynamicForm?.field_inputs}
                           fieldLabel={fieldLabel}
                           editValue={editValue}
                           setEditValue={setEditValue}
@@ -591,28 +608,28 @@ export default function ClaimReviewPanel({
               <div className="overview-alert is-attention">
                 <span aria-hidden="true">!</span>
                 <strong>Safety information has not been confirmed.</strong>
-                <button type="button" onClick={onViewNextSteps}>Review</button>
+                <button type="button" aria-label="Review missing safety information" onClick={onViewNextSteps}>Review</button>
               </div>
             )}
             {riskFields.length > 0 && (
               <div className="overview-alert is-risk">
                 <span aria-hidden="true">!</span>
                 <strong>{riskFields.length === 1 ? 'A safety risk was reported.' : `${riskFields.length} safety risks were reported.`}</strong>
-                <button type="button" onClick={() => openAlertSection('safety')}>Review</button>
+                <button type="button" aria-label="Review reported safety risks" onClick={() => openAlertSection('safety')}>Review</button>
               </div>
             )}
             {conflictFields.length > 0 && (
               <div className="overview-alert is-risk">
                 <span aria-hidden="true">!</span>
                 <strong>{conflictFields.length === 1 ? 'One detail has conflicting information.' : `${conflictFields.length} details have conflicting information.`}</strong>
-                <button type="button" onClick={() => openAlertSection(claimReviewSectionId(conflictFields[0][0]))}>Review</button>
+                <button type="button" aria-label="Review conflicting claim details" onClick={() => openAlertSection(claimReviewSectionId(conflictFields[0][0]))}>Review</button>
               </div>
             )}
             {reviewCount > 0 && editingField === null && (
               <div className="overview-alert is-review">
                 <span aria-hidden="true">◇</span>
                 <strong>{reviewCount} Agent-suggested {reviewCount === 1 ? 'detail needs' : 'details need'} your review.</strong>
-                <button type="button" onClick={() => openAlertSection(firstProposedSection)}>Review</button>
+                <button type="button" aria-label="Review Agent-suggested details" onClick={() => openAlertSection(firstProposedSection)}>Review</button>
               </div>
             )}
           </div>

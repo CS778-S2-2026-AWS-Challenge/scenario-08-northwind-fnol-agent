@@ -112,7 +112,7 @@ describe('ClaimReviewPanel overview', () => {
     const props = renderPanel()
 
     const safety = screen.getByText('Safety information has not been confirmed.').closest('.overview-alert')
-    await user.click(within(safety).getByRole('button', { name: 'Review' }))
+    await user.click(within(safety).getByRole('button', { name: 'Review missing safety information' }))
     expect(props.onViewNextSteps).toHaveBeenCalledOnce()
   })
 
@@ -125,7 +125,7 @@ describe('ClaimReviewPanel overview', () => {
     expect(screen.getByText('1 Agent-suggested detail needs your review.')).toBeVisible()
 
     const aiReview = screen.getByText('1 Agent-suggested detail needs your review.').closest('.overview-alert')
-    await user.click(within(aiReview).getByRole('button', { name: 'Review' }))
+    await user.click(within(aiReview).getByRole('button', { name: 'Review Agent-suggested details' }))
     // Each suggested detail is confirmed on its own row; there is no confirm-all.
     expect(screen.queryByRole('button', { name: 'Confirm suggested details' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /is right$/ }))

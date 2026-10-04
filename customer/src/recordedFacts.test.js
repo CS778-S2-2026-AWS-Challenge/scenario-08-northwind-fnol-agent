@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   choiceLabel,
   factCardsByAgentMessage,
+  fieldDraftValue,
+  fieldInputChoices,
+  fieldInputValue,
   fileReadings,
   notedProgress,
   progressLabel,
@@ -99,5 +102,19 @@ describe('noted progress', () => {
 
   it('names enum values in plain words', () => {
     expect(choiceLabel('other_party_accepts')).toBe('Other party accepts')
+  })
+
+  it('normalises correction drafts to registered field values', () => {
+    expect(fieldDraftValue(false, { value_type: 'boolean' })).toBe('false')
+    expect(fieldInputValue('false', { value_type: 'boolean' })).toBe(false)
+    expect(fieldInputValue('wall, roof', { value_type: 'text_list' })).toEqual(['wall', 'roof'])
+    expect(fieldInputValue('active_leak', {
+      value_type: 'enum',
+      allowed_values: ['none', 'active_leak'],
+    })).toBe('active_leak')
+    expect(fieldInputChoices({
+      value_type: 'enum',
+      allowed_values: ['active_leak'],
+    })).toEqual([['active_leak', 'Active leak']])
   })
 })

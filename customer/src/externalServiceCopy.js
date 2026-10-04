@@ -17,9 +17,9 @@ export const RECONCILIATION_WORDING =
   'The assessment request may already have reached the assessor, but we did not get a confirmation. Your claim is saved and unchanged. Northwind is checking with the assessor before anything is sent again, so please do not resend it.'
 
 export function claimantStatusCopy(action) {
-  if (action.effective_label || action.status_detail) {
+  if (action.status_label || action.status_detail) {
     return {
-      label: action.effective_label || 'External service update',
+      label: action.status_label || 'External service update',
       detail: action.status_detail
         || (typeof action.next_action === 'string' ? action.next_action : null)
         || 'Northwind has recorded an external-service update for this claim.',

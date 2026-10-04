@@ -1,32 +1,15 @@
 import { useId, useState } from 'react'
 
-import { choiceLabel } from '../recordedFacts.js'
-
-function initialDraft(fact, input) {
-  const { value } = fact.field
-  if (input?.value_type === 'boolean') return value === true ? 'true' : value === false ? 'false' : ''
-  if (input?.value_type === 'enum') return typeof value === 'string' ? value : ''
-  return fact.value
-}
-
-// The value as the registry stores it: Yes/No as a boolean, a list as an array.
-function typedValue(draft, input) {
-  if (input?.value_type === 'boolean') return draft === 'true'
-  if (input?.value_type === 'number') return Number(draft)
-  if (input?.value_type === 'text_list') {
-    return draft.split(',').map((item) => item.trim()).filter(Boolean)
-  }
-  return draft.trim()
-}
+import {
+  fieldDraftValue,
+  fieldInputChoices,
+  fieldInputValue,
+} from '../recordedFacts.js'
 
 export default function FactEditor({ fact, input, busy, onSave, onCancel }) {
   const inputId = useId()
-  const [draft, setDraft] = useState(() => initialDraft(fact, input))
-  const choices = input?.value_type === 'boolean'
-    ? [['true', 'Yes'], ['false', 'No']]
-    : input?.value_type === 'enum'
-      ? (input.allowed_values || []).map((value) => [value, choiceLabel(value)])
-      : null
+  const [draft, setDraft] = useState(() => fieldDraftValue(fact.field.value, input))
+  const choices = fieldInputChoices(input)
   const empty = !String(draft).trim()
     || (input?.value_type === 'number' && Number.isNaN(Number(draft)))
 
@@ -36,7 +19,7 @@ export default function FactEditor({ fact, input, busy, onSave, onCancel }) {
       onSubmit={async (event) => {
         event.preventDefault()
         if (empty) return
-        if (await onSave(fact, typedValue(draft, input))) onCancel()
+        if (await onSave(fact, fieldInputValue(draft, input))) onCancel()
       }}
     >
       <label className="sr-only" htmlFor={inputId}>{fact.label}</label>
