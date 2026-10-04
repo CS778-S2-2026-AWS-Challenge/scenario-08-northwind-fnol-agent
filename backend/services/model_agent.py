@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -22,7 +21,6 @@ from backend.domain.agent_v7 import (
 )
 from backend.domain.agent_v8 import V8TurnProposal
 from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
-from backend.domain.field_registry import parse_registered_number
 from backend.domain.ids import new_id
 from backend.domain.knowledge import (
     KnowledgeRetrievalUnavailable,
@@ -33,52 +31,35 @@ from backend.domain.model_gateway import (
     CLAIMANT_AGENT_PRIVACY_CLASS,
     CLAIMANT_AGENT_PURPOSE,
     ModelAgentProposal,
-    ModelAttachedEvidenceContext,
-    ModelBranchContext,
     ModelCapabilities,
-    ModelClaimContext,
-    ModelClaimStateContext,
     ModelCompletionStatus,
-    ModelContentsItemContext,
     ModelEvidenceContent,
-    ModelFieldSelectionContext,
-    ModelFormFieldContext,
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
-    ModelKnowledgeCitation,
     ModelMessage,
-    ModelProposedContentsItem,
-    ModelProposedFormChange,
-    ModelProvenanceMessage,
     ModelRequest,
     ModelResponse,
     ModelRole,
     ModelRuntimeProposal,
     ModelTextContent,
-    ModelTurnContext,
 )
 from backend.domain.models import (
     AgentAction,
     AgentProposalSource,
     CustomerNextStep,
-    FormSource,
-    FormStatus,
     ModelDecisionProvenance,
-    NeededFor,
     ProposedContentsItem,
     ProposedFormChange,
     ResponsibleParty,
     RuntimeInvocationTrace,
     RuntimeTraceRecord,
 )
-from backend.domain.open_items import model_message_content
 from backend.domain.realtime import AgentTurnProgressStage
 from backend.domain.turn_field_contract import RepairOutcome, TurnFieldContractViolation
 from backend.prompts import CLAIMANT_V8_PROMPT_ID
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.services.agent import (
-    AgentEvidenceReference,
     AgentProposal,
     AgentTurnContext,
     AgentTurnProvider,
@@ -109,7 +90,6 @@ from backend.services.runtime_configuration import (
 from backend.services.turn_field_contract import bind_provider_schema
 from backend.services.turn_proposal_validation import (
     ValidatedTurn,
-    claimant_report_supports_value,
     parse_turn_proposal,
     truthful_reply,
     validate_turn_proposal,
@@ -192,51 +172,6 @@ def _model_context_size_metrics(
     }
 
 
-def _normalise_model_field_value(field_code: str, value: Any) -> Any:
-    """Normalise provider scalar spellings without changing the registered contract."""
-
-    definition = _FIELD_DEFINITIONS.get(field_code)
-    value_type = definition.value_type if definition is not None else None
-    if value_type == 'boolean' and isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized in {'true', 'yes', 'y', '1'}:
-            return True
-        if normalized in {'false', 'no', 'n', '0'}:
-            return False
-        negative = re.search(
-            r"\b(?:no|none|nobody|not|never|without|isn't|wasn't|cannot|can't)\b",
-            normalized,
-        )
-        if field_code == 'incident.injury_or_danger' and re.search(
-            r'\b(?:injur(?:y|ies|ed)|hurt|danger|unsafe|emergency)\b', normalized
-        ):
-            return not bool(negative)
-        if field_code == 'vehicle.drivable' and re.search(
-            r'\b(?:driv(?:e|en|able)|roadworthy|safe|unsafe)\b', normalized
-        ):
-            return not bool(negative or re.search(r'\bunsafe\b', normalized))
-        if field_code == 'parties.other_parties' and re.search(
-            r'\b(?:another|other|second|person|people|vehicle|party)\b', normalized
-        ):
-            return not bool(negative)
-        if field_code == 'property.habitable' and re.search(
-            r'\b(?:habitable|live|safe|unsafe|uninhabitable)\b', normalized
-        ):
-            return not bool(negative or re.search(r'\b(?:unsafe|uninhabitable)\b', normalized))
-    if value_type == 'enum' and isinstance(value, str):
-        return value.strip().casefold()
-    if value_type == 'text_list' and isinstance(value, str):
-        return [
-            item.strip()
-            for item in re.split(r'\s*(?:,|;|\band\b)\s*', value, flags=re.IGNORECASE)
-            if item.strip()
-        ]
-    if value_type == 'number' and isinstance(value, str):
-        number = parse_registered_number(value)
-        return value if number is None else number
-    return value
-
-
 _MODEL_CONTEXT_FIELD_CODES = frozenset(
     {
         'claim.product_family',
@@ -270,277 +205,6 @@ def _knowledge_product(incident_type: str | None) -> str | None:
         'home': 'home',
         'contents': 'contents',
     }.get(incident_type or '')
-
-
-def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
-    claim = context.claim
-    branch = context.branch_evaluation
-    model_field_codes = (
-        {
-            item.field_code
-            for item in branch.field_selection
-            if item.selection_state.value not in {'inactive', 'system_owned'}
-        }
-        if branch is not None
-        else _MODEL_CONTEXT_FIELD_CODES
-    )
-    return ModelTurnContext(
-        claim=ModelClaimContext(
-            channel=claim.channel,
-            locale=claim.locale,
-            incident_type=claim.incident_type,
-            claim_state=ModelClaimStateContext(
-                evidence=claim.claim_state.evidence,
-                customer_support=claim.claim_state.customer_support,
-                urgency=claim.claim_state.urgency,
-                workflow_state=claim.claim_state.workflow_state,
-                next_action=claim.claim_state.next_action,
-            ),
-            form={
-                field_code: ModelFormFieldContext(
-                    value=field.value,
-                    source=field.source,
-                    status=field.status,
-                    needed_for=field.needed_for,
-                    confidence=field.confidence,
-                    precision=field.precision,
-                    source_refs=field.source_refs,
-                )
-                for field_code, field in claim.form.items()
-                if field_code in model_field_codes and field.needed_for is NeededFor.CURRENT_ACTION
-            },
-            contents_items=[
-                ModelContentsItemContext(
-                    item_id=item.item_id,
-                    description=item.description,
-                    category=item.category,
-                    quantity=item.quantity,
-                    brand=item.brand,
-                    model=item.model,
-                    loss_type=item.loss_type,
-                    ownership=item.ownership,
-                    estimated_value=item.estimated_value,
-                    source=item.source,
-                    source_refs=item.source_refs,
-                    status=item.status,
-                    resolution_state=item.resolution_state,
-                )
-                for item in claim.contents_items
-            ],
-            known_field_codes=sorted(
-                field_code
-                for field_code, field in claim.form.items()
-                if (branch is None or field_code in model_field_codes)
-                and field.needed_for is NeededFor.CURRENT_ACTION
-            ),
-            evidence_summary=claim.evidence_summary,
-            customer_next_step=claim.customer_next_step,
-        ),
-        message_text=context.message_text,
-        evidence_reference_count=len(context.evidence_refs),
-        attached_evidence=[
-            ModelAttachedEvidenceContext(
-                evidence_id=item.evidence_id,
-                media_type=item.media_type,
-            )
-            for item in context.evidence
-        ],
-        professional_review_required=context.professional_review_required,
-        branch=(
-            ModelBranchContext(
-                field_registry_version=branch.field_registry_version,
-                branch_rules_version=branch.branch_rules_version,
-                selected_family=branch.selected_family,
-                unresolved_family_conflict=branch.unresolved_family_conflict,
-                active_branches=branch.active_branches,
-                candidate_branches=branch.candidate_branches,
-                allowed_field_codes=sorted(
-                    item.field_code
-                    for item in branch.field_selection
-                    if item.selection_state.value not in {'inactive', 'system_owned'}
-                ),
-                field_selection=[
-                    ModelFieldSelectionContext(
-                        field_code=item.field_code,
-                        selection_state=item.selection_state,
-                        value_state=item.value_state,
-                    )
-                    for item in branch.field_selection
-                    if item.selection_state.value not in {'inactive', 'system_owned'}
-                ],
-                work_item_intents=branch.work_item_intents,
-                interruption_result=branch.interruption_result,
-                permitted_actions=branch.permitted_actions,
-                permitted_tools=branch.permitted_tools,
-                satisfied_requirements=branch.requirements.satisfied,
-                missing_required_now=branch.requirements.missing_required_now,
-                pending_later=branch.requirements.pending_later,
-                next_required_item=branch.requirements.next_required_item,
-                ready=branch.requirements.ready,
-            )
-            if branch is not None
-            else None
-        ),
-        knowledge_status=context.knowledge_status,
-        external_services=list(context.external_services),
-        knowledge_citations=[
-            ModelKnowledgeCitation(
-                document_id=chunk.document_id,
-                chunk_id=chunk.chunk_id,
-                title=chunk.title,
-                section_path=chunk.section_path,
-                source_uri=chunk.source_uri,
-                version=chunk.version,
-                checksum=chunk.checksum,
-                text=chunk.text,
-            )
-            for chunk in context.knowledge_results
-        ],
-        knowledge_limitations=list(context.knowledge_limitations),
-        tool_results=list(context.tool_results),
-        provenance_messages=[
-            ModelProvenanceMessage(
-                message_id=message.message_id,
-                content=model_message_content(message.content),
-            )
-            for message in context.provenance_messages
-        ],
-        conversation_history=[
-            ModelProvenanceMessage(
-                message_id=message.message_id,
-                content=json.dumps(
-                    {
-                        'actor': message.actor.value,
-                        'content': model_message_content(message.content),
-                    },
-                    separators=(',', ':'),
-                ),
-            )
-            for message in context.conversation_messages
-        ],
-        field_value_contracts={
-            code: {
-                'value_type': definition.value_type,
-                'allowed_values': sorted(definition.allowed_values),
-            }
-            for code in sorted(model_field_codes)
-            if (definition := _FIELD_DEFINITIONS.get(code)) is not None
-        },
-    )
-
-
-def _claimant_supports_model_change(
-    change: ModelProposedFormChange,
-    normalized_message: str,
-) -> bool:
-    return claimant_report_supports_value(
-        change.field_code,
-        _normalise_model_field_value(change.field_code, change.value),
-        change.reported_text,
-        normalized_message,
-    )
-
-
-def _model_form_change(
-    change: ModelProposedFormChange,
-    *,
-    message_text: str | None,
-    evidence: tuple[AgentEvidenceReference, ...],
-) -> ProposedFormChange:
-    evidence_by_id = {item.evidence_id: item for item in evidence}
-    source = FormSource.INFERENCE
-    if change.source_evidence_id is not None:
-        attached = evidence_by_id.get(change.source_evidence_id)
-        if attached is None:
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
-        source = (
-            FormSource.IMAGE if attached.media_type.startswith('image/') else FormSource.DOCUMENT
-        )
-    elif _claimant_supports_model_change(
-        change,
-        ' '.join((message_text or '').split()).casefold(),
-    ):
-        source = FormSource.CLAIMANT
-    return ProposedFormChange(
-        field_code=change.field_code,
-        value=_normalise_model_field_value(change.field_code, change.value),
-        source=source,
-        status=(FormStatus.CONFIRMED if source is FormSource.CLAIMANT else FormStatus.PROPOSED),
-        needed_for=change.needed_for,
-        confidence=change.confidence,
-        precision=change.precision,
-        relation=change.relation,
-        reported_text=change.reported_text,
-        source_evidence_id=change.source_evidence_id,
-    )
-
-
-def _model_contents_item_change(
-    item: ModelProposedContentsItem,
-    *,
-    evidence: tuple[AgentEvidenceReference, ...],
-) -> ProposedContentsItem:
-    if item.source_evidence_id is not None and item.source_evidence_id not in {
-        record.evidence_id for record in evidence
-    }:
-        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
-    return ProposedContentsItem(
-        item_id=item.item_id,
-        description=item.description,
-        category=item.category,
-        quantity=item.quantity,
-        brand=item.brand,
-        model=item.model,
-        loss_type=item.loss_type,
-        ownership=item.ownership,
-        estimated_value=item.estimated_value,
-        confidence=item.confidence,
-        relation=item.relation,
-        reported_text=item.reported_text,
-        source_evidence_id=item.source_evidence_id,
-    )
-
-
-def _agent_proposal(
-    proposal: ModelAgentProposal,
-    *,
-    message_text: str | None,
-    evidence: tuple[AgentEvidenceReference, ...],
-    provider_model: str | None,
-    provider_request_id: str | None,
-    prompt_id: str,
-    action_code: str | None = None,
-    runtime_action_code: str | None = None,
-) -> AgentProposal:
-    return AgentProposal(
-        action=proposal.action,
-        reason_codes=proposal.reason_codes,
-        customer_reason=proposal.customer_reason,
-        customer_response=proposal.customer_response,
-        customer_next_step=proposal.customer_next_step,
-        form_changes=[
-            _model_form_change(change, message_text=message_text, evidence=evidence)
-            for change in proposal.form_changes
-        ],
-        contents_item_changes=[
-            _model_contents_item_change(item, evidence=evidence)
-            for item in proposal.contents_item_changes
-        ],
-        state_changes=proposal.state_changes,
-        proposed_signals=[],
-        required_tools=proposal.required_tools,
-        next_action_requirements=proposal.next_action_requirements,
-        handoff_priority=proposal.handoff_priority,
-        controlled_rule_authorised=False,
-        proposal_source=AgentProposalSource.MODEL_GATEWAY,
-        model_provenance=ModelDecisionProvenance(
-            provider_model=provider_model,
-            provider_request_id=provider_request_id,
-            prompt_id=prompt_id,
-        ),
-        action_code=action_code,
-        external_service_intents=[],
-    )
 
 
 class GatewayAgent:
