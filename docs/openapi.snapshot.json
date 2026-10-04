@@ -1339,11 +1339,7 @@
         "description": "Versioned system instruction compiled into claimant model requests.",
         "properties": {
           "composition_mode": {
-            "default": "single",
-            "enum": [
-              "single",
-              "fragmented"
-            ],
+            "const": "fragmented",
             "title": "Composition Mode",
             "type": "string"
           },
@@ -1352,21 +1348,15 @@
               "$ref": "#/components/schemas/PublishedPromptFragment"
             },
             "maxItems": 100,
+            "minItems": 1,
             "title": "Fragments",
             "type": "array"
           },
           "manifest_version": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Manifest Version"
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Manifest Version",
+            "type": "string"
           },
           "prompt_version": {
             "maxLength": 100,
@@ -1379,23 +1369,13 @@
             "default": "claimant_agent",
             "title": "Purpose",
             "type": "string"
-          },
-          "system_prompt": {
-            "anyOf": [
-              {
-                "maxLength": 50000,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "System Prompt"
           }
         },
         "required": [
-          "prompt_version"
+          "prompt_version",
+          "composition_mode",
+          "manifest_version",
+          "fragments"
         ],
         "title": "AgentInstructionConfiguration",
         "type": "object"
