@@ -87,6 +87,7 @@ def test_a_dry_run_reports_every_change_and_writes_nothing() -> None:
         'rewritten_records': 4,
         'rewritten_by_type': {'branch_evaluation': 1, 'evidence': 2, 'idempotency': 1},
         'evaluations_added': 1,
+        'unfinished_claim_creations_with_old_kinds': [],
     }
     assert list(collection.find({})) == before
 
@@ -123,3 +124,40 @@ def test_apply_rewrites_old_shapes_backfills_evaluations_and_runs_once() -> None
     collection.delete_one({'_id': MIGRATION_ID})
     rerun = migrate_record_shapes(collection, apply=True)
     assert (rerun['rewritten_records'], rerun['evaluations_added']) == (0, 0)
+
+
+def test_apply_refuses_while_an_unfinished_claim_creation_covers_an_old_kind() -> None:
+    collection = _stored_records()
+    collection.update_one({'_id': 'evidence:evd_1'}, {'$set': {'claim_id': 'clm_evaluated'}})
+    collection.insert_many(
+        [
+            {
+                '_id': 'claim_creation_operation:cco_open',
+                'record_type': 'claim_creation_operation',
+                'operation_id': 'cco_open',
+                'claim_id': 'clm_evaluated',
+                'status': 'prepared',
+            },
+            {
+                '_id': 'claim_creation_operation:cco_retry',
+                'record_type': 'claim_creation_operation',
+                'operation_id': 'cco_retry',
+                'claim_id': 'clm_evaluated',
+                'status': 'retryable_failure',
+            },
+            {
+                '_id': 'claim_creation_operation:cco_done',
+                'record_type': 'claim_creation_operation',
+                'operation_id': 'cco_done',
+                'claim_id': 'clm_evaluated',
+                'status': 'accepted',
+            },
+        ]
+    )
+    before = list(collection.find({}))
+
+    report = migrate_record_shapes(collection, apply=True)
+
+    assert report['status'] == 'refused'
+    assert report['unfinished_claim_creations_with_old_kinds'] == ['cco_open', 'cco_retry']
+    assert list(collection.find({})) == before

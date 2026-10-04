@@ -14,6 +14,9 @@ The script reports by default and writes only with ``--apply``. A successful
 apply records a marker document; later runs see it and exit without touching
 anything. Each record is also checked on its own, so a rerun without the marker
 changes nothing that is already current. Stop the backend while applying.
+
+An unfinished claim creation fingerprinted its evidence while it had an old kind; the apply
+refuses, writing nothing, until those creations have finished.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from pymongo.errors import PyMongoError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.domain.claim_creation import ClaimCreationOperationStatus
 from backend.domain.models import BranchEvaluationStatus, WorkingClaim
 from backend.repositories.mongodb import MongoDBConfigurationError, MongoDBConnectionConfig
 from backend.services.branching import build_applied_branch_evaluation
@@ -39,6 +43,12 @@ MIGRATION_ID = 'schema_migration:record-shapes-2026-10'
 _REMOVED_KEY = 'current_action_satisfied'
 _KIND_KEYS = frozenset({'kind', 'document_kind'})
 _OLD_PHOTO_KINDS = frozenset({'incident_image', 'photo'})
+_FINISHED_CREATION_STATUSES = frozenset(
+    {
+        ClaimCreationOperationStatus.ACCEPTED.value,
+        ClaimCreationOperationStatus.TERMINAL_FAILURE.value,
+    }
+)
 
 
 def _current_shape(value: Any, key: str | None = None) -> Any:
@@ -73,6 +83,28 @@ def _claims_without_evaluation(documents: list[dict[str, Any]]) -> list[WorkingC
     ]
 
 
+def _unfinished_creations_with_old_kinds(documents: list[dict[str, Any]]) -> list[str]:
+    """Return unfinished claim creations whose evidence still has an old photo kind.
+
+    Such an operation fingerprinted its evidence, kind included, when it was prepared, and
+    compares that fingerprint again when its accepted outcome is saved, so rewriting the kind
+    would make it fail. Only accepted and terminally failed operations are finished.
+    """
+
+    claims_with_old_kinds = {
+        document.get('claim_id')
+        for document in documents
+        if document['record_type'] == 'evidence' and document.get('kind') in _OLD_PHOTO_KINDS
+    }
+    return sorted(
+        document['operation_id']
+        for document in documents
+        if document['record_type'] == 'claim_creation_operation'
+        and document.get('status') not in _FINISHED_CREATION_STATUSES
+        and document.get('claim_id') in claims_with_old_kinds
+    )
+
+
 def migrate_record_shapes(
     collection: Collection[dict[str, Any]], *, apply: bool = False
 ) -> dict[str, Any]:
@@ -91,6 +123,7 @@ def migrate_record_shapes(
         return {'status': 'already_applied', 'applied_at': marker['applied_at']}
 
     stored = list(collection.find({}))
+    blocking = _unfinished_creations_with_old_kinds(stored)
     current = [_current_shape(document) for document in stored]
     rewritten = [after for before, after in zip(stored, current, strict=True) if after != before]
     unevaluated = _claims_without_evaluation(current)
@@ -99,8 +132,13 @@ def migrate_record_shapes(
         'rewritten_records': len(rewritten),
         'rewritten_by_type': _count_by_type(rewritten),
         'evaluations_added': len(unevaluated),
+        'unfinished_claim_creations_with_old_kinds': blocking,
     }
     if not apply:
+        return report
+    if blocking:
+        # Writing nothing keeps the run all-or-nothing; finish these creations and run again.
+        report['status'] = 'refused'
         return report
 
     for document in rewritten:
@@ -158,7 +196,7 @@ def main() -> int:
         if client is not None:
             client.close()
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0
+    return 2 if report['status'] == 'refused' else 0
 
 
 if __name__ == '__main__':

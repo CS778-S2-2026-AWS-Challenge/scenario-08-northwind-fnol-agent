@@ -1496,7 +1496,9 @@ MongoDB records written before the October 2026 cleanup are brought to the curre
 `incident_photo`, the removed `current_action_satisfied` requirement field is dropped from branch
 evaluations and replayed responses, and a claim without an applied branch evaluation gets one.
 It reports by default, writes with `--apply` while the backend is stopped, and records a
-`schema_migration` marker so later runs exit without changing anything.
+`schema_migration` marker so later runs exit without changing anything. It refuses to apply,
+writing nothing, while an unfinished claim creation covers evidence with an old photo kind,
+because that creation fingerprinted the evidence; it lists those operations.
 
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The script is a
 thin operator entry point over the same repository migration rule the fixture adapter uses
