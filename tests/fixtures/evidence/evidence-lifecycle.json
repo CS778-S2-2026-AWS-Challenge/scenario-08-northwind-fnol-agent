@@ -10,7 +10,7 @@
       "evidence": {
         "evidence_id": "evd_fixture_lifecycle_pending",
         "claim_id": "clm_fixture_lifecycle",
-        "kind": "incident_image",
+        "kind": "incident_photo",
         "status": "pending",
         "file_status": "awaiting_upload",
         "original_filename": "incident-front.jpg",
@@ -126,7 +126,7 @@
       "evidence": {
         "evidence_id": "evd_fixture_lifecycle_received",
         "claim_id": "clm_fixture_lifecycle",
-        "kind": "incident_image",
+        "kind": "incident_photo",
         "status": "received",
         "file_status": "ready",
         "original_filename": "rear-damage.jpg",

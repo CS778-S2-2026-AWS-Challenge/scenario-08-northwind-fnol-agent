@@ -64,7 +64,7 @@
     {
       "evidence_id": "evd_fixture_at12_image",
       "claim_id": "clm_fixture_at12",
-      "kind": "incident_image",
+      "kind": "incident_photo",
       "status": "received",
       "file_status": "ready",
       "original_filename": "synthetic-damage.png",

@@ -184,7 +184,7 @@
    },
    "planted_indicators": [],
    "innocent_controls": [],
-   "notes": "Plan feature none with condition expired. The repair quote is dated 13 August 2026 and valid until 12 September 2026, before 1 October 2026. Open for the maintainer: main does not require a repair quote for contents (FAMILY_DOCUMENTS: incident_image and proof_of_ownership), so evidence_outstanding here rests on reading \"required material\" as including a quote the claimant supplies. No template can print a validity date on a proof of ownership, which would make the condition unambiguous.",
+   "notes": "Plan feature none with condition expired. The repair quote is dated 13 August 2026 and valid until 12 September 2026, before 1 October 2026. Open for the maintainer: main does not require a repair quote for contents (FAMILY_DOCUMENTS: incident_photo and proof_of_ownership), so evidence_outstanding here rests on reading \"required material\" as including a quote the claimant supplies. No template can print a validity date on a proof of ownership, which would make the condition unambiguous.",
    "policy_inception_date": "2019-01-15"
   },
   "triage": {

@@ -493,7 +493,7 @@ def _evidence(claim: WorkingClaim) -> EvidenceRecord:
     return EvidenceRecord(
         evidence_id='evd_mongo_001',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,

@@ -112,7 +112,7 @@ def test_environment_composes_minio_through_the_fastapi_evidence_flow(
                 'If-Match': '1',
             },
             json={
-                'kind': 'incident_image',
+                'kind': 'incident_photo',
                 'original_filename': 'damage.jpg',
                 'media_type': 'image/jpeg',
                 'size_bytes': len(PAYLOAD),
@@ -170,7 +170,7 @@ def test_minio_profile_rejects_fixture_proxy_without_reading_body(
                 'If-Match': '1',
             },
             json={
-                'kind': 'incident_image',
+                'kind': 'incident_photo',
                 'original_filename': 'damage.jpg',
                 'media_type': 'image/jpeg',
                 'size_bytes': len(PAYLOAD),
@@ -213,7 +213,7 @@ def test_expired_idempotent_replay_resigns_without_duplicate_or_revision_change(
             'If-Match': '1',
         }
         payload = {
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'damage.jpg',
             'media_type': 'image/jpeg',
             'size_bytes': len(PAYLOAD),
@@ -259,7 +259,7 @@ def test_real_presign_exposes_only_short_lived_addressing_and_identity(
                 'If-Match': '1',
             },
             json={
-                'kind': 'incident_image',
+                'kind': 'incident_photo',
                 'original_filename': 'damage.jpg',
                 'media_type': 'image/jpeg',
                 'size_bytes': len(PAYLOAD),

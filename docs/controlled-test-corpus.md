@@ -432,9 +432,9 @@ implemented, not as failures of the corpus.
 
    It never copies `evidence_kind` from `input/materials.json`; that field is the corpus's name for
    the material, for the simulator and the scorer. The triage labels assume the required materials
-   arrive this way. A run that can only use the chat records photos as `incident_photo` and
-   documents as `other_document`, neither of which matches the family requirement (`incident_image`,
-   `repair_quote`, `proof_of_ownership`), so main then reports those documents as not received.
+   arrive this way. A run that can only use the chat records documents as `other_document`, which
+   does not match the family requirement (`repair_quote`, `proof_of_ownership`), so main then
+   reports those documents as not received.
    Assertions match Evidence by `original_filename`, not by kind.
 7. **Earlier claims.** No seed route creates submitted claims for an account. The runner creates
    each earlier claim by driving the public API to creation.

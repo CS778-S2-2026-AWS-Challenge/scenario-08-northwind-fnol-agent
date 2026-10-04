@@ -231,7 +231,7 @@ def test_fixture_repository_supports_customer_message_and_evidence_access_patter
     evidence = EvidenceRecord(
         evidence_id='evd_fixture',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,
@@ -266,7 +266,7 @@ def test_fixture_repository_rejects_material_history_rewrite_or_removal() -> Non
     evidence = EvidenceRecord(
         evidence_id='evd_fixture_history',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.INVALID,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,

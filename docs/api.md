@@ -1217,7 +1217,7 @@ later claimant statement is resolved against existing assertions rather than sil
 
 | Field | Allowed values or rule |
 |---|---|
-| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `document`, `external_assessment`, `incident_image`, `incident_photo`, `incident_report`, `internal_policy_history`, `item_photo`, `other_document`, `photo`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
+| `kind` | Registered evidence type: `agency_incident_record`, `assessment_report`, `claim_history`, `claimant_attachment`, `claimant_statement`, `document`, `external_assessment`, `incident_photo`, `incident_report`, `internal_policy_history`, `item_photo`, `other_document`, `policy`, `police_report`, `proof_of_ownership`, `receipt`, or `repair_quote` |
 | `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |
@@ -2635,7 +2635,7 @@ Request:
 ```json
 {
   "evidence_id": "evd_01J4Y7V5QJ",
-  "kind": "incident_image",
+  "kind": "incident_photo",
   "original_filename": "rear-damage.jpg",
   "media_type": "image/jpeg",
   "size_bytes": 1842201
@@ -3143,9 +3143,8 @@ currency outside that table makes the amount unknown.
 
 `coverage_uncertain` comes from an uncertainty on the policy retrieval record for the Claim's
 policy number or `coverage = ambiguous`, never from `coverage = review_required` alone.
-`document_outstanding` compares canonical Evidence kinds (`canonical_evidence_kind` in
-`backend/domain/evidence.py`: `incident_image` and `photo` read as `incident_photo`). A receipt or
-invoice counts as proof of ownership; no other kind stands in for a required kind, so an
+`document_outstanding` compares registered Evidence kinds; each kind has one name (an incident
+photo is `incident_photo`). A receipt or invoice counts as proof of ownership; no other kind stands in for a required kind, so an
 assessment report does not replace a repair quote.
 
 `claim_state.severity` in Workbench projections equals `triage.severity`. Staff cannot change the

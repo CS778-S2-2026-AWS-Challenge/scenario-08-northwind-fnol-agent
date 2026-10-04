@@ -250,7 +250,7 @@ def test_mongodb_still_allows_mutable_lifecycle_record_updates() -> None:
     evidence = EvidenceRecord(
         evidence_id='evd_mongo_immutable',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.AWAITING_UPLOAD,
         source=EvidenceSource.CLAIMANT,
@@ -298,7 +298,7 @@ def test_mongodb_rejects_material_history_rewrite_or_removal() -> None:
     evidence = EvidenceRecord(
         evidence_id='evd_mongo_history',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.INVALID,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,

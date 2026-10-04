@@ -2574,7 +2574,7 @@ def test_claim_creation_accepts_complete_nonempty_evidence_snapshot() -> None:
         evidence = EvidenceRecord(
             evidence_id='evd_complete_claim_creation',
             claim_id=claim_id,
-            kind='incident_image',
+            kind='incident_photo',
             status=EvidenceStatus.RECEIVED,
             file_status=EvidenceFileStatus.READY,
             source=EvidenceSource.CLAIMANT,

@@ -71,7 +71,7 @@ def upload_and_process(
             'If-Match': str(start_revision),
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': f'{case}.jpg',
             'media_type': 'image/jpeg',
             'size_bytes': 512,

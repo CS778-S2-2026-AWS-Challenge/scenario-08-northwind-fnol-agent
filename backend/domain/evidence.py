@@ -22,7 +22,6 @@ REGISTERED_EVIDENCE_KINDS = frozenset(
         'claimant_statement',
         'document',
         'external_assessment',
-        'incident_image',
         'incident_photo',
         'incident_report',
         'internal_policy_history',
@@ -30,24 +29,14 @@ REGISTERED_EVIDENCE_KINDS = frozenset(
         'other_document',
         'policy',
         'police_report',
-        'photo',
         'proof_of_ownership',
         'receipt',
         'repair_quote',
     }
 )
 
-# One incident photo has carried three names: claimant uploads store `incident_photo`,
-# branch requirements and demo materials used `incident_image`, and tag projection read
-# `photo`. Stored records keep their kind; every comparison maps through this function.
-# `item_photo` (a photo of one contents item) stays a separate kind.
+# A photo of the incident. `item_photo` (a photo of one contents item) is a separate kind.
 INCIDENT_PHOTO_KIND = 'incident_photo'
-_LEGACY_EVIDENCE_KINDS = {'incident_image': INCIDENT_PHOTO_KIND, 'photo': INCIDENT_PHOTO_KIND}
-
-
-def canonical_evidence_kind(kind: str) -> str:
-    """Return the single current name for an Evidence kind."""
-    return _LEGACY_EVIDENCE_KINDS.get(kind, kind)
 
 
 # Files sent in the chat arrive without a kind; the model reads them and says
@@ -61,11 +50,11 @@ def evidence_kind(record: EvidenceRecord, interpreted: Mapping[str, str] | None 
     A file with no stated kind that the model has not read yet stays unspecified;
     Runtime does not guess from the media type.
     """
-    kind = canonical_evidence_kind(record.kind)
+    kind = record.kind
     if kind in UNSPECIFIED_EVIDENCE_KINDS and interpreted:
         read = interpreted.get(record.evidence_id)
         if read and read in REGISTERED_EVIDENCE_KINDS:
-            return canonical_evidence_kind(read)
+            return read
     return kind
 
 

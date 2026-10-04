@@ -510,7 +510,7 @@ def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
         headers={**auth_headers, 'Idempotency-Key': 'multimodal-upload', 'If-Match': '1'},
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'damage.png',
             'media_type': 'image/png',
             'size_bytes': len(content),
@@ -602,7 +602,7 @@ def test_message_turn_rejects_internal_evidence_before_agent_invocation(
             EvidenceRecord(
                 evidence_id=evidence_id,
                 claim_id=claim_id,
-                kind='incident_image',
+                kind='incident_photo',
                 status=EvidenceStatus.RECEIVED,
                 file_status=EvidenceFileStatus.READY,
                 source=source,
@@ -645,7 +645,7 @@ def test_turn_evidence_resolver_rechecks_claimant_visibility(
         EvidenceRecord(
             evidence_id=evidence_id,
             claim_id=claim.claim_id,
-            kind='incident_image',
+            kind='incident_photo',
             status=EvidenceStatus.RECEIVED,
             file_status=EvidenceFileStatus.READY,
             source=EvidenceSource.STAFF,
@@ -708,7 +708,7 @@ def test_message_turn_persists_contents_attachment_provenance(
                 'If-Match': str(revision),
             },
             json={
-                'kind': 'incident_image' if media_type.startswith('image/') else 'other_document',
+                'kind': 'incident_photo' if media_type.startswith('image/') else 'other_document',
                 'original_filename': filename,
                 'media_type': media_type,
                 'size_bytes': len(content),

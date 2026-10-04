@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from backend.domain.evidence import canonical_evidence_kind, evidence_kind
+from backend.domain.evidence import evidence_kind
 from backend.domain.models import (
     ActorType,
     ClaimantOpenItem,
@@ -165,7 +165,7 @@ def _documents(
     for record in evidence:
         if record.file_status is not EvidenceFileStatus.NOT_AVAILABLE:
             continue
-        kind = canonical_evidence_kind(record.kind)
+        kind = record.kind
         if record.status is EvidenceStatus.PENDING:
             owner = (
                 OpenItemOwner.THIRD_PARTY

@@ -103,7 +103,7 @@ HOME = HouseholdScenario(
             'Incident evidence',
             'claimant',
             Arrival.CLAIMANT_UPLOAD,
-            'incident_image',
+            'incident_photo',
             'image/jpeg',
         ),
         PackMaterial(
@@ -111,7 +111,7 @@ HOME = HouseholdScenario(
             'Incident evidence',
             'claimant',
             Arrival.CLAIMANT_UPLOAD,
-            'incident_image',
+            'incident_photo',
             'image/jpeg',
         ),
         PackMaterial(
@@ -161,7 +161,7 @@ CONTENTS = HouseholdScenario(
             'Incident evidence',
             'claimant',
             Arrival.CLAIMANT_UPLOAD,
-            'incident_image',
+            'incident_photo',
             'image/jpeg',
         ),
         PackMaterial(
@@ -169,7 +169,7 @@ CONTENTS = HouseholdScenario(
             'Incident evidence',
             'claimant',
             Arrival.CLAIMANT_UPLOAD,
-            'incident_image',
+            'incident_photo',
             'image/jpeg',
         ),
         PackMaterial(
@@ -220,7 +220,7 @@ HOME_ILLEGIBLE = replace(
             'Incident evidence',
             'claimant',
             Arrival.CLAIMANT_UPLOAD,
-            'incident_image',
+            'incident_photo',
             'application/pdf',
             'Unreadable attendance note supplied by the claimant (invalid material condition).',
             condition='invalid',

@@ -84,7 +84,7 @@ UNMAPPED_REASON = 'no EvidenceStatus counterpart for this catalogue condition'
 
 # Chosen so the material is recognised by what already reads evidence kinds:
 # `backend/services/tag_projection.py` raises staff tags from `assessment_report`,
-# `proof_of_ownership`, and `incident_image`, and treats `police_report` separately.
+# `proof_of_ownership`, and `incident_photo`, and treats `police_report` separately.
 #
 # Incident evidence is the one class that is not one kind. Most instances are
 # photographs, but an attendance note is incident evidence too, and calling a PDF an
@@ -98,7 +98,7 @@ MATERIAL_CLASS_KIND: dict[str, str] = {
 }
 
 INCIDENT_EVIDENCE_KIND: dict[str, str] = {
-    'photo': 'incident_image',
+    'photo': 'incident_photo',
     'document': 'other_document',
 }
 

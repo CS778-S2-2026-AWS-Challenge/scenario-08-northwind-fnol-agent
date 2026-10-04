@@ -23,7 +23,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
-from backend.domain.evidence import canonical_evidence_kind, evidence_kind
+from backend.domain.evidence import evidence_kind
 from backend.domain.external_service_registry import ExternalServiceLifecycleProjection
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -1704,13 +1704,13 @@ def _document_projection(
         elif item.status is EvidenceStatus.PENDING:
             # Recorded as owed by the claimant or a third party; not asked again.
             settled.setdefault(
-                canonical_evidence_kind(item.kind),
+                item.kind,
                 'with_third_party'
                 if item.responsible_party is ResponsibleParty.EXTERNAL_PARTY
                 else 'claimant_sends_later',
             )
         elif item.status is EvidenceStatus.UNAVAILABLE:
-            settled.setdefault(canonical_evidence_kind(item.kind), 'claimant_does_not_have')
+            settled.setdefault(item.kind, 'claimant_does_not_have')
     return tuple(
         {
             'kind': kind,

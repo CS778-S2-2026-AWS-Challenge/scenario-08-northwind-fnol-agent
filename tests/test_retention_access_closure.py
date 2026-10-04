@@ -82,7 +82,7 @@ def _evidence(
     return EvidenceRecord(
         evidence_id=f'evd_{claim.claim_id}',
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,

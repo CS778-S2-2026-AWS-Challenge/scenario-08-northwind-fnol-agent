@@ -81,7 +81,7 @@ def test_photo_without_text_starts_the_report_and_facts_are_document_sourced(
         client,
         claim_id,
         created['claim']['revision'],
-        kind='incident_image',
+        kind='incident_photo',
         filename='bumper.jpg',
         media_type='image/jpeg',
         content=synthetic_image(),
@@ -96,7 +96,7 @@ def test_photo_without_text_starts_the_report_and_facts_are_document_sourced(
             fact('claim.product_family', 'motor', None),
             fact('vehicle.damage_description', 'Rear bumper damaged', None),
         ],
-        interpretations=[{'evidence_id': evidence_id, 'document_kind': 'incident_image'}],
+        interpretations=[{'evidence_id': evidence_id, 'document_kind': 'incident_photo'}],
         question='incident.location',
     )
     for change in scripted['field_changes']:

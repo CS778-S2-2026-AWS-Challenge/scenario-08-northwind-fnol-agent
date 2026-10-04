@@ -96,7 +96,7 @@
     {
       "evidence_id": "evd_fixture_at10_damage",
       "claim_id": "clm_fixture_at10",
-      "kind": "incident_image",
+      "kind": "incident_photo",
       "status": "received",
       "file_status": "ready",
       "original_filename": "synthetic-rear-damage.png",

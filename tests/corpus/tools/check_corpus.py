@@ -82,7 +82,7 @@ ENTRY_KEYS = [
     'usage_rights',
     'sha256',
 ]
-IMAGE_KINDS = {'incident_photo', 'item_photo', 'incident_image', 'photo'}
+IMAGE_KINDS = {'incident_photo', 'item_photo'}
 OWNERSHIP_KINDS = {'receipt', 'proof_of_ownership'}
 QUOTE_KINDS = {'repair_quote', 'assessment_report'}
 UNREADABLE = {'illegible', 'corrupt_file', 'unsupported_format'}

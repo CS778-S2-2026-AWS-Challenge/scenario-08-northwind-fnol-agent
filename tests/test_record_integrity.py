@@ -79,7 +79,7 @@ def _evidence(claim: WorkingClaim, evidence_id: str = 'evd_integrity') -> Eviden
     return EvidenceRecord(
         evidence_id=evidence_id,
         claim_id=claim.claim_id,
-        kind='incident_image',
+        kind='incident_photo',
         status=EvidenceStatus.RECEIVED,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.CLAIMANT,
@@ -150,7 +150,7 @@ def test_evidence_write_boundaries_reject_unregistered_or_contradictory_records(
     assert repository.get_evidence(claim.claim_id, evidence.evidence_id, claim.customer_id) is None
 
 
-@pytest.mark.parametrize('kind', ('item_photo', 'photo', 'document'))
+@pytest.mark.parametrize('kind', ('item_photo', 'incident_photo', 'document'))
 def test_existing_production_evidence_kinds_remain_registered(
     repository: PersistenceRepository,
     kind: str,

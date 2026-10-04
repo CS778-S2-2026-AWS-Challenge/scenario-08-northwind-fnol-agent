@@ -901,7 +901,7 @@ def test_unresolved_evidence_remains_in_staff_pending_evidence_view(
 @pytest.mark.parametrize(
     ('kind', 'filename', 'media_type', 'size_bytes'),
     [
-        ('incident_image', 'rear-damage.jpg', 'image/jpeg', 1_842_201),
+        ('incident_photo', 'rear-damage.jpg', 'image/jpeg', 1_842_201),
         ('repair_quote', 'repair-quote.pdf', 'application/pdf', 284_120),
     ],
 )
@@ -1169,7 +1169,7 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
             'If-Match': '1',
         },
         json={
-            'kind': 'incident_image' if expected_source == 'image' else 'claimant_statement',
+            'kind': 'incident_photo' if expected_source == 'image' else 'claimant_statement',
             'original_filename': filename,
             'media_type': media_type,
             'size_bytes': 512,
@@ -1321,7 +1321,7 @@ def test_fact_decisions_require_completed_processing_and_the_owning_claimant(
             'If-Match': '1',
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'guarded.jpg',
             'media_type': 'image/jpeg',
             'size_bytes': 512,
@@ -1373,7 +1373,7 @@ def upload_evidence(
             'If-Match': str(revision),
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': f'{case}.pdf'
             if media_type == 'application/pdf'
             else f'{case}.jpg',
@@ -1761,7 +1761,7 @@ def test_evidence_mutations_enforce_headers_revision_media_and_state(
             'Idempotency-Key': 'received-without-upload',
             'If-Match': '1',
         },
-        json={'kind': 'incident_image', 'status': 'received'},
+        json={'kind': 'incident_photo', 'status': 'received'},
     )
     unsupported = client.post(
         f'{endpoint}/uploads',
@@ -1785,7 +1785,7 @@ def test_evidence_mutations_enforce_headers_revision_media_and_state(
             'If-Match': '1',
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'large.png',
             'media_type': 'image/png',
             'size_bytes': 10_485_761,
@@ -1889,7 +1889,7 @@ def test_unknown_claim_evidence_routes_return_not_found(
             'If-Match': '1',
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'missing.png',
             'media_type': 'image/png',
             'size_bytes': 100,
@@ -1937,7 +1937,7 @@ def test_anonymous_sessions_can_continue_chat_but_cannot_persist_file_evidence(
             'If-Match': '1',
         },
         json={
-            'kind': 'incident_image',
+            'kind': 'incident_photo',
             'original_filename': 'damage.jpg',
             'media_type': 'image/jpeg',
             'size_bytes': 10,
