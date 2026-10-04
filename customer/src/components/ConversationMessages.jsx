@@ -17,7 +17,6 @@ const CLAIM_START_PROMPTS = [
 
 function ClaimStartIcon({ name, className = '' }) {
   const paths = {
-    arrow: <path d="m9 18 6-6-6-6" />,
     car: (
       <>
         <path d="m5 17-1 2M19 17l1 2M3 13l2-6h14l2 6v5H3v-5Z" />
@@ -30,22 +29,10 @@ function ClaimStartIcon({ name, className = '' }) {
         <path d="M5 10v10h14V10M9 20v-6h6v6" />
       </>
     ),
-    lock: (
-      <>
-        <rect x="5" y="10" width="14" height="10" rx="2" />
-        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-      </>
-    ),
     search: (
       <>
         <circle cx="10" cy="10" r="6" />
         <path d="m15 15 5 5M8 8h4v4H8z" />
-      </>
-    ),
-    shield: (
-      <>
-        <path d="M12 3 5 6v5c0 4.4 2.8 8.4 7 10 4.2-1.6 7-5.6 7-10V6l-7-3Z" />
-        <path d="m9 12 2 2 4-4" />
       </>
     ),
   }
@@ -61,21 +48,13 @@ function ClaimStartIcon({ name, className = '' }) {
   )
 }
 
+// A new conversation opens with one line and three small starting chips.
 export function ConversationStart({ onChoosePrompt }) {
   return (
     <section className="conversation-start" aria-labelledby="conversation-title">
-      <div className="conversation-start-intro">
-        <span className="conversation-start-shield" aria-hidden="true">
-          <ClaimStartIcon name="shield" />
-        </span>
-        <div>
-          <h1 id="conversation-title">Let&apos;s get your claim started</h1>
-          <p>Tell us what happened in your own words. You don&apos;t need every detail yet—we&apos;ll guide you one step at a time.</p>
-        </div>
-      </div>
-      <div className="conversation-start-options" aria-labelledby="conversation-start-options-title">
-        <h3 id="conversation-start-options-title">Choose a starting point</h3>
-        <div className="conversation-start-prompt-list">
+      <h1 id="conversation-title">Tell us what happened, in your own words.</h1>
+      <div className="conversation-start-options">
+        <div className="conversation-start-prompt-list" role="group" aria-label="Choose a starting point">
           {CLAIM_START_PROMPTS.map((prompt) => (
             <button
               className="conversation-start-prompt"
@@ -87,15 +66,10 @@ export function ConversationStart({ onChoosePrompt }) {
                 <ClaimStartIcon name={prompt.icon} />
               </span>
               <span>{prompt.text}</span>
-              <ClaimStartIcon name="arrow" className="conversation-start-arrow" />
             </button>
           ))}
         </div>
       </div>
-      <p className="conversation-start-privacy">
-        <ClaimStartIcon name="lock" />
-        <span>Your information stays private and is only used to help prepare this claim.</span>
-      </p>
     </section>
   )
 }
@@ -186,6 +160,8 @@ export function ClaimantMessageRow({ message, displayName, evidenceItems, previe
   )
 }
 
+// A person from Northwind writes in the same layout as the assistant; only the
+// name and the mark differ.
 export function StaffMessageRow({ message }) {
   return (
     <article className="msg-staff">
@@ -194,7 +170,7 @@ export function StaffMessageRow({ message }) {
         <div className="message-avatar staff-mark" aria-hidden="true">N</div>
         <div className="staff-message-body">
           <div className="staff-label">Northwind staff</div>
-          <div className="chat-bubble staff-bubble">{messageText(message)}</div>
+          <div className="agent-text staff-text"><p>{messageText(message)}</p></div>
         </div>
       </div>
     </article>
@@ -217,11 +193,11 @@ export function AgentMessageRow({ message, activity, children }) {
         <div className="agent-body">
           <div className="agent-label">Claims assistant</div>
           {developerModeEnabled() && <AgentTurnDisclosure progress={activity} />}
-          <div className="chat-bubble agent-bubble">
-            <div className="agent-text">
-              <p>{text}</p>
-              <button className="listen-message" type="button" onClick={() => speak(text)}>Listen</button>
-            </div>
+          <div className="agent-text">
+            <p>{text}</p>
+          </div>
+          <div className="agent-message-menu">
+            <button className="listen-message" type="button" onClick={() => speak(text)}>Listen</button>
           </div>
           {children}
         </div>

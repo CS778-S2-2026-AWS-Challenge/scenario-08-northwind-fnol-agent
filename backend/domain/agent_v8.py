@@ -129,16 +129,25 @@ class V8DocumentRequest(ContractModel):
 
 
 class V8NorthwindQuestion(ContractModel):
-    """A claimant question the model cannot answer with authority.
+    """An item for the claims team's waiting list.
 
-    It becomes an open question for the claims team; the claimant sees that
-    Northwind owes an answer, and the staff answer returns to the conversation.
+    Staff do not enter a conversation while it is being collected. A question
+    the model cannot answer with authority, a point that needs professional
+    judgement, or a general request to be contacted waits here, with the model's
+    proposal, until a handler takes the lodged claim and approves, edits or
+    declines it.
     """
 
+    kind: Literal['question', 'contact_request'] = 'question'
+    # In the claimant's own voice, shown to them: "Will you pay for a hire car?"
     question: str = Field(min_length=1, max_length=200)
     claimant_wording: str = Field(min_length=1, max_length=300)
-    # The model's own reading for staff; never shown to the claimant.
-    model_view: str = Field(min_length=1, max_length=300)
+    # The answer the model proposes for a handler to approve; None for a contact request.
+    proposed_answer: str | None = Field(default=None, max_length=500)
+    # Why: the clause, policy data or reasoning behind the proposal. Staff only.
+    basis: str = Field(min_length=1, max_length=300)
+    # How the claimant asked to be contacted, for a contact request.
+    contact_preference: str | None = Field(default=None, max_length=100)
 
 
 class V8EvidenceInterpretation(ContractModel):
@@ -192,6 +201,11 @@ class V8TurnProposal(ContractModel):
     turn_ending: TurnEnding | None = None
     # One sentence, shown when this turn makes the report need more facts.
     scope_note: str | None = Field(default=None, max_length=150)
+    # chunk_ids of the policy excerpts this reply relies on; Runtime keeps only
+    # excerpts actually retrieved in this turn and shows their text to the claimant.
+    cited_sources: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=3
+    )
     # Required when action == 'summarize': the fields the reply read back to the
     # claimant. Runtime binds the confirmation request to exactly this set.
     summary_fields: list[Annotated[str, Field(min_length=1, max_length=100)]] | None = Field(

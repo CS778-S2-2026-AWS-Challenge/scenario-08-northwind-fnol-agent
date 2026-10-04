@@ -433,7 +433,7 @@ export const workbenchApi = {
       },
     )
   },
-  answerClaimantQuestion(token, claimId, questionId, revision, answer) {
+  answerClaimantQuestion(token, claimId, questionId, revision, decision) {
     return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/questions/${encodeURIComponent(questionId)}/answer`,
       {
@@ -442,7 +442,20 @@ export const workbenchApi = {
         headers: {
           'If-Match': String(revision),
         },
-        body: JSON.stringify({ answer }),
+        body: JSON.stringify({ decision: decision.decision, text: decision.text || null }),
+      },
+    )
+  },
+  correctEvidenceReading(token, claimId, evidenceId, revision, kind) {
+    return mutationRequest(
+      `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/evidence/${encodeURIComponent(evidenceId)}/reading`,
+      {
+        method: 'POST',
+        token,
+        headers: {
+          'If-Match': String(revision),
+        },
+        body: JSON.stringify({ kind }),
       },
     )
   },

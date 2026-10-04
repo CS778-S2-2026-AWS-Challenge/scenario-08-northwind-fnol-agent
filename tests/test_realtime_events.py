@@ -181,6 +181,21 @@ def test_fixture_replay_requires_a_durable_anchor() -> None:
         )
 
 
+def test_idle_fixture_watcher_ends_promptly_after_stop() -> None:
+    repository = FixtureRepository()
+    stop = Event()
+    watcher = Thread(target=lambda: list(repository.watch_realtime_events(stop)))
+    watcher.start()
+    sleep(0.1)
+
+    stopped_at = monotonic()
+    stop.set()
+    watcher.join(timeout=2)
+
+    assert not watcher.is_alive()
+    assert monotonic() - stopped_at < 0.5
+
+
 def test_fixture_sequence_preserves_append_order_for_live_and_reconnect() -> None:
     repository = FixtureRepository()
     stop = Event()

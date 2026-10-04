@@ -1,0 +1,444 @@
+version: 2.1
+
+# Continuation of the setup pipeline in .circleci/config.yml. scripts/ci_plan.py sets the
+# parameters below, so only the workflows a change needs are created.
+#
+# Backend tests:
+# - Pull requests run the test files that executed the changed lines in the latest full run
+#   on main (scripts/select_backend_tests.py reading the cached coverage map).
+# - main, the daily schedule, and changes to shared test infrastructure run the whole suite
+#   in parallel containers. On main and the schedule this refreshes the coverage map and
+#   opens a GitHub issue when it fails.
+
+parameters:
+  # Pipeline parameters set by the trigger are carried into the continuation, so every
+  # parameter of .circleci/config.yml must be declared here too.
+  nightly:
+    type: boolean
+    default: false
+  run-backend:
+    type: boolean
+    default: false
+  backend-full:
+    type: boolean
+    default: false
+  scheduled:
+    type: boolean
+    default: false
+  run-customer:
+    type: boolean
+    default: false
+  run-workbench:
+    type: boolean
+    default: false
+  run-admin:
+    type: boolean
+    default: false
+  run-browser-evidence:
+    type: boolean
+    default: false
+  run-automation:
+    type: boolean
+    default: false
+  run-docs:
+    type: boolean
+    default: false
+
+executors:
+  python:
+    docker:
+      - image: cimg/python:3.12-node
+    resource_class: small
+  node:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+
+commands:
+  install-backend:
+    steps:
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - save_cache:
+          key: v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+          paths:
+            - ~/.cache/pip
+
+  backend-static-checks:
+    description: Ruff, Mypy and test-layout advice on the Python files this change touches.
+    steps:
+      - run:
+          name: Check backend formatting
+          command: python -m scripts.select_backend_tests --python-files | xargs -r python -m ruff format --check
+      - run:
+          name: Lint backend
+          command: python -m scripts.select_backend_tests --python-files | xargs -r python -m ruff check
+      - run:
+          name: Type-check backend
+          command: python -m scripts.select_backend_tests --python-files | xargs -r python -m mypy
+      - run:
+          name: Test layout advice (does not fail the job)
+          command: python -m scripts.check_test_layout
+
+  contract-snapshot-checks:
+    parameters:
+      always:
+        type: boolean
+        default: false
+    steps:
+      - run:
+          name: Check OpenAPI snapshot drift
+          command: |
+            if [ "<< parameters.always >>" = "true" ] || [ "$(python -m scripts.select_backend_tests --needs-openapi)" = "true" ]; then
+              python scripts/export_openapi.py --check
+            else
+              echo "OpenAPI contract unaffected; check skipped."
+            fi
+      - run:
+          name: Check AuditEvent contract snapshot drift
+          command: |
+            if [ "<< parameters.always >>" = "true" ] || [ "$(python -m scripts.select_backend_tests --needs-audit-contract)" = "true" ]; then
+              python scripts/export_audit_contract.py --check
+            else
+              echo "AuditEvent contract unaffected; check skipped."
+            fi
+
+  frontend-quality:
+    parameters:
+      package:
+        type: string
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-<< parameters.package >>-node-{{ arch }}-{{ checksum "<< parameters.package >>/package-lock.json" }}
+      - run:
+          name: Install << parameters.package >> dependencies
+          working_directory: << parameters.package >>
+          command: npm ci
+      - save_cache:
+          key: v1-<< parameters.package >>-node-{{ arch }}-{{ checksum "<< parameters.package >>/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Lint << parameters.package >>
+          working_directory: << parameters.package >>
+          command: npm run lint
+      - run:
+          name: Test << parameters.package >>
+          working_directory: << parameters.package >>
+          command: npm test
+      - run:
+          name: Build << parameters.package >>
+          working_directory: << parameters.package >>
+          command: npm run build
+
+jobs:
+  backend-quality:
+    executor: python
+    steps:
+      - checkout
+      - run: git fetch origin main
+      - install-backend
+      - restore_cache:
+          keys:
+            - v2-backend-test-map-main-
+      - backend-static-checks
+      - run:
+          name: Test backend (tests covering the changed lines)
+          command: |
+            python -m scripts.select_backend_tests
+            mode=$(python -m scripts.select_backend_tests --mode)
+            mkdir -p test-results
+            case "$mode" in
+              skip)
+                echo "No backend, test, or script Python changed; backend pytest skipped."
+                exit 0
+                ;;
+              full)
+                python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 \
+                  --junitxml=test-results/junit.xml -o junit_family=xunit1
+                ;;
+              scoped)
+                tests=$(python -m scripts.select_backend_tests --tests)
+                if [ -z "$tests" ]; then
+                  echo "No existing test covers the changed lines."
+                  echo '{"files": {}}' > coverage.json
+                else
+                  python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 \
+                    --junitxml=test-results/junit.xml -o junit_family=xunit1 $tests
+                fi
+                ;;
+              *)
+                echo "Unknown backend test selection mode: $mode"
+                exit 1
+                ;;
+            esac
+            python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
+      - store_test_results:
+          path: test-results
+          when: always
+      - contract-snapshot-checks
+
+  backend-full-tests:
+    executor: python
+    parallelism: 4
+    steps:
+      - checkout
+      - run: git fetch origin main
+      - install-backend
+      - run:
+          name: Run the full backend suite (one timing-balanced shard)
+          no_output_timeout: 20m
+          command: |
+            mkdir -p test-results coverage-shards
+            circleci tests glob "tests/**/test_*.py" | grep -v '^tests/fixtures/' \
+              | circleci tests split --split-by=timings --timings-type=filename > /tmp/shard-tests.txt
+            echo "This shard runs $(wc -l < /tmp/shard-tests.txt) test files."
+            COVERAGE_FILE="coverage-shards/.coverage.${CIRCLE_NODE_INDEX}" python -m pytest \
+              --cov=backend --cov-context=test --cov-report= --cov-fail-under=0 \
+              --junitxml=test-results/junit.xml -o junit_family=xunit1 \
+              $(cat /tmp/shard-tests.txt)
+      - run:
+          name: Report a failing full suite on main as a GitHub issue
+          when: on_fail
+          command: |
+            if [ "${CIRCLE_BRANCH}" = "main" ] && [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
+              trigger="merge to main"
+              if [ "<< pipeline.parameters.scheduled >>" = "true" ]; then trigger="daily schedule"; fi
+              python scripts/report_full_suite_failure.py --trigger "$trigger"
+            else
+              echo "Not on main; no issue opened."
+            fi
+      - store_test_results:
+          path: test-results
+          when: always
+      - persist_to_workspace:
+          root: coverage-shards
+          paths:
+            - .coverage.*
+
+  backend-full-report:
+    executor: python
+    steps:
+      - checkout
+      - run: git fetch origin main
+      - install-backend
+      - attach_workspace:
+          at: coverage-shards
+      - run:
+          name: Combine shard coverage and refresh the coverage map
+          command: |
+            python -m coverage combine coverage-shards/.coverage.*
+            python -m coverage json -o coverage.json --fail-under=0
+            echo "Total backend coverage: $(python -m coverage report --format=total --fail-under=0)%"
+            python -m scripts.backend_test_map --data .coverage --commit "${CIRCLE_SHA1}" \
+              --out .ci/backend-test-map.json.gz
+      - save_cache:
+          key: v2-backend-test-map-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - .ci/backend-test-map.json.gz
+      - store_artifacts:
+          path: .ci/backend-test-map.json.gz
+          destination: backend-test-map.json.gz
+      - run:
+          name: Check changed-line coverage (pull requests)
+          command: |
+            if [ -n "${CIRCLE_PULL_REQUEST:-}" ] || [ "${CIRCLE_BRANCH}" != "main" ]; then
+              python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
+            else
+              echo "main: changed-line coverage applies to pull requests only."
+            fi
+      - backend-static-checks
+      - contract-snapshot-checks:
+          always: true
+
+  customer-quality:
+    executor: node
+    steps:
+      - frontend-quality:
+          package: customer
+
+  workbench-quality:
+    executor: node
+    steps:
+      - frontend-quality:
+          package: workbench
+
+  admin-quality:
+    executor: node
+    steps:
+      - frontend-quality:
+          package: admin
+
+  github-automation-quality:
+    executor: node
+    steps:
+      - checkout
+      - run:
+          name: Test repository policy validators
+          command: node --test .github/scripts/*.test.cjs
+      - restore_cache:
+          keys:
+            - v1-automation-node-{{ arch }}-{{ checksum "automation/github-automation/package-lock.json" }}
+      - run:
+          name: Install GitHub automation dependencies
+          command: npm ci
+          working_directory: automation/github-automation
+      - save_cache:
+          key: v1-automation-node-{{ arch }}-{{ checksum "automation/github-automation/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Check GitHub automation Worker
+          command: npm run check
+          working_directory: automation/github-automation
+      - run:
+          name: Validate Worker bundle
+          command: npm run dry-run
+          working_directory: automation/github-automation
+
+  docs-quality:
+    executor: node
+    steps:
+      - checkout
+      - run:
+          name: Lint changed markdown
+          command: |
+            git fetch origin main
+            base=$(git merge-base origin/main HEAD)
+            files=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.md' | tr '\n' ' ')
+            if [ -z "${files// /}" ]; then
+              echo "No markdown changes."
+              exit 0
+            fi
+            printf '%s\n' $files | xargs npx --yes markdownlint-cli2
+      - run:
+          name: Check docs updated with API changes
+          command: |
+            git fetch origin main
+            base=$(git merge-base origin/main HEAD)
+            changed=$(git diff --name-only "$base" HEAD)
+            modified=$(git diff --name-only --diff-filter=M "$base" HEAD)
+            if echo "$modified" | grep -qx 'docs/openapi.snapshot.json' && ! echo "$changed" | grep -qx 'docs/api.md'; then
+              echo "The OpenAPI snapshot changed but docs/api.md was not updated in the same PR."
+              exit 1
+            fi
+            if echo "$modified" | grep -qx 'docs/contracts/audit-event.schema.json' && ! echo "$changed" | grep -qx 'docs/persistence-schema.md'; then
+              echo "The AuditEvent snapshot changed but docs/persistence-schema.md was not updated in the same PR."
+              exit 1
+            fi
+            echo "Path coupling satisfied."
+
+  p12-browser-evidence:
+    executor: python
+    steps:
+      - checkout
+      - run:
+          name: Install browser-evidence dependencies
+          command: |
+            mkdir -p browser-evidence
+            python -m pip install -r backend/requirements-dev.txt
+            npm ci --prefix customer
+            npm ci --prefix workbench
+            npm install --prefix /tmp/p12-playwright --no-save playwright@1.55.0
+            /tmp/p12-playwright/node_modules/.bin/playwright install --with-deps chromium
+      - run:
+          name: Execute claimant ↔ Workbench interruption and recovery journey
+          no_output_timeout: 10m
+          command: |
+            set -euo pipefail
+
+            export PR_HEAD_SHA="$CIRCLE_SHA1"
+            export BROWSER_EVIDENCE_DIR=browser-evidence
+            export NORTHWIND_ENVIRONMENT=test
+            export NORTHWIND_IDENTITY_MODE=developer
+            export DATA_RUNTIME_PROFILE=fixture
+            export AGENT_RUNTIME_PROFILE=controlled
+            export NODE_PATH=/tmp/p12-playwright/node_modules
+
+            python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > browser-evidence/backend.log 2>&1 &
+            BACKEND_PID=$!
+            npm run dev --prefix customer -- --host 127.0.0.1 --port 8001 > browser-evidence/customer.log 2>&1 &
+            CUSTOMER_PID=$!
+            npm run dev --prefix workbench -- --host 127.0.0.1 --port 8002 > browser-evidence/workbench.log 2>&1 &
+            WORKBENCH_PID=$!
+
+            cleanup() {
+              kill "$BACKEND_PID" "$CUSTOMER_PID" "$WORKBENCH_PID" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            wait_for_url() {
+              url="$1"
+              for attempt in $(seq 1 90); do
+                if curl --fail --silent --show-error "$url" > /dev/null; then
+                  return 0
+                fi
+                sleep 1
+              done
+              echo "Timed out waiting for $url"
+              return 1
+            }
+
+            wait_for_url http://127.0.0.1:8000/health
+            wait_for_url http://127.0.0.1:8001/
+            wait_for_url http://127.0.0.1:8002/workbench/
+
+            node tests/browser/p12_3_claimant_workbench_recovery.cjs
+            node tests/browser/pr975_claimant_profile.cjs
+            node tests/browser/claimant_layout_widths.cjs
+      - store_artifacts:
+          path: browser-evidence
+          destination: p12-browser-evidence
+
+workflows:
+  backend-pull-request:
+    when:
+      and:
+        - << pipeline.parameters.run-backend >>
+        - not: << pipeline.parameters.backend-full >>
+    jobs:
+      - backend-quality
+
+  backend-full:
+    when: << pipeline.parameters.backend-full >>
+    jobs:
+      - backend-full-tests
+      - backend-full-report:
+          requires:
+            - backend-full-tests
+
+  customer:
+    when: << pipeline.parameters.run-customer >>
+    jobs:
+      - customer-quality
+
+  workbench:
+    when: << pipeline.parameters.run-workbench >>
+    jobs:
+      - workbench-quality
+
+  admin:
+    when: << pipeline.parameters.run-admin >>
+    jobs:
+      - admin-quality
+
+  browser-evidence:
+    when: << pipeline.parameters.run-browser-evidence >>
+    jobs:
+      - p12-browser-evidence
+
+  github-automation:
+    when: << pipeline.parameters.run-automation >>
+    jobs:
+      - github-automation-quality
+
+  docs:
+    when: << pipeline.parameters.run-docs >>
+    jobs:
+      - docs-quality

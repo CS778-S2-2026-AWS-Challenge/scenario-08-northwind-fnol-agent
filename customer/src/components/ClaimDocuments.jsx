@@ -137,7 +137,7 @@ function validationError(file) {
   return null
 }
 
-function DocumentTaskCard({ emphasized, item, onUpload }) {
+function DocumentTaskCard({ emphasized, item, onUpload, reading }) {
   const inputRef = useRef(null)
   const tipsId = useId()
   const [tipsOpen, setTipsOpen] = useState(false)
@@ -200,7 +200,7 @@ function DocumentTaskCard({ emphasized, item, onUpload }) {
           {isPhoto ? <CameraIcon /> : <FileIcon />}
         </span>
         <div className="document-card-title-row">
-          <h4>{documentTaskTitle(item)}</h4>
+          <h4>{reading ? documentTaskTitle({ kind: reading }) : documentTaskTitle(item)}</h4>
           <span className={`document-status document-status-${lifecycle === 'later' ? 'later' : requirement}`}>
             <span aria-hidden="true">{statusDetails.symbol}</span>
             {statusDetails.label}
@@ -270,7 +270,7 @@ function DocumentTaskCard({ emphasized, item, onUpload }) {
   )
 }
 
-function DocumentGroup({ emphasizedId, items, label, onUpload }) {
+function DocumentGroup({ emphasizedId, items, label, onUpload, readings }) {
   if (!items.length) return null
   const headingId = `document-group-${label.toLowerCase().replaceAll(' ', '-')}`
   return (
@@ -286,6 +286,7 @@ function DocumentGroup({ emphasizedId, items, label, onUpload }) {
             item={item}
             key={item.evidence_id}
             onUpload={onUpload}
+            reading={readings?.get(item.evidence_id)}
           />
         ))}
       </ul>
@@ -293,7 +294,8 @@ function DocumentGroup({ emphasizedId, items, label, onUpload }) {
   )
 }
 
-export default function ClaimDocuments({ items, loadStatus, onUpload, compact = false }) {
+// readings: how the assistant (or a handler) read each file, by Evidence id.
+export default function ClaimDocuments({ items, loadStatus, onUpload, compact = false, readings = null }) {
   const sortedItems = [...items].sort((left, right) => {
     const requirementDifference = (documentRequirement(left) === 'required' ? 0 : 1)
       - (documentRequirement(right) === 'required' ? 0 : 1)
@@ -361,12 +363,14 @@ export default function ClaimDocuments({ items, loadStatus, onUpload, compact = 
             items={requiredItems}
             label="Required for this claim"
             onUpload={onUpload}
+            readings={readings}
           />
           <DocumentGroup
             emphasizedId={emphasizedItem?.evidence_id}
             items={recommendedItems}
             label="Recommended for this claim"
             onUpload={onUpload}
+            readings={readings}
           />
         </>
       )}

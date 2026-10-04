@@ -303,7 +303,6 @@ export function ClaimNextStepsPanel({
   ]
   const safetyChecks = tasks.filter(({ fieldCode }) => SAFETY_FIELDS.has(fieldCode))
   const incidentDetails = tasks.filter(({ fieldCode }) => !SAFETY_FIELDS.has(fieldCode))
-  const completed = Object.entries(form || {}).filter(([, field]) => field.status === 'confirmed' && fieldHasValue(field))
 
   function renderTask({ fieldCode }) {
     return (
@@ -374,26 +373,9 @@ export function ClaimNextStepsPanel({
         </div>
       ) : (
         <>
-          {renderGroup('Safety checks', safetyChecks, 'safety')}
-          {renderGroup('Incident details', incidentDetails)}
+          {renderGroup('Still needed: safety', safetyChecks, 'safety')}
+          {renderGroup('Still needed', incidentDetails)}
         </>
-      )}
-
-      {completed.length > 0 && (
-        <details className="next-steps-completed">
-          <summary>
-            <span>Completed</span>
-            <span>{completed.length}</span>
-          </summary>
-          <ul>
-            {completed.map(([fieldCode]) => (
-              <li key={fieldCode}>
-                <span>{fieldLabel(fieldCode)}</span>
-                <span><span aria-hidden="true">✓</span> Done</span>
-              </li>
-            ))}
-          </ul>
-        </details>
       )}
     </div>
   )
@@ -411,7 +393,7 @@ export default function ClaimReviewPanel({
   beginEdit,
   cancelEdit,
   saveFieldCorrection,
-  confirmProposedFields,
+  confirmField,
   fieldLabel,
   fieldStatusLabel,
   fieldSourceLabel,
@@ -420,6 +402,7 @@ export default function ClaimReviewPanel({
   status,
   conversationEmpty = false,
   onViewNextSteps,
+  showHeading = true,
 }) {
   const requirements = claimReviewRequirements(dynamicForm)
   const capturedForm = Object.fromEntries(
@@ -441,13 +424,6 @@ export default function ClaimReviewPanel({
   const updatedSections = projectionUpdate.snapshot.key === nextSnapshot.key
     ? projectionUpdate.sections
     : changedReviewSections(projectionUpdate.snapshot, nextSnapshot)
-  const outstandingCount = new Set([
-    ...requirements.missingRequiredNow,
-    ...requirements.pendingLater,
-  ]).size
-  const progress = claimProgressStats(capturedForm, contentsItems, dynamicForm)
-  const claimType = claimTypeName(readableValue(capturedForm['claim.product_family'], fieldValueText))
-  const claimTitle = `${claimType[0].toUpperCase()}${claimType.slice(1)}`
   const overviewCopy = overviewDescription(capturedForm, requirements, conversationEmpty)
   const missingSafety = [...requirements.missingRequiredNow, ...requirements.pendingLater]
     .some((fieldCode) => SAFETY_FIELDS.has(fieldCode))
@@ -480,48 +456,15 @@ export default function ClaimReviewPanel({
 
   return (
     <div className="claim-summary-content">
-      <section className="claim-overview-card" aria-labelledby="claim-overview-title">
-        <p className="overview-eyebrow">Claim overview</p>
-        <h2 id="claim-overview-title">{claimTitle}</h2>
-        <p className="claim-overview-copy">{overviewCopy}</p>
-        {requirements.available && (
-          <div className="claim-overview-progress">
-            <strong>{progress.total > 0 ? `${progress.complete} of ${progress.total} details noted` : 'Ready to build'}</strong>
-            <div
-              className="claim-overview-progress-track"
-              role="progressbar"
-              aria-label="Overview details captured"
-              aria-valuemin="0"
-              aria-valuemax={progress.maximum}
-              aria-valuenow={Math.min(progress.complete, progress.maximum)}
-            >
-              <span style={{ width: `${Math.min((progress.complete / progress.maximum) * 100, 100)}%` }} />
-            </div>
-            <div className="claim-overview-next">
-              <span>
-                {outstandingCount === 0
-                  ? 'All required details captured'
-                  : `${outstandingCount} ${outstandingCount === 1 ? 'detail' : 'details'} remaining`}
-              </span>
-              {outstandingCount > 0 && (
-                <button type="button" onClick={onViewNextSteps}>
-                  View <span aria-hidden="true">→</span>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </section>
-
+      {sections.length === 0 && <p className="overview-known-summary">{overviewCopy}</p>}
       {sections.length > 0 && (
         <section className="overview-known" aria-labelledby="what-we-know-title">
-          <h2 id="what-we-know-title">What we know</h2>
+          <h2 id="what-we-know-title" className={showHeading ? undefined : 'sr-only'}>What we know</h2>
+          <p className="overview-known-summary">{overviewCopy}</p>
           <div className="claim-known-list">
             {sections.map((section) => {
               const isOpen = openSections.includes(section.id)
               const sectionState = sectionStatus(section)
-              const sectionHasReview = section.fields.some(([, field]) => field.status === 'proposed')
-                || section.contentsItems.some((item) => item.status === 'proposed')
               return (
                 <section
                   className={`claim-known-row state-${sectionState.tone} ${updatedSections.has(section.id) ? 'is-updated' : ''}`}
@@ -580,10 +523,10 @@ export default function ClaimReviewPanel({
                           status={status}
                         />
                       ) : (
+                        <div className="claim-summary-detail-row" key={fieldCode}>
                         <button
                           className="claim-summary-detail"
                           type="button"
-                          key={fieldCode}
                           onClick={() => beginEdit(fieldCode, field.value)}
                           disabled={busy}
                           aria-label={`Edit ${fieldLabel(fieldCode)}`}
@@ -598,6 +541,18 @@ export default function ClaimReviewPanel({
                           <strong>{readableValue(field, fieldValueText)}</strong>
                           <small>{fieldSourceLabel(field.source)}</small>
                         </button>
+                        {field.status === 'proposed' && confirmField && (
+                          <button
+                            className="text-button claim-summary-confirm"
+                            type="button"
+                            disabled={busy}
+                            aria-label={`${fieldLabel(fieldCode)} is right`}
+                            onClick={() => confirmField(fieldCode)}
+                          >
+                            Right
+                          </button>
+                        )}
+                        </div>
                       )
                     })}
                     {section.contentsItems.map((item) => {
@@ -613,19 +568,20 @@ export default function ClaimReviewPanel({
                           </span>
                           <strong>{item.description}</strong>
                           <small>{item.category ? `${item.category} · ` : ''}{fieldSourceLabel(item.source)}</small>
+                          {item.status === 'proposed' && confirmField && (
+                            <button
+                              className="text-button claim-summary-confirm"
+                              type="button"
+                              disabled={busy}
+                              aria-label="The insured items are right"
+                              onClick={() => confirmField('contents.items')}
+                            >
+                              Right
+                            </button>
+                          )}
                         </div>
                       )
                     })}
-                    {sectionHasReview && (
-                      <button
-                        className="summary-confirm-action"
-                        type="button"
-                        onClick={confirmProposedFields}
-                        disabled={busy}
-                      >
-                        {status === 'confirming' ? 'Confirming…' : 'Confirm suggested details'}
-                      </button>
-                    )}
                   </div>
                 </section>
               )

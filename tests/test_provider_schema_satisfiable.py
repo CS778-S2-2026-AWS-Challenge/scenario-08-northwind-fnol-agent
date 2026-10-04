@@ -17,6 +17,17 @@ from tests.journey_v8_support import envelope, fact
 from tests.test_turn_proposal_v8 import v8_context
 
 
+def _wire_envelope(**kwargs: Any) -> dict[str, Any]:
+    """Return a provider reply that fills every key the strict wire schemas require."""
+
+    return envelope(**kwargs) | {
+        'northwind_questions': [],
+        'turn_ending': 'question',
+        'scope_note': None,
+        'cited_sources': [],
+    }
+
+
 @pytest.mark.parametrize('family', ['motor', 'home', 'contents'])
 @pytest.mark.parametrize('media', [False, True])
 def test_full_schema_is_satisfiable_after_both_provider_translations(
@@ -37,7 +48,7 @@ def test_full_schema_is_satisfiable_after_both_provider_translations(
     )
     plan = plan_model_turn(context)
     assert plan is not None
-    raw = envelope(
+    raw = _wire_envelope(
         fields=[
             fact('incident.location', 'Wellington', 'in Wellington'),
             fact('incident.description', 'A synthetic incident', 'A synthetic incident'),
@@ -78,7 +89,7 @@ def test_google_wire_value_union_does_not_replace_runtime_field_type_authority()
     plan = plan_model_turn(v8_context('My car cannot be driven.'))
     assert plan is not None
     assert plan.field_contract is not None
-    invalid = envelope(fields=[fact('vehicle.drivable', 'home', 'My car')])
+    invalid = _wire_envelope(fields=[fact('vehicle.drivable', 'home', 'My car')])
     google = cast(dict[str, Any], _google_provider_schema(plan.response_schema))
     Draft202012Validator(google).validate(invalid)
     strict = cast(

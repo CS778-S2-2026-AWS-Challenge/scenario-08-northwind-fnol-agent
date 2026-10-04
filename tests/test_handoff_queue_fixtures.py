@@ -147,6 +147,67 @@ def test_staff_handoff_views_filter_and_order_open_requests_by_priority() -> Non
     assert [item['claim_id'] for item in human_items] == [claim_ids['AT-05-human-request']]
 
 
+def test_active_claims_classifies_counts_filters_and_orders_by_business_priority() -> None:
+    repository = FixtureRepository()
+    claim_ids: dict[str, str] = {}
+    for scenario_id in (
+        'AT-01-clear-motor',
+        'AT-02-coverage-ambiguity',
+        'AT-04-urgent',
+        'AT-05-human-request',
+    ):
+        loaded = load_scenario(SCENARIO_DIRECTORY / f'{scenario_id}.json')
+        seed_scenario(repository, loaded)
+        claim_ids[scenario_id] = loaded.claim.claim_id
+
+    headers = {'Authorization': 'Bearer synthetic-staff'}
+    with _staff_client(repository) as client:
+        response = client.get(
+            '/api/v1/workbench/claims',
+            params={'view': 'active_claims'},
+            headers=headers,
+        )
+        filtered = client.get(
+            '/api/v1/workbench/claims',
+            params={
+                'view': 'active_claims',
+                'active_status': 'professional_review',
+                'search': claim_ids['AT-02-coverage-ambiguity'],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item['claim_id'] for item in payload['items']] == [
+        claim_ids['AT-04-urgent'],
+        claim_ids['AT-05-human-request'],
+        claim_ids['AT-02-coverage-ambiguity'],
+        claim_ids['AT-01-clear-motor'],
+    ]
+    assert [item['active_claim']['status'] for item in payload['items']] == [
+        'urgent',
+        'human_assistance',
+        'professional_review',
+        'pending_creation',
+    ]
+    counts = {item['status']: item['count'] for item in payload['active_claim_counts']['items']}
+    assert payload['active_claim_counts']['status'] == 'available'
+    assert payload['active_claim_counts']['total'] == 4
+    assert payload['active_claim_counts']['navigation_total'] == 4
+    assert counts == {
+        'urgent': 1,
+        'human_assistance': 1,
+        'professional_review': 1,
+        'pending_creation': 1,
+    }
+    assert [item['claim_id'] for item in filtered.json()['items']] == [
+        claim_ids['AT-02-coverage-ambiguity']
+    ]
+    assert filtered.json()['active_claim_counts']['total'] == 1
+    assert filtered.json()['active_claim_counts']['navigation_total'] == 4
+
+
 @pytest.mark.parametrize(
     ('view', 'scenario_id'),
     [
@@ -291,13 +352,19 @@ def test_staff_queue_searches_each_documented_projection_field() -> None:
                 headers=headers,
             )
             assert [value['claim_id'] for value in response.json()['items']] == [claim_id]
-        unprojected_name = client.get(
+        non_searchable_name = client.get(
             '/api/v1/workbench/claims',
             params={'search': 'Demo Claimant One'},
             headers=headers,
         )
+        active_item = client.get(
+            '/api/v1/workbench/claims',
+            params={'view': 'active_claims'},
+            headers=headers,
+        ).json()['items'][0]
         assert item['claimant']['display_name'] is None
-        assert unprojected_name.json()['items'] == []
+        assert active_item['claimant']['display_name'] == 'Demo Claimant One'
+        assert non_searchable_name.json()['items'] == []
 
     repository, claim_id = _load('AT-02-coverage-ambiguity')
     with _staff_client(repository) as client:
@@ -380,6 +447,17 @@ def test_staff_queue_filter_metadata_is_canonical_without_claim_pages() -> None:
         'label': 'Staff assistance',
         'group': 'operational',
     } in payload['views']
+    assert {
+        'value': 'active_claims',
+        'label': 'Active claims',
+        'group': 'operational',
+    } in payload['views']
+    assert payload['active_claim_statuses'] == [
+        {'value': 'urgent', 'label': 'Urgent'},
+        {'value': 'human_assistance', 'label': 'Human assistance'},
+        {'value': 'professional_review', 'label': 'Professional review'},
+        {'value': 'pending_creation', 'label': 'Pending creation'},
+    ]
     assert {'value': 'professional_review', 'label': 'Professional review'} in payload[
         'workflow_states'
     ]

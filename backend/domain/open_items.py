@@ -30,15 +30,21 @@ from backend.domain.models import (
     OpenItemOwner,
     OpenItemState,
     ResponsibleParty,
+    StaffActionRecord,
+    StaffActionStatus,
     StaffOpenItem,
 )
 
 TURN_RECORD_KEY = 'turn_record'
+# A handler's decision on a waiting-list item is a claimant-visible customer
+# update whose related_refs name the item; a marker ref says how it was settled.
+DECLINED_REF = 'waiting_item:declined'
+CONTACTED_REF = 'waiting_item:contacted'
 
 # Content keys a claimant may read. Anything else stays server-side.
-_CLAIMANT_CONTENT_KEYS = frozenset({'type', 'text', 'parts'})
+_CLAIMANT_CONTENT_KEYS = frozenset({'type', 'text', 'parts', 'answers_item_id'})
 _CLAIMANT_TURN_RECORD_KEYS = frozenset(
-    {'recorded_facts', 'file_reads', 'opened_items', 'ending', 'scope_note'}
+    {'recorded_facts', 'file_reads', 'opened_items', 'ending', 'scope_note', 'cited_clauses'}
 )
 
 
@@ -69,8 +75,32 @@ def model_message_content(content: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in content.items() if key != TURN_RECORD_KEY}
 
 
-def interpreted_evidence_kinds(messages: Iterable[MessageRecord]) -> dict[str, str]:
-    """The latest kind the model read each file to be, by Evidence id."""
+EVIDENCE_READING_ACTION = 'evidence_reading'
+
+
+def staff_evidence_readings(actions: Iterable[StaffActionRecord]) -> dict[str, str]:
+    """The latest kind a handler set for each file, by Evidence id."""
+
+    kinds: dict[str, str] = {}
+    completed = [
+        item
+        for item in actions
+        if item.action_type == EVIDENCE_READING_ACTION
+        and item.status is StaffActionStatus.COMPLETED
+        and item.result is not None
+    ]
+    for action in sorted(completed, key=lambda item: item.completed_at or item.created_at):
+        assert action.result is not None
+        for evidence_id in action.source_refs:
+            kinds[evidence_id] = action.result.outcome
+    return kinds
+
+
+def interpreted_evidence_kinds(
+    messages: Iterable[MessageRecord], staff_actions: Iterable[StaffActionRecord] = ()
+) -> dict[str, str]:
+    """The kind each file counts as, by Evidence id: a handler's reading wins over
+    the latest reading by the model."""
 
     kinds: dict[str, str] = {}
     for message in sorted(messages, key=lambda item: item.created_at):
@@ -79,6 +109,7 @@ def interpreted_evidence_kinds(messages: Iterable[MessageRecord]) -> dict[str, s
         for read in turn_record(message.content).get('file_reads', ()):
             if isinstance(read, Mapping) and read.get('evidence_id') and read.get('kind'):
                 kinds[str(read['evidence_id'])] = str(read['kind'])
+    kinds.update(staff_evidence_readings(staff_actions))
     return kinds
 
 
@@ -86,11 +117,15 @@ def _questions(
     messages: Sequence[MessageRecord],
     updates: Sequence[CustomerUpdateRecord],
 ) -> list[StaffOpenItem]:
-    # A staff answer is a claimant-visible customer update that names the question.
-    answers: dict[str, str] = {}
+    # A handler's decision is a claimant-visible customer update naming the item.
+    decisions: dict[str, tuple[str, OpenItemState]] = {}
     for update in sorted(updates, key=lambda item: item.created_at):
+        state = (
+            OpenItemState.DECLINED if DECLINED_REF in update.related_refs else OpenItemState.DONE
+        )
         for ref in update.related_refs:
-            answers[ref] = update.summary
+            if not ref.startswith('waiting_item:'):
+                decisions[ref] = (update.summary, state)
     items: list[StaffOpenItem] = []
     for message in messages:
         if message.actor is not ActorType.AGENT:
@@ -99,18 +134,22 @@ def _questions(
             if not isinstance(question, Mapping) or not question.get('question_id'):
                 continue
             question_id = str(question['question_id'])
-            answer = answers.get(question_id)
+            decided = decisions.get(question_id)
+            kind = 'contact_request' if question.get('kind') == 'contact_request' else 'question'
             items.append(
                 StaffOpenItem(
                     item_id=question_id,
-                    kind='question',
+                    kind=kind,
                     owner=OpenItemOwner.NORTHWIND,
-                    state=OpenItemState.DONE if answer is not None else OpenItemState.OPEN,
+                    state=decided[1] if decided is not None else OpenItemState.OPEN,
                     subject=str(question.get('question') or '')[:200] or 'Question',
-                    answer=answer,
+                    answer=decided[0] if decided is not None else None,
                     opened_in_message_id=message.message_id,
                     claimant_wording=question.get('claimant_wording'),
-                    model_view=question.get('model_view'),
+                    proposed_answer=question.get('proposed_answer'),
+                    # Records from before the waiting list stored the basis as model_view.
+                    basis=question.get('basis') or question.get('model_view'),
+                    contact_preference=question.get('contact_preference'),
                     created_at=message.created_at,
                 )
             )
@@ -160,11 +199,12 @@ def staff_open_items(
     evidence: Sequence[EvidenceRecord],
     messages: Sequence[MessageRecord],
     updates: Sequence[CustomerUpdateRecord] = (),
+    staff_actions: Sequence[StaffActionRecord] = (),
 ) -> list[StaffOpenItem]:
     """Every outstanding or settled item on a Claim, oldest first."""
 
     ordered = sorted(messages, key=lambda item: item.created_at)
-    interpreted = interpreted_evidence_kinds(ordered)
+    interpreted = interpreted_evidence_kinds(ordered, staff_actions)
     received = {
         evidence_kind(item, interpreted)
         for item in evidence
@@ -183,10 +223,17 @@ def claimant_open_items(
     evidence: Sequence[EvidenceRecord],
     messages: Sequence[MessageRecord],
     updates: Sequence[CustomerUpdateRecord] = (),
+    staff_actions: Sequence[StaffActionRecord] = (),
 ) -> list[ClaimantOpenItem]:
+    """The claimant's view of the same items staff see; a handler's file reading
+    counts here exactly as in the Workbench."""
     return [
-        ClaimantOpenItem.model_validate(item.model_dump(exclude={'claimant_wording', 'model_view'}))
-        for item in staff_open_items(evidence, messages, updates)
+        ClaimantOpenItem.model_validate(
+            item.model_dump(
+                exclude={'claimant_wording', 'proposed_answer', 'basis', 'contact_preference'}
+            )
+        )
+        for item in staff_open_items(evidence, messages, updates, staff_actions)
     ]
 
 

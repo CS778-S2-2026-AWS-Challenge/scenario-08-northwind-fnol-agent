@@ -11,6 +11,9 @@ fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
 const STAFF_EMAIL = ['staff', 'one'].join('.') + '@example.invalid'
 const STAFF_PASSWORD = ['northwind', 'demo', 'staff'].join('-')
 const STAFF_MESSAGE = 'We have accepted your assistance request and are continuing the review.'
+// A clear demand for a person hands the claimant over (#1184); the header
+// "Staff assistance" button only sends an ordinary message for the Agent to judge.
+const HUMAN_REQUEST = 'I want to speak to a human about this claim.'
 const RESOLUTION_INTERNAL = 'Staff support completed after reviewing the claimant context.'
 const RESOLUTION_CLAIMANT = 'Your staff handoff is resolved and your claim can continue.'
 
@@ -34,6 +37,7 @@ const result = {
     create_claim: 0,
     create_session: 0,
     support_request: 0,
+    human_request_message: 0,
   },
   recovery_events: [],
   recovery_business_posts: [],
@@ -108,6 +112,12 @@ async function main() {
       && /^\/api\/v1\/claims\/[^/]+\/support-requests$/.test(pathname)
     ) {
       result.claimant_request_counts.support_request += 1
+    } else if (
+      method === 'POST'
+      && /^\/api\/v1\/claims\/[^/]+\/sessions\/[^/]+\/messages$/.test(pathname)
+      && (request.postData() || '').includes(HUMAN_REQUEST)
+    ) {
+      result.claimant_request_counts.human_request_message += 1
     }
 
     if (!recoveryActive) return
@@ -174,23 +184,26 @@ async function main() {
     assert(result.claim_id, 'Claim creation did not return claim_id.')
     assert(result.session_id, 'Claim creation did not return session_id.')
 
-    const support = claimant.getByRole('button', { name: 'Staff assistance', exact: true })
-    await support.waitFor({ state: 'visible', timeout: 60000 })
+    const claimantComposer = claimant.getByPlaceholder('Write the details you know...')
+    await claimantComposer.waitFor({ state: 'visible', timeout: 60000 })
     await maybeCloseCapabilities(claimant)
 
-    const supportResponsePromise = claimant.waitForResponse(
+    const handoffResponsePromise = claimant.waitForResponse(
       (response) => (
         response.request().method() === 'POST'
-        && pathOf(response.url()) === `/api/v1/claims/${result.claim_id}/support-requests`
+        && pathOf(response.url()) === `/api/v1/claims/${result.claim_id}/sessions/${result.session_id}/messages`
+        && (response.request().postData() || '').includes(HUMAN_REQUEST)
         && response.status() >= 200
         && response.status() < 300
       ),
-      { timeout: 30000 },
+      { timeout: 60000 },
     )
-    await support.click()
-    await supportResponsePromise
+    await claimantComposer.fill(HUMAN_REQUEST)
+    await claimant.getByRole('button', { name: 'Send', exact: true }).click()
+    await handoffResponsePromise
 
-    await claimant.getByText('Waiting for staff', { exact: true }).first()
+    // The handoff state shows once, in the title-bar status.
+    await claimant.locator('.case-status').filter({ hasText: 'Waiting for staff' }).first()
       .waitFor({ state: 'visible', timeout: 30000 })
     await screenshot(claimant, '01-claimant-waiting-for-staff')
 
@@ -320,8 +333,9 @@ async function main() {
       `Unexpected separate session creation: ${result.claimant_request_counts.create_session}.`,
     )
     assert(
-      result.claimant_request_counts.support_request === 1,
-      `Expected one support request, observed ${result.claimant_request_counts.support_request}.`,
+      result.claimant_request_counts.support_request === 0
+      && result.claimant_request_counts.human_request_message === 1,
+      `Expected one human-request message and no direct support request, observed ${JSON.stringify(result.claimant_request_counts)}.`,
     )
     assert(
       result.recovery_business_posts.length === 0,
@@ -340,7 +354,7 @@ async function main() {
       degraded_notice_cleared_after_recovery: true,
       exactly_one_claim_created: true,
       no_second_session_created: true,
-      exactly_one_support_request: true,
+      exactly_one_human_request_message: true,
       no_claimant_business_post_replayed_during_recovery: true,
       compact_claim_queue_returns_from_claim: result.compact_queue_recovery.returned_to_queue === true,
     }

@@ -70,7 +70,7 @@ class ConsistencyReview:
                     'booked, escalated or submitted. Offer a service only with offer_service, '
                     "never by asking in words. Northwind is the claimant's insurer: a question "
                     'you cannot answer goes into northwind_questions before the reply says the '
-                    'claims team will answer it. Leave the claimant one clear thing to answer or '
+                    'claims team will handle it. Leave the claimant one clear thing to answer or '
                     'do, or say what happens next. Keep every accepted fact and question. Return '
                     'the full envelope again.'
                 ),

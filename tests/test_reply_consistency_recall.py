@@ -271,7 +271,7 @@ def test_a_recall_after_a_tool_continuation_is_saved_with_three_calls(
             {
                 'question': 'Is a hire car covered while my car is repaired?',
                 'claimant_wording': 'will my policy pay for a hire car',
-                'model_view': 'Depends on the optional benefits on the schedule.',
+                'basis': 'Depends on the optional benefits on the schedule.',
             }
         ],
     }
@@ -304,7 +304,7 @@ def test_mentioning_a_question_passed_on_earlier_is_not_sent_back(
             {
                 'question': 'Is my hire car covered while my car is repaired?',
                 'claimant_wording': 'will my policy pay for a hire car',
-                'model_view': 'Not in the excerpts.',
+                'basis': 'Not in the excerpts.',
             }
         ],
     }

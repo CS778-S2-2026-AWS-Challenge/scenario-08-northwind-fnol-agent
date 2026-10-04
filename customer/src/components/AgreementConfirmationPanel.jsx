@@ -145,6 +145,7 @@ export default function AgreementConfirmationPanel({
   onReviewInformation,
   onReturnToConversation,
   submissionError = null,
+  stillNeeded = null,
 }) {
   const externalClaim = claim?.external_claim
   const agreement = claim?.submission_agreement
@@ -192,6 +193,8 @@ export default function AgreementConfirmationPanel({
             <p id="claim-reference-heading">Claim reference</p>
             <strong>{readable(externalClaim.claim_number)}</strong>
           </section>
+
+          {stillNeeded}
 
           <div className="claim-submitted-overview">
             <section className="claim-submitted-timeline" aria-labelledby="claim-next-steps-heading">

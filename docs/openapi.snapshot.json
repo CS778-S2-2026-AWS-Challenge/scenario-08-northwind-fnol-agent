@@ -1564,16 +1564,33 @@
       },
       "AnswerClaimantQuestionRequest": {
         "additionalProperties": false,
+        "description": "approve sends the proposed answer; edit sends ``text``; decline gives ``text``\nas the reason the claimant reads; contacted settles a contact request, with an\noptional note in ``text``.",
         "properties": {
-          "answer": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Answer",
+          "decision": {
+            "enum": [
+              "approve",
+              "edit",
+              "decline",
+              "contacted"
+            ],
+            "title": "Decision",
             "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
           }
         },
         "required": [
-          "answer"
+          "decision"
         ],
         "title": "AnswerClaimantQuestionRequest",
         "type": "object"
@@ -1590,6 +1607,26 @@
             "title": "Claim Revision",
             "type": "integer"
           },
+          "decision": {
+            "enum": [
+              "approve",
+              "edit",
+              "decline",
+              "contacted"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "question_id": {
             "title": "Question Id",
             "type": "string"
@@ -1602,6 +1639,7 @@
           "claim_id",
           "claim_revision",
           "question_id",
+          "decision",
           "update"
         ],
         "title": "AnswerClaimantQuestionResponse",
@@ -3408,6 +3446,11 @@
             "title": "Form",
             "type": "object"
           },
+          "handler_assigned": {
+            "default": false,
+            "title": "Handler Assigned",
+            "type": "boolean"
+          },
           "handoff": {
             "anyOf": [
               {
@@ -4605,7 +4648,8 @@
           "kind": {
             "enum": [
               "document",
-              "question"
+              "question",
+              "contact_request"
             ],
             "title": "Kind",
             "type": "string"
@@ -5899,6 +5943,52 @@
           "rules_version"
         ],
         "title": "ControlledRulesConfiguration",
+        "type": "object"
+      },
+      "CorrectEvidenceReadingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "CorrectEvidenceReadingRequest",
+        "type": "object"
+      },
+      "CorrectEvidenceReadingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_revision",
+          "evidence_id",
+          "kind"
+        ],
+        "title": "CorrectEvidenceReadingResponse",
         "type": "object"
       },
       "Coverage": {
@@ -11453,7 +11543,8 @@
         "enum": [
           "open",
           "done",
-          "not_available"
+          "not_available",
+          "declined"
         ],
         "title": "OpenItemState",
         "type": "string"
@@ -14770,6 +14861,18 @@
             ],
             "title": "Answer"
           },
+          "basis": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
           "claimant_wording": {
             "anyOf": [
               {
@@ -14781,6 +14884,18 @@
               }
             ],
             "title": "Claimant Wording"
+          },
+          "contact_preference": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Preference"
           },
           "created_at": {
             "format": "date-time",
@@ -14796,22 +14911,11 @@
           "kind": {
             "enum": [
               "document",
-              "question"
+              "question",
+              "contact_request"
             ],
             "title": "Kind",
             "type": "string"
-          },
-          "model_view": {
-            "anyOf": [
-              {
-                "maxLength": 300,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model View"
           },
           "opened_in_message_id": {
             "anyOf": [
@@ -14827,6 +14931,18 @@
           },
           "owner": {
             "$ref": "#/components/schemas/OpenItemOwner"
+          },
+          "proposed_answer": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Answer"
           },
           "service_identity": {
             "anyOf": [
@@ -16204,6 +16320,115 @@
         "title": "WorkbenchActionResultDefaults",
         "type": "object"
       },
+      "WorkbenchActiveClaimCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchActiveClaimStatusCount"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitation"
+          },
+          "navigation_total": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation Total"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchViewCountStatus"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WorkbenchActiveClaimCounts",
+        "type": "object"
+      },
+      "WorkbenchActiveClaimProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "entered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entered At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchActiveClaimStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WorkbenchActiveClaimProjection",
+        "type": "object"
+      },
+      "WorkbenchActiveClaimStatus": {
+        "enum": [
+          "urgent",
+          "human_assistance",
+          "professional_review",
+          "pending_creation"
+        ],
+        "title": "WorkbenchActiveClaimStatus",
+        "type": "string"
+      },
+      "WorkbenchActiveClaimStatusCount": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchActiveClaimStatus"
+          }
+        },
+        "required": [
+          "status",
+          "count"
+        ],
+        "title": "WorkbenchActiveClaimStatusCount",
+        "type": "object"
+      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -16392,6 +16617,16 @@
       "WorkbenchClaimDetail": {
         "additionalProperties": false,
         "properties": {
+          "active_claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActiveClaimProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "active_session_id": {
             "anyOf": [
               {
@@ -16533,6 +16768,13 @@
           "source_summary": {
             "$ref": "#/components/schemas/WorkbenchSourceSummary"
           },
+          "staff_file_readings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Staff File Readings",
+            "type": "array"
+          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/StaffTag"
@@ -16663,6 +16905,13 @@
       "WorkbenchClaimFilterMetadata": {
         "additionalProperties": false,
         "properties": {
+          "active_claim_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchFilterOption"
+            },
+            "title": "Active Claim Statuses",
+            "type": "array"
+          },
           "priorities": {
             "items": {
               "$ref": "#/components/schemas/WorkbenchFilterOption"
@@ -16700,6 +16949,7 @@
           "views",
           "workflow_states",
           "priorities",
+          "active_claim_statuses",
           "tags",
           "tag_registry_version"
         ],
@@ -16709,6 +16959,16 @@
       "WorkbenchClaimListItem": {
         "additionalProperties": false,
         "properties": {
+          "active_claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActiveClaimProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "claim_id": {
             "title": "Claim Id",
             "type": "string"
@@ -16805,6 +17065,9 @@
       "WorkbenchClaimListResponse": {
         "additionalProperties": false,
         "properties": {
+          "active_claim_counts": {
+            "$ref": "#/components/schemas/WorkbenchActiveClaimCounts"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/WorkbenchClaimListItem"
@@ -16822,7 +17085,8 @@
         "required": [
           "items",
           "page",
-          "view_counts"
+          "view_counts",
+          "active_claim_counts"
         ],
         "title": "WorkbenchClaimListResponse",
         "type": "object"
@@ -17973,6 +18237,7 @@
           "completed",
           "abandoned",
           "closed",
+          "active_claims",
           "urgent",
           "human_requests",
           "incomplete_claims",
@@ -19316,6 +19581,21 @@
       "WorkbenchWorkSummary": {
         "additionalProperties": false,
         "properties": {
+          "conversation_turn": {
+            "anyOf": [
+              {
+                "enum": [
+                  "waiting_on_claimant",
+                  "claimant_replied"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Turn"
+          },
           "current_work_item": {
             "anyOf": [
               {
@@ -25982,6 +26262,22 @@
           },
           {
             "in": "query",
+            "name": "active_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/WorkbenchActiveClaimStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active Status"
+            }
+          },
+          {
+            "in": "query",
             "name": "workflow_state",
             "required": false,
             "schema": {
@@ -27379,6 +27675,115 @@
           }
         },
         "summary": "Read Workbench Evidence Content Data",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/reading": {
+      "post": {
+        "operationId": "correct_reading_api_v1_workbench_claims__claim_id__evidence__evidence_id__reading_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectEvidenceReadingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectEvidenceReadingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Correct Reading",
         "tags": [
           "workbench"
         ]

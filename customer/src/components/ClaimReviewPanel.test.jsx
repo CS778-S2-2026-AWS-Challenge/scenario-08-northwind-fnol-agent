@@ -46,7 +46,7 @@ function panelProps(overrides = {}) {
     beginEdit: vi.fn(),
     cancelEdit: vi.fn(),
     saveFieldCorrection: vi.fn(),
-    confirmProposedFields: vi.fn(),
+    confirmField: vi.fn(),
     onViewNextSteps: vi.fn(),
     fieldLabel: (fieldCode) => labels[fieldCode] || fieldCode,
     fieldStatusLabel: (status) => status === 'confirmed' ? 'Confirmed' : 'Needs review',
@@ -68,12 +68,11 @@ describe('ClaimReviewPanel overview', () => {
   it('summarises known information without repeating the missing-question list', () => {
     renderPanel()
 
-    expect(screen.getByText('Claim overview', { selector: '.overview-eyebrow' })).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Home claim' })).toBeVisible()
-    expect(screen.getByText('We still need incident, damage, and safety details before the claim can progress.')).toBeVisible()
-    expect(screen.getByText('4 of 8 details noted')).toBeVisible()
-    expect(screen.getByText('4 details remaining')).toBeVisible()
+    // One sentence under "What we know"; progress lives in the title bar only.
     expect(screen.getByRole('heading', { name: 'What we know' })).toBeVisible()
+    expect(screen.getByText('We still need incident, damage, and safety details before the claim can progress.')).toBeVisible()
+    expect(screen.queryByText('4 of 8 details noted')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
     expect(screen.queryByText('When did it happen?')).not.toBeInTheDocument()
     expect(screen.queryByText(/No details captured/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Add / })).not.toBeInTheDocument()
@@ -109,11 +108,12 @@ describe('ClaimReviewPanel overview', () => {
     expect(props.beginEdit).toHaveBeenCalledWith('incident.description', 'A pipe burst in the kitchen.')
   })
 
-  it('switches to Next steps from the compact outstanding-details action', async () => {
+  it('goes to the still-needed details from the safety alert', async () => {
     const user = userEvent.setup()
     const props = renderPanel()
 
-    await user.click(screen.getByRole('button', { name: 'View' }))
+    const safety = screen.getByText('Safety information has not been confirmed.').closest('.overview-alert')
+    await user.click(within(safety).getByRole('button', { name: 'Review' }))
     expect(props.onViewNextSteps).toHaveBeenCalledOnce()
   })
 
@@ -127,8 +127,10 @@ describe('ClaimReviewPanel overview', () => {
 
     const aiReview = screen.getByText('1 Agent-suggested detail needs your review.').closest('.overview-alert')
     await user.click(within(aiReview).getByRole('button', { name: 'Review' }))
-    await user.click(screen.getByRole('button', { name: 'Confirm suggested details' }))
-    expect(props.confirmProposedFields).toHaveBeenCalledOnce()
+    // Each suggested detail is confirmed on its own row; there is no confirm-all.
+    expect(screen.queryByRole('button', { name: 'Confirm suggested details' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /is right$/ }))
+    expect(props.confirmField).toHaveBeenCalledOnce()
   })
 
   it('renders the existing correction editor without creating independent Claim state', () => {
@@ -199,8 +201,8 @@ describe('ClaimNextStepsPanel', () => {
     render(<ClaimNextStepsPanel {...props} />)
 
     expect(screen.queryByRole('heading', { name: 'Next steps' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Safety checks' })).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Incident details' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Still needed: safety' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Still needed' })).toBeVisible()
     expect(screen.getByText('Was anyone injured or in immediate danger?')).toBeVisible()
     expect(screen.getByText('Where did it happen?')).toBeVisible()
     expect(screen.getByText('What was damaged or lost?')).toBeVisible()
@@ -217,7 +219,7 @@ describe('ClaimNextStepsPanel', () => {
     expect(props.beginEdit).toHaveBeenCalledWith('incident.occurred_at', undefined)
   })
 
-  it('moves confirmed information into a collapsed Completed section', () => {
+  it('says when nothing is still needed, without repeating what is known', () => {
     const props = panelProps({
       form: {
         'claim.product_family': { value: 'motor', status: 'confirmed', source: 'claimant' },
@@ -233,8 +235,8 @@ describe('ClaimNextStepsPanel', () => {
     render(<ClaimNextStepsPanel {...props} />)
 
     expect(screen.getByText('All required details are complete.')).toBeVisible()
-    expect(screen.getByText('Completed')).toBeVisible()
-    expect(screen.getByText('Claim type')).not.toBeVisible()
+    expect(screen.queryByText('Completed')).not.toBeInTheDocument()
+    expect(screen.queryByText('Claim type')).not.toBeInTheDocument()
   })
 })
 

@@ -49,6 +49,7 @@ from backend.domain.retention import (
     WorkbenchRetentionHold,
 )
 from backend.domain.workbench import (
+    WorkbenchActiveClaimStatus,
     WorkbenchClaimDetail,
     WorkbenchClaimFilterMetadata,
     WorkbenchClaimListResponse,
@@ -70,12 +71,18 @@ from backend.domain.workbench import (
     WorkPriorityLevel,
 )
 from backend.repositories.assets import AssetRepository
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.claim_acceptance import accept_claim
 from backend.services.claimant_questions import (
     AnswerClaimantQuestionRequest,
     AnswerClaimantQuestionResponse,
     answer_claimant_question,
+)
+from backend.services.evidence_readings import (
+    CorrectEvidenceReadingRequest,
+    CorrectEvidenceReadingResponse,
+    correct_evidence_reading,
 )
 from backend.services.ownership import (
     create_cowork_request,
@@ -147,6 +154,10 @@ def repository_for(request: Request) -> PersistenceRepository:
     return cast(PersistenceRepository, request.app.state.claim_repository)
 
 
+def identity_repository_for(request: Request) -> IdentityRepository:
+    return cast(IdentityRepository, request.app.state.identity_repository)
+
+
 def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
     """Resolve the assessor adapter allowed by the active Runtime profile.
 
@@ -201,6 +212,7 @@ def read_workbench_claims(
     request: Request,
     principal: Principal = Depends(require_workbench_read),
     view: WorkbenchQueueView | None = Query(default=None),
+    active_status: WorkbenchActiveClaimStatus | None = Query(default=None),
     workflow_state: WorkflowState | None = Query(default=None),
     priority: WorkPriorityLevel | None = Query(default=None),
     assignee_id: str | None = Query(default=None, min_length=1),
@@ -217,6 +229,7 @@ def read_workbench_claims(
         repository_for(request),
         principal,
         view=view,
+        active_status=active_status,
         workflow_state=workflow_state,
         priority=priority,
         assignee_id=assignee_id,
@@ -228,6 +241,7 @@ def read_workbench_claims(
         limit=limit,
         cursor=cursor,
         ownership=ownership,
+        identity_repository=identity_repository_for(request),
     )
 
 
@@ -241,6 +255,30 @@ def take_claim(
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> WorkbenchClaimDetail:
     return accept_claim(repository_for(request), principal, claim_id, idempotency_key, if_match)
+
+
+@router.post(
+    '/{claim_id}/evidence/{evidence_id}/reading',
+    response_model=CorrectEvidenceReadingResponse,
+)
+def correct_reading(
+    claim_id: str,
+    evidence_id: str,
+    payload: CorrectEvidenceReadingRequest,
+    request: Request,
+    principal: Principal = Depends(require_workbench_write),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> CorrectEvidenceReadingResponse:
+    return correct_evidence_reading(
+        repository_for(request),
+        principal,
+        claim_id,
+        evidence_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
 
 
 @router.post(

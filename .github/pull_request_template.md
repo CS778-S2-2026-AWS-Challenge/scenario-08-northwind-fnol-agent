@@ -27,8 +27,9 @@
   development evidence only; CircleCI supplies the authoritative exact-head quality result.
 - Command:
 - Result:
-- [ ] New tests verify distinct business behaviour; equivalent inputs are consolidated, and any
-      parameterized function above 8-10 cases explains its separate contracts.
+- [ ] Existing tests were reused where they already cover the change; any new test proves a distinct
+      business behaviour, lives in the test file of the module it exercises, and is not named
+      after a PR, issue, week, or version.
 - [ ] Unit tests mock external I/O; real database or service tests are explicitly marked
       `@pytest.mark.integration`.
 

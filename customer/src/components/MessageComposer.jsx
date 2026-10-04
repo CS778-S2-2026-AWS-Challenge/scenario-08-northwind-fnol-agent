@@ -507,20 +507,21 @@ export default function MessageComposer({
           <span aria-hidden="true">→</span>
         </button>
         </div>
-        {!selectedModelCompatibility.compatible && (
-          <div className="composer-capability-warning" role="alert">
-            <span className="composer-capability-warning-icon" aria-hidden="true">!</span>
-            <span>{selectedModelCompatibility.message}</span>
-          </div>
-        )}
       </div>
-      {disabled && <p className="composer-note">{disabledNote}</p>}
-      {error && (
+      {/* One line under the composer, the most important first. */}
+      {error ? (
         <div className="backend-status is-error" role="alert">
           <span className="status-dot" />
           <span>{error}</span>
         </div>
-      )}
+      ) : !selectedModelCompatibility.compatible ? (
+        <div className="composer-capability-warning" role="alert">
+          <span className="composer-capability-warning-icon" aria-hidden="true">!</span>
+          <span>{selectedModelCompatibility.message}</span>
+        </div>
+      ) : disabled ? (
+        <p className="composer-note">{disabledNote}</p>
+      ) : null}
       <p
         className={`composer-note ${voiceStatus ? '' : 'sr-only'}`}
         role="status"

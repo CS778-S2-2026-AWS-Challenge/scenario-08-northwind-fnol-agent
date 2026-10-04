@@ -1,6 +1,8 @@
 [tool.pytest.ini_options]
 addopts = "--strict-markers --strict-config"
 testpaths = ["tests"]
+# tests/fixtures holds data only; a test module placed there is never collected.
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "fixtures"]
 markers = [
     "integration: requires explicitly enabled external infrastructure",
 ]

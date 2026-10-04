@@ -157,7 +157,7 @@ describe('ClaimWorkspace navigation', () => {
     screen.getByRole('tab', { name: 'Overview' }).focus()
     await user.keyboard('{ArrowRight}')
 
-    expect(onSection).toHaveBeenCalledWith('conversation')
+    expect(onSection).toHaveBeenCalledWith('waiting')
   })
 
   it('renders paged field resources instead of expecting fields on Claim detail', () => {

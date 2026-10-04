@@ -1,20 +1,25 @@
-import { Bot, BriefcaseBusiness, FileClock, MessageSquareText } from 'lucide-react'
+import { Bot, BriefcaseBusiness, FileClock, ListTodo, MessageSquareText } from 'lucide-react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { storedProfileOverrides } from '../account/settings-gateway.js'
 import { translate as t, useLanguage } from '../i18n.js'
 import AccountMenu from './AccountMenu.jsx'
 
-export default function NavigationRail({ profile, onLogout, onAgent, draftCount = null }) {
+export default function NavigationRail({ profile, onLogout, onAgent, activeCount = null, draftCount = null }) {
   useLanguage()
   const location = useLocation()
   const effectiveProfile = storedProfileOverrides(profile)
+  const activeSelected = location.pathname.startsWith('/workbench/active')
   const draftSelected = location.pathname.startsWith('/workbench/drafts')
   const workbenchSelected = location.pathname === '/workbench'
     || location.pathname.startsWith('/workbench/claims/')
   const workbenchLabel = t('Workbench')
   const conversationsLabel = t('Claim conversations')
   const agentLabel = t('Staff Agent')
+  const activeLabel = t('Active claims')
   const draftLabel = t('Draft claims')
+  const activeAccessibleLabel = Number.isInteger(activeCount)
+    ? t('{count} Active claims', { count: activeCount })
+    : activeLabel
   const draftAccessibleLabel = Number.isInteger(draftCount)
     ? t('{count} Draft claims', { count: draftCount })
     : draftLabel
@@ -33,6 +38,20 @@ export default function NavigationRail({ profile, onLogout, onAgent, draftCount 
         >
           <BriefcaseBusiness size={19} />
           <span>{workbenchLabel}</span>
+        </Link>
+        <Link
+          to="/workbench/active"
+          className={activeSelected ? 'active' : undefined}
+          aria-current={activeSelected ? 'page' : undefined}
+          aria-label={activeAccessibleLabel}
+        >
+          <ListTodo size={19} />
+          <span>{activeLabel}</span>
+          {Number.isInteger(activeCount) && (
+            <span className="navigation-rail__count">
+              {activeCount}
+            </span>
+          )}
         </Link>
         <Link
           to="/workbench/drafts"

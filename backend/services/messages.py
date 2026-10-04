@@ -1692,7 +1692,9 @@ def _document_projection(
             wanted.setdefault(kind, branch_id)
     if not wanted:
         return ()
-    interpreted = interpreted_evidence_kinds(claim_messages(repository, claim))
+    interpreted = interpreted_evidence_kinds(
+        claim_messages(repository, claim), repository.list_staff_actions(claim.claim_id)
+    )
     received: dict[str, list[str]] = {}
     settled: dict[str, str] = {}
     for item in repository.list_evidence(claim.claim_id, claim.customer_id):
@@ -1721,6 +1723,28 @@ def _document_projection(
     )
 
 
+def _handler_conversation_open(
+    repository: PersistenceRepository, claim: WorkingClaim, session_id: str, customer_id: str
+) -> bool:
+    """A lodged claim whose latest non-claimant message in this session is a handler's."""
+
+    lodged = claim.claim_state.workflow_state is WorkflowState.CREATED or (
+        claim.external_claim is not None
+    )
+    if not lodged:
+        return False
+    for message in reversed(
+        order_messages(repository.list_messages(claim.claim_id, session_id, customer_id))
+    ):
+        if message.visibility is MessageVisibility.INTERNAL_ONLY:
+            continue
+        if message.actor is ActorType.STAFF:
+            return True
+        if message.actor is ActorType.AGENT:
+            return False
+    return False
+
+
 def _northwind_question_projection(
     repository: PersistenceRepository, claim: WorkingClaim
 ) -> tuple[dict[str, object], ...]:
@@ -1731,7 +1755,7 @@ def _northwind_question_projection(
             claim_messages(repository, claim),
             repository.list_customer_updates(claim.claim_id),
         )
-        if item.kind == 'question'
+        if item.kind in {'question', 'contact_request'}
     )
 
 
@@ -2305,7 +2329,16 @@ def submit_message(
     # the same interrupted turn asking to try the model again, so it must
     # fall through to the normal turn path below rather than being silenced.
     message_text = payload.content.text if payload.content is not None else ''
-    if active_handoff is not None and not retrying_saved_message:
+    # After lodging, a handler may write to the claimant directly. Once the most
+    # recent reply in this session is the handler's, the claimant is talking to a
+    # person: the Agent stays out, as in a handoff, so the two never both reply.
+    if (
+        active_handoff is None
+        and not retrying_saved_message
+        and _handler_conversation_open(repository, claim, session_id, principal.subject)
+    ):
+        handoff_open = True
+    if (active_handoff is not None or handoff_open) and not retrying_saved_message:
         if progress_reporter is not None:
             progress_reporter.accepted()
         timestamp = now_utc()

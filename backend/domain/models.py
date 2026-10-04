@@ -2764,13 +2764,15 @@ class OpenItemState(str, Enum):
     OPEN = 'open'
     DONE = 'done'
     NOT_AVAILABLE = 'not_available'
+    # A waiting-list item the handler declined to answer here, with a reason.
+    DECLINED = 'declined'
 
 
 class ClaimantOpenItem(ContractModel):
     """One item still owed on a Claim, and by whom (``backend.domain.open_items``)."""
 
     item_id: str = Field(min_length=1, max_length=120)
-    kind: Literal['document', 'question']
+    kind: Literal['document', 'question', 'contact_request']
     owner: OpenItemOwner
     state: OpenItemState
     # A registered document kind, or the question in plain words.
@@ -2785,7 +2787,10 @@ class StaffOpenItem(ClaimantOpenItem):
     """The same item with what only the claims team reads."""
 
     claimant_wording: str | None = Field(default=None, max_length=300)
-    model_view: str | None = Field(default=None, max_length=300)
+    # The model's proposed answer and its basis, for the handler to approve, edit or decline.
+    proposed_answer: str | None = Field(default=None, max_length=500)
+    basis: str | None = Field(default=None, max_length=300)
+    contact_preference: str | None = Field(default=None, max_length=100)
 
 
 class ClaimantClaim(ContractModel):
@@ -2814,6 +2819,9 @@ class ClaimantClaim(ContractModel):
     handoff: ClaimantHandoff | None = None
     resolved_support_handoff: ClaimantResolvedSupportHandoff | None = None
     open_items: list[ClaimantOpenItem] = Field(default_factory=list)
+    # A claims handler is responsible for this claim (taken after lodging, or in a
+    # handoff). Who it is stays staff-side.
+    handler_assigned: bool = False
     created_at: datetime
     updated_at: datetime
 

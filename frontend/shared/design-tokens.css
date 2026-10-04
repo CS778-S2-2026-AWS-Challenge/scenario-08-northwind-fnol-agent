@@ -152,6 +152,18 @@
   --claimant-open-items-accent: var(--color-warning);
   --claimant-receipt-surface: var(--color-accent-soft);
   --claimant-receipt-accent: var(--color-accent-strong);
+  /* Tidy-up (#1184): chips under a reply, the title bar the panel stops at,
+     the collapsed rail, and the phone sheet's resting height. */
+  --claimant-chip-height: calc(var(--space-6) + var(--space-1));
+  --claimant-chip-height-compact: var(--space-6);
+  --claimant-chip-max-width: 320px;
+  --claimant-title-bar-height: calc(var(--size-control-touch) + var(--space-6));
+  --claimant-rail-width: var(--claimant-history-rail-width);
+  --claimant-case-sheet-half-height: 50svh;
+  --claimant-pinned-border: var(--border-focus);
+  --claimant-kicker-tracking: .08em;
+  --claimant-pulse-dim-opacity: .3;
+  --claimant-icon-stroke-width: 1.8;
 
   /* Step 4 keeps the final review comfortably scannable without stretching
      the Claim summary across the conversation workspace. */

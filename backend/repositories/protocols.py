@@ -218,10 +218,16 @@ def validate_staff_message_mutation_audit(
     idempotency: IdempotencyRecord,
     audit_event: AuditEventEnvelope | None,
 ) -> None:
-    """Require one matching audit fact for every staff-to-claimant message."""
+    """Require one matching audit fact for every staff-to-claimant message.
+
+    A message is sent either as a plain reply to the session, or as the answer to
+    a waiting-list item, in which case it targets that item and names it.
+    """
 
     if message is None:
         return
+    answering = idempotency.action_code == 'conversation.answer_claimant_question'
+    expected_target = message.content.get('answers_item_id') if answering else message.session_id
     if (
         audit_event is None
         or message.actor is not ActorType.STAFF
@@ -229,8 +235,10 @@ def validate_staff_message_mutation_audit(
         or idempotency.claim_id != claim.claim_id
         or idempotency.session_id != message.session_id
         or idempotency.message_id != message.message_id
-        or idempotency.action_code != 'conversation.send_claimant_message'
-        or idempotency.target_ref != message.session_id
+        or idempotency.action_code
+        not in {'conversation.send_claimant_message', 'conversation.answer_claimant_question'}
+        or not expected_target
+        or idempotency.target_ref != expected_target
         or audit_event.event_type is not AuditEventType.ACTION_COMPLETED
         or audit_event.outcome is not AuditOutcome.SUCCEEDED
         or audit_event.subject.subject_type is not AuditSubjectType.CLAIM
@@ -242,7 +250,7 @@ def validate_staff_message_mutation_audit(
         or audit_event.correlation_id != idempotency.key
         or message.message_id not in audit_event.source_refs
         or audit_event.permission is None
-        or audit_event.permission.required_permission != 'conversation.send_claimant_message'
+        or audit_event.permission.required_permission != idempotency.action_code
         or audit_event.permission.outcome is not AuditPermissionOutcome.AUTHORISED
         or audit_event.visibility not in {AuditVisibility.INTERNAL_ONLY, AuditVisibility.AUDIT_ONLY}
     ):

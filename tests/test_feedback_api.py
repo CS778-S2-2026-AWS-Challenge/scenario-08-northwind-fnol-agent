@@ -1,5 +1,7 @@
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -172,12 +174,16 @@ def test_sqlite_feedback_reads_use_parameterized_queries_without_file_io(
     connection.execute.side_effect = execute
     make_directories = MagicMock()
     monkeypatch.setattr('backend.repositories.feedback.os.makedirs', make_directories)
-    monkeypatch.setattr(
-        'backend.repositories.feedback.sqlite3.connect',
-        lambda _path: connection,
-    )
-
     database_path = Path.cwd() / 'virtual' / 'control-plane.sqlite3'
+    real_connect = sqlite3.connect
+
+    def connect(path: object, *args: Any, **kwargs: Any) -> object:
+        # sqlite3.connect is process-wide; coverage.py also uses it while this test runs.
+        if path == str(database_path):
+            return connection
+        return real_connect(path, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr('backend.repositories.feedback.sqlite3.connect', connect)
     repository = SQLiteFeedbackRepository(str(database_path))
 
     assert repository.get(record.feedback_id) == record

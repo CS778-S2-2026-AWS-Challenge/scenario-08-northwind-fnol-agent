@@ -2881,7 +2881,8 @@ item, signal, or external task exists.
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
 | `POST` | `/workbench/claims/{claim_id}/accept` | Take an unassigned Claim after successful FNOL creation |
-| `POST` | `/workbench/claims/{claim_id}/questions/{question_id}/answer` | Answer a question the Agent passed to the claims team |
+| `POST` | `/workbench/claims/{claim_id}/questions/{question_id}/answer` | Approve, edit, decline or mark contacted a waiting-list item |
+| `POST` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/reading` | Set what a claimant file is |
 | `POST` | `/workbench/claims/{claim_id}/assignments` | Assign or reassign ownership |
 | `POST` | `/workbench/claims/{claim_id}/cowork-requests` | Request or invite cowork access through a projected ownership action |
 | `POST` | `/workbench/claims/{claim_id}/transfer-requests` | Request a primary-owner transfer through a projected ownership action |
@@ -3015,7 +3016,8 @@ Supported filters:
 |---|---|
 | `limit` | Page size from 1 to 100; defaults to 25 |
 | `cursor` | Opaque cursor returned by the preceding page |
-| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `completed`, `abandoned`, `closed`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `completed`, `abandoned`, `closed`, `active_claims`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `active_status` | `urgent`, `human_assistance`, `professional_review`, `pending_creation` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
@@ -3027,8 +3029,8 @@ Supported filters:
 Filters can be combined and are applied before queue ordering and cursor pagination.
 `search` matches only staff-list projection fields: Claim ID, display reference, incident family
 and summary, current requested outcome, and projected tag codes and labels. Claimant display name
-is not searchable until an authorised staff-safe identity projection populates it. Search does not
-inspect unprojected Claim fields or change the backend rank order.
+is intentionally not searchable, even when the authorised staff-safe identity projection populates
+it for display. Search does not inspect unprojected Claim fields or change the backend rank order.
 
 Each item includes claim ID, safe display reference, state dimensions, terminal disposition,
 priority, queue, route,
@@ -3037,12 +3039,33 @@ service timing, and update time. It is a projection of shared claim state, not a
 editable board record.
 
 The response is shaped as
-`{ "items": [...], "page": { "next_cursor": null }, "view_counts": { "status": "available", "items": [...], "limitation": null } }`.
+`{ "items": [...], "page": { "next_cursor": null }, "view_counts": { "status": "available", "items": [...], "limitation": null }, "active_claim_counts": { "status": "available", "total": 4, "navigation_total": 4, "items": [...], "limitation": null } }`.
 A non-null `next_cursor` is passed back through `cursor` to read the next ordered page. Invalid
 cursors return `422 VALIDATION_ERROR`. Each item contains the safe Claim, claimant and incident
 summaries; lifecycle and workflow state; ownership and priority projections; `work_summary`;
 integration status; tags; and creation and update times. It is a projection of shared Claim state,
 not a separately editable board record.
+
+`view=active_claims` is a mutually exclusive operational projection for work that needs continued
+attention. Each matching row has an `active_claim` object with `status` and nullable `entered_at`.
+The server assigns exactly one status using this explicit precedence, rather than sorting status
+names alphabetically:
+
+1. `urgent` when the projected priority is `immediate` or `urgent`;
+2. `human_assistance` when an active handoff has `support_need=human_requested`;
+3. `professional_review` when the projected lifecycle is `professional_review`;
+4. `pending_creation` when the projected lifecycle is `ready_to_create`.
+
+Active claims sort by that precedence, then oldest `entered_at`, then Claim ID. `entered_at` is the
+earliest relevant active-handoff creation time. Professional review without such a handoff and
+pending creation have no authoritative state-entry timestamp, so their `entered_at` is null and
+sorting falls back to the Claim's `updated_at`. The `active_status` filter applies after this
+classification. `active_claim_counts` is calculated after the other result filters but before
+`view`, `active_status`, cursor, and limit, so `total` and the status counts describe the current
+filter context. `navigation_total` is calculated before result filters and supplies the stable
+sidebar badge. Rows returned by `view=active_claims` include a staff-safe claimant display name
+when the identity record is available; other Workbench views retain their existing identity
+projection. Clients retain the opaque customer ID as a non-inferred fallback.
 
 `work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
 Claim. The server applies actionable staff work and an accepted provider wait before terminal
@@ -3538,20 +3561,42 @@ existing realtime hint; the Claim disappears from this unassigned filter.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/questions/{question_id}/answer`
 
-Answers a claimant question the Agent recorded in `turn_record.northwind_questions` when it could
-not answer with authority (for example, whether a hire car is covered). The request body is
-`{"answer": "..."}` (1-1000 characters). Required headers are `If-Match` and `Idempotency-Key`. The
-current projection must offer `conversation.answer_claimant_question` for this question, which
-requires primary-owner or coworker access; no handoff is needed.
+Settles one item on the claim's waiting list. Staff do not enter a conversation while it is being
+collected; the Agent records what needs them in `turn_record.northwind_questions`. Each item is a
+`question` (in the claimant's own voice, with the Agent's `proposed_answer` and `basis`) or a
+`contact_request` (with the claimant's `contact_preference`). Only `question`, `kind` and state
+reach the claimant; the proposal, basis and wording stay staff-side.
 
-The answer is saved as a claimant-visible customer update whose `related_refs` contains the
-question id, with `responsible_party=claims_professional`. The Claim revision advances once and an
-internal `action.completed` audit is written in the same staff mutation. The claimant sees the
-question as `done` with the answer in `open_items`, whether or not their session is still open.
+Request: `{"decision": "approve" | "edit" | "decline" | "contacted", "text": "..."}`.
 
-Response `200` is `{claim_id, claim_revision, question_id, update}`. A question that is already
-answered or does not belong to the Claim returns `409 QUESTION_NOT_OPEN`; a stale revision returns
+- `approve` sends the proposed answer (a `question` with a proposal only);
+- `edit` sends `text` instead (required);
+- `decline` gives `text` as the reason the claimant reads (required); the item becomes `declined`;
+- `contacted` settles a `contact_request`, with an optional note.
+
+Required headers are `If-Match` and `Idempotency-Key`. The current projection must offer
+`conversation.answer_claimant_question` for this item, which requires primary-owner or coworker
+access; no handoff is needed.
+
+The decision is saved as a claimant-visible customer update whose `related_refs` contains the item
+id (and `waiting_item:declined` or `waiting_item:contacted`), with
+`responsible_party=claims_professional`. An approved or edited answer is also posted to the
+claimant's open session as the handler's message, with `content.answers_item_id` naming the item,
+in the same save and with the shared staff-message audit fact. The Claim revision advances once.
+
+Response `200` is `{claim_id, claim_revision, question_id, decision, update, message}`. An item that
+is already settled or does not belong to the Claim returns `409 QUESTION_NOT_OPEN`; a decision that
+does not fit the item returns `422 VALIDATION_ERROR`; a stale revision returns
 `409 REVISION_CONFLICT`; an exact retry returns the original response.
+
+### `POST /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/reading`
+
+Sets what a claimant file is when the assistant read it wrongly. Request: `{"kind": "repair_quote"}`
+(a registered evidence kind). Required headers are `If-Match` and `Idempotency-Key`; the projection
+must offer `evidence.correct_reading` for the file. The reading is stored as a completed staff
+action and wins over the assistant's reading wherever files are counted by kind. Response `200` is
+`{claim_id, claim_revision, evidence_id, kind}`; the Workbench detail lists the file in
+`staff_file_readings`.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/staff-actions`
 

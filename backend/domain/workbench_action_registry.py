@@ -13,7 +13,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-02.2'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-10-03.1'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -26,6 +26,7 @@ class WorkbenchActionTargetType(StrEnum):
     EXTERNAL_TASK = 'external_task'
     RETENTION_HOLD = 'retention_hold'
     CLAIMANT_QUESTION = 'claimant_question'
+    EVIDENCE = 'evidence'
 
 
 class WorkbenchActionPermission(StrEnum):
@@ -265,17 +266,75 @@ WORKBENCH_ACTION_REGISTRY = {
         RegisteredWorkbenchAction(
             'conversation.answer_claimant_question',
             WorkbenchActionTargetType.CLAIMANT_QUESTION,
-            'Answer question',
-            'Answer a question the Agent passed to the claims team.',
+            'Settle waiting item',
+            'Approve, edit or decline the Agent proposal for a waiting-list item.',
             WorkbenchActionPermission.CLAIM_COLLABORATOR,
             ConfirmationLevel.EXPLICIT,
-            'This answer will be visible to the claimant.',
-            ('customer_update.append', 'claim.revision.advance', 'audit.append'),
-            (_input('answer', 'Answer for the claimant', WorkbenchActionInputControl.TEXTAREA),),
-            ('customer_update.append',),
+            'Your answer or reason will be visible to the claimant.',
+            (
+                'customer_update.append',
+                'message.append',
+                'claim.revision.advance',
+                'audit.append',
+            ),
+            (
+                _input(
+                    'decision',
+                    'Decision',
+                    WorkbenchActionInputControl.SELECT,
+                    choices=(
+                        ('approve', 'Approve and send'),
+                        ('edit', 'Edit then send'),
+                        ('decline', 'Decline'),
+                        ('contacted', 'Mark contacted'),
+                    ),
+                ),
+                _input(
+                    'text',
+                    'Answer or reason for the claimant',
+                    WorkbenchActionInputControl.TEXTAREA,
+                    required=False,
+                ),
+            ),
+            ('customer_update.append', 'message.append'),
             failure_codes=(
                 'ACCESS_DENIED',
                 'QUESTION_NOT_OPEN',
+                'REVISION_CONFLICT',
+                'IDEMPOTENCY_CONFLICT',
+                'VALIDATION_ERROR',
+            ),
+        ),
+        RegisteredWorkbenchAction(
+            'evidence.correct_reading',
+            WorkbenchActionTargetType.EVIDENCE,
+            'Change file type',
+            'Set what a claimant file is when the assistant read it wrongly.',
+            WorkbenchActionPermission.CLAIM_COLLABORATOR,
+            ConfirmationLevel.EXPLICIT,
+            'Document checks will count this file as the type you choose.',
+            ('staff_action.complete', 'claim.revision.advance', 'audit.append'),
+            (
+                _input(
+                    'kind',
+                    'File type',
+                    WorkbenchActionInputControl.SELECT,
+                    choices=(
+                        ('incident_photo', 'Photo of the incident or damage'),
+                        ('item_photo', 'Photo of an item'),
+                        ('repair_quote', 'Repair quote'),
+                        ('receipt', 'Receipt or invoice'),
+                        ('police_report', 'Police report'),
+                        ('proof_of_ownership', 'Proof of ownership'),
+                        ('assessment_report', 'Assessment report'),
+                        ('claimant_statement', 'Written statement'),
+                        ('policy', 'Policy document'),
+                        ('other_document', 'Other document'),
+                    ),
+                ),
+            ),
+            failure_codes=(
+                'ACCESS_DENIED',
                 'REVISION_CONFLICT',
                 'IDEMPOTENCY_CONFLICT',
                 'VALIDATION_ERROR',

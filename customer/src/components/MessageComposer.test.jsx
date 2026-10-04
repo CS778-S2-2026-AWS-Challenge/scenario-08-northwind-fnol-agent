@@ -311,7 +311,8 @@ it.each([
   const capabilityWarning = screen.getByRole('alert')
   expect(capabilityWarning).toHaveTextContent(warning)
   expect(capabilityWarning).toHaveTextContent('Your file is still attached.')
-  expect(capabilityWarning.closest('.composer-input-surface')).not.toBeNull()
+  // One notice line under the composer.
+  expect(capabilityWarning.closest('form')).not.toBeNull()
   expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
 
   await user.click(screen.getByRole('button', { name: 'Model' }))

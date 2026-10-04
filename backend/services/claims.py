@@ -405,7 +405,9 @@ def claimant_claim(
             repository.list_evidence(claim.claim_id, claim.customer_id),
             claim_messages(repository, claim),
             repository.list_customer_updates(claim.claim_id),
+            repository.list_staff_actions(claim.claim_id),
         ),
+        handler_assigned=claim.assignee_id is not None,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )
