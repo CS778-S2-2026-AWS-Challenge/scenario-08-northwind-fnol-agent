@@ -244,8 +244,6 @@ describe('ClaimSummaryProgress', () => {
   it('renders the server-owned captured count as an accessible progress indicator', () => {
     render(
       <ClaimSummaryProgress
-        form={{}}
-        contentsItems={[]}
         dynamicForm={{ requirements: { ready: false, current_action_total: 11, current_action_satisfied: 3, missing_required_now: ['a', 'b', 'c', 'd', 'e', 'f'] } }}
       />,
     )

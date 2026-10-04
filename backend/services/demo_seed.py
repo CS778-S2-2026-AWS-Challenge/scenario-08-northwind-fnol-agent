@@ -37,6 +37,7 @@ from backend.repositories.scenario_loader import (
     seed_scenario,
 )
 from backend.repositories.staff_identity import StaffIdentityRepository
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.demo_materials import associate_materials, material_content
 from backend.services.support import now_utc, request_fingerprint, require_idempotency_key
 
@@ -300,6 +301,10 @@ def seed_validation_scenarios(
         sessions=tuple(session for scenario in scenarios for session in scenario.sessions),
         messages=tuple(message for scenario in scenarios for message in scenario.messages),
         evidence=tuple(item for scenario in scenarios for item in scenario.evidence),
+        branch_evaluations=tuple(
+            build_applied_branch_evaluation(scenario.claim, recomputation_reason='claim_seeded')
+            for scenario in scenarios
+        ),
         staff_presence=presence,
         expected_presence_revision=expected_presence_revision,
         idempotency=idempotency,

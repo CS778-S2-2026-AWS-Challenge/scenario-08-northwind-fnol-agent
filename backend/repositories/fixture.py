@@ -190,6 +190,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
+    seeded_branch_evaluations,
     validate_claim_decision_mutation_audit,
     validate_handoff_mutation_audit,
     validate_staff_agent_execution,
@@ -2620,7 +2621,12 @@ class FixtureRepository(PersistenceRepository):
             prepared[event.event_id] = event
         return tuple(prepared.values())
 
-    def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
+    def create_claim(
+        self,
+        claim: WorkingClaim,
+        session: SessionRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
         with self._claim_mutation_lock:
             if claim.claim_decision_id is not None:
                 raise KeyError(claim.claim_id)
@@ -2635,6 +2641,7 @@ class FixtureRepository(PersistenceRepository):
                     )
                     return
                 raise IdempotencyConflict(claim.claim_id)
+            self._validate_branch_evaluation(claim, branch_evaluation)
             realtime_event = self._prepare_realtime_mutation(
                 RealtimeMutation.CLAIM_CREATED,
                 claim,
@@ -2642,6 +2649,10 @@ class FixtureRepository(PersistenceRepository):
             assert realtime_event is not None
             self._claims[claim.claim_id] = deepcopy(claim)
             self._store_session(session)
+            if branch_evaluation is not None:
+                self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
+                    branch_evaluation
+                )
             self._commit_realtime_event(realtime_event)
 
     def _store_message(self, message: MessageRecord) -> None:
@@ -2771,6 +2782,7 @@ class FixtureRepository(PersistenceRepository):
                 evidence=graph.evidence,
             )
 
+            seeded_evaluations = seeded_branch_evaluations(graph)
             self.save_staff_presence(graph.staff_presence, graph.expected_presence_revision)
             sessions_by_claim: dict[str, list[SessionRecord]] = {
                 claim_id: [] for claim_id in claims_by_id
@@ -2786,7 +2798,7 @@ class FixtureRepository(PersistenceRepository):
                 if len(active) != 1:
                     raise ValueError('Every validation seed claim needs one active session.')
                 validate_validation_seed_session(claim, active[0])
-                self.create_claim(claim, active[0])
+                self.create_claim(claim, active[0], seeded_evaluations.get(claim.claim_id))
             for session in graph.sessions:
                 if session.session_id != claims_by_id[session.claim_id].active_session_id:
                     self.save_session(session)

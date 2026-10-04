@@ -790,7 +790,18 @@ def start_claim(
         started_at=timestamp,
         last_active_at=timestamp,
     )
-    repository.create_claim(claim, session)
+    # Evaluate the rules for the new Claim with it, so its dynamic form and requirements exist
+    # from the first read rather than after the first turn.
+    repository.create_claim(
+        claim,
+        session,
+        build_applied_branch_evaluation(
+            claim,
+            recomputation_reason='claim_started',
+            session_id=session_id,
+            created_at=timestamp,
+        ),
+    )
     repository.save_idempotency(
         IdempotencyRecord(
             actor_id=principal.subject,

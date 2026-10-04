@@ -217,6 +217,7 @@ from backend.repositories.protocols import (
     RepositorySearchLimitExceeded,
     RevisionConflict,
     ValidationSeedGraph,
+    seeded_branch_evaluations,
     validate_claim_decision_mutation_audit,
     validate_handoff_mutation_audit,
     validate_staff_agent_execution,
@@ -3998,7 +3999,12 @@ class MongoDBRepository:
                 events.append(event)
         return sorted(events, key=lambda event: (event.created_at, event.event_id))
 
-    def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
+    def create_claim(
+        self,
+        claim: WorkingClaim,
+        session: SessionRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
         if (
             session.claim_id != claim.claim_id
             or session.customer_id != claim.customer_id
@@ -4008,7 +4014,12 @@ class MongoDBRepository:
             or claim.claim_decision_id is not None
         ):
             raise KeyError(claim.claim_id)
-        self._atomic(lambda mongo_session: self._create_claim(claim, session, mongo_session))
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        self._atomic(
+            lambda mongo_session: self._create_claim(
+                claim, session, mongo_session, branch_evaluation=branch_evaluation
+            )
+        )
 
     def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Persist validation records in one MongoDB transaction."""
@@ -4115,6 +4126,7 @@ class MongoDBRepository:
             if result.matched_count != 1:
                 raise RevisionConflict(current_presence_revision)
 
+        seeded_evaluations = seeded_branch_evaluations(graph)
         sessions_by_claim: dict[str, list[SessionRecord]] = {
             claim_id: [] for claim_id in claims_by_id
         }
@@ -4129,7 +4141,9 @@ class MongoDBRepository:
             if len(active) != 1:
                 raise ValueError('Every validation seed claim needs one active session.')
             validate_validation_seed_session(claim, active[0])
-            self._create_claim(claim, active[0], mongo_session)
+            branch_evaluation = seeded_evaluations.get(claim.claim_id)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            self._create_claim(claim, active[0], mongo_session, branch_evaluation=branch_evaluation)
         for session in graph.sessions:
             if session.session_id != claims_by_id[session.claim_id].active_session_id:
                 self._reject_session_identity_conflict(session, mongo_session=mongo_session)
@@ -4167,6 +4181,8 @@ class MongoDBRepository:
         claim: WorkingClaim,
         session: SessionRecord,
         mongo_session: Any,
+        *,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         existing_claim = self._get('claim', claim.claim_id, WorkingClaim, session=mongo_session)
         existing_session = self._get(
@@ -4183,6 +4199,10 @@ class MongoDBRepository:
                 return
             raise IdempotencyConflict(claim.claim_id)
         self._reject_session_identity_conflict(session, mongo_session=mongo_session)
+        if branch_evaluation is not None:
+            self._reject_branch_evaluation_identity_conflict(
+                branch_evaluation, mongo_session=mongo_session
+            )
         self._put(
             'claim',
             claim.claim_id,
@@ -4199,6 +4219,15 @@ class MongoDBRepository:
             claim_id=session.claim_id,
             session=mongo_session,
         )
+        if branch_evaluation is not None:
+            self._put(
+                'branch_evaluation',
+                branch_evaluation.evaluation_id,
+                branch_evaluation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
         self._append_realtime_mutation(
             RealtimeMutation.CLAIM_CREATED,
             claim,

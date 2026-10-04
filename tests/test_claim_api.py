@@ -1510,7 +1510,10 @@ def test_read_claim_and_session_use_same_fixture_state(
 
     assert read_claim.status_code == 200
     assert read_claim.json()['claim_id'] == claim['claim_id']
-    assert read_claim.json()['dynamic_form'] is None
+    # The rules are evaluated when the Claim is started, so the form exists from the first read.
+    dynamic_form = read_claim.json()['dynamic_form']
+    assert dynamic_form['claim_revision'] == 1
+    assert dynamic_form['requirements']['current_action_total'] > 0
     assert read_session.status_code == 200
     assert read_session.json()['session_id'] == session['session_id']
     assert read_session.json()['resume']['unresolved_questions'] == []
@@ -2908,7 +2911,8 @@ def test_form_correction_persists_current_transition_and_immutable_previous_eval
 
     assert collision.status_code == 200
     assert corrected.status_code == 200
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    started, *evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert (started.recomputation_reason, started.resulting_claim_revision) == ('claim_started', 1)
     assert len(evaluations) == 2
     previous_collision = next(
         item for item in evaluations[0].branch_results if item.branch_id == 'incident.collision'
