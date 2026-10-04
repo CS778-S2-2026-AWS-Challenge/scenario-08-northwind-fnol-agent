@@ -159,5 +159,9 @@ def test_apply_refuses_while_an_unfinished_claim_creation_covers_an_old_kind() -
     report = migrate_record_shapes(collection, apply=True)
 
     assert report['status'] == 'refused'
-    assert report['unfinished_claim_creations_with_old_kinds'] == ['cco_open', 'cco_retry']
+    assert report['unfinished_claim_creations_with_old_kinds'] == [
+        {'operation_id': 'cco_open', 'claim_id': 'clm_evaluated', 'status': 'prepared'},
+        {'operation_id': 'cco_retry', 'claim_id': 'clm_evaluated', 'status': 'retryable_failure'},
+    ]
+    assert 'Retry the claim creation' in report['resolution']
     assert list(collection.find({})) == before

@@ -83,7 +83,9 @@ def _claims_without_evaluation(documents: list[dict[str, Any]]) -> list[WorkingC
     ]
 
 
-def _unfinished_creations_with_old_kinds(documents: list[dict[str, Any]]) -> list[str]:
+def _unfinished_creations_with_old_kinds(
+    documents: list[dict[str, Any]],
+) -> list[dict[str, str]]:
     """Return unfinished claim creations whose evidence still has an old photo kind.
 
     Such an operation fingerprinted its evidence, kind included, when it was prepared, and
@@ -97,11 +99,18 @@ def _unfinished_creations_with_old_kinds(documents: list[dict[str, Any]]) -> lis
         if document['record_type'] == 'evidence' and document.get('kind') in _OLD_PHOTO_KINDS
     }
     return sorted(
-        document['operation_id']
-        for document in documents
-        if document['record_type'] == 'claim_creation_operation'
-        and document.get('status') not in _FINISHED_CREATION_STATUSES
-        and document.get('claim_id') in claims_with_old_kinds
+        (
+            {
+                'operation_id': document['operation_id'],
+                'claim_id': document['claim_id'],
+                'status': document['status'],
+            }
+            for document in documents
+            if document['record_type'] == 'claim_creation_operation'
+            and document.get('status') not in _FINISHED_CREATION_STATUSES
+            and document.get('claim_id') in claims_with_old_kinds
+        ),
+        key=lambda item: item['operation_id'],
     )
 
 
@@ -139,6 +148,11 @@ def migrate_record_shapes(
     if blocking:
         # Writing nothing keeps the run all-or-nothing; finish these creations and run again.
         report['status'] = 'refused'
+        report['resolution'] = (
+            'Retry the claim creation for each listed claim so the claims service reconciles it '
+            'to accepted or failed, then run the migration again. An unknown outcome is never '
+            'closed as failed here, because the claim may already exist in the claims service.'
+        )
         return report
 
     for document in rewritten:
