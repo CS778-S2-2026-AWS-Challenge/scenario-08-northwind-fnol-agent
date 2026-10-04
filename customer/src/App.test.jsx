@@ -1034,10 +1034,12 @@ describe('claimant intake projection', () => {
         phone: '+64 21 555 123',
       },
       preferences: { email: true, sms: false },
+      revision: 3,
     }
     const updatedAccount = {
       ...initialAccount,
       profile: { ...initialAccount.profile, display_name: 'Iris', preferred_name: 'Iris' },
+      revision: 4,
     }
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue(initialAccount)
@@ -1057,7 +1059,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByLabelText('Preferred name'), 'Iris')
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
 
-    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' })
+    expect(api.updateAccountProfile).toHaveBeenCalledWith({ preferred_name: 'Iris' }, 3)
     expect(await screen.findByText('Iris', { selector: '.profile-header-copy > strong' })).toBeInTheDocument()
     expect(screen.getByText('Iris Zhang', { selector: '.profile-summary-row > dd' })).toBeInTheDocument()
     expect(api.createClaim).not.toHaveBeenCalled()
