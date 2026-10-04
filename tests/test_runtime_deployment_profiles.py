@@ -297,6 +297,9 @@ def test_aws_profile_refuses_cross_provider_and_model_settings_without_leaking_t
     values.update(sentinels)
     values['AGENT_RUNTIME_PROFILE'] = 'model_gateway'
     values['MODEL_PROMPT_VERSION'] = 'northwind-fnol-claimant-v8'
+    values['MODEL_PROFILE_ID'] = 'issue-432-profile'
+    values['MODEL_PROVIDER'] = 'issue-432-provider'
+    values['MODEL_PROTOCOL_ADAPTER'] = 'openai_compatible'
     original_environment = {name: os.environ.get(name) for name in sentinels}
 
     def forbidden_adapter(*_args: object, **_kwargs: object) -> None:

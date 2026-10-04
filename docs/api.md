@@ -1577,8 +1577,8 @@ credential. Health remains `null` until a controlled provider check records a re
 the page never invokes a paid provider. The frontend uses the default when creating a Session,
 while a message may select another published and runtime-ready profile in the same conversation.
 The repository initial catalogue publishes `qwen-local`, `openrouter-gpt4o-mini`,
-`google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; deployment
-selection keeps `openrouter-gpt4o-mini` as the default unless `MODEL_PROFILE_ID` changes.
+`google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; the deployment
+selects its default with the required `MODEL_PROFILE_ID`.
 
 ### `POST /api/v1/claims`
 

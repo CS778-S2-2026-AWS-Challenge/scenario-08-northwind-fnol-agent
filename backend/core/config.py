@@ -138,6 +138,18 @@ def _required_setting(name: str, allowed: tuple[str, ...]) -> str:
     return value
 
 
+def _model_setting(name: str, agent_runtime_profile: 'AgentRuntimeProfile') -> str:
+    """Return a model setting the model gateway needs when no deployment binding supplies it."""
+
+    value = os.getenv(name, '').strip()
+    if not value and agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
+        raise ValueError(
+            f'{name} is required with AGENT_RUNTIME_PROFILE=model_gateway when no model '
+            'runtime binding is selected.'
+        )
+    return value
+
+
 def _model_prompt_version(agent_runtime_profile: 'AgentRuntimeProfile') -> str:
     """Return the prompt version when no model binding supplies one."""
 
@@ -303,12 +315,16 @@ class Settings:
                 'DATA_RUNTIME_PROFILE=fixture is allowed only with NORTHWIND_ENVIRONMENT=test.'
             )
         model_runtime_bindings = _model_runtime_bindings_setting('MODEL_RUNTIME_BINDINGS_PATH')
-        model_profile_id = os.getenv('MODEL_PROFILE_ID', 'openrouter-gpt4o-mini').strip()
+        model_profile_id = os.getenv('MODEL_PROFILE_ID', '').strip()
+        if agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY and not model_profile_id:
+            raise ValueError(
+                'MODEL_PROFILE_ID is required with AGENT_RUNTIME_PROFILE=model_gateway.'
+            )
         selected_binding = next(
             (item for item in model_runtime_bindings if item.profile_id == model_profile_id),
             None,
         )
-        if model_runtime_bindings and selected_binding is None:
+        if model_runtime_bindings and model_profile_id and selected_binding is None:
             raise ValueError('MODEL_PROFILE_ID must identify a configured deployment binding.')
         credential_environment_variable = (
             selected_binding.credential_environment_variable
@@ -379,13 +395,13 @@ class Settings:
             model_protocol_adapter=(
                 selected_binding.protocol
                 if selected_binding
-                else os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip()
+                else _model_setting('MODEL_PROTOCOL_ADAPTER', agent_runtime_profile)
             ),
             model_profile_id=model_profile_id,
             model_provider=(
                 selected_binding.provider
                 if selected_binding
-                else os.getenv('MODEL_PROVIDER', 'qwen-local').strip()
+                else _model_setting('MODEL_PROVIDER', agent_runtime_profile)
             ),
             model_purpose=(
                 selected_binding.purpose

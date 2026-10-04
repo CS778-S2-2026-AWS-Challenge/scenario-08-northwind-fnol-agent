@@ -210,9 +210,9 @@ model and Runtime authority validation before it can affect Claim State.
 | Variable | Meaning |
 | --- | --- |
 | `AGENT_RUNTIME_PROFILE` | `controlled` or `model_gateway` |
-| `MODEL_PROTOCOL_ADAPTER` | Registered adapter name; `openai_compatible` is the default, with native `bedrock_converse` and `google_generate_content` adapters available |
-| `MODEL_PROFILE_ID` | Identifier of the selected model profile |
-| `MODEL_PROVIDER` | Provider label used for internal profile audit context |
+| `MODEL_PROTOCOL_ADAPTER` | Registered adapter name (`openai_compatible`, `bedrock_converse`, or `google_generate_content`); required with `model_gateway` when no binding is selected |
+| `MODEL_PROFILE_ID` | Identifier of the selected model profile; required with `model_gateway` |
+| `MODEL_PROVIDER` | Provider label used for internal profile audit context; required with `model_gateway` when no binding is selected |
 | `MODEL_PURPOSE` | Allowed request purpose; `agent_turn` for the claimant Agent |
 | `MODEL_PRIVACY_CLASS` | Allowed data classification for requests |
 | `MODEL_PROMPT_VERSION` | Exact executable prompt identifier allowed by the profile |
@@ -259,8 +259,8 @@ The published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
-| `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | deployment default through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
-| `openrouter-gpt4o-mini` | `openai/gpt-4o` through OpenRouter | deployment default | structured output, tools, image input, and PDF document input |
+| `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | selectable through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
+| `openrouter-gpt4o-mini` | `openai/gpt-4o` through OpenRouter | the profile `start-dev.ps1` and `.env.example` select | structured output, tools, image input, and PDF document input |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 | `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
 

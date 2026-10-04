@@ -154,6 +154,24 @@ def test_model_gateway_settings_use_only_a_secret_environment_reference(
     assert settings.model_supports_tools is False
 
 
+@pytest.mark.parametrize(
+    'missing', ['MODEL_PROFILE_ID', 'MODEL_PROVIDER', 'MODEL_PROTOCOL_ADAPTER']
+)
+def test_model_gateway_without_a_binding_refuses_to_start_without_its_model_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    missing: str,
+) -> None:
+    monkeypatch.setenv('AGENT_RUNTIME_PROFILE', 'model_gateway')
+    monkeypatch.delenv('MODEL_RUNTIME_BINDINGS_PATH', raising=False)
+    monkeypatch.setenv('MODEL_PROFILE_ID', 'local-agent-turn')
+    monkeypatch.setenv('MODEL_PROVIDER', 'local-runtime')
+    monkeypatch.setenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible')
+    monkeypatch.delenv(missing)
+
+    with pytest.raises(ValueError, match=f'{missing} is required'):
+        Settings.from_environment()
+
+
 def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
