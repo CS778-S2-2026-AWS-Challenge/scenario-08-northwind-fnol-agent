@@ -1491,6 +1491,13 @@ deleted/already_absent/failed/unknown; failed or unknown results require reconci
 Approved classifications, source-linked holds and scalar tombstone authority fields are defined
 in `backend/domain/retention.py`. Holds block destruction without reopening claimant access.
 
+MongoDB records written before the October 2026 cleanup are brought to the current shapes by
+`scripts/migrate_record_shapes.py`: incident photos stored as `incident_image` or `photo` become
+`incident_photo`, the removed `current_action_satisfied` requirement field is dropped from branch
+evaluations and replayed responses, and a claim without an applied branch evaluation gets one.
+It reports by default, writes with `--apply` while the backend is stopped, and records a
+`schema_migration` marker so later runs exit without changing anything.
+
 Deployments with legacy P17.1 records use `scripts/backfill_follow_up_policy.py`. The script is a
 thin operator entry point over the same repository migration rule the fixture adapter uses
 (`backfill_legacy_follow_up_record`); there is no second migration implementation. The rule is:
