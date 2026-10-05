@@ -2940,6 +2940,96 @@ describe('claimant intake projection', () => {
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
+  it('keeps a non-resumable Claim conversation in the main workspace across repeated selection', async () => {
+    const user = userEvent.setup()
+    const existingSessionId = 'ses_terminal_history'
+    const historicalMessage = {
+      ...agentMessage,
+      message_id: 'msg_terminal_history',
+      content: { type: 'text', text: 'Your completed Claim conversation remains available.' },
+    }
+    const terminalClaim = {
+      ...initialClaim,
+      claim_id: 'clm_terminal_conversation',
+      can_resume: false,
+      conversation_session_id: existingSessionId,
+      external_claim: {
+        claim_number: 'NWF-2026-HISTORY',
+        creation_status: 'created',
+      },
+      customer_next_step: {
+        status: 'claim_created',
+        summary: 'This Claim has completed review.',
+        responsible_party: 'system',
+        can_resume: false,
+      },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [terminalClaim], page: { next_cursor: null } })
+    api.getClaim.mockResolvedValue(terminalClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [historicalMessage], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+
+    expect(await screen.findByText(historicalMessage.content.text)).toBeInTheDocument()
+    expect(api.getClaimMessages).toHaveBeenCalledWith(terminalClaim.claim_id)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+    expect(globalThis.location.pathname).toBe(
+      `/claims/${terminalClaim.claim_id}`,
+    )
+    expect(screen.getByRole('complementary', { name: 'Conversation history' })).toBeInTheDocument()
+    expect(document.querySelector('aside[aria-label="Claim details"]')).not.toHaveAttribute('hidden')
+
+    await user.click(screen.getByRole('button', { name: /Current claim/ }))
+    await user.click(screen.getByRole('button', { name: /Current claim/ }))
+
+    expect(globalThis.location.pathname).toBe(`/claims/${terminalClaim.claim_id}`)
+    expect(screen.getByRole('complementary', { name: 'Conversation history' })).toBeInTheDocument()
+    expect(document.querySelector('aside[aria-label="Claim details"]')).not.toHaveAttribute('hidden')
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
+  it('restores a refreshed Claim workspace with both sidebars and its persisted conversation', async () => {
+    const claimId = 'clm_refreshed_workspace'
+    const sessionId = 'ses_refreshed_workspace'
+    const savedClaim = {
+      ...initialClaim,
+      claim_id: claimId,
+      conversation_session_id: sessionId,
+      can_resume: true,
+    }
+    const savedMessage = {
+      ...agentMessage,
+      message_id: 'msg_refreshed_workspace',
+      content: { type: 'text', text: 'This message survived the workspace refresh.' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_refreshed_workspace',
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [savedClaim], page: { next_cursor: null } })
+    api.getClaim.mockResolvedValue(savedClaim)
+    api.getClaimMessages.mockResolvedValue({ items: [savedMessage], page: { next_cursor: null } })
+    globalThis.history.replaceState({}, '', `/claims/${claimId}`)
+
+    render(<App />)
+
+    expect(await screen.findByText(savedMessage.content.text)).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe(`/claims/${claimId}`)
+    expect(screen.getByRole('complementary', { name: 'Conversation history' })).toBeInTheDocument()
+    expect(document.querySelector('aside[aria-label="Claim details"]')).not.toHaveAttribute('hidden')
+    expect(api.getClaimMessages).toHaveBeenCalledWith(claimId)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
   it('removes a stale conversation when a fresh readback is non-resumable', async () => {
     const user = userEvent.setup()
     const staleListClaim = {
@@ -3043,6 +3133,119 @@ describe('claimant intake projection', () => {
 
     await user.click(historyCards()[1])
     expect(api.resumeClaimSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps active-session history buttons bound to the same Claim after repeated clicks', async () => {
+    const user = userEvent.setup()
+    const reportA = {
+      ...initialClaim,
+      claim_id: 'clm_active_history_a',
+      conversation_session_id: 'ses_active_history_a',
+      can_resume: false,
+      customer_next_step: { ...initialClaim.customer_next_step, summary: 'Review claim A' },
+    }
+    const reportB = {
+      ...initialClaim,
+      claim_id: 'clm_active_history_b',
+      conversation_session_id: 'ses_active_history_b',
+      incident_type: 'contents',
+      can_resume: false,
+      customer_next_step: { ...initialClaim.customer_next_step, summary: 'Review claim B' },
+    }
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_active_history',
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [reportA, reportB], page: { next_cursor: null } })
+    api.getClaim.mockImplementation((claimId) => Promise.resolve(
+      claimId === reportA.claim_id ? reportA : reportB,
+    ))
+    api.getClaimMessages.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+    await waitFor(() => expect(globalThis.location.pathname).toBe(`/claims/${reportA.claim_id}`))
+
+    const historyCards = () => [...document.querySelectorAll('.intake-history-item')]
+    expect(historyCards()[0]).toHaveTextContent('Current claim')
+    expect(historyCards()[1]).toHaveTextContent('Review claim B')
+
+    await user.click(historyCards()[1])
+    await waitFor(() => expect(globalThis.location.pathname).toBe(`/claims/${reportB.claim_id}`))
+    expect(historyCards()[0]).toHaveTextContent('Review claim A')
+    expect(historyCards()[1]).toHaveTextContent('Current claim')
+
+    await user.click(historyCards()[1])
+    await user.click(historyCards()[1])
+
+    expect(globalThis.location.pathname).toBe(`/claims/${reportB.claim_id}`)
+    expect(historyCards()[0]).toHaveTextContent('Review claim A')
+    expect(historyCards()[1]).toHaveTextContent('Current claim')
+    expect(api.getClaim).toHaveBeenCalledTimes(2)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps the latest Claim selected when an earlier history request finishes last', async () => {
+    const user = userEvent.setup()
+    const reportA = {
+      ...initialClaim,
+      claim_id: 'clm_history_race_a',
+      conversation_session_id: 'ses_history_race_a',
+      can_resume: false,
+    }
+    const reportB = {
+      ...initialClaim,
+      claim_id: 'clm_history_race_b',
+      conversation_session_id: 'ses_history_race_b',
+      incident_type: 'contents',
+      can_resume: false,
+    }
+    const reportC = {
+      ...initialClaim,
+      claim_id: 'clm_history_race_c',
+      conversation_session_id: 'ses_history_race_c',
+      incident_type: 'motor',
+      can_resume: false,
+    }
+    const delayedReportB = deferredRequest()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      customer_id: 'cus_history_race',
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({
+      items: [reportA, reportB, reportC],
+      page: { next_cursor: null },
+    })
+    api.getClaim.mockImplementation((claimId) => {
+      if (claimId === reportB.claim_id) return delayedReportB.promise
+      return Promise.resolve(claimId === reportA.claim_id ? reportA : reportC)
+    })
+    api.getClaimMessages.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
+    await waitFor(() => expect(globalThis.location.pathname).toBe(`/claims/${reportA.claim_id}`))
+
+    globalThis.history.replaceState({}, '', `/claims/${reportB.claim_id}`)
+    globalThis.dispatchEvent(new PopStateEvent('popstate'))
+    await waitFor(() => expect(api.getClaim).toHaveBeenCalledWith(reportB.claim_id))
+
+    globalThis.history.replaceState({}, '', `/claims/${reportC.claim_id}`)
+    globalThis.dispatchEvent(new PopStateEvent('popstate'))
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(reportC.claim_id))
+
+    await act(async () => delayedReportB.resolve(reportB))
+
+    const historyCards = () => [...document.querySelectorAll('.intake-history-item')]
+    await waitFor(() => expect(historyCards()[2]).toHaveTextContent('Current claim'))
+    expect(globalThis.location.pathname).toBe(`/claims/${reportC.claim_id}`)
+    expect(api.getClaimMessages).not.toHaveBeenCalledWith(reportB.claim_id)
   })
 
   it('holds a target Claim realtime event until an in-flight resume installs that Claim', async () => {
@@ -4441,7 +4644,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
-    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id, 'ses_ui_vp'))
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id))
     expect(screen.queryByText(/Permission needed/)).not.toBeInTheDocument()
     await act(async () => {
       if (readbackSucceeds) {
@@ -4538,10 +4741,7 @@ describe('claimant intake projection', () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id))
-    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(
-      initialClaim.claim_id,
-      'ses_ui_vp',
-    ))
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id))
 
     await user.type(
       screen.getByPlaceholderText('Write the details you know...'),

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from fastapi.testclient import TestClient
@@ -124,3 +124,95 @@ def test_message_cursor_rejects_non_api_cursor(
     assert response.status_code == 422
     assert response.json()['error']['code'] == 'VALIDATION_ERROR'
     assert response.json()['error']['details'][0]['field'] == 'cursor'
+
+
+def test_claim_conversation_history_pages_visible_messages_across_sessions(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, first_session_id = _claim_and_session(
+        client,
+        auth_headers,
+        'claim-conversation-history',
+    )
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    assert first_session is not None
+    second_session = first_session.model_copy(
+        update={
+            'session_id': 'ses_claim_conversation_second',
+            'started_at': first_session.started_at + timedelta(minutes=5),
+            'last_active_at': first_session.last_active_at + timedelta(minutes=5),
+        }
+    )
+    repository.save_session(second_session)
+
+    timestamp = datetime(2026, 8, 26, 8, 0, tzinfo=UTC)
+    _save_message(
+        repository,
+        claim_id,
+        first_session_id,
+        'msg_before_resume',
+        timestamp,
+        actor=ActorType.CLAIMANT,
+    )
+    _save_message(
+        repository,
+        claim_id,
+        second_session.session_id,
+        'msg_after_resume',
+        timestamp + timedelta(minutes=5),
+    )
+    _save_message(
+        repository,
+        claim_id,
+        first_session_id,
+        'msg_internal_across_sessions',
+        timestamp + timedelta(minutes=1),
+        visibility=MessageVisibility.INTERNAL_ONLY,
+        actor=ActorType.SYSTEM,
+    )
+
+    route = f'/api/v1/claims/{claim_id}/messages'
+    first = client.get(route, headers=auth_headers, params={'limit': 1})
+    assert first.status_code == 200
+    assert [item['message_id'] for item in first.json()['items']] == ['msg_before_resume']
+    cursor = cast(str, first.json()['page']['next_cursor'])
+    assert cursor
+
+    second = client.get(route, headers=auth_headers, params={'limit': 1, 'cursor': cursor})
+    assert second.status_code == 200
+    assert [item['message_id'] for item in second.json()['items']] == ['msg_after_resume']
+    assert second.json()['page']['next_cursor'] is None
+
+    session_only = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{first_session_id}/messages',
+        headers=auth_headers,
+    )
+    assert [item['message_id'] for item in session_only.json()['items']] == ['msg_before_resume']
+
+
+def test_claim_conversation_history_conceals_another_claimants_claim(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _claim_and_session(client, auth_headers, 'claim-conversation-owner')
+    owned_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert owned_claim is not None
+    other_claim = owned_claim.model_copy(
+        update={
+            'claim_id': 'clm_other_conversation',
+            'customer_id': 'cus_other',
+            'active_session_id': None,
+        }
+    )
+    repository._claims[other_claim.claim_id] = other_claim
+
+    response = client.get(
+        f'/api/v1/claims/{other_claim.claim_id}/messages',
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
