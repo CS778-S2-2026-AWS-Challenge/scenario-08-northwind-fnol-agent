@@ -406,6 +406,7 @@ function App() {
   const [workspaceActive, setWorkspaceActive] = useState(initialDraftWorkspaceActive)
   const [draftWorkspaceActive, setDraftWorkspaceActive] = useState(initialDraftWorkspaceActive)
   const [profileReturnClaimId, setProfileReturnClaimId] = useState(null)
+  const claimHistoryReturnRoute = useRef({ page: 'home', profileSection: null })
   const profileController = useProfileController({
     account,
     setAccount,
@@ -3218,6 +3219,7 @@ function App() {
   }
 
   async function openSavedClaims() {
+    claimHistoryReturnRoute.current = { page: 'account', profileSection }
     setSelectedHistoryClaimId(null)
     setPage('claim-history')
     await loadSavedReports()
@@ -3230,9 +3232,24 @@ function App() {
       setWorkspaceView('history')
       setMobileView('chat')
     } else {
+      claimHistoryReturnRoute.current = { page: 'home', profileSection: null }
       setPage('claim-history')
     }
     if (account) loadSavedReports().catch(() => {})
+  }
+
+  function leaveStandaloneClaimHistory() {
+    const returnRoute = claimHistoryReturnRoute.current
+    if (returnRoute.page === 'account') {
+      setPageState('account')
+      setProfileSection(returnRoute.profileSection)
+      const nextPath = profilePathForSection(returnRoute.profileSection)
+      if (globalThis.location?.pathname !== nextPath) {
+        globalThis.history?.pushState({ northwindRoute: 'account' }, '', nextPath)
+      }
+      return
+    }
+    setPage('home')
   }
 
   // The account pages show these Claim record views whenever the workspace is inactive, even
@@ -3812,9 +3829,13 @@ function App() {
               ? 'login-button profile-entry-button'
               : 'login-button'}
             type="button"
-            onClick={() => isProfilePage ? leaveProfilePage() : setPage(account ? 'account' : 'login')}
+            onClick={() => {
+              if (isProfilePage) leaveProfilePage()
+              else if (isStandaloneClaimHistory) leaveStandaloneClaimHistory()
+              else setPage(account ? 'account' : 'login')
+            }}
           >
-            {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
+            {isProfilePage || isStandaloneClaimHistory ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
         )}
         {isWorkspaceActive && !isFocusedClaimMessages && !['login', 'register'].includes(page) && (

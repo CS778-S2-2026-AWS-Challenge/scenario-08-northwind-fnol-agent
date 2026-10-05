@@ -5927,6 +5927,41 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
   })
 
+  it('returns from standalone Claim history to the homepage with the header Back control', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue(testAccount('cus_claim_history_back', 'Test claimant'))
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'My claims' }))
+
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Profile' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(await screen.findByRole('heading', { name: 'Start your insurance claim' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('returns from standalone Claim history to Profile when Profile opened it', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue(testAccount('cus_profile_claim_history', 'Test claimant'))
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Profile' }))
+    const [claimHistoryEntry] = await screen.findAllByRole('button', { name: 'Claim history' })
+    await user.click(claimHistoryEntry)
+
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile')
+  })
+
   it('keeps account Claim history navigable after leaving an active conversation', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
