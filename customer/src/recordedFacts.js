@@ -1,6 +1,6 @@
 import { fieldLabel, fieldValueText } from './claimFieldPresentation.js'
 
-// What the "Just noted" card under an assistant reply shows. The server stores,
+// What the captured-information card under an assistant reply shows. The server stores,
 // with each Agent message, which facts that turn recorded
 // (content.turn_record.recorded_facts); the card lists those fields with their
 // current stored value, so a later correction shows the corrected value.
@@ -126,6 +126,9 @@ export function fieldInputChoices(input) {
 }
 
 export function displayValue(fact, input) {
+  if (fact.fieldCode === 'claim.product_family' && fact.field.value === 'motor') {
+    return 'Motor vehicle accident'
+  }
   if (input?.value_type === 'enum' && typeof fact.field.value === 'string') {
     return choiceLabel(fact.field.value)
   }

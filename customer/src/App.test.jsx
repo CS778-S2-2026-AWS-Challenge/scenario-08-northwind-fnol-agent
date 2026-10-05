@@ -4387,7 +4387,7 @@ describe('claimant intake projection', () => {
     await openCasePanel(user)
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
     expect(screen.queryByRole('button', { name: 'Check your details' })).not.toBeInTheDocument()
-    // Progress now lives only on the "Just noted" card.
+    // Progress now lives only in the compact case status.
     expect(screen.queryByRole('button', { name: /Claim progress/i })).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
 
@@ -4464,7 +4464,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await openCasePanel(user)
     await user.click(await screen.findByRole('button', { name: /^Insured item and loss/ }))
-    await user.click(screen.getByRole('button', { name: /Edit estimated amount/i }))
+    await user.click(screen.getByRole('button', { name: /^Edit estimated amount$/i }))
 
     const correction = screen.getByRole('textbox', { name: /Correct estimated amount/i })
     await user.clear(correction)
@@ -4525,7 +4525,7 @@ describe('claimant intake projection', () => {
     }
   }
 
-  it('shows what was just noted as chips under the reply and confirms them with All correct', async () => {
+  it('shows captured information under the reply and confirms the recorded details', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(notedTurn())
     api.confirmClaimFields.mockResolvedValue({
@@ -4543,27 +4543,25 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const locationChip = await screen.findByRole('button', { name: 'Incident location: Queen Street lights (to check)' })
-    expect(locationChip.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
-    expect(locationChip).toHaveClass('is-check')
-    expect(screen.getByRole('button', { name: 'Vehicle safe to drive: No (to check)' })).toBeInTheDocument()
+    const card = await screen.findByRole('region', { name: 'Captured information' })
+    expect(card.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
+    expect(card).toHaveTextContent('Recorded')
+    expect(card).toHaveTextContent('Incident location')
+    expect(card).toHaveTextContent('Queen Street lights')
+    expect(card).toHaveTextContent('Vehicle safe to drive')
+    expect(card).toHaveTextContent('No')
     // Progress lives once, in the title bar.
     expect(document.querySelector('.case-status')).toHaveTextContent('Noted 2/5')
     expect(screen.queryByRole('button', { name: 'Check your details' })).not.toBeInTheDocument()
 
-    await user.click(locationChip)
-    const list = screen.getByRole('region', { name: 'Just noted' })
-    expect(list).toHaveTextContent('Incident location')
-    expect(list).toHaveTextContent('Vehicle safe to drive')
-    expect(within(list).getAllByText('To check')).toHaveLength(2)
-    await user.click(within(list).getByRole('button', { name: 'All correct' }))
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
 
     await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
       fieldCodes: ['incident.location', 'vehicle.drivable'],
     })))
-    expect(await screen.findByRole('button', { name: 'Incident location: Queen Street lights' })).not.toHaveClass('is-check')
-    expect(screen.queryByRole('region', { name: 'Just noted' })).not.toBeInTheDocument()
+    await waitFor(() => expect(within(card).queryByRole('button', { name: 'Looks right' })).not.toBeInTheDocument())
+    expect(within(card).getByRole('button', { name: 'Edit Incident location in captured information' })).toBeVisible()
   })
 
   it('keeps the review prompt for a conflicting answer and confirms only suggested facts', async () => {
@@ -4593,13 +4591,11 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const chip = await screen.findByRole('button', { name: 'Incident location: Queen Street lights (to check)' })
-    expect(chip.closest('.turn-attachments')).not.toHaveTextContent('Monday')
+    const card = await screen.findByRole('region', { name: 'Captured information' })
+    expect(card).not.toHaveTextContent('Monday')
     expect(screen.getByRole('button', { name: 'Check your details' })).toBeInTheDocument()
 
-    await user.click(chip)
-    const card = screen.getByRole('region', { name: 'Just noted' })
-    await user.click(within(card).getByRole('button', { name: 'All correct' }))
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
     await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
       fieldCodes: ['incident.location', 'vehicle.drivable'],
     })))
@@ -4630,9 +4626,8 @@ describe('claimant intake projection', () => {
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
-    await user.click(await screen.findByRole('button', { name: 'Vehicle safe to drive: No (to check)' }))
-    const card = screen.getByRole('region', { name: 'Just noted' })
-    await user.click(within(card).getByRole('button', { name: 'Change Vehicle safe to drive' }))
+    const card = await screen.findByRole('region', { name: 'Captured information' })
+    await user.click(within(card).getByRole('button', { name: 'Edit Vehicle safe to drive in captured information' }))
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Vehicle safe to drive' }), 'Yes')
     await user.click(within(card).getByRole('button', { name: 'Save' }))
 
@@ -4642,7 +4637,7 @@ describe('claimant intake projection', () => {
     })))
     // The corrected fact stays under the reply that first stated it.
     await waitFor(() => expect(within(card).getByText('Yes')).toBeInTheDocument())
-    expect(await screen.findByRole('button', { name: 'Vehicle safe to drive: Yes' })).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Edit Vehicle safe to drive in captured information' })).toBeVisible()
   })
 
   it.each([true, false])('installs the current snapshot and suppresses stale replay actions (readback succeeds: %s)', async (readbackSucceeds) => {

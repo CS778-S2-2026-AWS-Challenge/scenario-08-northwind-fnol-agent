@@ -872,7 +872,7 @@ function App() {
     [messages],
   )
   const conversationActionKind = conversationAction?.kind || null
-  // The latest "Just noted" card replaces the "Review claim details" prompt only
+  // The latest captured-information card replaces the "Review claim details" prompt only
   // when every detail the prompt asks about is on that open card. Otherwise the
   // prompt stays: details on folded earlier cards, contents items, a fact with
   // two conflicting answers, or a whole-claim summary the claimant is checking.
@@ -901,7 +901,7 @@ function App() {
   useEffect(() => {
     // Review and submit is the one flow the panel opens by itself: once per step,
     // with the step pinned on top while the conversation stays in view.
-    // A check whose details are all on the latest reply's chips is done there instead.
+    // A check whose details are all on the latest reply's summary is done there instead.
     const identity = NEXT_STEP_CHIPS[visibleConversationActionKind] ? conversationAction?.identity : null
     if (!identity || autoOpenedReview.current === identity) return
     autoOpenedReview.current = identity
