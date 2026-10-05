@@ -55,7 +55,8 @@ def _validation_path(errors: Iterable[object]) -> str | None:
             parts.append(item)
         else:
             return None
-    return '.'.join(parts) or None
+    path = '.'.join(parts)
+    return path if 0 < len(path) <= 120 else None
 
 
 _ISOLATED_INSTRUCTION = (

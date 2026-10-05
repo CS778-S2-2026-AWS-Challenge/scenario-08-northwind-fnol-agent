@@ -9,7 +9,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.domain.agent_v8 import V8Escalation
-from backend.domain.model_gateway import ModelCompletionStatus, ModelResponse, ModelToolCall
+from backend.domain.model_gateway import (
+    ModelCompletionStatus,
+    ModelGatewayError,
+    ModelGatewayErrorCode,
+    ModelRequest,
+    ModelResponse,
+    ModelToolCall,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentProposal, AgentTurnContext, InvariantGuardedAgent
 from backend.services.model_agent import GatewayAgent
@@ -111,6 +118,88 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
     assert body['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     # No spliced or stripped reply reached the claimant; the message is kept.
     assert len(repository.list_messages(journey.claim_id, journey.session_id, 'cus_demo')) == 1
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, body['claimant_message']['message_id'], 'cus_demo'
+    )
+    assert trace is not None and trace.failure_diagnostic is not None
+    assert trace.failure_diagnostic.code == 'consistency_recall_truthfulness'
+    assert trace.failure_diagnostic.path is None
+
+
+@pytest.mark.parametrize(
+    ('rewrite', 'status', 'diagnostic_code', 'diagnostic_path'),
+    [
+        (None, ModelCompletionStatus.COMPLETE, 'consistency_recall_output_missing', None),
+        (
+            {**HONEST_REWRITE, 'reply': []},
+            ModelCompletionStatus.COMPLETE,
+            'consistency_recall_output_schema_validation',
+            'reply',
+        ),
+        (
+            HONEST_REWRITE,
+            ModelCompletionStatus.INCOMPLETE,
+            'consistency_recall_completion_status',
+            None,
+        ),
+    ],
+)
+def test_rejected_rewrite_records_its_check_without_model_content(
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+    rewrite: dict[str, Any] | None,
+    status: ModelCompletionStatus,
+    diagnostic_code: str,
+    diagnostic_path: str | None,
+) -> None:
+    provider = _provider(NAMES_REFUSED_SERVICE, review=_Verdicts(NAMES_TOW))
+    provider.gateway.responses.append(
+        ModelResponse(completion_status=status, structured_output=rewrite)
+    )
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', f'recall-{diagnostic_code}')
+    turn = journey.send(
+        'Synthetic claimant incident detail for diagnostic isolation.', expect_agent_message=False
+    )
+
+    assert turn['agent_message'] is None
+    assert turn['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+    )
+    assert trace is not None and trace.failure_diagnostic is not None
+    assert trace.failure_diagnostic.code == diagnostic_code
+    assert trace.failure_diagnostic.path == diagnostic_path
+    assert 'Synthetic claimant incident detail' not in trace.failure_diagnostic.model_dump_json()
+    assert 'Water still dripping' not in trace.failure_diagnostic.model_dump_json()
+
+
+def test_recall_gateway_rejection_keeps_its_error_and_records_stage(
+    app: FastAPI, client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = _provider(NAMES_REFUSED_SERVICE, review=_Verdicts(NAMES_TOW))
+    original_complete = provider.gateway.complete
+
+    def fail_on_recall(request: ModelRequest) -> ModelResponse:
+        if provider.gateway.requests:
+            provider.gateway.requests.append(request)
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        return original_complete(request)
+
+    monkeypatch.setattr(provider.gateway, 'complete', fail_on_recall)
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'recall-gateway-failure')
+    turn = journey.send('The water is still dripping.', expect_agent_message=False)
+
+    assert turn['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+    )
+    assert trace is not None and trace.failure_diagnostic is not None
+    assert trace.reason_codes == ['malformed_response']
+    assert trace.failure_diagnostic.code == 'consistency_recall_gateway_failure'
+    assert trace.failure_diagnostic.path is None
 
 
 def _validated(

@@ -116,6 +116,14 @@ written atomically with the accepted claimant message recovery and contains no r
 output, provider payload, or additional claimant content. A failed trace remains retryable;
 it is diagnostic evidence, not a completed Runtime turn.
 
+For a rejected `consistency_recall` rewrite, the code distinguishes completion status,
+missing structured output, output schema validation, and a reply that remains untruthful.
+Unclassified gateway errors and proposal validation failures retain their original error
+type and receive a recall-stage diagnostic code; field-contract violations are separate.
+The recall output-schema check adds a sanitized structural `path` when available;
+completion and consistency-rule checks have no field path. These diagnostics do not
+change the recovery policy or expose the model's reply.
+
 ## Audit Event Contract
 
 The provider-neutral structural envelope is defined by `AuditEventEnvelope` in

@@ -68,7 +68,10 @@ from backend.services.agent import (
 from backend.services.context_budget import build_request_budget
 from backend.services.context_planner import ContextBudgetExceeded
 from backend.services.context_resolver import resolver_for_turn
-from backend.services.isolated_context_executor import execute_isolated_context_plan
+from backend.services.isolated_context_executor import (
+    _validation_path,
+    execute_isolated_context_plan,
+)
 from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_request_planner import (
@@ -423,6 +426,7 @@ class GatewayAgent:
         repair_outcome: RepairOutcome | None = None,
         field_contract_violations: list[dict[str, str]] | None = None,
         authorized_policy_sources: list[dict[str, object]] | None = None,
+        diagnostic_stage: str | None = None,
     ) -> AgentProposal:
         if response.structured_output is None:
             logger.warning(
@@ -437,7 +441,12 @@ class GatewayAgent:
                     'provider_model': response.provider_model,
                 },
             )
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                diagnostic_code=(
+                    f'{diagnostic_stage}_output_missing' if diagnostic_stage is not None else None
+                ),
+            )
         raw_output = dict(response.structured_output)
         try:
             parsed: Any
@@ -467,7 +476,15 @@ class GatewayAgent:
                     ],
                 },
             )
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                diagnostic_code=(
+                    f'{diagnostic_stage}_output_schema_validation'
+                    if diagnostic_stage is not None
+                    else None
+                ),
+                diagnostic_path=_validation_path(error.errors()) if diagnostic_stage else None,
+            ) from None
 
         if isinstance(parsed, V8TurnProposal):
             answer = V7AnswerProposal(
@@ -906,6 +923,8 @@ class GatewayAgent:
         response: ModelResponse | None = None
         request_budgets = [plan.request_budget]
         context_sizes = _model_context_size_metrics(context, context_json)
+        recall_started = False
+        recall_response_received = False
         try:
             request = self._v7_request(
                 plan,
@@ -1111,6 +1130,7 @@ class GatewayAgent:
                     request_budgets.append(recall_budget)
                     self._require_turn_time(started_at)
                     first_output = response.structured_output
+                    recall_started = True
                     response = self._observed_complete(
                         recall,
                         context,
@@ -1118,13 +1138,17 @@ class GatewayAgent:
                         observations,
                         exchange_completion,
                     )
+                    recall_response_received = True
                     invocations.append(
                         _runtime_invocation_trace(
                             len(invocations) + 1, response, observations[-1].latency_ms
                         )
                     )
                     if response.completion_status is not ModelCompletionStatus.COMPLETE:
-                        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+                        raise ModelGatewayError(
+                            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                            diagnostic_code='consistency_recall_completion_status',
+                        )
                     response = response.model_copy(
                         update={
                             'structured_output': keep_recorded_parts(
@@ -1143,6 +1167,7 @@ class GatewayAgent:
                         tool_output=tool_output,
                         started_at=started_at,
                         request_budgets=request_budgets,
+                        diagnostic_stage='consistency_recall',
                     )
                     second_review = (
                         self._review(result.validated_turn, context)
@@ -1162,7 +1187,10 @@ class GatewayAgent:
                                 ],
                             },
                         )
-                        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+                        raise ModelGatewayError(
+                            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                            diagnostic_code='consistency_recall_truthfulness',
+                        )
             except TurnFieldContractViolation as contract_error:
                 if plan.schema_id == 'claimant.turn.v1':
                     logger.warning(
@@ -1179,7 +1207,10 @@ class GatewayAgent:
                     # noise: fail through persist-first recovery rather than
                     # spend another model call on a repair.
                     raise ModelGatewayError(
-                        ModelGatewayErrorCode.MALFORMED_RESPONSE
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                        diagnostic_code=(
+                            'consistency_recall_field_contract' if recall_started else None
+                        ),
                     ) from contract_error
                 violations = [item.model_dump(mode='json') for item in contract_error.violations]
                 logger.info(
@@ -1362,6 +1393,12 @@ class GatewayAgent:
                     )
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
         except ModelGatewayError as error:
+            if recall_started and error.diagnostic_code is None:
+                error.diagnostic_code = (
+                    'consistency_recall_proposal_validation'
+                    if recall_response_received
+                    else 'consistency_recall_gateway_failure'
+                )
             self._record_observations(observations, context_sizes, error)
             raise
         self._record_observations(observations, context_sizes)
