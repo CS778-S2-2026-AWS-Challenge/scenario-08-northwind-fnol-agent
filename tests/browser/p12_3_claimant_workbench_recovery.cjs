@@ -53,6 +53,9 @@ function classifyRecoveryPath(pathname) {
   if (result.claim_id && pathname === `/api/v1/claims/${result.claim_id}`) {
     return 'authoritative_claim'
   }
+  if (result.claim_id && pathname === `/api/v1/claims/${result.claim_id}/messages`) {
+    return 'authoritative_claim_messages'
+  }
   if (
     result.claim_id
     && result.session_id
@@ -305,10 +308,10 @@ async function main() {
 
     const realtimeRequest = firstEvent('request', 'replacement_realtime')
     const claimRequest = firstEvent('request', 'authoritative_claim')
-    const messagesRequest = firstEvent('request', 'authoritative_messages')
+    const messagesRequest = firstEvent('request', 'authoritative_claim_messages')
     const realtimeResponse = firstEvent('response', 'replacement_realtime')
     const claimResponse = firstEvent('response', 'authoritative_claim')
-    const messagesResponse = firstEvent('response', 'authoritative_messages')
+    const messagesResponse = firstEvent('response', 'authoritative_claim_messages')
 
     assert(
       realtimeRequest && claimRequest && messagesRequest
@@ -349,7 +352,7 @@ async function main() {
       replacement_realtime_requested_before_authoritative_claim_read: true,
       replacement_realtime_requested_before_authoritative_message_read: true,
       authoritative_claim_read_succeeded: true,
-      authoritative_current_session_messages_read_succeeded: true,
+      authoritative_claim_messages_read_succeeded: true,
       staff_message_visible_after_recovery: true,
       degraded_notice_cleared_after_recovery: true,
       exactly_one_claim_created: true,

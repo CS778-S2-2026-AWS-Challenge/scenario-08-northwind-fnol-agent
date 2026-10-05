@@ -12,6 +12,7 @@ import {
   listAccountPolicies,
   createPaymentDestination,
   getClaimAutoFillSuggestions,
+  getClaimMessages,
   listEvidenceHistory,
   listClaims,
   listClaimAssetSnapshots,
@@ -153,6 +154,67 @@ describe('claim message contract', () => {
       content: { type: 'text', text: 'Kitchen damage' },
       evidence_refs: ['evd_photo'],
     })
+  })
+
+  it('loads every page of a persisted Claim conversation', async () => {
+    const firstPage = {
+      items: [{ message_id: 'msg_oldest' }],
+      page: { next_cursor: 'message-cursor-2' },
+    }
+    const secondPage = {
+      items: [firstPage.items[0], { message_id: 'msg_latest' }],
+      page: { next_cursor: null },
+    }
+    fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(firstPage), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(secondPage), { status: 200 }))
+
+    await expect(getClaimMessages('clm_history')).resolves.toEqual({
+      items: [firstPage.items[0], secondPage.items[1]],
+      page: { next_cursor: null },
+    })
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/claims/clm_history/messages?limit=100',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }),
+      }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/claims/clm_history/messages?limit=100&cursor=message-cursor-2',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer synthetic-claimant-token' }),
+      }),
+    )
+  })
+
+  it('fails closed when Claim conversation pagination repeats a cursor', async () => {
+    fetch.mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      items: [{ message_id: 'msg_repeated_page' }],
+      page: { next_cursor: 'repeated-message-cursor' },
+    }), { status: 200 })))
+
+    await expect(getClaimMessages('clm_history')).rejects.toMatchObject({
+      code: 'INVALID_PAGINATION',
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('propagates a Claim-wide read error without switching to a Session route', async () => {
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Claim was not found.',
+        retryable: false,
+      },
+    }), { status: 404 }))
+
+    await expect(getClaimMessages('clm_history')).rejects.toMatchObject({
+      code: 'RESOURCE_NOT_FOUND',
+      status: 404,
+    })
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })
 
