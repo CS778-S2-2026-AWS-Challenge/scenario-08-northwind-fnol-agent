@@ -3770,7 +3770,9 @@ function App() {
         )}
         {!isWorkspaceActive && page !== 'home' && page !== 'how-it-works' && (
           <button
-            className="login-button"
+            className={account && isStandaloneClaimHistory
+              ? 'login-button profile-entry-button'
+              : 'login-button'}
             type="button"
             onClick={() => isProfilePage ? leaveProfilePage() : setPage(account ? 'account' : 'login')}
           >
