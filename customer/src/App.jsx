@@ -118,7 +118,7 @@ import { ConversationEvent } from './components/ConversationContext.jsx'
 const HELP_MESSAGE = "I'd like to talk to someone at Northwind."
 
 // From this width the case panel docks beside the conversation instead of floating.
-const DOCKED_PANEL_QUERY = '(min-width: 1440px)'
+const DOCKED_PANEL_QUERY = '(min-width: 981px)'
 const PANEL_SECTIONS_KEY = 'northwind.casePanelSections'
 const DEFAULT_PANEL_SECTIONS = { openItems: true, facts: true, files: true }
 

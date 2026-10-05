@@ -591,6 +591,7 @@ describe('claimant intake projection', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     if (originalCreateObjectUrl) {
       Object.defineProperty(globalThis.URL, 'createObjectURL', originalCreateObjectUrl)
     } else {
@@ -1623,8 +1624,18 @@ describe('claimant intake projection', () => {
       .not.toBeInTheDocument()
   })
 
-  it('closes the floating case panel with Esc or a click outside it', async () => {
+  it.each([
+    { viewport: '980px floating layout', docked: false, expectedClass: 'is-collapsed' },
+    { viewport: '981px docked layout', docked: true, expectedClass: 'is-open' },
+  ])('keeps panel dismissal behavior aligned with the $viewport', async ({ docked, expectedClass }) => {
     const user = userEvent.setup()
+    const matchMedia = vi.fn((query) => ({
+      matches: query === '(min-width: 981px)' && docked,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    vi.stubGlobal('matchMedia', matchMedia)
     api.submitClaimMessage.mockResolvedValue(initialTurn())
     render(<App />)
     await startActiveClaim(user)
@@ -1632,11 +1643,12 @@ describe('claimant intake projection', () => {
     const panel = await openCasePanel(user)
     expect(panel).toHaveClass('is-open')
     await user.keyboard('{Escape}')
-    expect(panel).toHaveClass('is-collapsed')
+    expect(panel).toHaveClass(expectedClass)
 
-    await openCasePanel(user)
+    if (!docked) await openCasePanel(user)
     await user.click(screen.getByText(agentMessage.content.text))
-    expect(panel).toHaveClass('is-collapsed')
+    expect(panel).toHaveClass(expectedClass)
+    expect(matchMedia).toHaveBeenCalledWith('(min-width: 981px)')
   })
 
   it('keeps the latest chat position when the Noted details panel opens', async () => {
