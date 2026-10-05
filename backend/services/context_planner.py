@@ -357,7 +357,7 @@ def _catalogue(
                 cache_segment='service-registry',
             )
         )
-    if 'policy-search' in route.capability_ids and (
+    if route.product_family is not None and (
         context.policy_context_loader is not None or context.knowledge_context_loader is not None
     ):
         entries.append(
@@ -432,11 +432,9 @@ def plan_context(
         ),
     }
     inline: dict[str, Any] = {'turn_focus': turn_focus}
-    product = context.claim.form.get('claim.product_family')
     if (
         include_policy_clause_directory
-        and product is not None
-        and product.status is FormStatus.CONFIRMED
+        and route.product_family is not None
         and context.knowledge_clause_directory_loader is not None
     ):
         directory = context.knowledge_clause_directory_loader()

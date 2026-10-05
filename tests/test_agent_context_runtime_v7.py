@@ -918,14 +918,17 @@ def test_policy_resolver_passes_selection_and_bounded_limit_without_truncation(
         (False, FormStatus.CONFIRMED, 'available'),
     ],
 )
-def test_policy_directory_is_inline_only_for_confirmed_product_lookup(
+def test_policy_directory_is_inline_for_resolved_product_on_any_turn(
     lookup: bool,
     status: FormStatus,
     directory_status: str,
 ) -> None:
     from unittest.mock import Mock
 
-    context = _context('What does my policy say?' if lookup else 'My car was rear-ended.')
+    context = _context(
+        'What does my policy say?' if lookup else 'My car was rear-ended.',
+        incident_type=None if status is FormStatus.PROPOSED else 'motor',
+    )
     product = StructuredFormField(
         value='motor',
         source=FormSource.CLAIMANT,
@@ -951,17 +954,15 @@ def test_policy_directory_is_inline_only_for_confirmed_product_lookup(
     )
     plan = plan_model_turn(context)
     assert plan is not None
-    if lookup and status is FormStatus.CONFIRMED:
-        loader.assert_called_once_with()
-        assert (
-            plan.context_payload['policy_clause_directory']
-            == loader.return_value['policy_clause_directory']
-        )
-        assert plan.context_payload['policy_clause_directory_status'] == directory_status
-        assert plan.context_payload['policy_clause_directory_limitations'] == limitations
-    else:
-        loader.assert_not_called()
-        assert 'policy_clause_directory' not in plan.context_payload
+    assert plan.request_profile.profile_id == 'claimant.lookup.v1'
+    loader.assert_called_once_with()
+    assert (
+        plan.context_payload['policy_clause_directory']
+        == loader.return_value['policy_clause_directory']
+    )
+    assert plan.context_payload['policy_clause_directory_status'] == directory_status
+    assert plan.context_payload['policy_clause_directory_limitations'] == limitations
+    assert any(ref.resource_type == 'policy_version' for ref in plan.context_plan.references)
 
 
 def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
@@ -1061,19 +1062,18 @@ def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
     assert len(gateway.requests) == 1
 
 
-def test_v7_lookup_rejects_a_missing_required_context_continuation() -> None:
+def test_v7_lookup_allows_an_answer_without_context_continuation() -> None:
+    from tests.journey_v8_support import envelope
+
     response = ModelResponse(
-        structured_output=_answer_output(),
+        structured_output=envelope(reply='Your claim is still being reviewed.'),
         completion_status=ModelCompletionStatus.COMPLETE,
     )
     gateway = _RecordingGateway([response])
-
-    with pytest.raises(ModelGatewayError) as error:
-        GatewayAgent(gateway).propose_turn(
-            _context('What is the status of my claim?', conversation_messages=_messages(6))
-        )
-
-    assert error.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    GatewayAgent(gateway).propose_turn(
+        _context('What is the status of my claim?', conversation_messages=_messages(6))
+    )
+    assert gateway.requests[0].required_tool_name is None
     assert len(gateway.requests) == 1
 
 

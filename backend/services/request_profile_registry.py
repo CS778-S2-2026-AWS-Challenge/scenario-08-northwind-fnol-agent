@@ -43,7 +43,7 @@ _PROFILES = {
         max_model_selected_tools=1,
         input_hard_limit=V8_INPUT_HARD_LIMIT,
         output_limit=7500,
-        requires_tool_continuation=True,
+        requires_tool_continuation=False,
     ),
     'claimant.evidence-history.v1': RequestProfile(
         profile_id='claimant.evidence-history.v1',

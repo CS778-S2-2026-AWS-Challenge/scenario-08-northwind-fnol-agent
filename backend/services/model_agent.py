@@ -48,7 +48,6 @@ from backend.domain.models import (
     AgentAction,
     AgentProposalSource,
     CustomerNextStep,
-    FormStatus,
     ModelDecisionProvenance,
     ProposedContentsItem,
     ProposedFormChange,
@@ -92,6 +91,7 @@ from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
 )
+from backend.services.turn_family_resolution import resolve_turn_family
 from backend.services.turn_field_contract import bind_provider_schema
 from backend.services.turn_proposal_validation import (
     ValidatedTurn,
@@ -407,7 +407,11 @@ class GatewayAgent:
             messages=messages,
             response_schema=plan.response_schema,
             tools=tools,
-            required_tool_name='context.resolve' if tools else None,
+            required_tool_name=(
+                'context.resolve'
+                if tools and plan.request_profile.requires_tool_continuation
+                else None
+            ),
             max_output_tokens=plan.request_profile.output_limit,
         )
 
@@ -1492,17 +1496,18 @@ class KnowledgeGroundedAgent:
                 'chunks': [],
                 'limitations': ['Knowledge retrieval is disabled by published configuration.'],
             }
-        family = context.claim.form.get('claim.product_family')
-        product = (
-            _knowledge_product(str(family.value))
-            if family is not None and family.status is FormStatus.CONFIRMED
-            else None
+        resolution = context.turn_family_resolution or resolve_turn_family(
+            context.claim,
+            context.branch_evaluation,
+            context.message_text,
+            model_family_judgment=True,
         )
+        product = _knowledge_product(resolution.product_family)
         if product is None:
             return {
                 'status': 'no_evidence',
                 'chunks': [],
-                'limitations': ['A confirmed product family is required for scoped search.'],
+                'limitations': ['A resolved product family is required for scoped search.'],
             }
         resolution_error = False
         if (

@@ -2223,8 +2223,20 @@ class StaticKnowledgeRetriever:
 
 
 @pytest.mark.parametrize('clause_ids', [['MTR-BEN-03', 'UNKNOWN'], [], ['UNKNOWN']])
+@pytest.mark.parametrize(
+    ('schedule_sections', 'readable_sections'),
+    [
+        (['alternative_transport'], ['alternative transport']),
+        (
+            ['accidental_damage', 'third_party_liability'],
+            ['accidental damage', 'third party liability'],
+        ),
+    ],
+)
 def test_knowledge_grounded_lookup_selects_full_clauses_and_records_trace(
     clause_ids: list[str],
+    schedule_sections: list[str],
+    readable_sections: list[str],
 ) -> None:
     context = _context('Will my policy pay for a rental car while mine is repaired?')
     assert context.runtime_configuration_snapshot is not None
@@ -2249,7 +2261,7 @@ def test_knowledge_grounded_lookup_selects_full_clauses_and_records_trace(
         ),
         policy_context_loader=lambda _limit: {
             'status': 'evidence_found',
-            'facts': {'coverage_sections': ['alternative_transport']},
+            'facts': {'coverage_sections': schedule_sections},
         },
     )
     text = 'A complete synthetic rental benefit. ' * 24 + 'Only if the schedule includes it.'
@@ -2299,7 +2311,7 @@ def test_knowledge_grounded_lookup_selects_full_clauses_and_records_trace(
     expected = ['MTR-BEN-03'] if 'MTR-BEN-03' in clause_ids else []
     assert guidance['returned_clause_ids'] == expected
     assert guidance['not_found'] == (['UNKNOWN'] if 'UNKNOWN' in clause_ids else [])
-    assert result['policy']['facts']['coverage_sections'] == ['alternative_transport']
+    assert result['policy']['facts']['coverage_sections'] == readable_sections
     if expected:
         assert guidance['chunks'][0]['text'] == text
         assert len(text) > 600
@@ -2490,6 +2502,35 @@ def test_knowledge_grounded_lookup_unavailable_has_no_citable_chunks(
     assert result['chunks'] == []
     assert result['returned_clause_ids'] == []
     assert result['status'] == ('no_evidence' if failure == 'unresolved' else 'unavailable')
+
+
+def test_knowledge_scope_uses_recorded_unconfirmed_product_family() -> None:
+    context = _context('Will you pay for a rental car?', incident_type=None)
+    context = replace(
+        context,
+        runtime_configuration_snapshot=None,
+        claim=context.claim.model_copy(
+            update={
+                'form': {
+                    'claim.product_family': StructuredFormField(
+                        value='motor',
+                        source=FormSource.CLAIMANT,
+                        status=FormStatus.PROPOSED,
+                        needed_for=NeededFor.CURRENT_ACTION,
+                        updated_at=datetime.now(UTC),
+                        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_v7'),
+                    )
+                }
+            }
+        ),
+    )
+    agent = KnowledgeGroundedAgent(
+        GatewayAgent(_RecordingGateway([])),
+        FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore()),
+    )
+    scope = agent._knowledge_scope(context)
+    assert isinstance(scope, KnowledgeSearch)
+    assert scope.product == 'motor'
 
 
 def model_turn_output(

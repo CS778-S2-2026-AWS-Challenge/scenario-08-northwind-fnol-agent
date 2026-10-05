@@ -138,11 +138,23 @@ def resolver_for_turn(context: AgentTurnContext, plan: ContextPlan) -> TurnConte
                 result: dict[str, object] = {}
                 if context.policy_context_loader is not None:
                     policy = context.policy_context_loader(limit)
-                    result['policy'] = {
+                    visible_policy = {
                         key: value
                         for key, value in policy.items()
                         if value is not None and value != []
                     }
+                    facts = visible_policy.get('facts')
+                    if isinstance(facts, dict):
+                        sections = facts.get('coverage_sections')
+                        if isinstance(sections, list):
+                            facts = dict(facts)
+                            facts['coverage_sections'] = [
+                                section.replace('_', ' ')
+                                for section in sections
+                                if isinstance(section, str)
+                            ]
+                            visible_policy['facts'] = facts
+                    result['policy'] = visible_policy
                 if context.knowledge_context_loader is not None:
                     result['approved_guidance'] = context.knowledge_context_loader(
                         limit, clause_ids

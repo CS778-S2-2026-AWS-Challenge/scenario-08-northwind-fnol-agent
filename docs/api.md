@@ -1853,15 +1853,17 @@ structured form fact or contents item attributed to an attachment must name that
 ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
 confirmation.
 
-On the v7 Runtime path, Runtime builds the current Claim projection before transport. Ordinary
-profiles make one tool-free call. A lookup profile can resolve one published turn-scoped
-`context.resolve` reference and make one continuation call; the continuation exposes no tools.
+On the v7 Runtime path, Runtime builds the current Claim projection before transport. A
+resolved product family selects the claimant lookup profile on ordinary v8 turns, even without
+policy keywords. It offers one turn-scoped `context.resolve` reference; the model may answer
+without calling it or resolve once and make one continuation call. The continuation exposes no
+tools. Other profiles retain their existing routing and tool behavior.
 Policy/RAG, claimant-owned Claim history, claimant-scoped Evidence history, and older messages use
 separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one isolated,
 mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
 rejected before Claim State mutation.
 
-For a lookup with a confirmed product family, `policy_clause_directory` lists clause IDs and
+For any v8 turn with a resolved product family, `policy_clause_directory` lists clause IDs and
 headings from the validated, scope-matching ingested policy. Its status and limitations are
 explicit when the source is unavailable. The turn pins the product, selected version and effective
 instant for both listing and fetching. A release-selected version remains authoritative; without
@@ -1876,9 +1878,10 @@ unknown or out-of-scope IDs. Empty selection returns `status: no_evidence`,
 Structured results that exceed the reference budget are rejected, not silently shortened.
 The model-visible chunk contains its `chunk_id` and complete `text`; Runtime retains the full
 document, version, source URI, checksum, and section provenance server-side for citation checks.
-Empty schedule metadata arrays are omitted from the bounded result. Runtime trace records requested
-and returned clause IDs separately. Only chunks actually returned during this turn authorize
-citations or advisory policy judgments.
+Empty schedule metadata arrays are omitted from the bounded result. Schedule coverage-section codes
+are rendered as readable names in the model-facing tool result; stored facts retain their codes.
+Runtime trace records requested and returned clause IDs separately. Only chunks actually returned
+during this turn authorize citations or advisory policy judgments.
 The internal search endpoint and its keyword ranking retain their existing contract.
 For an intake proposal, Runtime compiles one `TurnFieldContract` from the exact branch evaluation
 and Field Registry snapshot used by that turn. Its contract identity, registry version, branch

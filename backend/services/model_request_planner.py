@@ -203,16 +203,23 @@ def plan_model_turn(
     published_profiles = (
         runtime_policy.tool_policy.request_profiles if runtime_policy is not None else None
     )
-    needs_lookup = route.task is not None and (
-        (
-            bool({'policy-search', 'claim-history'} & set(route.capability_ids))
-            and (
-                context.policy_context_loader is not None
-                or context.knowledge_context_loader is not None
-                or context.claim_history_context_loader is not None
-            )
+    has_lookup_source = any(
+        loader is not None
+        for loader in (
+            context.policy_context_loader,
+            context.knowledge_context_loader,
+            context.claim_history_context_loader,
         )
-        or (route.task.value == 'status_question' and len(context.conversation_messages) > 4)
+    )
+    needs_lookup = (route.product_family is not None and has_lookup_source) or (
+        route.task is not None
+        and (
+            (
+                bool({'policy-search', 'claim-history'} & set(route.capability_ids))
+                and has_lookup_source
+            )
+            or (route.task.value == 'status_question' and len(context.conversation_messages) > 4)
+        )
     )
     if model_configuration.prompt_version != CLAIMANT_V8_PROMPT_ID:
         raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
@@ -312,7 +319,7 @@ def plan_model_turn(
         reserved_tokens=reserved,
         summary=summary or context.rolling_summary,
         field_contract=field_contract,
-        include_policy_clause_directory=profile.profile_id == 'claimant.lookup.v1',
+        include_policy_clause_directory=route.product_family is not None,
     )
     recent_history_tokens = next(
         (
