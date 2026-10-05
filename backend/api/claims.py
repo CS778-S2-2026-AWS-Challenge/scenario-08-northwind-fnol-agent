@@ -86,7 +86,10 @@ from backend.services.external_services import (
     grant_assessor_consent,
     request_assessor_routing,
 )
-from backend.services.message_history import list_claim_messages
+from backend.services.message_history import (
+    list_claim_conversation_messages,
+    list_claim_messages,
+)
 from backend.services.messages import submit_message
 from backend.services.model_profiles import select_model_profile
 from backend.services.protected_values import ProtectedValueAdapter
@@ -730,6 +733,74 @@ def create_message(
         principal.subject,
         claim_id,
         session_id,
+    )
+    return result
+
+
+@router.get(
+    '/{claim_id}/messages',
+    response_model=MessageListResponse,
+    description=(
+        'Returns the complete claimant-visible conversation for one owned Claim across all of '
+        'its Sessions.'
+    ),
+)
+def read_claim_conversation_messages(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    before: datetime | None = Query(default=None),
+    after: datetime | None = Query(default=None),
+) -> MessageListResponse:
+    """List a claimant's complete visible conversation for one owned Claim.
+
+    Args:
+        claim_id: Claim whose message history is requested.
+        request: Current HTTP request and application dependencies.
+        principal: Claimant identity resolved at the transport boundary.
+        limit: Maximum number of visible messages to return.
+        cursor: Opaque cursor returned by a previous page.
+        before: Optional exclusive upper timestamp bound.
+        after: Optional exclusive lower timestamp bound.
+
+    Returns:
+        One chronological page of claimant-visible messages.
+
+    Raises:
+        ApiError: If the Claim is unavailable to the claimant or a filter is invalid.
+    """
+
+    context = {
+        'request_id': str(getattr(request.state, 'request_id', 'unavailable')),
+        'claim_id': claim_id,
+    }
+    try:
+        result = list_claim_conversation_messages(
+            repository_for(request),
+            principal,
+            claim_id,
+            limit=limit,
+            cursor=cursor,
+            before=before,
+            after=after,
+        )
+    except ApiError as error:
+        logger.info(
+            'claim_conversation_messages.list',
+            extra={**context, 'outcome': 'rejected', 'error_code': error.code},
+        )
+        raise
+    except Exception:
+        logger.exception(
+            'claim_conversation_messages.list',
+            extra={**context, 'outcome': 'failed', 'error_code': 'INTERNAL_ERROR'},
+        )
+        raise
+    logger.info(
+        'claim_conversation_messages.list',
+        extra={**context, 'outcome': 'succeeded', 'item_count': len(result.items)},
     )
     return result
 

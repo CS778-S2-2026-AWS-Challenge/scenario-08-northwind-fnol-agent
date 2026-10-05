@@ -21,7 +21,31 @@
 .product-header.is-intake-header .support-button { padding: 0 var(--space-4); font-size: var(--font-size-caption); }
 
 /* Left rail: an icon strip that opens to the conversation list. */
+.intake-history { padding: var(--space-3) var(--space-3) 0; }
 @media (min-width: 641px) {
+  /* Allocate the visible header first, then let the workspace consume every
+     remaining viewport pixel without changing either sidebar's layout. */
+  .customer-app.workspace-shell {
+    display: grid;
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .customer-app.workspace-shell > .intake-page {
+    position: fixed;
+    inset-block: var(--size-header-compact) 0;
+    inset-inline: 0;
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    overflow: hidden;
+    /* Keep focus-driven browser scrolling from moving the workspace off the
+       viewport and exposing the shell background below the composer. */
+    grid-template-rows: minmax(0, 1fr);
+  }
   .intake-page.details-closed,
   .intake-page.details-open {
     grid-template-columns: var(--claimant-rail-width) minmax(0, 1fr) var(--claimant-details-panel-width);
@@ -57,12 +81,74 @@
   .intake-page:has(.intake-history.is-rail-open).details-closed {
     grid-template-columns: var(--claimant-workspace-nav-max) minmax(0, 1fr);
   }
-  /* The floating panel stops under the title bar so the status stays in reach. */
-  .intake-details-panel { inset-block: var(--claimant-title-bar-height) 0; }
+  /* Keep the panel as an overlay only while the compact navigation leaves too
+     little room for a readable conversation column. */
+  .intake-details-panel { inset-block: 0; }
+}
+
+/* Once the viewport can support all three regions, reserve the panel's column
+   so opening it narrows the conversation instead of covering its messages. */
+@media (max-width: 1439px) and (min-width: 981px) {
+  .intake-page.details-open {
+    grid-template-columns: var(--claimant-rail-width) minmax(0, 1fr) var(--claimant-details-panel-width);
+  }
+  .intake-page:has(.intake-history.is-rail-open).details-open {
+    grid-template-columns: var(--claimant-workspace-nav-max) minmax(0, 1fr) var(--claimant-details-panel-width);
+  }
+  .intake-details-panel {
+    position: relative;
+    inset: auto;
+    right: auto;
+    width: 100%;
+    box-shadow: var(--claimant-workspace-sidebar-shadow);
+  }
 }
 .history-actions button { display: flex; align-items: center; gap: var(--space-2); }
 .rail-icon { display: inline-grid; place-items: center; width: var(--space-6); color: var(--color-text-muted); font-weight: var(--font-weight-semibold); }
-.rail-toggle { border: 0; background: transparent; cursor: pointer; }
+.rail-icon svg { width: var(--space-4); height: var(--space-4); fill: none; stroke: currentColor; stroke-width: var(--claimant-icon-stroke-width); stroke-linecap: round; stroke-linejoin: round; }
+.history-actions { gap: 0; padding-bottom: var(--space-2); }
+.intake-history.is-rail-open .history-actions { position: relative; }
+.history-actions .rail-toggle {
+  display: grid;
+  width: var(--size-control-touch);
+  height: var(--size-control-touch);
+  min-height: var(--size-control-touch);
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  background: transparent;
+  box-shadow: var(--shadow-none);
+  cursor: pointer;
+  transition: background var(--duration-standard) var(--ease-standard), border-color var(--duration-standard) var(--ease-standard), box-shadow var(--duration-standard) var(--ease-standard), color var(--duration-standard) var(--ease-standard);
+}
+.intake-history.is-rail-open .history-actions .rail-toggle {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+}
+.history-actions .rail-toggle:hover:not(:disabled),
+.history-actions .rail-toggle:focus-visible {
+  color: var(--color-text-primary);
+  background: var(--color-accent-soft);
+  box-shadow: var(--shadow-none);
+}
+.history-actions .rail-toggle:focus-visible {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+.rail-toggle-icon {
+  width: var(--space-4);
+  height: var(--space-4);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--claimant-icon-stroke-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* Tool pages (privacy, my claims) are pages of their own, not a squeezed centre. */
 .intake-page.is-utility-view,
@@ -119,10 +205,10 @@
 }
 .case-status:hover + .case-status-tip, .case-status:focus-visible + .case-status-tip { visibility: visible; opacity: 1; }
 
-/* Messages: the assistant and staff write without a bubble. */
-.workspace-shell .agent-text { margin-top: var(--space-1); }
+/* Messages: the assistant and staff use a restrained neutral bubble. */
+.workspace-shell .agent-text { margin-top: 0; }
 .msg-agent .agent-body, .msg-staff .staff-message-body { position: relative; min-width: 0; }
-.agent-message-menu { display: flex; justify-content: flex-end; min-height: var(--space-5); opacity: 0; transition: opacity var(--duration-standard) var(--ease-standard); }
+.agent-message-menu { display: flex; width: 100%; justify-content: flex-end; min-height: var(--space-5); opacity: 0; transition: opacity var(--duration-standard) var(--ease-standard); }
 .msg-agent:hover .agent-message-menu, .agent-message-menu:focus-within { opacity: 1; }
 .agent-message-menu .listen-message { margin: 0; }
 .staff-text { color: var(--color-text-primary); }
@@ -169,14 +255,53 @@
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
 }
-.turn-fact-list { padding: var(--space-3); border: var(--border-component); border-radius: var(--radius-lg); background: var(--color-surface); font-size: var(--font-size-caption); animation: claimant-rise var(--duration-standard) var(--ease-standard); }
-.turn-fact-list dl { display: grid; gap: var(--space-1); margin: 0; }
-.turn-fact-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; align-items: center; gap: var(--space-2); }
-.turn-fact-row dt { color: var(--color-text-muted); }
-.turn-fact-row dd { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; overflow-wrap: anywhere; }
-.turn-fact-state { color: var(--claimant-open-items-accent); font-weight: var(--font-weight-semibold); }
-.turn-fact-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
-.turn-fact-list .recorded-facts-editor { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.captured-information-card {
+  display: grid;
+  width: 100%;
+  gap: 0;
+  overflow: hidden;
+  border: var(--border-subtle);
+  border-radius: var(--radius-xl);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  text-align: left;
+}
+.captured-information-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4); border-bottom: var(--border-subtle); }
+.captured-information-title { display: flex; min-width: 0; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); }
+.captured-information-title h3 { margin: 0; font-size: var(--font-size-body); font-weight: var(--font-weight-medium); line-height: var(--line-height-heading); }
+.captured-information-title svg { width: var(--space-5); height: var(--space-5); flex: 0 0 var(--space-5); fill: none; stroke: currentColor; stroke-width: var(--claimant-icon-stroke-width); stroke-linecap: round; stroke-linejoin: round; }
+.captured-information-status { display: inline-flex; align-items: center; gap: var(--space-1); margin: 0; color: var(--color-accent-strong); font-size: var(--font-size-body); font-weight: var(--font-weight-medium); }
+.captured-information-status svg { width: var(--font-size-body); height: var(--font-size-body); fill: none; stroke: currentColor; stroke-width: var(--claimant-icon-stroke-width); stroke-linecap: round; stroke-linejoin: round; }
+.captured-information-list { display: grid; gap: var(--space-3); margin: 0; padding: var(--space-4) var(--space-4) var(--space-3); }
+.captured-information-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); align-items: baseline; gap: var(--space-4); }
+.captured-information-row dt { color: var(--color-text-secondary); font-size: var(--font-size-body); }
+.captured-information-row dd { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); margin: 0; }
+.captured-information-value { font-size: var(--font-size-body); overflow-wrap: anywhere; }
+.captured-information-edit,
+.captured-information-confirm {
+  min-height: var(--size-control-touch);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-accent-strong);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-control);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+.captured-information-edit { display: inline-flex; align-items: center; gap: var(--space-2); }
+.captured-information-edit svg { width: var(--space-5); height: var(--space-5); fill: none; stroke: currentColor; stroke-width: var(--claimant-icon-stroke-width); stroke-linecap: round; stroke-linejoin: round; }
+.captured-information-edit:hover:not(:disabled),
+.captured-information-confirm:hover:not(:disabled) { background: var(--color-accent-soft); }
+.captured-information-edit:focus-visible,
+.captured-information-confirm:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
+.captured-information-edit:disabled,
+.captured-information-confirm:disabled { cursor: default; opacity: var(--opacity-disabled); }
+.captured-information-card .recorded-facts-editor { display: flex; min-width: 0; flex-wrap: wrap; gap: var(--space-2); grid-column: 1 / -1; }
+.captured-information-review { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-4) var(--space-4); }
+.captured-information-review p { max-width: var(--measure-reading); margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-body); line-height: var(--line-height-body); }
+.captured-information-confirm { flex: 0 0 auto; }
 
 /* System events are a thin line with one sentence. */
 .conversation-event, .conversation-system-event {
@@ -304,6 +429,10 @@
   .case-status-sync, .case-status-tip { display: none; }
   .turn-chips .turn-chip, .turn-chips button.turn-chip { min-width: 0; height: auto; min-height: var(--claimant-chip-height-compact); padding: 0 var(--space-2); border-radius: var(--radius-md); font-size: var(--font-size-micro); }
   .turn-chips { gap: var(--space-1); }
+  .captured-information-header { gap: var(--space-1); padding: var(--space-3); }
+  .captured-information-list { padding: var(--space-3); }
+  .captured-information-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  .captured-information-review { align-items: flex-start; flex-direction: column; padding: 0 var(--space-3) var(--space-3); }
   .header-my-claims, .product-header.is-intake-header .support-button { padding: 0 var(--space-2); }
   .intake-details-panel:not(.is-collapsed) { height: var(--claimant-case-sheet-half-height); transition: height var(--duration-layout) var(--ease-standard); }
   .intake-details-panel.is-sheet-full:not(.is-collapsed) { height: var(--claimant-case-sheet-max-height); }
@@ -315,8 +444,8 @@
 @keyframes claimant-pin-in { from { opacity: 0; transform: translateY(calc(var(--space-4) * -1)); } to { opacity: 1; transform: none; } }
 @keyframes claimant-pulse { from { opacity: var(--claimant-pulse-dim-opacity); } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .turn-fact-list, .pinned-card, .agent-turn-pulse { animation: none; }
-  .agent-message-menu, .case-status-tip, .intake-details-panel { transition: none; }
+  .pinned-card, .agent-turn-pulse { animation: none; }
+  .agent-message-menu, .case-status-tip, .intake-details-panel, .history-actions .rail-toggle { transition: none; }
 }
 
 /* Case panel sections fold from their title; a thin line separates them. */

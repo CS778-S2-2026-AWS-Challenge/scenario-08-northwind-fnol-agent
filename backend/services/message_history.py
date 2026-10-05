@@ -13,10 +13,12 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     PageInfo,
+    WorkingClaim,
 )
 from backend.domain.open_items import claimant_message_content
 from backend.domain.recovery_policy_registry import claimant_recovery_projection
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.claim_conversation import claim_messages
 from backend.services.external_service_offers import message_external_actions
 
 
@@ -25,6 +27,14 @@ def _session_not_found() -> ApiError:
         status_code=404,
         code='RESOURCE_NOT_FOUND',
         message='The session was not found.',
+    )
+
+
+def _claim_not_found() -> ApiError:
+    return ApiError(
+        status_code=404,
+        code='RESOURCE_NOT_FOUND',
+        message='The claim was not found.',
     )
 
 
@@ -81,19 +91,16 @@ def _decode_message_cursor(cursor: str | None) -> tuple[datetime, str] | None:
         raise _invalid_cursor() from error
 
 
-def list_claim_messages(
+def _claimant_message_page(
     repository: PersistenceRepository,
-    principal: Principal,
-    claim_id: str,
-    session_id: str,
+    claim: WorkingClaim,
+    messages: list[MessageRecord],
     *,
     limit: int,
     cursor: str | None,
     before: datetime | None,
     after: datetime | None,
 ) -> MessageListResponse:
-    if repository.get_session(claim_id, session_id, principal.subject) is None:
-        raise _session_not_found()
     for field_name, timestamp in {'before': before, 'after': after}.items():
         if timestamp is not None and timestamp.utcoffset() is None:
             raise ApiError(
@@ -111,11 +118,7 @@ def list_claim_messages(
     visible_messages = order_messages(
         [
             message
-            for message in repository.list_messages(
-                claim_id,
-                session_id,
-                principal.subject,
-            )
+            for message in messages
             if message.visibility is not MessageVisibility.INTERNAL_ONLY
         ]
     )
@@ -149,7 +152,6 @@ def list_claim_messages(
         if page_messages and len(visible_messages) > limit
         else None
     )
-    claim = repository.get_claim(claim_id, principal.subject)
     return MessageListResponse(
         items=[
             _claimant_message(message).model_copy(
@@ -161,7 +163,7 @@ def list_claim_messages(
                     ),
                     'message_actions': (
                         message_external_actions(repository, claim, message.message_id)
-                        if claim is not None and message.actor is ActorType.AGENT
+                        if message.actor is ActorType.AGENT
                         else []
                     ),
                 }
@@ -169,4 +171,73 @@ def list_claim_messages(
             for message in page_messages
         ],
         page=PageInfo(next_cursor=next_cursor),
+    )
+
+
+def list_claim_messages(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    session_id: str,
+    *,
+    limit: int,
+    cursor: str | None,
+    before: datetime | None,
+    after: datetime | None,
+) -> MessageListResponse:
+    if repository.get_session(claim_id, session_id, principal.subject) is None:
+        raise _session_not_found()
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _session_not_found()
+    return _claimant_message_page(
+        repository,
+        claim,
+        repository.list_messages(claim_id, session_id, principal.subject),
+        limit=limit,
+        cursor=cursor,
+        before=before,
+        after=after,
+    )
+
+
+def list_claim_conversation_messages(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    *,
+    limit: int,
+    cursor: str | None,
+    before: datetime | None,
+    after: datetime | None,
+) -> MessageListResponse:
+    """Return the claimant-visible conversation across every Session of one Claim.
+
+    Args:
+        repository: Persistence boundary used to load the owned Claim and its messages.
+        principal: Authenticated or browser-session claimant identity.
+        claim_id: Claim whose complete conversation is requested.
+        limit: Maximum number of visible messages to return.
+        cursor: Opaque cursor returned by a previous message page.
+        before: Optional exclusive upper timestamp bound.
+        after: Optional exclusive lower timestamp bound.
+
+    Returns:
+        One chronological page of claimant-visible messages.
+
+    Raises:
+        ApiError: If the Claim is unavailable to the claimant or a filter is invalid.
+    """
+
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _claim_not_found()
+    return _claimant_message_page(
+        repository,
+        claim,
+        claim_messages(repository, claim),
+        limit=limit,
+        cursor=cursor,
+        before=before,
+        after=after,
     )

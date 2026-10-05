@@ -116,6 +116,23 @@ written atomically with the accepted claimant message recovery and contains no r
 output, provider payload, or additional claimant content. A failed trace remains retryable;
 it is diagnostic evidence, not a completed Runtime turn.
 
+For a rejected `consistency_recall` rewrite, the diagnostic `code` has these stable values:
+
+| Code | Rejected stage |
+| --- | --- |
+| `consistency_recall_completion_status` | The provider returned a non-complete response. |
+| `consistency_recall_provider_output_invalid` | The adapter rejected malformed provider output before returning a response, including non-JSON structured content. |
+| `consistency_recall_output_missing` | A returned complete response had no structured output. |
+| `consistency_recall_output_schema_validation` | Returned structured output failed schema validation. |
+| `consistency_recall_proposal_validation` | A returned proposal failed a later deterministic validation. |
+| `consistency_recall_truthfulness` | The rewritten reply still contradicted the ledger. |
+| `consistency_recall_gateway_failure` | Another gateway error, such as timeout or provider failure, prevented a response. |
+
+Only output-schema validation may add a sanitized, bounded structural `path` when available;
+an extra-field rejection omits the model-chosen key from that path.
+These diagnostics retain the original gateway reason, do not change recovery or retry policy,
+and do not expose the model's reply.
+
 ## Audit Event Contract
 
 The provider-neutral structural envelope is defined by `AuditEventEnvelope` in

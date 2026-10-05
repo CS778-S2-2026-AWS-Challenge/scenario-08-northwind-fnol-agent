@@ -47,6 +47,8 @@ def _validation_path(errors: Iterable[object]) -> str | None:
     location = first.get('loc')
     if not isinstance(location, tuple | list):
         return None
+    if first.get('type') == 'extra_forbidden':
+        location = location[:-1]
     parts: list[str] = []
     for item in location:
         if isinstance(item, int):
@@ -55,7 +57,8 @@ def _validation_path(errors: Iterable[object]) -> str | None:
             parts.append(item)
         else:
             return None
-    return '.'.join(parts) or None
+    path = '.'.join(parts)
+    return path if 0 < len(path) <= 120 else None
 
 
 _ISOLATED_INSTRUCTION = (

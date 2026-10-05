@@ -17,10 +17,12 @@ export function AgentTurnPlaceholder({ progress, turnId }) {
         <div className="message-avatar agent-avatar" aria-hidden="true">N</div>
         <div className="agent-body">
           <div className="agent-label">Claims assistant</div>
-          <p className="agent-turn-current" role="status">
-            <span className="agent-turn-pulse" aria-hidden="true" />
-            {text}
-          </p>
+          <div className="chat-bubble agent-bubble agent-turn-bubble">
+            <p className="agent-turn-current" role="status">
+              <span className="agent-turn-pulse" aria-hidden="true" />
+              {text}
+            </p>
+          </div>
         </div>
       </div>
     </article>

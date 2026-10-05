@@ -118,6 +118,15 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     ports:
       - "8000:8000"
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        if [ -z "$${AGENT_RUNTIME_PROFILE:-}" ]; then
+        echo 'AGENT_RUNTIME_PROFILE is required; set it to one of: controlled, model_gateway.' >&2;
+        exit 1;
+        fi;
+        exec python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
     volumes:
       - northwind-backend-state:/var/lib/northwind
     restart: unless-stopped
@@ -147,13 +156,14 @@ services:
       NORTHWIND_KNOWLEDGE_BUCKET: northwind-knowledge
       NORTHWIND_OBJECT_STORAGE_REGION: ${NORTHWIND_OBJECT_STORAGE_REGION:-us-east-1}
     command:
-      - python
-      - -m
-      - backend.recovery_worker_main
-      - --limit
-      - "50"
-      - --interval-seconds
-      - "30"
+      - /bin/sh
+      - -c
+      - >-
+        if [ -z "$${AGENT_RUNTIME_PROFILE:-}" ]; then
+        echo 'AGENT_RUNTIME_PROFILE is required; set it to one of: controlled, model_gateway.' >&2;
+        exit 1;
+        fi;
+        exec python -m backend.recovery_worker_main --limit 50 --interval-seconds 30
     restart: unless-stopped
 
 volumes:

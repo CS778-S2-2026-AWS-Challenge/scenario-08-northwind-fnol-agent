@@ -1671,8 +1671,9 @@ Response `200` uses the standard collection envelope. Each item contains
 `customer_next_step`, `created_at`, `updated_at`, and `can_resume`.
 
 `conversation_session_id` is the claimant-owned active conversation identifier. Clients use it
-with the claimant message endpoint to reopen Claim-scoped staff communication. It is `null` when
-the Claim has no active conversation and does not expose staff routing or ownership data.
+as the write and realtime authority for the current conversation. Complete conversation readback
+uses the Claim message collection. The identifier is `null` when the Claim has no active
+conversation and does not expose staff routing or ownership data.
 
 ### `GET /api/v1/claims/{claim_id}`
 
@@ -2113,9 +2114,20 @@ response. Selection state (`required_now`, `candidate_now`, or `pending_later` i
 is separate from the stored value state. The projection is `null` when the Claim has no applied
 branch evaluation.
 
+### `GET /api/v1/claims/{claim_id}/messages`
+
+Returns the complete claimant-visible conversation for an owned Claim across all of its Sessions,
+ordered oldest-first. Supported query parameters are `before`, `after`, `limit`, and `cursor`.
+The response uses the standard collection envelope. Staff-only notes and hidden system messages
+are excluded before pagination. This read-only collection does not select or create an active
+Session; the active `conversation_session_id` remains the authority for writes and realtime events.
+
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 
-Returns claimant-visible messages ordered newest-last by default. Supported query: `before`, `after`, `limit`, and `cursor`. Staff-only notes and hidden system messages are excluded.
+Returns claimant-visible messages for one owned Session, ordered oldest-first. Supported query
+parameters are `before`, `after`, `limit`, and `cursor`. Staff-only notes and hidden system
+messages are excluded before pagination. This compatibility collection remains Session-scoped;
+clients that restore a Claim conversation use the Claim message collection instead.
 
 ### `GET /api/v1/realtime/events`
 

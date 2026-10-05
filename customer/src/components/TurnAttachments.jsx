@@ -6,11 +6,9 @@ import FactEditor from './FactEditor.jsx'
 import { displayValue, isEditable } from '../recordedFacts.js'
 import { claimantStatusCopy } from '../externalServiceCopy.js'
 
-// The one attachment row under an assistant reply. A reply is text plus at most
-// this row of small chips: what was noted (facts), what was added or passed on
-// (receipts), a service waiting on the claimant, how a file was read, the policy
-// clauses the reply relies on, and the next step. Chips stay folded; details
-// open in place (facts) or pinned at the top of the case panel (everything else).
+// The attachments under an assistant reply. Recorded facts use a structured
+// summary so their meaning, state, and correction action stay visible. Receipts,
+// services, file reads, policy clauses, and the next step remain compact chips.
 
 function Chip({ className = '', children, ...props }) {
   const Element = props.onClick ? 'button' : 'span'
@@ -55,14 +53,50 @@ function ChipUpload({ item, onUpload, busy }) {
   )
 }
 
-function FactList({ id, facts, fieldInputs, busy, onConfirm, onSave, onClose }) {
+function RecordedIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="m5 12 4 4L19 6" />
+    </svg>
+  )
+}
+
+function ClipboardIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M9 5H6a2 2 0 0 0-2 2v13h16V7a2 2 0 0 0-2-2h-3" />
+      <path d="M9 3h6v4H9zM9 13l2 2 4-4" />
+    </svg>
+  )
+}
+
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="m14 6 4 4M4 20l1-5L16 4l4 4L9 19l-5 1Z" />
+    </svg>
+  )
+}
+
+function CapturedInformationCard({ facts, fieldInputs, busy, onConfirm, onSave }) {
+  const titleId = useId()
   const [editingCode, setEditingCode] = useState(null)
   const toCheck = facts.filter((fact) => fact.toCheck)
   return (
-    <section className="turn-fact-list" id={id} aria-label="Just noted">
-      <dl>
+    <section className="captured-information-card" aria-labelledby={titleId}>
+      <header className="captured-information-header">
+        <div className="captured-information-title">
+          <ClipboardIcon />
+          <h3 id={titleId}>Captured information</h3>
+        </div>
+        <p className="captured-information-status">
+          <RecordedIcon />
+          <span>Recorded</span>
+        </p>
+      </header>
+      <dl className="captured-information-list">
         {facts.map((fact) => (
-          <div className="turn-fact-row" key={fact.fieldCode}>
+          <div className="captured-information-row" key={fact.fieldCode}>
             <dt>{fact.label}</dt>
             <dd>
               {editingCode === fact.fieldCode ? (
@@ -75,37 +109,39 @@ function FactList({ id, facts, fieldInputs, busy, onConfirm, onSave, onClose }) 
                 />
               ) : (
                 <>
-                  <span>{displayValue(fact, fieldInputs?.[fact.fieldCode])}</span>
-                  {fact.toCheck && <span className="turn-fact-state">To check</span>}
+                  <span className="captured-information-value">
+                    {displayValue(fact, fieldInputs?.[fact.fieldCode])}
+                  </span>
+                  {isEditable(fact) && (
+                    <button
+                      className="captured-information-edit"
+                      type="button"
+                      aria-label={`Edit ${fact.label} in captured information`}
+                      disabled={busy}
+                      onClick={() => setEditingCode(fact.fieldCode)}
+                    >
+                      <EditIcon />
+                      Edit
+                    </button>
+                  )}
                 </>
               )}
             </dd>
-            {editingCode !== fact.fieldCode && isEditable(fact) && (
-              <button
-                className="text-button turn-fact-edit"
-                type="button"
-                aria-label={`Change ${fact.label}`}
-                disabled={busy}
-                onClick={() => setEditingCode(fact.fieldCode)}
-              >
-                Change
-              </button>
-            )}
           </div>
         ))}
       </dl>
-      <div className="turn-fact-actions">
+      <div className="captured-information-review">
+        <p>Please review this detail. You can correct it at any time.</p>
         {toCheck.length > 0 && (
           <button
-            className="primary-button"
+            className="captured-information-confirm"
             type="button"
             disabled={busy}
-            onClick={() => onConfirm(toCheck.map((fact) => fact.fieldCode))}
+            onClick={() => onConfirm?.(toCheck.map((fact) => fact.fieldCode))}
           >
-            All correct
+            Looks right
           </button>
         )}
-        <button className="secondary-button" type="button" onClick={onClose}>Close</button>
       </div>
     </section>
   )
@@ -132,30 +168,24 @@ export default function TurnAttachments({
   onOpenReceipt,
   onPin,
 }) {
-  const listId = useId()
-  const [factsOpen, setFactsOpen] = useState(false)
-  const hasChips = facts.length > 0 || receipts.length > 0 || services.length > 0
+  const hasChips = receipts.length > 0 || services.length > 0
     || fileReads.length > 0 || clauses.length > 0 || nextStep
-  if (!hasChips && !scopeNote) return null
+  if (facts.length === 0 && !hasChips && !scopeNote) return null
 
   return (
     <div className="turn-attachments">
       {scopeNote && <p className="turn-scope-note">{scopeNote}</p>}
+      {facts.length > 0 && (
+        <CapturedInformationCard
+          facts={facts}
+          fieldInputs={fieldInputs}
+          busy={busy}
+          onConfirm={onConfirmFacts}
+          onSave={onSaveFact}
+        />
+      )}
       {hasChips && (
         <div className="turn-chips">
-          {facts.map((fact) => (
-            <Chip
-              key={fact.fieldCode}
-              className={fact.toCheck ? 'is-check' : ''}
-              aria-expanded={factsOpen}
-              aria-controls={listId}
-              aria-label={`${fact.label}: ${displayValue(fact, fieldInputs?.[fact.fieldCode])}${fact.toCheck ? ' (to check)' : ''}`}
-              title={`${fact.label}: ${displayValue(fact, fieldInputs?.[fact.fieldCode])}`}
-              onClick={() => setFactsOpen((open) => !open)}
-            >
-              <span className="turn-chip-text">{displayValue(fact, fieldInputs?.[fact.fieldCode])}</span>
-            </Chip>
-          ))}
           {receipts.map((item) => {
             const chip = receiptChip(item)
             return (
@@ -206,20 +236,6 @@ export default function TurnAttachments({
             </Chip>
           )}
         </div>
-      )}
-      {factsOpen && facts.length > 0 && (
-        <FactList
-          id={listId}
-          facts={facts}
-          fieldInputs={fieldInputs}
-          busy={busy}
-          onConfirm={async (codes) => {
-            await onConfirmFacts?.(codes)
-            setFactsOpen(false)
-          }}
-          onSave={onSaveFact}
-          onClose={() => setFactsOpen(false)}
-        />
       )}
     </div>
   )
