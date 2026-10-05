@@ -1380,7 +1380,7 @@ function App() {
           const messagesGeneration = activeSessionId ? beginMessagesReadback() : null
           const [currentClaim, conversation, evidence] = await Promise.all([
             getClaim(claimId),
-            activeSessionId ? getClaimMessages(claimId, activeSessionId) : Promise.resolve(null),
+            activeSessionId ? getClaimMessages(claimId) : Promise.resolve(null),
             getClaimEvidence(claimId),
           ])
           if (
@@ -1489,7 +1489,7 @@ function App() {
         }
         if (resources.has('messages') && activeSessionId) {
           const messagesGeneration = beginMessagesReadback()
-          refreshes.push(getClaimMessages(claimId, activeSessionId).then((conversation) => {
+          refreshes.push(getClaimMessages(claimId).then((conversation) => {
             if (!active) return
             applyMessagesReadback(conversation.items, {
               generation: messagesGeneration,
@@ -2010,10 +2010,7 @@ function App() {
       !reconciliationIsCurrent()
       || !isSessionPauseIdentityCurrent(operation)
     ) return null
-    const conversation = await getClaimMessages(
-      currentClaim.claim_id,
-      resumedSession.session_id,
-    )
+    const conversation = await getClaimMessages(currentClaim.claim_id)
     if (
       !reconciliationIsCurrent()
       || !isSessionPauseIdentityCurrent(operation)
@@ -2348,7 +2345,7 @@ function App() {
       if (historicalTurn) {
         const generation = beginMessagesReadback()
         try {
-          const conversation = await getClaimMessages(activeClaim.claim_id, activeSessionId)
+          const conversation = await getClaimMessages(activeClaim.claim_id)
           applyMessagesReadback(conversation.items, {
             generation,
             claimId: activeClaim.claim_id,
@@ -3000,7 +2997,7 @@ function App() {
       if (!isClaimTransitionCurrent(transition)) return
       const current = await getClaim(claimId)
       if (!isClaimTransitionCurrent(transition)) return
-      const conversation = await getClaimMessages(claimId, session.session_id)
+      const conversation = await getClaimMessages(claimId)
       if (!isClaimTransitionCurrent(transition)) return
       clearComposerAttachments()
       replaceActiveClaimContext(current, session.session_id)
@@ -3258,7 +3255,7 @@ function App() {
       const current = await getClaim(claimId)
       if (!isClaimTransitionCurrent(transition)) return
       const conversationSessionId = current.conversation_session_id
-      const conversation = await getClaimMessages(claimId, conversationSessionId)
+      const conversation = await getClaimMessages(claimId)
       if (!isClaimTransitionCurrent(transition)) return
       clearComposerAttachments()
       replaceActiveClaimContext(current, conversationSessionId)

@@ -169,7 +169,7 @@ describe('claim message contract', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(firstPage), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(secondPage), { status: 200 }))
 
-    await expect(getClaimMessages('clm_history', 'ses_history')).resolves.toEqual({
+    await expect(getClaimMessages('clm_history')).resolves.toEqual({
       items: [firstPage.items[0], secondPage.items[1]],
       page: { next_cursor: null },
     })
@@ -195,35 +195,26 @@ describe('claim message contract', () => {
       page: { next_cursor: 'repeated-message-cursor' },
     }), { status: 200 })))
 
-    await expect(getClaimMessages('clm_history', 'ses_history')).rejects.toMatchObject({
+    await expect(getClaimMessages('clm_history')).rejects.toMatchObject({
       code: 'INVALID_PAGINATION',
     })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
-  it('uses the Session message route only when an older backend lacks the Claim route', async () => {
-    fetch
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        error: {
-          code: 'RESOURCE_NOT_FOUND',
-          message: 'Not Found',
-          retryable: false,
-        },
-      }), { status: 404 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        items: [{ message_id: 'msg_legacy_backend' }],
-        page: { next_cursor: null },
-      }), { status: 200 }))
+  it('propagates a Claim-wide read error without switching to a Session route', async () => {
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Claim was not found.',
+        retryable: false,
+      },
+    }), { status: 404 }))
 
-    await expect(getClaimMessages('clm_history', 'ses_history')).resolves.toEqual({
-      items: [{ message_id: 'msg_legacy_backend' }],
-      page: { next_cursor: null },
+    await expect(getClaimMessages('clm_history')).rejects.toMatchObject({
+      code: 'RESOURCE_NOT_FOUND',
+      status: 404,
     })
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      '/api/v1/claims/clm_history/sessions/ses_history/messages?limit=100',
-      expect.any(Object),
-    )
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })
 

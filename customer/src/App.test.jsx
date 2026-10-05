@@ -2956,10 +2956,7 @@ describe('claimant intake projection', () => {
     await user.click(await screen.findByRole('button', { name: /Open Home claim/ }))
 
     expect(await screen.findByText(historicalMessage.content.text)).toBeInTheDocument()
-    expect(api.getClaimMessages).toHaveBeenCalledWith(
-      terminalClaim.claim_id,
-      existingSessionId,
-    )
+    expect(api.getClaimMessages).toHaveBeenCalledWith(terminalClaim.claim_id)
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
     expect(globalThis.location.pathname).toBe(
       `/claims/${terminalClaim.claim_id}`,
@@ -3007,7 +3004,7 @@ describe('claimant intake projection', () => {
     expect(globalThis.location.pathname).toBe(`/claims/${claimId}`)
     expect(screen.getByRole('complementary', { name: 'Conversation history' })).toBeInTheDocument()
     expect(document.querySelector('aside[aria-label="Claim details"]')).not.toHaveAttribute('hidden')
-    expect(api.getClaimMessages).toHaveBeenCalledWith(claimId, sessionId)
+    expect(api.getClaimMessages).toHaveBeenCalledWith(claimId)
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
@@ -3219,20 +3216,14 @@ describe('claimant intake projection', () => {
 
     globalThis.history.replaceState({}, '', `/claims/${reportC.claim_id}`)
     globalThis.dispatchEvent(new PopStateEvent('popstate'))
-    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(
-      reportC.claim_id,
-      reportC.conversation_session_id,
-    ))
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(reportC.claim_id))
 
     await act(async () => delayedReportB.resolve(reportB))
 
     const historyCards = () => [...document.querySelectorAll('.intake-history-item')]
     await waitFor(() => expect(historyCards()[2]).toHaveTextContent('Current claim'))
     expect(globalThis.location.pathname).toBe(`/claims/${reportC.claim_id}`)
-    expect(api.getClaimMessages).not.toHaveBeenCalledWith(
-      reportB.claim_id,
-      reportB.conversation_session_id,
-    )
+    expect(api.getClaimMessages).not.toHaveBeenCalledWith(reportB.claim_id)
   })
 
   it('holds a target Claim realtime event until an in-flight resume installs that Claim', async () => {
@@ -4566,7 +4557,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await screen.findByText(agentMessage.content.text)
-    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id, 'ses_ui_vp'))
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id))
     expect(screen.queryByText(/Permission needed/)).not.toBeInTheDocument()
     await act(async () => {
       if (readbackSucceeds) {
@@ -4663,10 +4654,7 @@ describe('claimant intake projection', () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(api.getClaim).toHaveBeenCalledWith(initialClaim.claim_id))
-    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(
-      initialClaim.claim_id,
-      'ses_ui_vp',
-    ))
+    await waitFor(() => expect(api.getClaimMessages).toHaveBeenCalledWith(initialClaim.claim_id))
 
     await user.type(
       screen.getByPlaceholderText('Write the details you know...'),

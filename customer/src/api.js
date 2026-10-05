@@ -636,20 +636,11 @@ async function getAllClaimMessagePages(pathForCursor, { signal } = {}) {
   return { items: [...messagesById.values()], page: { next_cursor: null } }
 }
 
-export async function getClaimMessages(claimId, sessionId, { signal } = {}) {
-  try {
-    return await getAllClaimMessagePages(
-      (params) => `/api/v1/claims/${claimId}/messages?${params}`,
-      { signal },
-    )
-  } catch (error) {
-    const claimWideRouteIsUnavailable = error instanceof ApiRequestError && error.status === 404
-    if (!claimWideRouteIsUnavailable || !sessionId) throw error
-    return getAllClaimMessagePages(
-      (params) => `/api/v1/claims/${claimId}/sessions/${sessionId}/messages?${params}`,
-      { signal },
-    )
-  }
+export function getClaimMessages(claimId, { signal } = {}) {
+  return getAllClaimMessagePages(
+    (params) => `/api/v1/claims/${claimId}/messages?${params}`,
+    { signal },
+  )
 }
 
 

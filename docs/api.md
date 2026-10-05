@@ -2109,33 +2109,6 @@ parameters are `before`, `after`, `limit`, and `cursor`. Staff-only notes and hi
 messages are excluded before pagination. This compatibility collection remains Session-scoped;
 clients that restore a Claim conversation use the Claim message collection instead.
 
-### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/events`
-
-Opens a `text/event-stream` connection for the authenticated claimant or the browser's current
-anonymous claimant session. The Claim and session ownership checks are identical to the ordinary
-claimant read boundary. This compatibility route retains `after_revision` and the `claim.updated`
-wire shape for the current claimant client, but its event source is the process-level realtime
-dispatcher. It performs no per-connection repository polling. The server rejects a revision newer
-than the current Claim with `409 INVALID_EVENT_CURSOR` and the current revision. It also accepts an
-opaque durable cursor through `cursor`; `Last-Event-ID` is interpreted as a non-negative legacy
-revision when numeric and as a durable cursor otherwise. The claimant client keeps numeric
-`claim.updated` IDs in `after_revision` and keeps only opaque IDs as durable replay cursors.
-
-When shared Claim State advances, the stream emits `claim.updated`:
-
-```text
-id: 4
-event: claim.updated
-data: {"event_id":"4","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8","claim_revision":4,"resources":["claim","messages"],"emitted_at":"2026-09-03T05:10:00Z"}
-```
-
-This event is a resource hint, not a second Claim projection. It contains no messages, handoff
-packet, internal signals, staff identity, model metadata, or hidden reasoning. After receiving it,
-the claimant client reloads `GET /claims/{claim_id}` and the Claim message collection through their
-existing visibility-filtered endpoints. The server sends comment-only keep-alives; clients ignore
-them and reconnect with bounded backoff if the transport closes. This route is a migration
-compatibility boundary, not a second event store.
-
 ### `GET /api/v1/realtime/events`
 
 Opens one claimant-scoped, multiplexed `text/event-stream` for all Claims owned by the
