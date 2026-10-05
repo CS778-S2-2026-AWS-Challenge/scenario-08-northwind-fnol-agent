@@ -109,7 +109,7 @@ services:
       NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS: 900
       NORTHWIND_CORS_ALLOW_ORIGINS: ${NORTHWIND_CORS_ALLOW_ORIGINS:-*}
       NORTHWIND_CORS_ALLOW_CREDENTIALS: "false"
-      AGENT_RUNTIME_PROFILE: ${AGENT_RUNTIME_PROFILE:?Set AGENT_RUNTIME_PROFILE to controlled or model_gateway}
+      AGENT_RUNTIME_PROFILE: ${AGENT_RUNTIME_PROFILE:-}
       MODEL_PROFILE_ID: ${MODEL_PROFILE_ID:-}
       PDF_MODEL_PROFILE_ID: ${PDF_MODEL_PROFILE_ID:-}
       MODEL_RUNTIME_BINDINGS_PATH: /app/config/model-runtime-bindings.json
@@ -118,6 +118,15 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     ports:
       - "8000:8000"
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        if [ -z "$${AGENT_RUNTIME_PROFILE:-}" ]; then
+        echo 'AGENT_RUNTIME_PROFILE is required; set it to one of: controlled, model_gateway.' >&2;
+        exit 1;
+        fi;
+        exec python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
     volumes:
       - northwind-backend-state:/var/lib/northwind
     restart: unless-stopped
@@ -133,7 +142,7 @@ services:
     environment:
       NORTHWIND_ENVIRONMENT: development
       DATA_RUNTIME_PROFILE: local_mvp
-      AGENT_RUNTIME_PROFILE: ${AGENT_RUNTIME_PROFILE:?Set AGENT_RUNTIME_PROFILE to controlled or model_gateway}
+      AGENT_RUNTIME_PROFILE: ${AGENT_RUNTIME_PROFILE:-}
       NORTHWIND_MONGODB_URI: mongodb://mongodb:27017/?directConnection=true&replicaSet=rs0
       NORTHWIND_MONGODB_DATABASE: northwind_fnol
       NORTHWIND_MONGODB_COLLECTION: northwind_records
@@ -147,13 +156,14 @@ services:
       NORTHWIND_KNOWLEDGE_BUCKET: northwind-knowledge
       NORTHWIND_OBJECT_STORAGE_REGION: ${NORTHWIND_OBJECT_STORAGE_REGION:-us-east-1}
     command:
-      - python
-      - -m
-      - backend.recovery_worker_main
-      - --limit
-      - "50"
-      - --interval-seconds
-      - "30"
+      - /bin/sh
+      - -c
+      - >-
+        if [ -z "$${AGENT_RUNTIME_PROFILE:-}" ]; then
+        echo 'AGENT_RUNTIME_PROFILE is required; set it to one of: controlled, model_gateway.' >&2;
+        exit 1;
+        fi;
+        exec python -m backend.recovery_worker_main --limit 50 --interval-seconds 30
     restart: unless-stopped
 
 volumes:

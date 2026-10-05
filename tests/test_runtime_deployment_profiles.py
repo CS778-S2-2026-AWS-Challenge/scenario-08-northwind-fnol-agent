@@ -373,3 +373,7 @@ def test_vp_compose_profile_bootstraps_knowledge_and_mounts_durable_backend_stat
     assert 'recovery-worker:' in compose
     assert 'backend.recovery_worker_main' in compose
     assert '--interval-seconds' in compose
+    assert compose.count('AGENT_RUNTIME_PROFILE: ${AGENT_RUNTIME_PROFILE:-}') == 2
+    assert compose.count('AGENT_RUNTIME_PROFILE is required; set it to one of: controlled, model_gateway.') == 2
+    assert 'exec python -m uvicorn backend.main:app' in compose
+    assert 'exec python -m backend.recovery_worker_main --limit 50 --interval-seconds 30' in compose
