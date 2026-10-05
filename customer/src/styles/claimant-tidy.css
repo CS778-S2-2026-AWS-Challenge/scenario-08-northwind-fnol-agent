@@ -205,10 +205,10 @@
 }
 .case-status:hover + .case-status-tip, .case-status:focus-visible + .case-status-tip { visibility: visible; opacity: 1; }
 
-/* Messages: the assistant and staff write without a bubble. */
-.workspace-shell .agent-text { margin-top: var(--space-1); }
+/* Messages: the assistant and staff use a restrained neutral bubble. */
+.workspace-shell .agent-text { margin-top: 0; }
 .msg-agent .agent-body, .msg-staff .staff-message-body { position: relative; min-width: 0; }
-.agent-message-menu { display: flex; justify-content: flex-end; min-height: var(--space-5); opacity: 0; transition: opacity var(--duration-standard) var(--ease-standard); }
+.agent-message-menu { display: flex; width: 100%; justify-content: flex-end; min-height: var(--space-5); opacity: 0; transition: opacity var(--duration-standard) var(--ease-standard); }
 .msg-agent:hover .agent-message-menu, .agent-message-menu:focus-within { opacity: 1; }
 .agent-message-menu .listen-message { margin: 0; }
 .staff-text { color: var(--color-text-primary); }

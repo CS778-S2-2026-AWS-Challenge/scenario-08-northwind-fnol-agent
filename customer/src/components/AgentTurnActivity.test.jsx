@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   AgentTurnDisclosure,
+  AgentTurnPlaceholder,
 } from './AgentTurnActivity.jsx'
 import { reduceTurnProgress } from '../agentTurnProgress.js'
 
@@ -18,6 +19,18 @@ function progressEvent(stage, ordinal, state = 'running') {
 }
 
 describe('Agent turn activity', () => {
+  it('keeps the pending assistant state inside the agent message bubble', () => {
+    const { container } = render(<AgentTurnPlaceholder turnId="message-one" />)
+
+    const article = screen.getByLabelText('Claims assistant is working')
+    const bubble = article.querySelector('.agent-bubble')
+    expect(bubble).toHaveClass('chat-bubble', 'agent-turn-bubble')
+    expect(bubble).toContainElement(screen.getByRole('status'))
+    expect(screen.getByRole('status')).toHaveTextContent('Sending your message')
+    expect(container.querySelector('.agent-avatar + .agent-body .agent-label'))
+      .toHaveTextContent('Claims assistant')
+  })
+
   it('ignores duplicate, out-of-order, foreign, and post-terminal progress', () => {
     const accepted = reduceTurnProgress(null, progressEvent('turn.accepted', 1), 'message-one')
     const loading = reduceTurnProgress(

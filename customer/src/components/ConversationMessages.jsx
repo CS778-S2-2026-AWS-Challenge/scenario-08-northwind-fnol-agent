@@ -170,7 +170,9 @@ export function StaffMessageRow({ message }) {
         <div className="message-avatar staff-mark" aria-hidden="true">N</div>
         <div className="staff-message-body">
           <div className="staff-label">Northwind staff</div>
-          <div className="agent-text staff-text"><p>{messageText(message)}</p></div>
+          <div className="chat-bubble staff-bubble">
+            <div className="agent-text staff-text"><p>{messageText(message)}</p></div>
+          </div>
         </div>
       </div>
     </article>
@@ -192,14 +194,16 @@ export function AgentMessageRow({ message, activity, children }) {
         <div className="message-avatar agent-avatar" aria-hidden="true">N</div>
         <div className="agent-body">
           <div className="agent-label">Claims assistant</div>
-          {developerModeEnabled() && <AgentTurnDisclosure progress={activity} />}
-          <div className="agent-text">
-            <p>{text}</p>
+          <div className="chat-bubble agent-bubble">
+            <div className="agent-text">
+              <p>{text}</p>
+            </div>
           </div>
+          {children}
+          {developerModeEnabled() && <AgentTurnDisclosure progress={activity} />}
           <div className="agent-message-menu">
             <button className="listen-message" type="button" onClick={() => speak(text)}>Listen</button>
           </div>
-          {children}
         </div>
       </div>
     </article>
