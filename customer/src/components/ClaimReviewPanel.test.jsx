@@ -112,7 +112,7 @@ describe('ClaimReviewPanel overview', () => {
     const props = renderPanel()
 
     const safety = screen.getByText('Safety information has not been confirmed.').closest('.overview-alert')
-    await user.click(within(safety).getByRole('button', { name: 'Review' }))
+    await user.click(within(safety).getByRole('button', { name: 'Review missing safety information' }))
     expect(props.onViewNextSteps).toHaveBeenCalledOnce()
   })
 
@@ -125,7 +125,7 @@ describe('ClaimReviewPanel overview', () => {
     expect(screen.getByText('1 Agent-suggested detail needs your review.')).toBeVisible()
 
     const aiReview = screen.getByText('1 Agent-suggested detail needs your review.').closest('.overview-alert')
-    await user.click(within(aiReview).getByRole('button', { name: 'Review' }))
+    await user.click(within(aiReview).getByRole('button', { name: 'Review Agent-suggested details' }))
     // Each suggested detail is confirmed on its own row; there is no confirm-all.
     expect(screen.queryByRole('button', { name: 'Confirm suggested details' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /is right$/ }))
@@ -152,6 +152,22 @@ describe('ClaimReviewPanel overview', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save correction' }))
     expect(saveFieldCorrection).toHaveBeenCalledWith('incident.description', field)
+  })
+
+  it('blocks invalid numeric corrections before mutation', () => {
+    const saveFieldCorrection = vi.fn()
+    renderPanel({
+      form: { 'loss.estimated_amount': { value: 250, status: 'confirmed', source: 'claimant' } },
+      dynamicForm: { field_inputs: { 'loss.estimated_amount': { value_type: 'number' } } },
+      proposedFields: [],
+      editingField: 'loss.estimated_amount',
+      editValue: '-1',
+      saveFieldCorrection,
+      fieldLabel: () => 'Estimated loss',
+    })
+
+    expect(screen.getByRole('button', { name: 'Save correction' })).toBeDisabled()
+    expect(saveFieldCorrection).not.toHaveBeenCalled()
   })
 
   it('gently marks the affected section when conversation data changes', () => {

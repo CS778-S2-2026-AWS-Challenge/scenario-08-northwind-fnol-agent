@@ -1527,6 +1527,24 @@ describe('claimant intake projection', () => {
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
+  it('confirms before leaving a claim with an unsent composer draft', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    const confirm = vi.spyOn(globalThis, 'confirm').mockReturnValue(false)
+
+    render(<App />)
+    await startActiveClaim(user)
+    const composer = screen.getByPlaceholderText('Write the details you know...')
+    await user.type(composer, 'A detail I still need to send.')
+
+    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+
+    expect(confirm).toHaveBeenCalledWith('You have an unsent message or selected files. Leave this claim and discard them?')
+    expect(screen.getByRole('heading', { name: /^Home claim · started/ })).toBeVisible()
+    expect(screen.getByPlaceholderText('Write the details you know...')).toHaveValue('A detail I still need to send.')
+    confirm.mockRestore()
+  })
+
   it.each([
     ['Privacy & your data', 'Privacy & your data', false],
     ['My claims', 'Claim history', false],
@@ -4108,6 +4126,71 @@ describe('claimant intake projection', () => {
     })))
     expect(await screen.findByText('9pm')).toBeInTheDocument()
     expect(screen.queryByText('Add the affected property address')).not.toBeInTheDocument()
+  })
+
+  it('sends typed values from the claim details editor', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(notedTurn())
+    api.updateClaimField.mockResolvedValue({
+      revision: 3,
+      updated_fields: {
+        'vehicle.drivable': { value: true, status: 'confirmed', source: 'claimant' },
+      },
+      dynamic_form: notedTurn().dynamic_form,
+      customer_next_step: initialClaim.customer_next_step,
+    })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await openCasePanel(user)
+    await user.click(screen.getByRole('button', { name: 'Edit Safety and ongoing risk' }))
+    await user.click(screen.getByRole('button', { name: 'Edit Vehicle safe to drive' }))
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Correct Vehicle safe to drive' }),
+      'true',
+    )
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+
+    await waitFor(() => expect(api.updateClaimField).toHaveBeenCalledWith(expect.objectContaining({
+      fieldCode: 'vehicle.drivable',
+      value: true,
+    })))
+  })
+
+  it('does not submit invalid numeric corrections from the claim details editor', async () => {
+    const user = userEvent.setup()
+    const turn = notedTurn()
+    const amountField = { value: 250, status: 'confirmed', source: 'claimant' }
+    turn.form_changes = [{ field_code: 'loss.estimated_amount', field: amountField }]
+    turn.agent_message.content.turn_record.recorded_facts = [{ field_code: 'loss.estimated_amount' }]
+    turn.dynamic_form = {
+      ...turn.dynamic_form,
+      fields: [{
+        field_code: 'loss.estimated_amount',
+        selection_state: 'required_now',
+        value_state: 'confirmed',
+        reason: 'We need the estimated loss amount.',
+      }],
+      form: { 'loss.estimated_amount': amountField },
+      field_inputs: {
+        'loss.estimated_amount': { value_type: 'number', allowed_values: [] },
+      },
+    }
+    api.submitClaimMessage.mockResolvedValue(turn)
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await openCasePanel(user)
+    await user.click(await screen.findByRole('button', { name: /^Insured item and loss/ }))
+    await user.click(screen.getByRole('button', { name: /Edit estimated amount/i }))
+
+    const correction = screen.getByRole('textbox', { name: /Correct estimated amount/i })
+    await user.clear(correction)
+    await user.type(correction, '-1')
+    expect(screen.getByRole('button', { name: 'Save correction' })).toBeDisabled()
+    expect(api.updateClaimField).not.toHaveBeenCalled()
   })
 
   function notedTurn() {

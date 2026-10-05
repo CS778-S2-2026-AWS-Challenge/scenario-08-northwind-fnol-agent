@@ -52,6 +52,8 @@ import { PinnedCard, PinnedClause, PinnedFile, SubmitSteps } from './components/
 import { fieldLabel, fieldSourceLabel, fieldStatusLabel, fieldValueText } from './claimFieldPresentation.js'
 import { evidenceFileStatusLabel, messageText } from './messagePresentation.js'
 import {
+  fieldDraftValue,
+  fieldInputValue,
   factCardsByAgentMessage,
   fileReadings,
   notedProgress,
@@ -2594,12 +2596,16 @@ function App() {
 
   function beginEdit(fieldCode, value) {
     setEditingField(fieldCode)
-    setEditValue(String(value ?? ''))
+    setEditValue(fieldDraftValue(value, dynamicForm?.field_inputs?.[fieldCode]))
     setError('')
   }
 
   function saveFieldCorrection(fieldCode, field) {
-    return saveFieldValue(fieldCode, field, editValue)
+    return saveFieldValue(
+      fieldCode,
+      field,
+      fieldInputValue(editValue, dynamicForm?.field_inputs?.[fieldCode]),
+    )
   }
 
   // Saves one corrected value; a corrected suggestion counts as checked.
@@ -3317,9 +3323,24 @@ function App() {
   }
 
   function returnToLanding() {
+    const hasUnsentComposerState = Boolean(
+      draft.trim()
+      || queuedText.trim()
+      || attachments.length > 0
+      || failedMessage?.text
+      || failedMessage?.attachments?.length > 0
+      || pendingMessage?.text
+      || pendingMessage?.attachments?.length > 0,
+    )
+    if (
+      hasUnsentComposerState
+      && typeof globalThis.confirm === 'function'
+      && !globalThis.confirm('You have an unsent message or selected files. Leave this claim and discard them?')
+    ) return
     clearComposerAttachments()
     pendingSubmission.current = null
     setDraft('')
+    setQueuedText('')
     setError('')
     setFailedMessage(null)
     setPendingMessage(null)
