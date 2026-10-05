@@ -4158,6 +4158,41 @@ describe('claimant intake projection', () => {
     })))
   })
 
+  it('does not submit invalid numeric corrections from the claim details editor', async () => {
+    const user = userEvent.setup()
+    const turn = notedTurn()
+    const amountField = { value: 250, status: 'confirmed', source: 'claimant' }
+    turn.form_changes = [{ field_code: 'loss.estimated_amount', field: amountField }]
+    turn.agent_message.content.turn_record.recorded_facts = [{ field_code: 'loss.estimated_amount' }]
+    turn.dynamic_form = {
+      ...turn.dynamic_form,
+      fields: [{
+        field_code: 'loss.estimated_amount',
+        selection_state: 'required_now',
+        value_state: 'confirmed',
+        reason: 'We need the estimated loss amount.',
+      }],
+      form: { 'loss.estimated_amount': amountField },
+      field_inputs: {
+        'loss.estimated_amount': { value_type: 'number', allowed_values: [] },
+      },
+    }
+    api.submitClaimMessage.mockResolvedValue(turn)
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await openCasePanel(user)
+    await user.click(await screen.findByRole('button', { name: /^Insured item and loss/ }))
+    await user.click(screen.getByRole('button', { name: /Edit estimated amount/i }))
+
+    const correction = screen.getByRole('textbox', { name: /Correct estimated amount/i })
+    await user.clear(correction)
+    await user.type(correction, '-1')
+    expect(screen.getByRole('button', { name: 'Save correction' })).toBeDisabled()
+    expect(api.updateClaimField).not.toHaveBeenCalled()
+  })
+
   function notedTurn() {
     const recorded = (value) => ({
       value,

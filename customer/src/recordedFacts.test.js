@@ -6,6 +6,7 @@ import {
   fieldDraftValue,
   fieldInputChoices,
   fieldInputValue,
+  parseRegisteredNumber,
   fileReadings,
   notedProgress,
   progressLabel,
@@ -116,5 +117,15 @@ describe('noted progress', () => {
       value_type: 'enum',
       allowed_values: ['active_leak'],
     })).toEqual([['active_leak', 'Active leak']])
+  })
+
+  it('accepts the registered non-negative amount format and rejects invalid numbers', () => {
+    expect(parseRegisteredNumber('$1,850.50')).toBe(1850.5)
+    expect(parseRegisteredNumber('NZ$1850')).toBe(1850)
+    expect(fieldInputValue('0', { value_type: 'number' })).toBe(0)
+    for (const draft of ['abc', '-1', 'Infinity', '1.234']) {
+      expect(parseRegisteredNumber(draft)).toBeNull()
+      expect(fieldInputValue(draft, { value_type: 'number' })).toBeNull()
+    }
   })
 })

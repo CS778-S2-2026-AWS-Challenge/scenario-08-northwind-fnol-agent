@@ -5,7 +5,7 @@ import {
   claimReviewSectionId,
   claimReviewSections,
 } from '../claimReviewProjection.js'
-import { fieldInputChoices } from '../recordedFacts.js'
+import { fieldInputChoices, fieldInputValue } from '../recordedFacts.js'
 import './ClaimReviewPanel.css'
 
 const ATTENTION_QUESTIONS = {
@@ -206,7 +206,11 @@ function sectionRenderKey(section) {
 }
 
 function FieldEditor({ fieldCode, field, fieldInputs, fieldLabel, editValue, setEditValue, cancelEdit, saveFieldCorrection, busy, status }) {
-  const choices = fieldInputChoices(fieldInputs?.[fieldCode])
+  const input = fieldInputs?.[fieldCode]
+  const choices = fieldInputChoices(input)
+  const value = fieldInputValue(editValue, input)
+  const empty = !String(editValue).trim()
+    || (input?.value_type === 'number' && value === null)
   return (
     <div className="summary-field-editor">
       <label htmlFor={`summary-field-${fieldCode}`}>{fieldLabel(fieldCode)}</label>
@@ -237,7 +241,7 @@ function FieldEditor({ fieldCode, field, fieldInputs, fieldLabel, editValue, set
           className="summary-save-action"
           type="button"
           onClick={() => saveFieldCorrection(fieldCode, field || { value: null, status: 'missing' })}
-          disabled={!editValue.trim() || busy}
+          disabled={empty || busy}
         >
           {status === 'saving' ? 'Saving…' : 'Save correction'}
         </button>

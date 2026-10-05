@@ -96,9 +96,20 @@ export function fieldDraftValue(value, input) {
   return value === null || value === undefined ? '' : String(value)
 }
 
+const REGISTERED_NUMBER_PATTERN = /^(?:nz)?\$?\s*(\d+(?:\.\d{1,2})?)$/i
+
+export function parseRegisteredNumber(value) {
+  if (typeof value === 'boolean' || value === null || value === undefined) return null
+  const normalized = String(value).trim().replaceAll(',', '')
+  const match = REGISTERED_NUMBER_PATTERN.exec(normalized)
+  if (!match) return null
+  const number = Number(match[1])
+  return Number.isFinite(number) && number >= 0 ? number : null
+}
+
 export function fieldInputValue(draft, input) {
   if (input?.value_type === 'boolean') return draft === 'true'
-  if (input?.value_type === 'number') return Number(draft)
+  if (input?.value_type === 'number') return parseRegisteredNumber(draft)
   if (input?.value_type === 'text_list') {
     return String(draft).split(',').map((item) => item.trim()).filter(Boolean)
   }

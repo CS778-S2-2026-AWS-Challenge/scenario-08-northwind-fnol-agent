@@ -10,8 +10,9 @@ export default function FactEditor({ fact, input, busy, onSave, onCancel }) {
   const inputId = useId()
   const [draft, setDraft] = useState(() => fieldDraftValue(fact.field.value, input))
   const choices = fieldInputChoices(input)
+  const value = fieldInputValue(draft, input)
   const empty = !String(draft).trim()
-    || (input?.value_type === 'number' && Number.isNaN(Number(draft)))
+    || (input?.value_type === 'number' && value === null)
 
   return (
     <form

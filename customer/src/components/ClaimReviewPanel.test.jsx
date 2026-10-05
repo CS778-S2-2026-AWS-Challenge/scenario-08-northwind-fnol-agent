@@ -154,6 +154,22 @@ describe('ClaimReviewPanel overview', () => {
     expect(saveFieldCorrection).toHaveBeenCalledWith('incident.description', field)
   })
 
+  it('blocks invalid numeric corrections before mutation', () => {
+    const saveFieldCorrection = vi.fn()
+    renderPanel({
+      form: { 'loss.estimated_amount': { value: 250, status: 'confirmed', source: 'claimant' } },
+      dynamicForm: { field_inputs: { 'loss.estimated_amount': { value_type: 'number' } } },
+      proposedFields: [],
+      editingField: 'loss.estimated_amount',
+      editValue: '-1',
+      saveFieldCorrection,
+      fieldLabel: () => 'Estimated loss',
+    })
+
+    expect(screen.getByRole('button', { name: 'Save correction' })).toBeDisabled()
+    expect(saveFieldCorrection).not.toHaveBeenCalled()
+  })
+
   it('gently marks the affected section when conversation data changes', () => {
     const props = panelProps()
     const { rerender } = render(<ClaimReviewPanel {...props} />)
