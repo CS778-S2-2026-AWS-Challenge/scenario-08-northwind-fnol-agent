@@ -754,6 +754,21 @@ describe('claimant intake projection', () => {
     expect(container.querySelectorAll('.message-list time.message-timestamp')).toHaveLength(1)
   })
 
+  it('keeps the workspace in the closed-details layout until Noted is opened', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await startActiveClaim(user)
+
+    const app = container.querySelector('.customer-app')
+    const intakePage = container.querySelector('.intake-page')
+    expect(app).toHaveClass('workspace-shell')
+    expect(intakePage).toHaveClass('details-closed')
+    expect(intakePage).not.toHaveClass('details-open')
+    expect(container.querySelector('.intake-details-panel')).toHaveClass('is-collapsed')
+  })
+
   it('automatically applies a sole saved policy without adding a persistent workspace card', async () => {
     const user = userEvent.setup()
     const policy = {

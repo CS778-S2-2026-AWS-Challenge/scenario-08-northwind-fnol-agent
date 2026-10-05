@@ -22,6 +22,29 @@
 
 /* Left rail: an icon strip that opens to the conversation list. */
 @media (min-width: 641px) {
+  /* Allocate the visible header first, then let the workspace consume every
+     remaining viewport pixel without changing either sidebar's layout. */
+  .customer-app.workspace-shell {
+    display: grid;
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .customer-app.workspace-shell > .intake-page {
+    position: fixed;
+    inset-block: var(--size-header-compact) 0;
+    inset-inline: 0;
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    overflow: hidden;
+    /* Keep focus-driven browser scrolling from moving the workspace off the
+       viewport and exposing the shell background below the composer. */
+    grid-template-rows: minmax(0, 1fr);
+  }
   .intake-page.details-closed,
   .intake-page.details-open {
     grid-template-columns: var(--claimant-rail-width) minmax(0, 1fr) var(--claimant-details-panel-width);
