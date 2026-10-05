@@ -1461,6 +1461,26 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText(new RegExp(initialClaim.claim_id))).not.toBeInTheDocument()
   })
 
+  it('keeps the conversation rail toggle compact and stateful', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await startActiveClaim(user)
+
+    const expandedToggle = screen.getByRole('button', { name: 'Hide conversations' })
+    expect(expandedToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(expandedToggle).toHaveAttribute('title', 'Hide conversations')
+    expect(expandedToggle.querySelector('.rail-toggle-icon')).toBeInTheDocument()
+
+    await user.click(expandedToggle)
+
+    const collapsedToggle = screen.getByRole('button', { name: 'Show conversations' })
+    expect(collapsedToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(collapsedToggle).toHaveAttribute('title', 'Show conversations')
+    expect(collapsedToggle.querySelector('.rail-toggle-icon path')).toHaveAttribute('d', 'm10 9 3 3-3 3')
+  })
+
   it('opens Profile as a standalone page and returns to the loaded conversation', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
@@ -1577,7 +1597,14 @@ describe('claimant intake projection', () => {
     const header = container.querySelector('.product-header')
     expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
 
-    await user.click(screen.getAllByRole('button', { name: navigationLabel })[0])
+    const utilityNavigation = screen.getAllByRole('button', { name: navigationLabel })[0]
+    if (navigationLabel === 'Privacy & your data') {
+      expect(utilityNavigation.querySelector('.rail-icon')).toHaveAttribute('aria-hidden', 'true')
+      expect(utilityNavigation.querySelector('.rail-icon svg')).toHaveAttribute('focusable', 'false')
+      expect(utilityNavigation).toHaveAccessibleName('Privacy & your data')
+    }
+
+    await user.click(utilityNavigation)
     expect(await screen.findByRole('heading', { level: 1, name: headingLabel })).toBeVisible()
     const pageBack = within(container.querySelector('.workspace-utility-page'))
       .queryByRole('button', { name: /^Back/ })

@@ -21,6 +21,7 @@
 .product-header.is-intake-header .support-button { padding: 0 var(--space-4); font-size: var(--font-size-caption); }
 
 /* Left rail: an icon strip that opens to the conversation list. */
+.intake-history { padding: var(--space-3) var(--space-3) 0; }
 @media (min-width: 641px) {
   /* Allocate the visible header first, then let the workspace consume every
      remaining viewport pixel without changing either sidebar's layout. */
@@ -85,7 +86,50 @@
 }
 .history-actions button { display: flex; align-items: center; gap: var(--space-2); }
 .rail-icon { display: inline-grid; place-items: center; width: var(--space-6); color: var(--color-text-muted); font-weight: var(--font-weight-semibold); }
-.rail-toggle { border: 0; background: transparent; cursor: pointer; }
+.rail-icon svg { width: var(--space-4); height: var(--space-4); fill: none; stroke: currentColor; stroke-width: var(--claimant-icon-stroke-width); stroke-linecap: round; stroke-linejoin: round; }
+.history-actions { gap: 0; padding-bottom: var(--space-2); }
+.intake-history.is-rail-open .history-actions { position: relative; }
+.history-actions .rail-toggle {
+  display: grid;
+  width: var(--size-control-touch);
+  height: var(--size-control-touch);
+  min-height: var(--size-control-touch);
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  background: transparent;
+  box-shadow: var(--shadow-none);
+  cursor: pointer;
+  transition: background var(--duration-standard) var(--ease-standard), border-color var(--duration-standard) var(--ease-standard), box-shadow var(--duration-standard) var(--ease-standard), color var(--duration-standard) var(--ease-standard);
+}
+.intake-history.is-rail-open .history-actions .rail-toggle {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+}
+.history-actions .rail-toggle:hover:not(:disabled),
+.history-actions .rail-toggle:focus-visible {
+  color: var(--color-text-primary);
+  background: var(--color-accent-soft);
+  box-shadow: var(--shadow-none);
+}
+.history-actions .rail-toggle:focus-visible {
+  outline: var(--border-focus);
+  outline-offset: var(--space-1);
+}
+.rail-toggle-icon {
+  width: var(--space-4);
+  height: var(--space-4);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--claimant-icon-stroke-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* Tool pages (privacy, my claims) are pages of their own, not a squeezed centre. */
 .intake-page.is-utility-view,

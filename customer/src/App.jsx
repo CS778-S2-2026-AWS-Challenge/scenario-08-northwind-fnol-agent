@@ -4101,9 +4101,13 @@ function App() {
                 type="button"
                 aria-expanded={railOpen}
                 aria-label={railOpen ? 'Hide conversations' : 'Show conversations'}
+                title={railOpen ? 'Hide conversations' : 'Show conversations'}
                 onClick={() => setRailOpen((open) => !open)}
               >
-                <span className="rail-icon" aria-hidden="true">☰</span>
+                <svg className="rail-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                  <path d={railOpen ? 'm14 9-3 3 3 3' : 'm10 9 3 3-3 3'} />
+                </svg>
               </button>
               <button
                 type="button"
@@ -4127,6 +4131,11 @@ function App() {
                   setMobileView('chat')
                 }}
               >
+                <span className="rail-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M12 3 5 6v5c0 4.7 2.9 8.7 7 10 4.1-1.3 7-5.3 7-10V6l-7-3Z" />
+                  </svg>
+                </span>
                 <span className="rail-label">Privacy &amp; your data</span>
               </button>
             </div>
