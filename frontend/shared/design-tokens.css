@@ -81,6 +81,7 @@
   --color-workbench-dark-warning: hsl(32 70% 72%);
   --color-workbench-dark-warning-soft: hsl(32 26% 20%);
   --border-region: 2px solid var(--color-divider);
+  --border-subtle: 1px solid var(--color-divider);
   --border-component: 1.5px solid var(--color-divider);
   --border-focus: 1.5px solid var(--color-accent);
   --border-action: 1.5px solid var(--color-accent-light);
