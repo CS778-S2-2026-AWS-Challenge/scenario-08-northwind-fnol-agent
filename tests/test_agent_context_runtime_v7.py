@@ -1148,6 +1148,9 @@ def test_v7_isolated_review_rejects_an_unscoped_source_reference() -> None:
         ([{}], None),
         ([{'loc': ('items', 0)}], 'items.[0]'),
         ([{'loc': ('items', object())}], None),
+        ([{'loc': ('field', 'x' * 120)}], None),
+        ([{'loc': ('model_chosen_key',), 'type': 'extra_forbidden'}], None),
+        ([{'loc': ('reply', 'model_chosen_key'), 'type': 'extra_forbidden'}], 'reply'),
     ],
 )
 def test_validation_path_is_bounded_for_untrusted_error_shapes(
