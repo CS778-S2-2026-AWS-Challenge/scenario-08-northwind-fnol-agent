@@ -118,7 +118,7 @@ import { ConversationEvent } from './components/ConversationContext.jsx'
 const HELP_MESSAGE = "I'd like to talk to someone at Northwind."
 
 // From this width the case panel docks beside the conversation instead of floating.
-const DOCKED_PANEL_QUERY = '(min-width: 1440px)'
+const DOCKED_PANEL_QUERY = '(min-width: 981px)'
 const PANEL_SECTIONS_KEY = 'northwind.casePanelSections'
 const DEFAULT_PANEL_SECTIONS = { openItems: true, facts: true, files: true }
 
@@ -406,6 +406,7 @@ function App() {
   const [workspaceActive, setWorkspaceActive] = useState(initialDraftWorkspaceActive)
   const [draftWorkspaceActive, setDraftWorkspaceActive] = useState(initialDraftWorkspaceActive)
   const [profileReturnClaimId, setProfileReturnClaimId] = useState(null)
+  const claimHistoryReturnRoute = useRef({ page: 'home', profileSection: null })
   const profileController = useProfileController({
     account,
     setAccount,
@@ -480,6 +481,7 @@ function App() {
   const autoOpenedReview = useRef(null)
   const conversationPanelRef = useRef(null)
   const messageListRef = useRef(null)
+  const detailsPanelRef = useRef(null)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
@@ -871,7 +873,7 @@ function App() {
     [messages],
   )
   const conversationActionKind = conversationAction?.kind || null
-  // The latest "Just noted" card replaces the "Review claim details" prompt only
+  // The latest captured-information card replaces the "Review claim details" prompt only
   // when every detail the prompt asks about is on that open card. Otherwise the
   // prompt stays: details on folded earlier cards, contents items, a fact with
   // two conflicting answers, or a whole-claim summary the claimant is checking.
@@ -900,7 +902,7 @@ function App() {
   useEffect(() => {
     // Review and submit is the one flow the panel opens by itself: once per step,
     // with the step pinned on top while the conversation stays in view.
-    // A check whose details are all on the latest reply's chips is done there instead.
+    // A check whose details are all on the latest reply's summary is done there instead.
     const identity = NEXT_STEP_CHIPS[visibleConversationActionKind] ? conversationAction?.identity : null
     if (!identity || autoOpenedReview.current === identity) return
     autoOpenedReview.current = identity
@@ -941,7 +943,20 @@ function App() {
     const sectionKey = { 'open-items': 'openItems', facts: 'facts', files: 'files' }[panelFocus]
     if (sectionKey) setPanelSections((current) => (current[sectionKey] ? current : { ...current, [sectionKey]: true }))
     globalThis.requestAnimationFrame?.(() => {
-      globalThis.document?.getElementById(`case-panel-${panelFocus}`)?.scrollIntoView?.({ block: 'start' })
+      const panel = detailsPanelRef.current
+      const section = panel?.querySelector(`#case-panel-${panelFocus}`)
+      if (!panel || !section) return
+
+      // Scroll the panel itself. scrollIntoView also scrolls the document when the
+      // panel section starts outside the viewport, which moves the chat workspace.
+      const panelRect = panel.getBoundingClientRect()
+      const sectionRect = section.getBoundingClientRect()
+      const stickyHeader = panel.querySelector('.claim-details-sticky-header')
+      const headerHeight = stickyHeader?.getBoundingClientRect().height || 0
+      panel.scrollTop = Math.max(
+        0,
+        panel.scrollTop + sectionRect.top - panelRect.top - headerHeight,
+      )
     })
   }, [panelFocus, detailsOpen])
 
@@ -1066,6 +1081,8 @@ function App() {
   useEffect(() => {
     const messageList = messageListRef.current
     if (!messageList || !isWorkspaceActive || workspaceView !== 'chat') return
+    // Opening the details panel changes the desktop conversation width, so re-anchor
+    // the list after its messages reflow without overriding a claimant's scroll-up.
     if (isNewConversationEmpty) {
       messageList.scrollTop = 0
       followLatestMessages.current = true
@@ -1086,6 +1103,7 @@ function App() {
     error,
     evidenceSyncNotice,
     failedMessage,
+    detailsOpen,
     isNewConversationEmpty,
     isWorkspaceActive,
     pendingMessage,
@@ -3201,6 +3219,7 @@ function App() {
   }
 
   async function openSavedClaims() {
+    claimHistoryReturnRoute.current = { page: 'account', profileSection }
     setSelectedHistoryClaimId(null)
     setPage('claim-history')
     await loadSavedReports()
@@ -3213,9 +3232,24 @@ function App() {
       setWorkspaceView('history')
       setMobileView('chat')
     } else {
+      claimHistoryReturnRoute.current = { page: 'home', profileSection: null }
       setPage('claim-history')
     }
     if (account) loadSavedReports().catch(() => {})
+  }
+
+  function leaveStandaloneClaimHistory() {
+    const returnRoute = claimHistoryReturnRoute.current
+    if (returnRoute.page === 'account') {
+      setPageState('account')
+      setProfileSection(returnRoute.profileSection)
+      const nextPath = profilePathForSection(returnRoute.profileSection)
+      if (globalThis.location?.pathname !== nextPath) {
+        globalThis.history?.pushState({ northwindRoute: 'account' }, '', nextPath)
+      }
+      return
+    }
+    setPage('home')
   }
 
   // The account pages show these Claim record views whenever the workspace is inactive, even
@@ -3795,9 +3829,13 @@ function App() {
               ? 'login-button profile-entry-button'
               : 'login-button'}
             type="button"
-            onClick={() => isProfilePage ? leaveProfilePage() : setPage(account ? 'account' : 'login')}
+            onClick={() => {
+              if (isProfilePage) leaveProfilePage()
+              else if (isStandaloneClaimHistory) leaveStandaloneClaimHistory()
+              else setPage(account ? 'account' : 'login')
+            }}
           >
-            {isProfilePage ? 'Back' : account ? 'Profile' : 'Log in'}
+            {isProfilePage || isStandaloneClaimHistory ? 'Back' : account ? 'Profile' : 'Log in'}
           </button>
         )}
         {isWorkspaceActive && !isFocusedClaimMessages && !['login', 'register'].includes(page) && (
@@ -4101,9 +4139,13 @@ function App() {
                 type="button"
                 aria-expanded={railOpen}
                 aria-label={railOpen ? 'Hide conversations' : 'Show conversations'}
+                title={railOpen ? 'Hide conversations' : 'Show conversations'}
                 onClick={() => setRailOpen((open) => !open)}
               >
-                <span className="rail-icon" aria-hidden="true">☰</span>
+                <svg className="rail-toggle-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                  <path d={railOpen ? 'm14 9-3 3 3 3' : 'm10 9 3 3-3 3'} />
+                </svg>
               </button>
               <button
                 type="button"
@@ -4127,6 +4169,11 @@ function App() {
                   setMobileView('chat')
                 }}
               >
+                <span className="rail-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M12 3 5 6v5c0 4.7 2.9 8.7 7 10 4.1-1.3 7-5.3 7-10V6l-7-3Z" />
+                  </svg>
+                </span>
                 <span className="rail-label">Privacy &amp; your data</span>
               </button>
             </div>
@@ -4569,6 +4616,7 @@ function App() {
           </section>
 
           <aside
+            ref={detailsPanelRef}
             className={`claim-panel intake-details-panel mobile-view-${mobileView} ${claimDetailsExpanded ? 'is-open' : 'is-collapsed'} ${sheetFull ? 'is-sheet-full' : ''}`}
             aria-label="Claim details"
             aria-hidden={!claimDetailsExpanded}

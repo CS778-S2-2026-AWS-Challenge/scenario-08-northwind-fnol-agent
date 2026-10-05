@@ -591,6 +591,7 @@ describe('claimant intake projection', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     if (originalCreateObjectUrl) {
       Object.defineProperty(globalThis.URL, 'createObjectURL', originalCreateObjectUrl)
     } else {
@@ -746,12 +747,27 @@ describe('claimant intake projection', () => {
     const agentRow = agentArticle.querySelector('.chat-message-row')
     expect(agentRow.querySelector('.agent-avatar')).toHaveTextContent('N')
     expect(agentRow.querySelector('.agent-body')).toBeInTheDocument()
-    // The assistant writes without a bubble; only the claimant's messages have one.
-    expect(agentArticle.querySelector('.chat-bubble')).not.toBeInTheDocument()
-    expect(agentArticle.querySelector('.agent-text')).toHaveTextContent(agentMessage.content.text)
+    expect(agentArticle.querySelector('.agent-bubble')).toHaveClass('chat-bubble')
+    expect(agentArticle.querySelector('.agent-bubble .agent-text'))
+      .toHaveTextContent(agentMessage.content.text)
     expect(agentArticle.querySelector('time.message-timestamp'))
       .toHaveAttribute('datetime', agentMessage.created_at)
     expect(container.querySelectorAll('.message-list time.message-timestamp')).toHaveLength(1)
+  })
+
+  it('keeps the workspace in the closed-details layout until Noted is opened', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    const { container } = render(<App />)
+    await startActiveClaim(user)
+
+    const app = container.querySelector('.customer-app')
+    const intakePage = container.querySelector('.intake-page')
+    expect(app).toHaveClass('workspace-shell')
+    expect(intakePage).toHaveClass('details-closed')
+    expect(intakePage).not.toHaveClass('details-open')
+    expect(container.querySelector('.intake-details-panel')).toHaveClass('is-collapsed')
   })
 
   it('automatically applies a sole saved policy without adding a persistent workspace card', async () => {
@@ -1446,6 +1462,26 @@ describe('claimant intake projection', () => {
     expect(screen.queryByText(new RegExp(initialClaim.claim_id))).not.toBeInTheDocument()
   })
 
+  it('keeps the conversation rail toggle compact and stateful', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await startActiveClaim(user)
+
+    const expandedToggle = screen.getByRole('button', { name: 'Hide conversations' })
+    expect(expandedToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(expandedToggle).toHaveAttribute('title', 'Hide conversations')
+    expect(expandedToggle.querySelector('.rail-toggle-icon')).toBeInTheDocument()
+
+    await user.click(expandedToggle)
+
+    const collapsedToggle = screen.getByRole('button', { name: 'Show conversations' })
+    expect(collapsedToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(collapsedToggle).toHaveAttribute('title', 'Show conversations')
+    expect(collapsedToggle.querySelector('.rail-toggle-icon path')).toHaveAttribute('d', 'm10 9 3 3-3 3')
+  })
+
   it('opens Profile as a standalone page and returns to the loaded conversation', async () => {
     const user = userEvent.setup()
     api.hasClaimantAccessToken.mockReturnValue(true)
@@ -1562,7 +1598,14 @@ describe('claimant intake projection', () => {
     const header = container.querySelector('.product-header')
     expect(within(header).getByRole('button', { name: 'Back to start' })).toBeVisible()
 
-    await user.click(screen.getAllByRole('button', { name: navigationLabel })[0])
+    const utilityNavigation = screen.getAllByRole('button', { name: navigationLabel })[0]
+    if (navigationLabel === 'Privacy & your data') {
+      expect(utilityNavigation.querySelector('.rail-icon')).toHaveAttribute('aria-hidden', 'true')
+      expect(utilityNavigation.querySelector('.rail-icon svg')).toHaveAttribute('focusable', 'false')
+      expect(utilityNavigation).toHaveAccessibleName('Privacy & your data')
+    }
+
+    await user.click(utilityNavigation)
     expect(await screen.findByRole('heading', { level: 1, name: headingLabel })).toBeVisible()
     const pageBack = within(container.querySelector('.workspace-utility-page'))
       .queryByRole('button', { name: /^Back/ })
@@ -1581,8 +1624,18 @@ describe('claimant intake projection', () => {
       .not.toBeInTheDocument()
   })
 
-  it('closes the floating case panel with Esc or a click outside it', async () => {
+  it.each([
+    { viewport: '980px floating layout', docked: false, expectedClass: 'is-collapsed' },
+    { viewport: '981px docked layout', docked: true, expectedClass: 'is-open' },
+  ])('keeps panel dismissal behavior aligned with the $viewport', async ({ docked, expectedClass }) => {
     const user = userEvent.setup()
+    const matchMedia = vi.fn((query) => ({
+      matches: query === '(min-width: 981px)' && docked,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    vi.stubGlobal('matchMedia', matchMedia)
     api.submitClaimMessage.mockResolvedValue(initialTurn())
     render(<App />)
     await startActiveClaim(user)
@@ -1590,11 +1643,46 @@ describe('claimant intake projection', () => {
     const panel = await openCasePanel(user)
     expect(panel).toHaveClass('is-open')
     await user.keyboard('{Escape}')
-    expect(panel).toHaveClass('is-collapsed')
+    expect(panel).toHaveClass(expectedClass)
 
-    await openCasePanel(user)
+    if (!docked) await openCasePanel(user)
     await user.click(screen.getByText(agentMessage.content.text))
-    expect(panel).toHaveClass('is-collapsed')
+    expect(panel).toHaveClass(expectedClass)
+    expect(matchMedia).toHaveBeenCalledWith('(min-width: 981px)')
+  })
+
+  it('keeps the latest chat position when the Noted details panel opens', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(notedTurn())
+    const originalScrollIntoView = Element.prototype.scrollIntoView
+    const originalRequestAnimationFrame = globalThis.requestAnimationFrame
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    globalThis.requestAnimationFrame = (callback) => {
+      callback()
+      return 0
+    }
+
+    try {
+      const { container } = render(<App />)
+      await startActiveClaim(user)
+
+      const messageList = container.querySelector('.message-list')
+      Object.defineProperties(messageList, {
+        clientHeight: { configurable: true, value: 240 },
+        scrollHeight: { configurable: true, value: 960 },
+      })
+      messageList.scrollTop = 720
+      fireEvent.scroll(messageList)
+
+      await user.click(document.querySelector('.case-status'))
+      await waitFor(() => expect(screen.getByRole('complementary', { name: 'Claim details' })).toHaveClass('is-open'))
+      await waitFor(() => expect(messageList.scrollTop).toBe(960))
+      expect(scrollIntoView).not.toHaveBeenCalled()
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView
+      globalThis.requestAnimationFrame = originalRequestAnimationFrame
+    }
   })
 
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
@@ -1847,8 +1935,9 @@ describe('claimant intake projection', () => {
     expect(await screen.findByRole('button', { name: /Your response is needed/ })).toBeInTheDocument()
     const staffArticle = screen.getByText(staffMessage.content.text).closest('.msg-staff')
     expect(staffArticle.querySelector('.staff-mark')).toHaveTextContent('N')
-    expect(staffArticle.querySelector('.chat-bubble')).not.toBeInTheDocument()
-    expect(staffArticle.querySelector('.staff-text')).toHaveTextContent(staffMessage.content.text)
+    expect(staffArticle.querySelector('.staff-bubble')).toHaveClass('chat-bubble')
+    expect(staffArticle.querySelector('.staff-bubble .staff-text'))
+      .toHaveTextContent(staffMessage.content.text)
     expect(staffArticle.querySelector('time.message-timestamp'))
       .toHaveAttribute('datetime', staffMessage.created_at)
     expect(screen.getByText('Northwind staff')).toBeInTheDocument()
@@ -4310,7 +4399,7 @@ describe('claimant intake projection', () => {
     await openCasePanel(user)
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
     expect(screen.queryByRole('button', { name: 'Check your details' })).not.toBeInTheDocument()
-    // Progress now lives only on the "Just noted" card.
+    // Progress now lives only in the compact case status.
     expect(screen.queryByRole('button', { name: /Claim progress/i })).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
 
@@ -4387,7 +4476,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await openCasePanel(user)
     await user.click(await screen.findByRole('button', { name: /^Insured item and loss/ }))
-    await user.click(screen.getByRole('button', { name: /Edit estimated amount/i }))
+    await user.click(screen.getByRole('button', { name: /^Edit estimated amount$/i }))
 
     const correction = screen.getByRole('textbox', { name: /Correct estimated amount/i })
     await user.clear(correction)
@@ -4448,7 +4537,7 @@ describe('claimant intake projection', () => {
     }
   }
 
-  it('shows what was just noted as chips under the reply and confirms them with All correct', async () => {
+  it('shows captured information under the reply and confirms the recorded details', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(notedTurn())
     api.confirmClaimFields.mockResolvedValue({
@@ -4466,27 +4555,25 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const locationChip = await screen.findByRole('button', { name: 'Incident location: Queen Street lights (to check)' })
-    expect(locationChip.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
-    expect(locationChip).toHaveClass('is-check')
-    expect(screen.getByRole('button', { name: 'Vehicle safe to drive: No (to check)' })).toBeInTheDocument()
+    const card = await screen.findByRole('region', { name: 'Captured information' })
+    expect(card.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
+    expect(card).toHaveTextContent('Recorded')
+    expect(card).toHaveTextContent('Incident location')
+    expect(card).toHaveTextContent('Queen Street lights')
+    expect(card).toHaveTextContent('Vehicle safe to drive')
+    expect(card).toHaveTextContent('No')
     // Progress lives once, in the title bar.
     expect(document.querySelector('.case-status')).toHaveTextContent('Noted 2/5')
     expect(screen.queryByRole('button', { name: 'Check your details' })).not.toBeInTheDocument()
 
-    await user.click(locationChip)
-    const list = screen.getByRole('region', { name: 'Just noted' })
-    expect(list).toHaveTextContent('Incident location')
-    expect(list).toHaveTextContent('Vehicle safe to drive')
-    expect(within(list).getAllByText('To check')).toHaveLength(2)
-    await user.click(within(list).getByRole('button', { name: 'All correct' }))
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
 
     await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
       claimId: initialClaim.claim_id,
       fieldCodes: ['incident.location', 'vehicle.drivable'],
     })))
-    expect(await screen.findByRole('button', { name: 'Incident location: Queen Street lights' })).not.toHaveClass('is-check')
-    expect(screen.queryByRole('region', { name: 'Just noted' })).not.toBeInTheDocument()
+    await waitFor(() => expect(within(card).queryByRole('button', { name: 'Looks right' })).not.toBeInTheDocument())
+    expect(within(card).getByRole('button', { name: 'Edit Incident location in captured information' })).toBeVisible()
   })
 
   it('keeps the review prompt for a conflicting answer and confirms only suggested facts', async () => {
@@ -4516,13 +4603,11 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    const chip = await screen.findByRole('button', { name: 'Incident location: Queen Street lights (to check)' })
-    expect(chip.closest('.turn-attachments')).not.toHaveTextContent('Monday')
+    const card = await screen.findByRole('region', { name: 'Captured information' })
+    expect(card).not.toHaveTextContent('Monday')
     expect(screen.getByRole('button', { name: 'Check your details' })).toBeInTheDocument()
 
-    await user.click(chip)
-    const card = screen.getByRole('region', { name: 'Just noted' })
-    await user.click(within(card).getByRole('button', { name: 'All correct' }))
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
     await waitFor(() => expect(api.confirmClaimFields).toHaveBeenCalledWith(expect.objectContaining({
       fieldCodes: ['incident.location', 'vehicle.drivable'],
     })))
@@ -4553,9 +4638,8 @@ describe('claimant intake projection', () => {
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
-    await user.click(await screen.findByRole('button', { name: 'Vehicle safe to drive: No (to check)' }))
-    const card = screen.getByRole('region', { name: 'Just noted' })
-    await user.click(within(card).getByRole('button', { name: 'Change Vehicle safe to drive' }))
+    const card = await screen.findByRole('region', { name: 'Captured information' })
+    await user.click(within(card).getByRole('button', { name: 'Edit Vehicle safe to drive in captured information' }))
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Vehicle safe to drive' }), 'Yes')
     await user.click(within(card).getByRole('button', { name: 'Save' }))
 
@@ -4565,7 +4649,7 @@ describe('claimant intake projection', () => {
     })))
     // The corrected fact stays under the reply that first stated it.
     await waitFor(() => expect(within(card).getByText('Yes')).toBeInTheDocument())
-    expect(await screen.findByRole('button', { name: 'Vehicle safe to drive: Yes' })).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Edit Vehicle safe to drive in captured information' })).toBeVisible()
   })
 
   it.each([true, false])('installs the current snapshot and suppresses stale replay actions (readback succeeds: %s)', async (readbackSucceeds) => {
@@ -5853,6 +5937,41 @@ describe('claimant intake projection', () => {
 
     expect(screen.queryByRole('heading', { name: 'Claim history' })).not.toBeInTheDocument()
     expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+  })
+
+  it('returns from standalone Claim history to the homepage with the header Back control', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue(testAccount('cus_claim_history_back', 'Test claimant'))
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'My claims' }))
+
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Profile' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(await screen.findByRole('heading', { name: 'Start your insurance claim' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
+  it('returns from standalone Claim history to Profile when Profile opened it', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue(testAccount('cus_profile_claim_history', 'Test claimant'))
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Profile' }))
+    const [claimHistoryEntry] = await screen.findAllByRole('button', { name: 'Claim history' })
+    await user.click(claimHistoryEntry)
+
+    expect(await screen.findByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(await screen.findByRole('region', { name: 'Personal details' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/profile')
   })
 
   it('keeps account Claim history navigable after leaving an active conversation', async () => {

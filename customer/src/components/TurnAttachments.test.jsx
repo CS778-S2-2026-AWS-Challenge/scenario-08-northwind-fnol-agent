@@ -18,26 +18,42 @@ describe('TurnAttachments', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('folds facts into chips and opens them in place to confirm', async () => {
+  it('shows recorded facts as an editable structured summary', async () => {
     const user = userEvent.setup()
     const onConfirmFacts = vi.fn()
+    const onSaveFact = vi.fn().mockResolvedValue(true)
     render(
       <TurnAttachments
-        facts={[fact('incident.location', 'Location', 'Dominion Road', true), fact('incident.injury_or_danger', 'Anyone hurt', 'No', false)]}
+        facts={[fact('claim.product_family', 'Claim type', 'motor', true)]}
+        fieldInputs={{
+          'claim.product_family': {
+            value_type: 'enum',
+            allowed_values: ['motor', 'home', 'contents'],
+          },
+        }}
         onConfirmFacts={onConfirmFacts}
+        onSaveFact={onSaveFact}
       />,
     )
 
-    const location = screen.getByRole('button', { name: 'Location: Dominion Road (to check)' })
-    expect(location).toHaveClass('is-check')
-    expect(screen.getByRole('button', { name: 'Anyone hurt: No' })).not.toHaveClass('is-check')
-    expect(screen.queryByRole('region', { name: 'Just noted' })).not.toBeInTheDocument()
+    const card = screen.getByRole('region', { name: 'Captured information' })
+    expect(within(card).getByRole('heading', { name: 'Captured information' }).previousElementSibling)
+      .toHaveAttribute('aria-hidden', 'true')
+    expect(within(card).getByText('Recorded')).toBeVisible()
+    expect(within(card).getByText('Recorded').previousElementSibling).toHaveAttribute('aria-hidden', 'true')
+    expect(within(card).getByText('Claim type')).toBeVisible()
+    expect(within(card).getByText('Motor vehicle accident')).toBeVisible()
+    expect(within(card).getByText('Please review this detail. You can correct it at any time.')).toBeVisible()
 
-    await user.click(location)
-    const list = screen.getByRole('region', { name: 'Just noted' })
-    await user.click(within(list).getByRole('button', { name: 'All correct' }))
-    expect(onConfirmFacts).toHaveBeenCalledWith(['incident.location'])
-    expect(screen.queryByRole('region', { name: 'Just noted' })).not.toBeInTheDocument()
+    const edit = within(card).getByRole('button', { name: 'Edit Claim type in captured information' })
+    expect(edit.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    await user.click(edit)
+    await user.selectOptions(within(card).getByRole('combobox', { name: 'Claim type' }), 'home')
+    await user.click(within(card).getByRole('button', { name: 'Save' }))
+    expect(onSaveFact).toHaveBeenCalledWith(expect.objectContaining({ fieldCode: 'claim.product_family' }), 'home')
+
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
+    expect(onConfirmFacts).toHaveBeenCalledWith(['claim.product_family'])
   })
 
   it('marks what the claimant owes and lets them upload from the chip', () => {
