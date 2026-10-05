@@ -1639,6 +1639,40 @@ describe('claimant intake projection', () => {
     expect(panel).toHaveClass('is-collapsed')
   })
 
+  it('keeps the latest chat position when the Noted details panel opens', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(notedTurn())
+    const originalScrollIntoView = Element.prototype.scrollIntoView
+    const originalRequestAnimationFrame = globalThis.requestAnimationFrame
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    globalThis.requestAnimationFrame = (callback) => {
+      callback()
+      return 0
+    }
+
+    try {
+      const { container } = render(<App />)
+      await startActiveClaim(user)
+
+      const messageList = container.querySelector('.message-list')
+      Object.defineProperties(messageList, {
+        clientHeight: { configurable: true, value: 240 },
+        scrollHeight: { configurable: true, value: 960 },
+      })
+      messageList.scrollTop = 720
+      fireEvent.scroll(messageList)
+
+      await user.click(document.querySelector('.case-status'))
+      await waitFor(() => expect(screen.getByRole('complementary', { name: 'Claim details' })).toHaveClass('is-open'))
+      await waitFor(() => expect(messageList.scrollTop).toBe(960))
+      expect(scrollIntoView).not.toHaveBeenCalled()
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView
+      globalThis.requestAnimationFrame = originalRequestAnimationFrame
+    }
+  })
+
   it('scrolls to the latest messages after the claimant sends from earlier in the conversation', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage

@@ -81,8 +81,27 @@
   .intake-page:has(.intake-history.is-rail-open).details-closed {
     grid-template-columns: var(--claimant-workspace-nav-max) minmax(0, 1fr);
   }
-  /* The floating panel stops under the title bar so the status stays in reach. */
-  .intake-details-panel { inset-block: var(--claimant-title-bar-height) 0; }
+  /* Keep the panel as an overlay only while the compact navigation leaves too
+     little room for a readable conversation column. */
+  .intake-details-panel { inset-block: 0; }
+}
+
+/* Once the viewport can support all three regions, reserve the panel's column
+   so opening it narrows the conversation instead of covering its messages. */
+@media (max-width: 1439px) and (min-width: 981px) {
+  .intake-page.details-open {
+    grid-template-columns: var(--claimant-rail-width) minmax(0, 1fr) var(--claimant-details-panel-width);
+  }
+  .intake-page:has(.intake-history.is-rail-open).details-open {
+    grid-template-columns: var(--claimant-workspace-nav-max) minmax(0, 1fr) var(--claimant-details-panel-width);
+  }
+  .intake-details-panel {
+    position: relative;
+    inset: auto;
+    right: auto;
+    width: 100%;
+    box-shadow: var(--claimant-workspace-sidebar-shadow);
+  }
 }
 .history-actions button { display: flex; align-items: center; gap: var(--space-2); }
 .rail-icon { display: inline-grid; place-items: center; width: var(--space-6); color: var(--color-text-muted); font-weight: var(--font-weight-semibold); }

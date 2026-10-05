@@ -480,6 +480,7 @@ function App() {
   const autoOpenedReview = useRef(null)
   const conversationPanelRef = useRef(null)
   const messageListRef = useRef(null)
+  const detailsPanelRef = useRef(null)
   const followLatestMessages = useRef(true)
   const forceLatestMessages = useRef(false)
   const confirmedClaimProjections = useRef(new Map())
@@ -941,7 +942,20 @@ function App() {
     const sectionKey = { 'open-items': 'openItems', facts: 'facts', files: 'files' }[panelFocus]
     if (sectionKey) setPanelSections((current) => (current[sectionKey] ? current : { ...current, [sectionKey]: true }))
     globalThis.requestAnimationFrame?.(() => {
-      globalThis.document?.getElementById(`case-panel-${panelFocus}`)?.scrollIntoView?.({ block: 'start' })
+      const panel = detailsPanelRef.current
+      const section = panel?.querySelector(`#case-panel-${panelFocus}`)
+      if (!panel || !section) return
+
+      // Scroll the panel itself. scrollIntoView also scrolls the document when the
+      // panel section starts outside the viewport, which moves the chat workspace.
+      const panelRect = panel.getBoundingClientRect()
+      const sectionRect = section.getBoundingClientRect()
+      const stickyHeader = panel.querySelector('.claim-details-sticky-header')
+      const headerHeight = stickyHeader?.getBoundingClientRect().height || 0
+      panel.scrollTop = Math.max(
+        0,
+        panel.scrollTop + sectionRect.top - panelRect.top - headerHeight,
+      )
     })
   }, [panelFocus, detailsOpen])
 
@@ -1066,6 +1080,8 @@ function App() {
   useEffect(() => {
     const messageList = messageListRef.current
     if (!messageList || !isWorkspaceActive || workspaceView !== 'chat') return
+    // Opening the details panel changes the desktop conversation width, so re-anchor
+    // the list after its messages reflow without overriding a claimant's scroll-up.
     if (isNewConversationEmpty) {
       messageList.scrollTop = 0
       followLatestMessages.current = true
@@ -1086,6 +1102,7 @@ function App() {
     error,
     evidenceSyncNotice,
     failedMessage,
+    detailsOpen,
     isNewConversationEmpty,
     isWorkspaceActive,
     pendingMessage,
@@ -4578,6 +4595,7 @@ function App() {
           </section>
 
           <aside
+            ref={detailsPanelRef}
             className={`claim-panel intake-details-panel mobile-view-${mobileView} ${claimDetailsExpanded ? 'is-open' : 'is-collapsed'} ${sheetFull ? 'is-sheet-full' : ''}`}
             aria-label="Claim details"
             aria-hidden={!claimDetailsExpanded}
