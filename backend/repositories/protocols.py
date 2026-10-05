@@ -493,6 +493,12 @@ class ClaimRepository(Protocol):
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         raise NotImplementedError
 
+    def list_historical_claims_for_customer(
+        self, customer_id: str, current_claim_id: str, limit: int = 10
+    ) -> list[WorkingClaim]:
+        """Return bounded, terminal Claims suitable for history retrieval."""
+        raise NotImplementedError
+
     def list_claims_internal(self) -> list[WorkingClaim]:
         """Return claims for an authorised staff projection."""
         raise NotImplementedError

@@ -2098,6 +2098,7 @@ def submit_message(
     repository: PersistenceRepository,
     agent: AgentTurnProvider,
     policy_history_adapter: PolicyHistoryAdapter,
+    claim_history_adapter: PolicyHistoryAdapter,
     principal: Principal,
     claim_id: str,
     session_id: str,
@@ -3043,7 +3044,7 @@ def submit_message(
         )
         history_outcome = _execute_claim_history_search(
             repository,
-            policy_history_adapter,
+            claim_history_adapter,
             claim_id,
             principal.subject,
             proposal,

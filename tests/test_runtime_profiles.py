@@ -268,7 +268,7 @@ def test_local_mvp_builds_mongodb_minio_and_synthetic_lookup_bundle(
         'persistence': 'verified',
         'evidence_storage': 'configured_service',
         'policy': 'using_fixture',
-        'claim_history': 'using_fixture',
+        'claim_history': 'verified',
         'knowledge_documents': 'configured_service',
         'knowledge_retrieval': 'configured_service',
     }

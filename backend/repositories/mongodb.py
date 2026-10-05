@@ -4334,6 +4334,23 @@ class MongoDBRepository:
 
         return [claim for claim in claims if not self._claim_access_closed(claim.claim_id)]
 
+    def list_historical_claims_for_customer(
+        self, customer_id: str, current_claim_id: str, limit: int = 10
+    ) -> list[WorkingClaim]:
+        claims = self._list(
+            'claim',
+            WorkingClaim,
+            {'customer_id': customer_id},
+            '-updated_at',
+        )
+        return [
+            claim
+            for claim in claims
+            if claim.claim_id != current_claim_id
+            and claim.terminal_disposition is not None
+            and claim.terminal_disposition.value.value in {'closed', 'completed'}
+        ][:limit]
+
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 

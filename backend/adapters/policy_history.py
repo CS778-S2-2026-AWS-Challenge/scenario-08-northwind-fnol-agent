@@ -14,6 +14,7 @@ from backend.domain.retrieval import (
     RetrievalSource,
     RetrievalUncertainty,
 )
+from backend.repositories.protocols import ClaimRepository
 from backend.services.support import now_utc
 
 
@@ -228,4 +229,45 @@ class MockPolicyHistoryAdapter(PolicyHistoryAdapter):
             retrieved_at=now_utc(),
             payload=payload,
             uncertainty=[],
+        )
+
+
+class MongoClaimHistoryAdapter(PolicyHistoryAdapter):
+    """Read terminal historical Claims from the configured persistence provider."""
+
+    def __init__(self, repository: ClaimRepository) -> None:
+        self._repository = repository
+
+    def connection_status(self) -> str:
+        status = getattr(self._repository, 'connection_status', None)
+        return str(status()) if callable(status) else 'configured_service'
+
+    def search_policy(self, command: PolicySearchRequest) -> ProviderLookupEnvelope:
+        raise LookupError('policy lookup is not provided by the claim history adapter')
+
+    def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
+        current = self._repository.get_claim_internal(command.claim_id)
+        if current is None:
+            raise LookupError(command.claim_id)
+        claims = self._repository.list_historical_claims_for_customer(
+            current.customer_id, current.claim_id, command.limit
+        )
+        if not claims:
+            raise LookupError(command.history_reference)
+        claim = claims[0]
+        terminal = claim.terminal_disposition
+        assert terminal is not None
+        return ProviderLookupEnvelope(
+            provider='mongodb_claim_history',
+            provider_reference=claim.claim_id,
+            retrieved_at=now_utc(),
+            payload={
+                'history_reference': claim.claim_id,
+                'incident_type': claim.incident_type,
+                'occurred_at': claim.occurred_at
+                if hasattr(claim, 'occurred_at')
+                else claim.created_at,
+                'status': terminal.value.value,
+                'outcome': terminal.value.value,
+            },
         )

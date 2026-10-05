@@ -4435,6 +4435,19 @@ class FixtureRepository(PersistenceRepository):
             key=lambda claim: claim.created_at,
         )
 
+    def list_historical_claims_for_customer(
+        self, customer_id: str, current_claim_id: str, limit: int = 10
+    ) -> list[WorkingClaim]:
+        matches = [
+            deepcopy(claim)
+            for claim in self._claims.values()
+            if claim.customer_id == customer_id
+            and claim.claim_id != current_claim_id
+            and claim.terminal_disposition is not None
+            and claim.terminal_disposition.value.value in {'closed', 'completed'}
+        ]
+        return sorted(matches, key=lambda claim: claim.updated_at, reverse=True)[:limit]
+
     def freeze_message_response(
         self, idempotency: IdempotencyRecord, response_payload: dict[str, Any]
     ) -> dict[str, Any]:

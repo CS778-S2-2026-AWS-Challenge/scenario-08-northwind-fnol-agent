@@ -86,6 +86,10 @@ def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
     return cast(PolicyHistoryAdapter, request.app.state.policy_history_adapter)
 
 
+def claim_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
+    return cast(PolicyHistoryAdapter, request.app.state.claim_history_adapter)
+
+
 def knowledge_retriever_for(request: Request) -> KnowledgeRetriever:
     runtime_integration_policy_for(request).require('knowledge_retrieval')
     return cast(KnowledgeRetriever, request.app.state.knowledge_retriever)
@@ -168,7 +172,7 @@ def search_claim_history_integration(
     runtime_integration_policy_for(request).require('claim_history')
     return search_claim_history(
         repository_for(request),
-        policy_history_adapter_for(request),
+        claim_history_adapter_for(request),
         payload,
     )
 

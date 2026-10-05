@@ -19,7 +19,11 @@ from backend.adapters.knowledge_object_store import (
     S3CompatibleKnowledgeObjectStore,
 )
 from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
-from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHistoryAdapter
+from backend.adapters.policy_history import (
+    MockPolicyHistoryAdapter,
+    MongoClaimHistoryAdapter,
+    PolicyHistoryAdapter,
+)
 from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
@@ -128,6 +132,7 @@ class DataRuntimeBundle:
     policy_history: PolicyHistoryAdapter
     knowledge_documents: KnowledgeDocumentStore
     knowledge_retrieval: KnowledgeRetriever
+    claim_history: PolicyHistoryAdapter | None = None
 
     def readiness_checks(self) -> dict[str, str]:
         repository_status = getattr(self.repository, 'connection_status', None)
@@ -137,7 +142,7 @@ class DataRuntimeBundle:
             ),
             'evidence_storage': self.evidence_storage.connection_status(),
             'policy': self.policy_history.connection_status(),
-            'claim_history': self.policy_history.connection_status(),
+            'claim_history': (self.claim_history or self.policy_history).connection_status(),
             'knowledge_documents': self.knowledge_documents.connection_status(),
             'knowledge_retrieval': self.knowledge_retrieval.connection_status(),
         }
@@ -247,6 +252,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             repository=FixtureRepository(),
             evidence_storage=evidence_storage,
             policy_history=MockPolicyHistoryAdapter(),
+            claim_history=MockPolicyHistoryAdapter(),
             knowledge_documents=knowledge_documents,
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
         )
@@ -278,6 +284,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             repository=repository,
             evidence_storage=evidence_storage,
             policy_history=MockPolicyHistoryAdapter(),
+            claim_history=MongoClaimHistoryAdapter(repository),
             knowledge_documents=knowledge_retrieval,
             knowledge_retrieval=knowledge_retrieval,
         )

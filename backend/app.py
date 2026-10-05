@@ -262,6 +262,7 @@ def create_app(
             policy_history=policy_history_adapter or fixture_bundle.policy_history,
             knowledge_documents=fixture_bundle.knowledge_documents,
             knowledge_retrieval=fixture_bundle.knowledge_retrieval,
+            claim_history=policy_history_adapter or fixture_bundle.policy_history,
         )
     else:
         bundle = data_runtime_bundle or build_data_runtime_bundle(resolved_settings)
@@ -493,6 +494,7 @@ def create_app(
     resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage
     app.state.policy_history_adapter = bundle.policy_history
+    app.state.claim_history_adapter = bundle.claim_history or bundle.policy_history
     app.state.handoff_dispatch_adapter = handoff_dispatch_adapter or MockHandoffDispatchAdapter()
     readiness = bundle.readiness_checks()
     actual_integration_sources = {
