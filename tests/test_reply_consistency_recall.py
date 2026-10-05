@@ -4,15 +4,20 @@ import json
 from dataclasses import replace
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.adapters.model_gateway import ModelGatewayConfig, OpenAICompatibleModelGateway
 from backend.domain.agent_v8 import V8Escalation
 from backend.domain.model_gateway import (
+    ModelCapabilities,
     ModelCompletionStatus,
     ModelGatewayError,
     ModelGatewayErrorCode,
+    ModelProfile,
+    ModelProfileStatus,
     ModelRequest,
     ModelResponse,
     ModelToolCall,
@@ -137,9 +142,21 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
             'reply',
         ),
         (
+            {**HONEST_REWRITE, 'model_chosen_secret_key': 'secret-value'},
+            ModelCompletionStatus.COMPLETE,
+            'consistency_recall_output_schema_validation',
+            None,
+        ),
+        (
             HONEST_REWRITE,
             ModelCompletionStatus.INCOMPLETE,
             'consistency_recall_completion_status',
+            None,
+        ),
+        (
+            {**HONEST_REWRITE, 'reply': '   '},
+            ModelCompletionStatus.COMPLETE,
+            'consistency_recall_proposal_validation',
             None,
         ),
     ],
@@ -171,12 +188,26 @@ def test_rejected_rewrite_records_its_check_without_model_content(
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.failure_diagnostic.code == diagnostic_code
     assert trace.failure_diagnostic.path == diagnostic_path
-    assert 'Synthetic claimant incident detail' not in trace.failure_diagnostic.model_dump_json()
-    assert 'Water still dripping' not in trace.failure_diagnostic.model_dump_json()
+    assert 'Synthetic claimant incident detail' not in trace.model_dump_json()
+    assert 'Water still dripping' not in trace.model_dump_json()
+    assert 'model_chosen_secret_key' not in trace.model_dump_json()
+    assert 'secret-value' not in trace.model_dump_json()
 
 
+@pytest.mark.parametrize(
+    ('error_code', 'recovery_rule'),
+    [
+        (ModelGatewayErrorCode.TIMEOUT, 'claimant_turn.model_timeout'),
+        (ModelGatewayErrorCode.PROVIDER, 'claimant_turn.model_provider_terminal'),
+    ],
+)
 def test_recall_gateway_rejection_keeps_its_error_and_records_stage(
-    app: FastAPI, client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+    app: FastAPI,
+    client: TestClient,
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: ModelGatewayErrorCode,
+    recovery_rule: str,
 ) -> None:
     provider = _provider(NAMES_REFUSED_SERVICE, review=_Verdicts(NAMES_TOW))
     original_complete = provider.gateway.complete
@@ -184,22 +215,80 @@ def test_recall_gateway_rejection_keeps_its_error_and_records_stage(
     def fail_on_recall(request: ModelRequest) -> ModelResponse:
         if provider.gateway.requests:
             provider.gateway.requests.append(request)
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+            raise ModelGatewayError(error_code)
         return original_complete(request)
 
     monkeypatch.setattr(provider.gateway, 'complete', fail_on_recall)
     app.state.agent_turn_provider = InvariantGuardedAgent(provider)
-    journey = Journey(client, 'home', 'recall-gateway-failure')
+    journey = Journey(client, 'home', f'recall-gateway-{error_code.value}')
     turn = journey.send('The water is still dripping.', expect_agent_message=False)
 
+    assert turn['recovery']['rule_id'] == recovery_rule
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+    )
+    assert trace is not None and trace.failure_diagnostic is not None
+    assert trace.reason_codes == [error_code.value]
+    assert trace.failure_diagnostic.code == 'consistency_recall_gateway_failure'
+    assert trace.failure_diagnostic.path is None
+
+
+def test_real_gateway_malformed_recall_output_has_distinct_diagnostic(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        content = json.dumps(NAMES_REFUSED_SERVICE) if calls == 1 else 'not valid JSON'
+        return httpx.Response(
+            200,
+            json={'choices': [{'finish_reason': 'stop', 'message': {'content': content}}]},
+        )
+
+    capabilities = ModelCapabilities(structured_output=True, tools=True)
+    gateway = OpenAICompatibleModelGateway(
+        ModelGatewayConfig(
+            base_url='https://model.example.test/v1',
+            model='synthetic-model',
+            credential_environment_variable=None,
+            timeout_seconds=5.0,
+            capabilities=capabilities,
+            profile=ModelProfile(
+                profile_id='synthetic-recall',
+                protocol='openai_compatible',
+                provider='synthetic',
+                model_identifier='synthetic-model',
+                credential_reference=None,
+                purpose='agent_turn',
+                privacy_class='synthetic_fnol',
+                capabilities=capabilities,
+                structured_output_method='json_object',
+                timeout_seconds=5.0,
+                prompt_version='northwind-fnol-claimant-v8',
+                evaluation_status=ModelProfileStatus.CONFIGURED,
+            ),
+            structured_output_method='json_object',
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    provider = V8JourneyProvider([])
+    provider.agent = GatewayAgent(gateway, reply_judge=_Verdicts(NAMES_TOW))
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'real-gateway-malformed-recall')
+    turn = journey.send('The water is still dripping.', expect_agent_message=False)
+
+    assert calls == 2, turn['recovery']
     assert turn['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     trace = repository.find_runtime_trace_for_trigger(
         journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
     )
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.reason_codes == ['malformed_response']
-    assert trace.failure_diagnostic.code == 'consistency_recall_gateway_failure'
+    assert trace.failure_diagnostic.code == 'consistency_recall_provider_output_invalid'
     assert trace.failure_diagnostic.path is None
+    assert 'not valid JSON' not in trace.model_dump_json()
 
 
 def _validated(

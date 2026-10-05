@@ -444,7 +444,9 @@ class GatewayAgent:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 diagnostic_code=(
-                    f'{diagnostic_stage}_output_missing' if diagnostic_stage is not None else None
+                    'consistency_recall_output_missing'
+                    if diagnostic_stage == 'consistency_recall'
+                    else None
                 ),
             )
         raw_output = dict(response.structured_output)
@@ -479,8 +481,8 @@ class GatewayAgent:
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
                 diagnostic_code=(
-                    f'{diagnostic_stage}_output_schema_validation'
-                    if diagnostic_stage is not None
+                    'consistency_recall_output_schema_validation'
+                    if diagnostic_stage == 'consistency_recall'
                     else None
                 ),
                 diagnostic_path=_validation_path(error.errors()) if diagnostic_stage else None,
@@ -1207,10 +1209,7 @@ class GatewayAgent:
                     # noise: fail through persist-first recovery rather than
                     # spend another model call on a repair.
                     raise ModelGatewayError(
-                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
-                        diagnostic_code=(
-                            'consistency_recall_field_contract' if recall_started else None
-                        ),
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE
                     ) from contract_error
                 violations = [item.model_dump(mode='json') for item in contract_error.violations]
                 logger.info(
@@ -1394,11 +1393,12 @@ class GatewayAgent:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
         except ModelGatewayError as error:
             if recall_started and error.diagnostic_code is None:
-                error.diagnostic_code = (
-                    'consistency_recall_proposal_validation'
-                    if recall_response_received
-                    else 'consistency_recall_gateway_failure'
-                )
+                if recall_response_received:
+                    error.diagnostic_code = 'consistency_recall_proposal_validation'
+                elif error.code is ModelGatewayErrorCode.MALFORMED_RESPONSE:
+                    error.diagnostic_code = 'consistency_recall_provider_output_invalid'
+                else:
+                    error.diagnostic_code = 'consistency_recall_gateway_failure'
             self._record_observations(observations, context_sizes, error)
             raise
         self._record_observations(observations, context_sizes)
