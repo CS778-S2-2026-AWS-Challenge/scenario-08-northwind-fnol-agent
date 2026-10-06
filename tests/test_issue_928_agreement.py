@@ -15,8 +15,20 @@ def _login(
     response = client.post(
         '/api/v1/auth/sessions',
         json={
-            'email': f'claimant.{claimant}@example.invalid',
-            'password': 'northwind-demo-' + claimant,
+            'email': (
+                'maya.chen@example.invalid'
+                if claimant == 'one'
+                else 'oliver.reed@example.invalid'
+                if claimant == 'two'
+                else f'claimant.{claimant}@example.invalid'
+            ),
+            'password': (
+                'northwind-demo-one'
+                if claimant == 'one'
+                else 'northwind-demo-two'
+                if claimant == 'two'
+                else 'northwind-demo-' + claimant
+            ),
         },
     )
     assert response.status_code == 201, response.text
@@ -56,7 +68,7 @@ def _prepare_step4(
     claim = cast(dict[str, Any], created.json()['claim'])
     claim_id = cast(str, claim['claim_id'])
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
 
     repository._claims[claim_id] = stored.model_copy(
@@ -192,10 +204,10 @@ def test_acceptance_is_revisioned_audited_idempotent_and_claimant_safe(
     assert 'customer_id' not in body['acceptance']
     assert 'accepted_against_claim_revision' not in body['acceptance']
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert len(stored.agreement_acceptances) == 1
-    assert stored.agreement_acceptances[0].customer_id == 'cus_demo'
+    assert stored.agreement_acceptances[0].customer_id == 'cus_8f41a2c90d7e463b'
 
     changed_reuse = client.post(
         f'/api/v1/claims/{claim_id}/agreement-acceptances',
@@ -277,7 +289,7 @@ def test_false_confirmation_wrong_version_foreign_claimant_and_stale_revision_fa
     )
     assert concealed.status_code == 404
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.agreement_acceptances == []
 
@@ -292,7 +304,7 @@ def test_later_claim_revision_invalidates_previous_acceptance(
     accepted = _accept(client, owner, claim)
     assert accepted['primary_action']['action_code'] == 'claimant.create_claim'
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
 
     repository._claims[claim_id] = stored.model_copy(

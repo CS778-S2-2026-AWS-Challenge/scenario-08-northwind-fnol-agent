@@ -7,7 +7,7 @@ from backend.repositories.fixture import FixtureRepository
 from backend.services.claimant_events import claimant_change_after, claimant_event_revision
 
 
-def _claimant_principal(customer_id: str = 'cus_demo') -> Principal:
+def _claimant_principal(customer_id: str = 'cus_8f41a2c90d7e463b') -> Principal:
     return Principal(
         subject=customer_id,
         actor_type='claimant',
@@ -82,7 +82,7 @@ def test_claimant_event_cursor_rejects_cross_customer_and_cross_session_reads(
     with pytest.raises(ApiError) as cross_customer:
         claimant_event_revision(
             repository,
-            _claimant_principal('cus_other'),
+            _claimant_principal('cus_2b67e9d14a3c508f'),
             claim_id,
             session_id,
         )

@@ -460,7 +460,7 @@ def test_closed_claim_create_replay_cannot_create_replacement_claim(
 
     assert replay.status_code == 404
     assert replay.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
 
     # Closure is Claim-scoped, not an account ban. A genuinely new request
     # with a new retry identity may still create a separate Claim.
@@ -475,7 +475,7 @@ def test_closed_claim_create_replay_cannot_create_replacement_claim(
 
     assert fresh.status_code == 201
     assert fresh.json()['claim']['claim_id'] != claim_id
-    assert repository.claim_count == 2
+    assert repository.claim_count == 3
 
 
 @pytest.mark.parametrize(

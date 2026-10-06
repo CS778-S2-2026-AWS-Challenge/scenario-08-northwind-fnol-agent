@@ -68,6 +68,8 @@ them:
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
+- [Scenario regression fixtures](../tests/fixtures/scenarios/README.md) — test-only AT snapshots;
+  runtime cases use the configured business seed.
 - [Controlled Test Corpus Standard](controlled-test-corpus.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [VP Field and Branch Mapping](vp-field-branch-mapping.md)

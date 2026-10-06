@@ -93,9 +93,9 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     assert body['claim']['revision'] == revision + 1
     assert body['claim']['incomplete_context']['follow_up_status'] == 'pending'
 
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
-    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
-    follow_ups = repository.list_follow_ups(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    stored_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
+    follow_ups = repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_session is not None
     assert stored_claim.active_session_id is None
@@ -108,20 +108,20 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
         repository.get_follow_up(
             claim_id,
             follow_ups[0].follow_up_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         == follow_ups[0]
     )
-    assert repository.get_follow_up(claim_id, 'fup_missing', 'cus_demo') is None
+    assert repository.get_follow_up(claim_id, 'fup_missing', 'cus_8f41a2c90d7e463b') is None
     assert (
         repository.get_follow_up(
             claim_id,
             follow_ups[0].follow_up_id,
-            'cus_other',
+            'cus_2b67e9d14a3c508f',
         )
         is None
     )
-    assert repository.list_follow_ups(claim_id, 'cus_other') == []
+    assert repository.list_follow_ups(claim_id, 'cus_2b67e9d14a3c508f') == []
 
     replay = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
@@ -129,8 +129,8 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     )
     assert replay.status_code == 200
     assert replay.json() == body
-    assert len(repository.list_follow_ups(claim_id, 'cus_demo')) == 1
-    replayed_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert len(repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')) == 1
+    replayed_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert replayed_claim is not None
     assert replayed_claim.revision == revision + 1
 
@@ -163,11 +163,11 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     )
     assert resumed.status_code == 201
     assert resumed.json()['session_id'] != session_id
-    assert repository.claim_count == 1
-    final_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert repository.claim_count == 2
+    final_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert final_claim is not None
     assert final_claim.active_session_id == resumed.json()['session_id']
-    resumed_follow_ups = repository.list_follow_ups(claim_id, 'cus_demo')
+    resumed_follow_ups = repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(resumed_follow_ups) == 1
     assert resumed_follow_ups[0].status is FollowUpStatus.RESOLVED
     assert resumed_follow_ups[0].outcome == 'claimant_resumed'
@@ -181,7 +181,7 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     )
     resume_events = [event for event in resume_events if event.idempotency_key == 'p17-resume']
     assert len(resume_events) == 1
-    assert resume_events[0].actor.actor_id == 'cus_demo'
+    assert resume_events[0].actor.actor_id == 'cus_8f41a2c90d7e463b'
     assert resume_events[0].claim_revision == final_claim.revision
 
 
@@ -210,14 +210,14 @@ def test_pause_checkpoint_rejects_stale_revision_without_partial_write(
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'REVISION_CONFLICT'
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
-    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    stored_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_session is not None
     assert stored_claim.revision == revision
     assert stored_claim.active_session_id == session_id
     assert stored_session.status is SessionStatus.ACTIVE
-    assert repository.list_follow_ups(claim_id, 'cus_demo') == []
+    assert repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def _mongo_bundle() -> tuple[
@@ -360,11 +360,11 @@ def test_mongodb_persists_incomplete_checkpoint_with_fixture_equivalent_shape() 
         repository.get_follow_up(
             claim.claim_id,
             follow_up.follow_up_id,
-            'cus_other',
+            'cus_2b67e9d14a3c508f',
         )
         is None
     )
-    assert repository.list_follow_ups(claim.claim_id, 'cus_other') == []
+    assert repository.list_follow_ups(claim.claim_id, 'cus_2b67e9d14a3c508f') == []
     assert (
         repository.find_idempotency(
             claim.customer_id,
@@ -450,7 +450,7 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     )
     assert paused.status_code == 200
 
-    follow_up = repository.list_follow_ups(claim_id, 'cus_demo')[0]
+    follow_up = repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')[0]
     storage = MockEvidenceStorage()
     bundle = cast(
         DataRuntimeBundle,
@@ -503,7 +503,7 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
         current = repository.get_follow_up(
             claim_id,
             follow_up.follow_up_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         assert current is not None
         assert current.due_at is not None
@@ -513,7 +513,7 @@ def test_supported_recovery_worker_entrypoint_advances_real_pause_to_retention(
     exhausted = repository.get_follow_up(
         claim_id,
         follow_up.follow_up_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert exhausted is not None
     assert exhausted.status is FollowUpStatus.BLOCKED
@@ -577,7 +577,7 @@ def test_recovery_cycle_isolates_one_failed_expiry_candidate(
             },
         )
         assert paused.status_code == 200
-        candidates.append(repository.list_follow_ups(claim_id, 'cus_demo')[0])
+        candidates.append(repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')[0])
 
     def list_expiring(
         _now: datetime,
@@ -666,7 +666,7 @@ def test_p17_full_journey_pause_resume_stops_future_recovery(
 
     follow_ups = repository.list_follow_ups(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert len(follow_ups) == 1
@@ -700,7 +700,7 @@ def test_p17_full_journey_pause_resume_stops_future_recovery(
 
     final_claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert final_claim is not None
@@ -709,7 +709,7 @@ def test_p17_full_journey_pause_resume_stops_future_recovery(
 
     resolved = repository.list_follow_ups(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert len(resolved) == 1
@@ -759,7 +759,7 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
 
     current = repository.list_follow_ups(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )[0]
 
     assert current.deadline_at is not None
@@ -780,7 +780,7 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
         reloaded = repository.get_follow_up(
             claim_id,
             current.follow_up_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
 
         assert reloaded is not None
@@ -813,7 +813,7 @@ def test_p17_full_journey_attempt_exhaustion_expiry_retention_denies_old_session
     terminal_follow_up = repository.get_follow_up(
         claim_id,
         current.follow_up_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert terminal_follow_up is not None

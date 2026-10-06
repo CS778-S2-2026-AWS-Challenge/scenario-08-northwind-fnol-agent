@@ -49,20 +49,20 @@ def test_incident_time_is_the_models_reading_checked_not_rewritten(
     journey = Journey(client, 'motor', 'relative-time')
 
     journey.send('Someone rear-ended me at the lights about 20 minutes ago.')
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.form['incident.occurred_at'].value == worked_out
     assert 'reported_at_local' in (provider.gateway.requests[0].messages[-1].content or '')
 
     journey.send('Actually it was just after lunch.')
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     stored = claim.form['incident.occurred_at']
     assert stored.value == 'just after lunch'
     assert stored.precision.value == 'approximate'
 
     journey.send('Thanks.')
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.form['incident.occurred_at'].value == 'just after lunch'
 
 

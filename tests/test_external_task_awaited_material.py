@@ -76,7 +76,11 @@ def repository() -> FixtureRepository:
 @pytest.fixture
 def client(repository: FixtureRepository) -> Iterator[TestClient]:
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository,
         ControlledAgent(),
     )
@@ -207,7 +211,7 @@ def test_nothing_is_owed_before_a_request_is_accepted(
     )
     claim_id = str(created.json()['claim']['claim_id'])
 
-    assert repository.list_evidence(claim_id, 'cus_demo') == []
+    assert repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b') == []
     assert repository.list_external_task_evidence_links_internal(claim_id) == []
 
 
@@ -223,7 +227,7 @@ def test_an_accepted_request_records_what_it_owes(
 
     claim_id = _routed_claim(client)
 
-    records = repository.list_evidence(claim_id, 'cus_demo')
+    records = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     awaited = [item for item in records if item.source is EvidenceSource.EXTERNAL_SYSTEM]
     assert len(awaited) == 1
     record = awaited[0]
@@ -245,7 +249,7 @@ def test_the_awaited_material_names_the_task_that_owes_it(
     """
 
     claim_id = _routed_claim(client)
-    records = repository.list_evidence(claim_id, 'cus_demo')
+    records = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     links = repository.list_external_task_evidence_links_internal(claim_id)
     tasks = repository.list_external_tasks_internal(claim_id)
 

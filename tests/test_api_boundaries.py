@@ -174,7 +174,9 @@ def test_integration_routes_reject_other_registered_actor_credentials(client: Te
 
 
 def test_normal_mode_rejects_synthetic_credentials_even_in_development() -> None:
-    app = create_app(Settings(environment='development'))
+    app = create_app(
+        Settings(business_seed_path='config/business-seed.json', environment='development')
+    )
     integration_payload = {
         'working_claim_id': 'clm_missing',
         'claim_revision': 1,
@@ -205,7 +207,9 @@ def test_normal_mode_rejects_synthetic_credentials_even_in_development() -> None
 
 
 def test_synthetic_credentials_are_disabled_in_production_normal_mode() -> None:
-    app = create_app(Settings(environment='production'))
+    app = create_app(
+        Settings(business_seed_path='config/business-seed.json', environment='production')
+    )
     integration_payload = {
         'working_claim_id': 'clm_missing',
         'claim_revision': 1,

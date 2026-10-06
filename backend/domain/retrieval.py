@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from backend.domain.claim_history import LodgedClaimHistory
 from backend.domain.data_query import DataQueryProjection
 from backend.domain.knowledge import KnowledgeCitation
 from backend.domain.models import ContractModel
@@ -46,6 +47,14 @@ class ClaimHistoryFacts(ContractModel):
     outcome: str | None = Field(default=None, max_length=200)
 
 
+class SeededPolicyRecord(ContractModel):
+    """Customer-owned synthetic policy data provisioned without overwriting edits."""
+
+    customer_id: str = Field(min_length=1, max_length=100)
+    facts: PolicyFacts
+    uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
+
+
 class PolicyRetrievalRecord(ContractModel):
     retrieval_id: str = Field(min_length=1, max_length=100)
     claim_id: str = Field(min_length=1, max_length=100)
@@ -60,7 +69,11 @@ class ClaimHistoryRetrievalRecord(ContractModel):
     claim_id: str = Field(min_length=1, max_length=100)
     kind: Literal[RetrievalKind.CLAIM_HISTORY] = RetrievalKind.CLAIM_HISTORY
     source: RetrievalSource
-    facts: ClaimHistoryFacts
+    # Persisted pre-1221 retrievals still contain facts; new consultations use history.
+    # Remove this reader only after those durable records have been migrated.
+    facts: ClaimHistoryFacts | None = None
+    history: LodgedClaimHistory | None = None
+    query: 'ClaimHistorySearchRequest | None' = None
     uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
 
 
@@ -113,7 +126,7 @@ class ClaimHistorySearchRequest(ContractModel):
     """
 
     claim_id: str = Field(min_length=1, max_length=100)
-    history_reference: str = Field(min_length=1, max_length=200)
+    history_reference: str | None = Field(default=None, min_length=1, max_length=200)
     purpose: Literal['relevant_history_review'] = 'relevant_history_review'
     limit: int = Field(default=10, ge=1, le=50)
 
@@ -132,7 +145,7 @@ class ClaimHistorySearchResponse(DataQueryProjection):
     result_id: str = Field(min_length=1, max_length=100)
     status: RetrievalStatus
     source: RetrievalSource | None = None
-    facts: ClaimHistoryFacts | None = None
+    history: LodgedClaimHistory | None = None
     uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
     limitations: list[str] = Field(default_factory=list, max_length=100)
     retrieved_at: datetime

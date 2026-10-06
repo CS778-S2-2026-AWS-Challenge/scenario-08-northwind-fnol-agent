@@ -12,6 +12,7 @@ from backend.adapters.policy_history import (
     map_policy_provider_payload,
 )
 from backend.domain.models import FraudSignal, WorkflowState
+from backend.domain.retrieval import ClaimHistorySearchRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.services.retrieval_review import persist_retrieval_record
 
@@ -73,7 +74,7 @@ def test_demo_policy_uncertainty_remains_sourced_through_staff_writeback(
 ) -> None:
     claim_id = _create_claim(client, auth_headers)
     _assign_fixture_staff(repository, claim_id)
-    initial_claim = repository.get_claim(claim_id, 'cus_demo')
+    initial_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert initial_claim is not None
     assert initial_claim.revision == 1
 
@@ -105,11 +106,11 @@ def test_demo_policy_uncertainty_remains_sourced_through_staff_writeback(
             ],
         ),
     )
-    review_signals = persist_retrieval_record(repository, retrieval, 'cus_demo')
+    review_signals = persist_retrieval_record(repository, retrieval, 'cus_8f41a2c90d7e463b')
     assert len(review_signals) == 1
     review_signal = review_signals[0]
 
-    persisted_claim = repository.get_claim(claim_id, 'cus_demo')
+    persisted_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert persisted_claim is not None
     assert persisted_claim.revision == 1
     assert persisted_claim.claim_state.fraud_signal is FraudSignal.NONE
@@ -161,13 +162,13 @@ def test_demo_policy_uncertainty_remains_sourced_through_staff_writeback(
     assert stored_decision['summary'] == staff_summary
     assert stored_decision['evidence_refs'] == review_signal.source_refs
 
-    final_claim = repository.get_claim(claim_id, 'cus_demo')
+    final_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert final_claim is not None
     assert final_claim.revision == 2
     assert final_claim.claim_state.fraud_signal is FraudSignal.NONE
     assert final_claim.claim_state.workflow_state is WorkflowState.COLLECTING
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [retrieval]
-    assert repository.list_review_signals(claim_id, 'cus_demo') == [review_signal]
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == [retrieval]
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == [review_signal]
 
 
 def test_demo_adapter_fails_closed_without_required_source_facts() -> None:
@@ -198,9 +199,10 @@ def test_demo_adapter_fails_closed_without_required_source_facts() -> None:
             'risk_score': 0.95,
         },
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError, match='scoped history'):
         map_history_provider_payload(
             retrieval_id='ret_missing_history_reference',
             claim_id='clm_demo',
             envelope=history_envelope,
+            query=ClaimHistorySearchRequest(claim_id='clm_demo'),
         )

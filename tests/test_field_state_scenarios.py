@@ -15,7 +15,7 @@ from backend.domain.models import FieldSelectionState, FormSource, FormStatus
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import ScenarioFixture, load_scenario, seed_scenario
 
-SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'tests' / 'fixtures' / 'scenarios'
 SCENARIOS = (
     'AT-14-field-states-motor',
     'AT-15-field-states-home',
@@ -97,7 +97,14 @@ def test_each_family_is_projected_through_claimant_and_workbench_apis(scenario_i
     scenario = _scenario(scenario_id)
     repository = FixtureRepository()
     seed_scenario(repository, scenario)
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+    )
 
     with TestClient(app) as client:
         claimant = client.get(
@@ -162,9 +169,9 @@ def test_branch_incompatible_form_update_is_rejected_without_claim_mutation(
     )
     assert created.status_code == 201, created.text
     claim_id = created.json()['claim']['claim_id']
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
-    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
 
     response = client.patch(
         f'/api/v1/claims/{claim_id}/form',
@@ -175,8 +182,10 @@ def test_branch_incompatible_form_update_is_rejected_without_claim_mutation(
     assert response.status_code == 422, response.text
     assert response.json()['error']['code'] == 'VALIDATION_ERROR'
     assert 'inactive' in response.json()['error']['details'][0]['reason']
-    assert repository.get_claim(claim_id, 'cus_demo') == before
-    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == evaluations_before
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == before
+    assert (
+        repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b') == evaluations_before
+    )
 
 
 def test_atomic_family_transition_allows_the_new_family_field(
@@ -191,9 +200,9 @@ def test_atomic_family_transition_allows_the_new_family_field(
     )
     assert created.status_code == 201, created.text
     claim_id = created.json()['claim']['claim_id']
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
-    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
 
     response = client.patch(
         f'/api/v1/claims/{claim_id}/form',
@@ -220,11 +229,11 @@ def test_atomic_family_transition_allows_the_new_family_field(
         'claim.product_family',
         'property.address',
     }
-    updated = repository.get_claim(claim_id, 'cus_demo')
+    updated = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert updated is not None
     assert updated.incident_type == 'home'
     assert updated.form['property.address'].value == '14 Synthetic Lane, Auckland'
-    evaluations_after = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    evaluations_after = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(evaluations_after) == len(evaluations_before) + 1
     assert evaluations_after[-1].resulting_claim_revision == updated.revision
 

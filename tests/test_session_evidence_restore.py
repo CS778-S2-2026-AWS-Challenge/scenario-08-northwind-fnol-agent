@@ -13,10 +13,10 @@ PROPOSED_VALUE = 'Rear panel damage shown in the supplied evidence.'
 
 
 def _pause_active_session(repository: FixtureRepository, claim_id: str) -> int:
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.active_session_id is not None
-    session = repository.get_session(claim_id, claim.active_session_id, 'cus_demo')
+    session = repository.get_session(claim_id, claim.active_session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
 
     repository.save_session(session.model_copy(update={'status': SessionStatus.PAUSED}))
@@ -123,8 +123,8 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
         f'evidence:{evidence_id}:material:1',
     ]
 
-    stored_before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
-    claim_before = repository.get_claim(claim_id, 'cus_demo')
+    stored_before = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
+    claim_before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_before is not None
     assert claim_before is not None
     before_payload = stored_before.model_dump(mode='json')
@@ -145,8 +145,8 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     assert isinstance(resumed_session_id, str)
     assert resumed_session_id != original_session_id
 
-    current_claim = repository.get_claim(claim_id, 'cus_demo')
-    stored_after = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    current_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    stored_after = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert current_claim is not None
     assert stored_after is not None
     assert current_claim.revision == 6
@@ -202,7 +202,7 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     assert staff_evidence['provenance'] == before_payload['provenance']
     assert staff_detail.json()['revision'] == 6
 
-    sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    sessions = repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(sessions) == 2
     assert sum(session.status is SessionStatus.ACTIVE for session in sessions) == 1
     assert all(session.claim_id == claim_id for session in sessions)

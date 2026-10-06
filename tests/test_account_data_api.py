@@ -59,7 +59,7 @@ def _post(
 def test_profile_migrates_display_name_to_one_compatible_name_projection(
     client: TestClient,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     initial = client.get('/api/v1/account', headers=owner)
     updated = client.patch(
         '/api/v1/account/profile',
@@ -90,7 +90,7 @@ def test_profile_migrates_display_name_to_one_compatible_name_projection(
         'legal_name': 'Synthetic Legal Name',
         'preferred_name': 'Synthetic Preferred Name',
         'date_of_birth': '1990-02-03',
-        'email': 'claimant.one@example.invalid',
+        'email': 'maya.chen@example.invalid',
         'phone': '020 000 0000',
         'residential_address': '1 Example Street, Auckland',
     }
@@ -103,8 +103,8 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-    other = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
+    other = _login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
     bank_number = '12-3456-1234567-00'
     passport_number = 'PA1234567'
     payment = _post(
@@ -213,7 +213,7 @@ def test_protected_account_records_are_masked_owned_revisioned_and_idempotent(
     assert retired_identity.status_code == 204
     assert repeated_identity_retirement.status_code == 204
     stored_payment = repository.get_payment_destination(
-        payment['payment_destination_id'], 'cus_demo'
+        payment['payment_destination_id'], 'cus_8f41a2c90d7e463b'
     )
     assert stored_payment is not None
     assert stored_payment.protected_value != bank_number
@@ -231,7 +231,7 @@ def test_payment_destinations_persist_profile_fields_and_one_common_destination(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     first = _post(
         client,
         owner,
@@ -267,7 +267,9 @@ def test_payment_destinations_persist_profile_fields_and_one_common_destination(
     by_id = {item['payment_destination_id']: item for item in listed.json()['items']}
     assert by_id[first['payment_destination_id']]['is_common'] is False
     assert by_id[second['payment_destination_id']]['is_common'] is True
-    demoted = repository.get_payment_destination(first['payment_destination_id'], 'cus_demo')
+    demoted = repository.get_payment_destination(
+        first['payment_destination_id'], 'cus_8f41a2c90d7e463b'
+    )
     assert demoted is not None
     assert demoted.revision == 2
     demotion_events = repository.list_audit_events_internal(
@@ -310,7 +312,7 @@ def test_payment_destination_rejects_retired_common_designation_atomically(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     common = _post(
         client,
         owner,
@@ -339,9 +341,11 @@ def test_payment_destination_rejects_retired_common_designation_atomically(
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'PAYMENT_DESTINATION_STATE_CONFLICT'
-    stored_common = repository.get_payment_destination(common['payment_destination_id'], 'cus_demo')
+    stored_common = repository.get_payment_destination(
+        common['payment_destination_id'], 'cus_8f41a2c90d7e463b'
+    )
     stored_target = repository.get_payment_destination(
-        retired_target['payment_destination_id'], 'cus_demo'
+        retired_target['payment_destination_id'], 'cus_8f41a2c90d7e463b'
     )
     assert stored_common is not None
     assert stored_target is not None
@@ -383,7 +387,7 @@ def test_payment_destination_rejects_false_common_mutation(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     common = _post(
         client,
         owner,
@@ -400,7 +404,9 @@ def test_payment_destination_rejects_false_common_mutation(
 
     assert response.status_code == 422
     assert response.json()['error']['code'] == 'VALIDATION_ERROR'
-    stored = repository.get_payment_destination(common['payment_destination_id'], 'cus_demo')
+    stored = repository.get_payment_destination(
+        common['payment_destination_id'], 'cus_8f41a2c90d7e463b'
+    )
     assert stored is not None
     assert (stored.active, stored.is_common, stored.revision) == (True, True, 1)
 
@@ -410,7 +416,7 @@ def test_payment_destination_create_requires_profile_fields(
     client: TestClient,
     missing_field: str,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     payload = {
         'account_type': 'savings',
         'account_number': '12-3456-1111222-00',
@@ -434,7 +440,7 @@ def test_payment_destination_create_retries_as_non_common_after_atomic_race(
     repository: FixtureRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     original = repository.create_account_record
     state = {'raised': False}
 
@@ -633,7 +639,7 @@ def test_fixture_create_boundary_decides_common_from_active_record_count(
 def test_saved_policy_prefills_registered_claim_field_without_coverage_inference(
     client: TestClient,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     policy = _post(
         client,
         owner,
@@ -722,9 +728,16 @@ def test_policy_selection_conflicts_preserve_claim_revision_and_identify_policy(
     else:
         repository = MongoDBRepository(mongomock.MongoClient(), f'policy_conflict_{conflict_kind}')
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+    )
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         policy = _post(
             client,
             owner,
@@ -775,7 +788,7 @@ def test_policy_selection_conflicts_preserve_claim_revision_and_identify_policy(
                 'reason': 'unavailable' if conflict_kind == 'unavailable' else 'changed',
             }
         ]
-    stored_claim = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored_claim = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_claim.revision == claim['revision']
 
@@ -783,7 +796,7 @@ def test_policy_selection_conflicts_preserve_claim_revision_and_identify_policy(
 def _advance_claim_to_payout_contact(
     repository: FixtureRepository | MongoDBRepository,
     claim_id: str,
-    customer_id: str = 'cus_demo',
+    customer_id: str = 'cus_8f41a2c90d7e463b',
 ) -> WorkingClaim:
     claim = repository.get_claim(claim_id, customer_id)
     assert claim is not None
@@ -810,10 +823,17 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     else:
         repository = MongoDBRepository(mongomock.MongoClient(), f'payout_contact_{adapter}')
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+    )
 
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         payment = _post(
             client,
             owner,
@@ -863,7 +883,7 @@ def test_payout_contact_selection_is_atomic_masked_and_resumable(adapter: str) -
     assert bank_number not in selected.text
     assert bank_number not in detail.text
 
-    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.payment_destination_id == payment['payment_destination_id']
     assert stored.form['claimant.contact_preference'].status.value == 'confirmed'
@@ -891,7 +911,7 @@ def test_payout_contact_in_app_progresses_to_agreement(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
 
     payment = _post(
         client,
@@ -948,7 +968,7 @@ def test_payout_contact_progression_fails_closed_after_phone_is_removed(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     account = client.get('/api/v1/account', headers=owner)
     with_phone = client.patch(
         '/api/v1/account/profile',
@@ -1017,13 +1037,17 @@ def test_payout_contact_selection_rejects_profile_write_that_wins_before_guard(
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     identity_repository = FixtureIdentityRepository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository,
         identity_repository=identity_repository,
     )
 
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         account = client.get('/api/v1/account', headers=owner)
         with_phone = client.patch(
             '/api/v1/account/profile',
@@ -1062,7 +1086,9 @@ def test_payout_contact_selection_rejects_profile_write_that_wins_before_guard(
             subject_id=claim['claim_id'],
             claim_id=claim['claim_id'],
         )
-        evaluations_before = repository.list_branch_evaluations(claim['claim_id'], 'cus_demo')
+        evaluations_before = repository.list_branch_evaluations(
+            claim['claim_id'], 'cus_8f41a2c90d7e463b'
+        )
         audits_before = repository.list_audit_events_internal(subject)
         realtime_before = repository.replay_realtime_events(None, limit=1000)
 
@@ -1082,7 +1108,7 @@ def test_payout_contact_selection_rejects_profile_write_that_wins_before_guard(
         with ThreadPoolExecutor(max_workers=1) as executor:
             response_future = executor.submit(client.post, route, headers=headers, json=payload)
             assert guard_requested.wait(timeout=2)
-            current = identity_repository.get_account('cus_demo')
+            current = identity_repository.get_account('cus_8f41a2c90d7e463b')
             assert current is not None
             identity_repository.save_account(
                 replace(current, phone='', revision=current.revision + 1),
@@ -1102,13 +1128,16 @@ def test_payout_contact_selection_rejects_profile_write_that_wins_before_guard(
     assert detail.json()['customer_next_step']['status'] == 'ready_to_create'
     assert detail.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
 
-    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == ready.revision
     assert stored.payment_destination_id is None
     assert 'claimant.contact_preference' not in stored.form
-    assert repository.list_branch_evaluations(claim['claim_id'], 'cus_demo') == evaluations_before
-    assert repository.find_idempotency('cus_demo', route, key) is None
+    assert (
+        repository.list_branch_evaluations(claim['claim_id'], 'cus_8f41a2c90d7e463b')
+        == evaluations_before
+    )
+    assert repository.find_idempotency('cus_8f41a2c90d7e463b', route, key) is None
     assert repository.list_audit_events_internal(subject) == audits_before
     assert repository.replay_realtime_events(None, limit=1000) == realtime_before
 
@@ -1129,13 +1158,17 @@ def test_payout_contact_guard_blocks_profile_write_until_claim_commit(
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     identity_repository = FixtureIdentityRepository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository,
         identity_repository=identity_repository,
     )
 
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         account = client.get('/api/v1/account', headers=owner)
         with_phone = client.patch(
             '/api/v1/account/profile',
@@ -1183,7 +1216,7 @@ def test_payout_contact_guard_blocks_profile_write_until_claim_commit(
         monkeypatch.setattr(repository, 'save_payout_contact_selection', paused_save)
 
         def update_profile() -> None:
-            current = identity_repository.get_account('cus_demo')
+            current = identity_repository.get_account('cus_8f41a2c90d7e463b')
             assert current is not None
             updated = replace(current, phone='', revision=current.revision + 1)
             profile_write_started.set()
@@ -1204,12 +1237,12 @@ def test_payout_contact_guard_blocks_profile_write_until_claim_commit(
 
     assert selected.status_code == 201, selected.text
     assert profile_write_finished.is_set()
-    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == ready.revision + 1
     assert stored.payment_destination_id == payment['payment_destination_id']
     assert stored.form['claimant.contact_preference'].value == 'sms'
-    assert repository.find_idempotency('cus_demo', route, key) is not None
+    assert repository.find_idempotency('cus_8f41a2c90d7e463b', route, key) is not None
     assert detail.status_code == 200, detail.text
     assert detail.json()['customer_next_step']['status'] == 'ready_to_create'
     assert detail.json()['primary_action']['action_code'] == 'claimant.review_payout_contact'
@@ -1231,13 +1264,17 @@ def test_payout_contact_claim_failure_releases_contact_guard_without_partial_wri
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     identity_repository = FixtureIdentityRepository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository,
         identity_repository=identity_repository,
     )
 
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         account = client.get('/api/v1/account', headers=owner)
         with_phone = client.patch(
             '/api/v1/account/profile',
@@ -1267,7 +1304,9 @@ def test_payout_contact_claim_failure_releases_contact_guard_without_partial_wri
             subject_id=claim['claim_id'],
             claim_id=claim['claim_id'],
         )
-        evaluations_before = repository.list_branch_evaluations(claim['claim_id'], 'cus_demo')
+        evaluations_before = repository.list_branch_evaluations(
+            claim['claim_id'], 'cus_8f41a2c90d7e463b'
+        )
         audits_before = repository.list_audit_events_internal(subject)
         realtime_before = repository.replay_realtime_events(None, limit=1000)
         claim_write_called = Event()
@@ -1292,7 +1331,7 @@ def test_payout_contact_claim_failure_releases_contact_guard_without_partial_wri
         )
 
         assert claim_write_called.is_set()
-        current = identity_repository.get_account('cus_demo')
+        current = identity_repository.get_account('cus_8f41a2c90d7e463b')
         assert current is not None
         identity_repository.save_account(
             replace(current, phone='', revision=current.revision + 1),
@@ -1301,13 +1340,16 @@ def test_payout_contact_claim_failure_releases_contact_guard_without_partial_wri
 
     assert selected.status_code == 409, selected.text
     assert selected.json()['error']['code'] == 'REVISION_CONFLICT'
-    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == ready.revision
     assert stored.payment_destination_id is None
     assert 'claimant.contact_preference' not in stored.form
-    assert repository.list_branch_evaluations(claim['claim_id'], 'cus_demo') == evaluations_before
-    assert repository.find_idempotency('cus_demo', route, key) is None
+    assert (
+        repository.list_branch_evaluations(claim['claim_id'], 'cus_8f41a2c90d7e463b')
+        == evaluations_before
+    )
+    assert repository.find_idempotency('cus_8f41a2c90d7e463b', route, key) is None
     assert repository.list_audit_events_internal(subject) == audits_before
     assert repository.replay_realtime_events(None, limit=1000) == realtime_before
 
@@ -1316,8 +1358,8 @@ def test_payout_contact_selection_rejects_stale_foreign_and_unusable_inputs(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-    other = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
+    other = _login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
     owner_payment = _post(
         client,
         owner,
@@ -1382,7 +1424,7 @@ def test_payout_contact_selection_rejects_stale_foreign_and_unusable_inputs(
     assert missing_phone.json()['error']['details'] == [
         {'field': 'contact_preference', 'reason': 'Add a phone number first.'}
     ]
-    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == ready.revision
     assert stored.payment_destination_id is None
@@ -1404,7 +1446,7 @@ def test_payout_contact_selection_maps_repository_conflicts_without_partial_writ
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     payment = _post(
         client,
         owner,
@@ -1453,7 +1495,7 @@ def test_payout_contact_selection_maps_repository_conflicts_without_partial_writ
     expected_status = 404 if conflict_kind == 'missing_destination' else 409
     assert response.status_code == expected_status
     assert response.json()['error']['code'] == expected_code
-    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == ready.revision
     assert stored.payment_destination_id is None
@@ -1473,10 +1515,17 @@ def test_payout_contact_repository_rechecks_destination_revision_at_commit(
             f'payout_repository_revision_race_{adapter}',
         )
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+    )
 
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         payment = _post(
             client,
             owner,
@@ -1554,7 +1603,7 @@ def test_payout_contact_repository_rechecks_destination_revision_at_commit(
         )
     assert raised.value.reason == 'changed'
 
-    stored = repository.get_claim(claim['claim_id'], 'cus_demo')
+    stored = repository.get_claim(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == ready.revision
     assert stored.payment_destination_id is None
@@ -1569,9 +1618,16 @@ def test_fixture_and_mongodb_protected_record_parity(adapter: str) -> None:
     else:
         repository = MongoDBRepository(mongomock.MongoClient(), 'account_data_parity')
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+    )
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         created = _post(
             client,
             owner,
@@ -1614,7 +1670,7 @@ def test_fixture_and_mongodb_protected_record_parity(adapter: str) -> None:
     assert updated.json()['masked_document_number'] == '****8877'
     assert selected.status_code == 201, selected.text
     assert selected.json()['proposed_field']['value'] == 'NW-SYNTHETIC-PARITY'
-    stored = repository.get_identity_document(created['identity_id'], 'cus_demo')
+    stored = repository.get_identity_document(created['identity_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.protected_value != 'DL-SYNTH-9988'
     assert stored.masked_value == '****8877'
@@ -1626,12 +1682,16 @@ def test_fixture_and_mongodb_protected_record_parity(adapter: str) -> None:
 
 def test_protected_writes_fail_closed_without_a_configured_adapter() -> None:
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         FixtureRepository(),
         protected_value_adapter=UnavailableProtectedValueAdapter(),
     )
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         response = client.post(
             '/api/v1/account/identity-documents',
             headers={**owner, 'Idempotency-Key': 'unavailable-protected-store'},
@@ -1653,10 +1713,17 @@ def test_account_keyset_cursor_survives_updates_and_rejects_scope_mismatch(
     else:
         repository = MongoDBRepository(mongomock.MongoClient(), f'keyset_{adapter}')
         repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+    )
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-        other_owner = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
+        other_owner = _login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
         for number in range(3):
             _post(
                 client,
@@ -1706,7 +1773,7 @@ def test_account_keyset_cursor_survives_updates_and_rejects_scope_mismatch(
 
     assert updated.status_code == 200
     assert first.json()['items'][0]['policy_id'] == ordered[0]['policy_id']
-    assert 'cus_demo' not in decoded_cursor
+    assert 'cus_8f41a2c90d7e463b' not in decoded_cursor
     assert second.json()['items'][0]['policy_id'] == ordered[1]['policy_id']
     assert third.json()['items'][0]['policy_id'] == ordered[2]['policy_id']
     assert third.json()['page']['next_cursor'] is None
@@ -1718,10 +1785,15 @@ def test_account_keyset_cursor_survives_updates_and_rejects_scope_mismatch(
 
 def test_account_list_caps_limit_above_one_hundred() -> None:
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), FixtureRepository()
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        FixtureRepository(),
     )
     with TestClient(app) as client:
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         for number in range(101):
             _post(
                 client,
@@ -1742,13 +1814,18 @@ def test_account_operation_logs_are_correlated_and_exclude_protected_values(
 ) -> None:
     bank_number = '12-3456-1234567-00'
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), FixtureRepository()
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        FixtureRepository(),
     )
     with (
         TestClient(app) as client,
         caplog.at_level(logging.INFO, logger='backend.api.account_data'),
     ):
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         created = client.post(
             '/api/v1/account/payment-destinations',
             headers={
@@ -1778,7 +1855,7 @@ def test_account_operation_logs_are_correlated_and_exclude_protected_values(
     assert created.status_code == 201
     assert rejected.status_code == 409
     assert success.__dict__['request_id'] == 'account-log-success'
-    assert success.__dict__['customer_id'] == 'cus_demo'
+    assert success.__dict__['customer_id'] == 'cus_8f41a2c90d7e463b'
     assert success.__dict__['outcome'] == 'succeeded'
     assert success.__dict__['revision'] == 1
     assert failure.__dict__['request_id'] == 'account-log-rejected'
@@ -1795,13 +1872,18 @@ def test_retirement_logs_include_final_revision_for_all_account_resources(
     bank_number = '12-3456-7654321-00'
     document_number = 'DL-RETIRE-9988'
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), FixtureRepository()
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        FixtureRepository(),
     )
     with (
         TestClient(app) as client,
         caplog.at_level(logging.INFO, logger='backend.api.account_data'),
     ):
-        owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         policy = _post(
             client,
             owner,

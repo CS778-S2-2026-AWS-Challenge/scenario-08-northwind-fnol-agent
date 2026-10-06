@@ -1,6 +1,10 @@
 import datetime
 import json
-from pathlib import Path
+
+import pytest
+
+from backend.domain.claim_history import LodgedClaimHistory
+from backend.domain.retrieval import ClaimHistorySearchRequest
 
 RETRIEVED_AT = datetime.datetime(2026, 8, 17, 0, 15, tzinfo=datetime.UTC)
 
@@ -73,52 +77,40 @@ def test_policy_provider_payload_maps_to_provider_neutral_domain_record() -> Non
     assert 'must-not-cross-domain-boundary' not in encoded
 
 
-def test_history_provider_payload_maps_without_provider_risk_scoring() -> None:
-    import backend.adapters.policy_history as policy_history
+def test_history_consultation_maps_bounded_projection_without_provider_scoring() -> None:
+    from backend.adapters.policy_history import ProviderLookupEnvelope, map_history_provider_payload
 
-    envelope = policy_history.ProviderLookupEnvelope(
-        provider='synthetic_history_provider',
-        provider_reference='provider-history-009',
+    history = LodgedClaimHistory(
+        count_past_12_months=0,
+        claims=[],
+        as_of=RETRIEVED_AT,
+        window_start=RETRIEVED_AT.replace(year=2025),
+    )
+    envelope = ProviderLookupEnvelope(
+        provider='repository_history',
+        provider_reference='current',
         retrieved_at=RETRIEVED_AT,
-        payload={
-            'history_reference': 'HIST-SYNTH-009',
-            'incident_type': 'motor',
-            'occurred_at': '2025-11-03T02:00:00Z',
-            'status': 'closed',
-            'outcome': 'settled',
-            'provider_risk_score': 0.91,
-            'provider_fraud_label': 'do-not-copy',
-            'internal_notes': {'reviewer': 'synthetic-only'},
-        },
-        uncertainty=[
-            policy_history.ProviderUncertainty(
-                code='HISTORY_MATCH_UNCERTAIN',
-                detail='The historical record may be relevant but is not a fraud finding.',
-            )
-        ],
+        history=history,
+        payload={'provider_risk_score': 0.91, 'provider_fraud_label': 'do-not-copy'},
     )
-
-    record = policy_history.map_history_provider_payload(
-        retrieval_id='ret_history_009',
-        claim_id='clm_fixture',
+    record = map_history_provider_payload(
+        retrieval_id='his_consultation',
+        claim_id='current',
         envelope=envelope,
+        query=ClaimHistorySearchRequest(claim_id='current', limit=3),
     )
-
-    assert record.kind.value == 'claim_history'
-    assert record.facts.history_reference == 'HIST-SYNTH-009'
-    assert record.facts.incident_type == 'motor'
-    assert record.facts.status == 'closed'
-    assert record.facts.outcome == 'settled'
-    assert record.uncertainty[0].code == 'HISTORY_MATCH_UNCERTAIN'
-
-    dumped = record.model_dump(mode='json')
-    keys = collect_keys(dumped)
-    encoded = json.dumps(dumped)
-    assert 'provider_risk_score' not in keys
-    assert 'provider_fraud_label' not in keys
-    assert 'internal_notes' not in keys
-    assert 'do-not-copy' not in encoded
-    assert 'synthetic-only' not in encoded
+    assert record.history == history
+    assert record.query is not None and record.query.limit == 3
+    assert record.facts is None
+    assert record.source.retrieved_at == RETRIEVED_AT
+    assert 'do-not-copy' not in record.model_dump_json()
+    with pytest.raises(ValueError, match='scoped history'):
+        map_history_provider_payload(
+            retrieval_id='his_foreign',
+            claim_id='other',
+            envelope=envelope,
+            query=ClaimHistorySearchRequest(claim_id='current'),
+        )
 
 
 def test_mapping_rejects_provider_payload_without_required_domain_reference() -> None:
@@ -142,45 +134,6 @@ def test_mapping_rejects_provider_payload_without_required_domain_reference() ->
     raise AssertionError('Mapping must reject a provider payload without a policy reference.')
 
 
-def test_drive_history_fixture_maps_allow_list_and_discards_source_only_fields() -> None:
-    import backend.adapters.policy_history as policy_history
-
-    fixture_path = (
-        Path(__file__).parent / 'fixtures' / 'policy_history' / 'drive-source-history-example.json'
-    )
-    fixture = json.loads(fixture_path.read_text(encoding='utf-8'))
-    envelope = policy_history.ProviderLookupEnvelope.model_validate(fixture['provider_envelope'])
-
-    record = policy_history.map_history_provider_payload(
-        retrieval_id=fixture['retrieval_id'],
-        claim_id=fixture['claim_id'],
-        envelope=envelope,
-    )
-
-    assert record.source.system == 'drive_claims_lifecycle_ifrs_synthetic'
-    assert record.source.reference.endswith('#CLM-IFRS-2024012')
-    assert record.facts.history_reference == 'CLM-IFRS-2024012'
-    assert record.facts.incident_type == 'motor'
-    assert record.facts.occurred_at == datetime.datetime(2025, 11, 1, tzinfo=datetime.UTC)
-    assert record.facts.status == 'reported'
-    assert record.facts.outcome is None
-    assert {item.code for item in record.uncertainty} == {
-        'HISTORY_OUTCOME_PENDING',
-        'SYNTHETIC_HISTORY_CONTEXT',
-    }
-
-    mapped_keys = collect_keys(record.model_dump(mode='json'))
-    source_only_keys = {
-        'source_policy_number',
-        'source_claim_amount',
-        'source_reserve_amount',
-        'source_ifrs17_cohort',
-        'source_discount_rate',
-        'source_risk_adjustment',
-    }
-    assert mapped_keys.isdisjoint(source_only_keys)
-
-
 def test_issue_108_does_not_expand_claimant_api_with_provider_records() -> None:
     from backend.domain.models import ClaimantClaim
 
@@ -189,3 +142,38 @@ def test_issue_108_does_not_expand_claimant_api_with_provider_records() -> None:
     assert 'provider_payload' not in public_fields
     assert 'policy_retrievals' not in public_fields
     assert 'history_retrievals' not in public_fields
+
+
+def test_repository_history_adapter_uses_lodged_seed_and_explicit_missing_claim() -> None:
+    import pytest
+
+    from backend.adapters.policy_history import RepositoryClaimHistoryAdapter
+    from backend.domain.retrieval import ClaimHistorySearchRequest, PolicySearchRequest
+    from backend.repositories.fixture import FixtureRepository
+    from backend.services.business_seed import (
+        BUSINESS_SEED_PATH,
+        load_business_seed,
+        provision_business_claims,
+    )
+
+    repository = FixtureRepository()
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    provision_business_claims(repository, seed)
+    history_claim = repository.get_claim_internal('clm_6d9231ab40e85fc7')
+    assert history_claim is not None
+    current = history_claim.model_copy(update={'claim_id': 'current', 'active_session_id': None})
+    repository._claims[current.claim_id] = current
+    adapter = RepositoryClaimHistoryAdapter(repository)
+    envelope = adapter.search_claim_history(ClaimHistorySearchRequest(claim_id='current'))
+    assert envelope.history is not None
+    assert envelope.history.claims[0].claim_id == history_claim.claim_id
+    assert envelope.history.claims[0].occurred_at != history_claim.created_at
+    assert envelope.payload == {}
+    missing = adapter.search_claim_history(
+        ClaimHistorySearchRequest(claim_id='current', history_reference='not-owned')
+    )
+    assert missing.history is not None and missing.history.claims == []
+    with pytest.raises(LookupError):
+        adapter.search_claim_history(ClaimHistorySearchRequest(claim_id='missing'))
+    with pytest.raises(LookupError):
+        adapter.search_policy(PolicySearchRequest(claim_id='current', policy_reference='ignored'))

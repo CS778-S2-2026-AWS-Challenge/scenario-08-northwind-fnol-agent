@@ -13,7 +13,13 @@ from backend.repositories.configuration import ConfigurationRepository
 
 def _client() -> TestClient:
     return TestClient(
-        create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+        create_app(
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            )
+        )
     )
 
 
@@ -118,7 +124,7 @@ def test_admin_audit_search_is_filtered_and_protected() -> None:
         assert denied.status_code == 401
 
         updated = client.patch(
-            '/internal/v1/admin/accounts/customers/cus_demo',
+            '/internal/v1/admin/accounts/customers/cus_8f41a2c90d7e463b',
             headers={
                 **_headers('audit-customer-update'),
                 'If-Match': '"1"',
@@ -163,7 +169,11 @@ def test_published_access_policy_can_only_restrict_existing_staff_scope() -> Non
     )
     with TestClient(
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             configuration_repository=repository,
         )
     ) as client:

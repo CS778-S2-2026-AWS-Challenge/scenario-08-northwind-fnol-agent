@@ -53,7 +53,7 @@ def seed_policy_review_signal(
             ],
         ),
     )
-    signals = persist_retrieval_record(repository, record, 'cus_demo')
+    signals = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
     assert len(signals) == 1
     return claim_id, record, signals[0]
 
@@ -75,9 +75,9 @@ def test_workbench_review_decision_preserves_actor_reason_revision_and_source_ev
         repository,
         key_prefix='review-writeback',
     )
-    before_claim = repository.get_claim(claim_id, 'cus_demo')
-    before_records = repository.list_retrieval_records(claim_id, 'cus_demo')
-    before_signals = repository.list_review_signals(claim_id, 'cus_demo')
+    before_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    before_records = repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')
+    before_signals = repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b')
     assert before_claim is not None
     assert before_claim.revision == 1
     assert before_records == [record]
@@ -133,13 +133,13 @@ def test_workbench_review_decision_preserves_actor_reason_revision_and_source_ev
         'staff-note-001',
     ]
 
-    after_claim = repository.get_claim(claim_id, 'cus_demo')
+    after_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert after_claim is not None
     assert after_claim.revision == 2
     assert after_claim.claim_state.workflow_state is WorkflowState.COLLECTING
     assert after_claim.claim_state.fraud_signal is FraudSignal.NONE
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == before_records
-    assert repository.list_review_signals(claim_id, 'cus_demo') == before_signals
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == before_records
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == before_signals
 
     stored_decisions = repository.list_signal_decisions(claim_id)
     assert len(stored_decisions) == 1
@@ -209,7 +209,7 @@ def test_review_decision_is_idempotent_and_stale_revision_is_rejected(
     assert replay.status_code == 201
     assert replay.json() == first.json()
     assert len(repository.list_signal_decisions(claim_id)) == 1
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.revision == 2
 
@@ -233,4 +233,4 @@ def test_review_decision_is_idempotent_and_stale_revision_is_rejected(
     assert stale.status_code == 409
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
     assert stale.json()['error']['current_revision'] == 2
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [record]
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == [record]

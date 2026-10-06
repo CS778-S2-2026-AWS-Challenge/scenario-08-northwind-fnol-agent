@@ -1,7 +1,7 @@
 from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from threading import Condition, Event, RLock
 from typing import Any
 
@@ -18,6 +18,12 @@ from backend.domain.claim_creation import (
     ClaimCreationOperationStatus,
     assert_claim_creation_operation_transition,
     evidence_snapshot_fingerprint,
+)
+from backend.domain.claim_history import (
+    LodgedClaimHistory,
+    history_window_start,
+    incident_calendar_date,
+    lodged_claim_summary,
 )
 from backend.domain.evidence import (
     assert_material_history_is_append_only,
@@ -138,7 +144,7 @@ from backend.domain.retention import (
     validate_retention_operation_transition,
     validate_retention_source_authority,
 )
-from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
+from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord, SeededPolicyRecord
 from backend.domain.runtime import (
     RuntimeTurnRecords,
     RuntimeWorkItemRecord,
@@ -209,6 +215,7 @@ class FixtureRepository(PersistenceRepository):
         self._realtime_condition = Condition(self._claim_mutation_lock)
         self._claims: dict[str, WorkingClaim] = {}
         self._policies: dict[str, PolicyNumberRecord] = {}
+        self._seed_policies: dict[tuple[str, str], SeededPolicyRecord] = {}
         self._payment_destinations: dict[str, PaymentDestinationRecord] = {}
         self._identity_documents: dict[str, IdentityDocumentRecord] = {}
         self._assets: dict[str, AssetRecord] = {}
@@ -4433,6 +4440,101 @@ class FixtureRepository(PersistenceRepository):
         return sorted(
             claims,
             key=lambda claim: claim.created_at,
+        )
+
+    def get_seed_policy(self, customer_id: str, policy_number: str) -> SeededPolicyRecord | None:
+        return deepcopy(self._seed_policies.get((customer_id, policy_number)))
+
+    def ensure_seed_policy(self, policy: SeededPolicyRecord) -> None:
+        with self._claim_mutation_lock:
+            self._seed_policies.setdefault(
+                (policy.customer_id, policy.facts.policy_reference), deepcopy(policy)
+            )
+
+    def find_duplicate_lodged_claim_ids(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        product_family: str,
+        incident_date: date,
+        as_of: datetime,
+    ) -> list[str]:
+        matches = []
+        for claim in self._claims.values():
+            if (
+                claim.customer_id != customer_id
+                or claim.claim_id == current_claim_id
+                or claim.incident_type != product_family
+                or self._claim_access_closed(claim.claim_id)
+            ):
+                continue
+            terminal, external = claim.terminal_disposition, claim.external_claim
+            if (
+                terminal is None
+                or terminal.value.value != 'completed'
+                or terminal.reason_code.value != 'CLAIM_CREATED'
+                or terminal.recorded_at > as_of
+                or external is None
+                or external.creation_status.value != 'created'
+                or not external.external_claim_id
+            ):
+                continue
+            field = claim.form.get('incident.occurred_at')
+            occurred = incident_calendar_date(field.value) if field is not None else None
+            if occurred is not None and abs((occurred - incident_date).days) <= 3:
+                matches.append(claim.claim_id)
+        return sorted(matches)[:50]
+
+    def query_lodged_claim_history(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        limit: int,
+        as_of: datetime,
+        history_reference: str | None = None,
+    ) -> LodgedClaimHistory:
+        if not 1 <= limit <= 50:
+            raise ValueError('History limit must be between 1 and 50.')
+        window_start = history_window_start(as_of)
+        summaries = []
+        count = 0
+        for claim in self._claims.values():
+            if claim.customer_id != customer_id or claim.claim_id == current_claim_id:
+                continue
+            terminal = claim.terminal_disposition
+            if (
+                terminal is None
+                or terminal.value.value != 'completed'
+                or terminal.reason_code.value != 'CLAIM_CREATED'
+            ):
+                continue
+            if terminal.recorded_at > as_of or self._claim_access_closed(claim.claim_id):
+                continue
+            external = claim.external_claim
+            if (
+                external is None
+                or external.creation_status.value != 'created'
+                or not external.external_claim_id
+            ):
+                continue
+            summary = lodged_claim_summary(claim)
+            count += summary.lodged_at >= window_start
+            external = claim.external_claim
+            if history_reference is not None and history_reference not in (
+                claim.claim_id,
+                summary.claim_number,
+                external.external_claim_id if external is not None else None,
+            ):
+                continue
+            summaries.append(summary)
+        summaries.sort(key=lambda item: (item.lodged_at, item.claim_id), reverse=True)
+        return LodgedClaimHistory(
+            count_past_12_months=count,
+            claims=summaries[:limit],
+            as_of=as_of,
+            window_start=window_start,
         )
 
     def freeze_message_response(

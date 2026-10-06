@@ -32,12 +32,17 @@ from backend.services.configuration import (
 
 
 def _client() -> TestClient:
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     return TestClient(create_app(settings))
 
 
 def _model_client() -> TestClient:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         model_protocol_adapter='openai_compatible',
@@ -1342,6 +1347,7 @@ def test_admin_api_validates_a_secondary_deployment_bound_model_without_a_secret
         tools=True,
     )
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         model_runtime_bindings=(binding,),

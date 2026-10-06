@@ -35,7 +35,13 @@ from backend.services import release_sets
 
 def _client() -> TestClient:
     return TestClient(
-        create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+        create_app(
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            )
+        )
     )
 
 

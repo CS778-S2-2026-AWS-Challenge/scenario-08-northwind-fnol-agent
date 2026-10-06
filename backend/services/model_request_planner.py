@@ -181,6 +181,7 @@ def plan_model_turn(
     cross_claim_review = (
         'claim-history' in route.capability_ids
         and context.claim_history_context_loader is not None
+        and 'claim' in (context.message_text or '').casefold()
         and any(
             term in (context.message_text or '').casefold()
             for term in ('compare', 'across claims', 'all claims', 'multiple claims')

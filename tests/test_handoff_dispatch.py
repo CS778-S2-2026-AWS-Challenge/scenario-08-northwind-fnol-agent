@@ -50,7 +50,11 @@ def dispatch_client(
     dispatch_adapter: MockHandoffDispatchAdapter,
 ) -> TestClient:
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         dispatch_repository,
         handoff_dispatch_adapter=dispatch_adapter,
     )
@@ -143,7 +147,11 @@ def test_disabled_dispatch_preserves_handoff_and_uses_the_local_queue() -> None:
         )
     )
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         FixtureRepository(),
         configuration_repository=configurations,
         release_set_repository=releases,
@@ -187,8 +195,8 @@ def test_notification_outage_keeps_the_request_its_state_and_the_staff_queue(
     assert body['revision'] == 2
 
     handoff_id = body['handoff']['handoff_id']
-    stored = dispatch_repository.get_handoff(claim_id, handoff_id, 'cus_demo')
-    claim = dispatch_repository.get_claim(claim_id, 'cus_demo')
+    stored = dispatch_repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
+    claim = dispatch_repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert claim is not None
     assert claim.revision == 2
@@ -217,8 +225,8 @@ def test_retry_during_an_outage_does_not_duplicate_the_handoff_or_the_revision(
     assert replay.json() == first.json()
     assert repeat.json()['handoff']['handoff_id'] == first.json()['handoff']['handoff_id']
 
-    handoffs = dispatch_repository.list_handoffs(claim_id, 'cus_demo')
-    claim = dispatch_repository.get_claim(claim_id, 'cus_demo')
+    handoffs = dispatch_repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')
+    claim = dispatch_repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(handoffs) == 1
     assert claim is not None
     assert claim.revision == 2

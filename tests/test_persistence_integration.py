@@ -8,10 +8,10 @@ from backend.repositories.fixture import FixtureRepository
 
 
 def pause_active_session(repository: FixtureRepository, claim_id: str) -> int:
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.active_session_id is not None
-    session = repository.get_session(claim_id, claim.active_session_id, 'cus_demo')
+    session = repository.get_session(claim_id, claim.active_session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
 
     repository.save_session(session.model_copy(update={'status': SessionStatus.PAUSED}))
@@ -48,7 +48,7 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
     assert isinstance(claim_id, str)
     assert isinstance(first_session_id, str)
     assert created.json()['claim']['revision'] == 1
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
 
     assert pause_active_session(repository, claim_id) == 2
 
@@ -63,11 +63,11 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
     assert isinstance(second_session_id, str)
     assert second_session_id != first_session_id
 
-    after_first_resume = repository.get_claim(claim_id, 'cus_demo')
+    after_first_resume = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert after_first_resume is not None
     assert after_first_resume.revision == 3
     assert after_first_resume.active_session_id == second_session_id
-    resumed_session = repository.get_session(claim_id, second_session_id, 'cus_demo')
+    resumed_session = repository.get_session(claim_id, second_session_id, 'cus_8f41a2c90d7e463b')
     assert resumed_session is not None
     assert resumed_session.context_revision == 2
 
@@ -90,7 +90,7 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
     assert isinstance(handoff_id, str)
     assert support_body['revision'] == 4
     assert support_body['handoff']['status'] == 'queued'
-    requested_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    requested_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert requested_handoff is not None
     assert requested_handoff.claim_id == claim_id
     assert requested_handoff.status is HandoffStatus.QUEUED
@@ -123,13 +123,13 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
     assert isinstance(third_session_id, str)
     assert third_session_id not in {first_session_id, second_session_id}
 
-    after_second_resume = repository.get_claim(claim_id, 'cus_demo')
+    after_second_resume = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert after_second_resume is not None
     assert after_second_resume.revision == 7
     assert after_second_resume.active_session_id == third_session_id
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
 
-    preserved_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    preserved_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert preserved_handoff is not None
     assert preserved_handoff.status is HandoffStatus.ACCEPTED
     assert preserved_handoff.assigned_to == 'stf_demo'
@@ -162,16 +162,16 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
     assert staff_write.status_code == 200
     assert staff_write.json()['claim_revision'] == 8
 
-    final_claim = repository.get_claim(claim_id, 'cus_demo')
-    final_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
-    sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    final_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    final_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
+    sessions = repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert final_claim is not None
     assert final_handoff is not None
     assert final_claim.revision == 8
     assert final_claim.active_session_id == third_session_id
     assert final_handoff.status is HandoffStatus.IN_PROGRESS
     assert final_handoff.assigned_to == 'stf_demo'
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
     assert len(sessions) == 3
     assert sum(session.status is SessionStatus.ACTIVE for session in sessions) == 1
     assert all(session.claim_id == claim_id for session in sessions)
@@ -215,13 +215,13 @@ def test_claim_session_and_evidence_share_one_persistence_baseline(
     evidence = cast(dict[str, Any], registered.json()['evidence'])
     evidence_id = cast(str, evidence['evidence_id'])
 
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
-    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
-    stored_evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    stored_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
+    stored_evidence = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_session is not None
     assert stored_evidence is not None
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
     assert stored_claim.revision == 2
     assert stored_claim.active_session_id == session_id
     assert stored_session.claim_id == claim_id
@@ -242,8 +242,8 @@ def test_claim_session_and_evidence_share_one_persistence_baseline(
     )
     assert stale.status_code == 409
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
-    assert repository.get_claim(claim_id, 'cus_demo') == stored_claim
-    assert repository.list_evidence(claim_id, 'cus_demo') == [stored_evidence]
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == stored_claim
+    assert repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b') == [stored_evidence]
 
     listed = client.get(endpoint, headers=auth_headers)
     read_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)

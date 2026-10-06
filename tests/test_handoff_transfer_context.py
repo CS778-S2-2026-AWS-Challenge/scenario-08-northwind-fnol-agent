@@ -9,8 +9,8 @@ from backend.services.handoff_context import _active_signals, build_handoff_tran
 
 SCENARIO = (
     Path(__file__).resolve().parents[1]
-    / 'backend'
-    / 'demo_data'
+    / 'tests'
+    / 'fixtures'
     / 'scenarios'
     / 'AT-02-coverage-ambiguity.json'
 )

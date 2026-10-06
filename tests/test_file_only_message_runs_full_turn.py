@@ -116,7 +116,7 @@ def test_photo_without_text_starts_the_report_and_facts_are_document_sourced(
         for message in provider.gateway.requests[0].messages
         for block in (message.content_blocks or [])
     )
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     for code in ('claim.product_family', 'vehicle.damage_description'):
         assert claim.form[code].source.value == 'image'
@@ -172,7 +172,8 @@ def test_pdf_the_provider_cannot_read_is_kept_and_acknowledged_not_errored(
     assert evidence_id in user_payload
     assert 'received_but_unreadable' in user_payload
     # The message and the evidence are both persisted.
-    assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 2
+    assert len(repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')) == 2
     assert any(
-        item.evidence_id == evidence_id for item in repository.list_evidence(claim_id, 'cus_demo')
+        item.evidence_id == evidence_id
+        for item in repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     )

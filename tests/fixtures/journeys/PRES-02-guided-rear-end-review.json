@@ -30,9 +30,9 @@
     }
   ],
   "policy": {
-    "reference": "synthetic-policy-ambiguous",
+    "reference": "NW-MTR-2026-20963",
     "source_system": "fixture_policy_administration",
-    "source_reference": "synthetic-policy-ambiguous",
+    "source_reference": "NW-MTR-2026-20963",
     "review_reason": "COVERAGE_SECTION_INCOMPLETE"
   },
   "staff_resolution": {

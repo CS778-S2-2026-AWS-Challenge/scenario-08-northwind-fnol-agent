@@ -2721,6 +2721,74 @@
         "title": "ClaimDecisionValue",
         "type": "string"
       },
+      "ClaimHistoryChecks": {
+        "description": "Immutable, staff-only history observations at the lodging boundary.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "count_past_12_months": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count Past 12 Months"
+          },
+          "duplicate_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Duplicate Claim Ids",
+            "type": "array"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "possible_duplicate": {
+            "enum": [
+              "hit",
+              "clear",
+              "not_checked"
+            ],
+            "title": "Possible Duplicate",
+            "type": "string"
+          },
+          "prior_claims_12m": {
+            "enum": [
+              "hit",
+              "clear",
+              "not_checked"
+            ],
+            "title": "Prior Claims 12M",
+            "type": "string"
+          },
+          "rules_version": {
+            "const": "lodging-history-v1",
+            "default": "lodging-history-v1",
+            "title": "Rules Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "checked_at",
+          "prior_claims_12m",
+          "possible_duplicate"
+        ],
+        "title": "ClaimHistoryChecks",
+        "type": "object"
+      },
       "ClaimHistoryFacts": {
         "additionalProperties": false,
         "properties": {
@@ -2795,13 +2863,40 @@
             "type": "string"
           },
           "facts": {
-            "$ref": "#/components/schemas/ClaimHistoryFacts"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimHistoryFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LodgedClaimHistory"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "kind": {
             "const": "claim_history",
             "default": "claim_history",
             "title": "Kind",
             "type": "string"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimHistorySearchRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "retrieval_id": {
             "maxLength": 100,
@@ -2824,8 +2919,7 @@
         "required": [
           "retrieval_id",
           "claim_id",
-          "source",
-          "facts"
+          "source"
         ],
         "title": "ClaimHistoryRetrievalRecord",
         "type": "object"
@@ -2841,10 +2935,17 @@
             "type": "string"
           },
           "history_reference": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "History Reference",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Reference"
           },
           "limit": {
             "default": 10,
@@ -2861,8 +2962,7 @@
           }
         },
         "required": [
-          "claim_id",
-          "history_reference"
+          "claim_id"
         ],
         "title": "ClaimHistorySearchRequest",
         "type": "object"
@@ -2881,10 +2981,10 @@
             "title": "Errors",
             "type": "array"
           },
-          "facts": {
+          "history": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ClaimHistoryFacts"
+                "$ref": "#/components/schemas/LodgedClaimHistory"
               },
               {
                 "type": "null"
@@ -10874,6 +10974,122 @@
         "title": "LivenessResponse",
         "type": "object"
       },
+      "LodgedClaimHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/LodgedClaimSummary"
+            },
+            "maxItems": 50,
+            "title": "Claims",
+            "type": "array"
+          },
+          "count_past_12_months": {
+            "minimum": 0.0,
+            "title": "Count Past 12 Months",
+            "type": "integer"
+          },
+          "window_start": {
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count_past_12_months",
+          "claims",
+          "as_of",
+          "window_start"
+        ],
+        "title": "LodgedClaimHistory",
+        "type": "object"
+      },
+      "LodgedClaimSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Number"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "lodged_at": {
+            "format": "date-time",
+            "title": "Lodged At",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/TemporalFactValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "product_family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Family"
+          },
+          "stated_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stated Amount"
+          }
+        },
+        "required": [
+          "claim_id",
+          "lodged_at"
+        ],
+        "title": "LodgedClaimSummary",
+        "type": "object"
+      },
       "LoginRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15586,6 +15802,84 @@
         "title": "TagVisibility",
         "type": "string"
       },
+      "TemporalFactValue": {
+        "additionalProperties": false,
+        "description": "A claimant time statement without invented precision.",
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/FactPrecision",
+            "default": "unknown"
+          },
+          "reported_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Text"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          }
+        },
+        "title": "TemporalFactValue",
+        "type": "object"
+      },
       "TerminalDispositionReasonCode": {
         "enum": [
           "CLAIM_CREATED",
@@ -16641,6 +16935,16 @@
             },
             "title": "File Readings",
             "type": "object"
+          },
+          "history_checks": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimHistoryChecks"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "incident": {
             "$ref": "#/components/schemas/WorkbenchIncidentSummary"

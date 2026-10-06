@@ -66,6 +66,7 @@ class DeterministicPdfGateway:
 
 def _settings(profile: AgentRuntimeProfile) -> Settings:
     return Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,

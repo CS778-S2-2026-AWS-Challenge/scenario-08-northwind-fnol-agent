@@ -154,7 +154,7 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert time_change['field']['source'] == 'claimant'
     _assert_customer_text_excludes_internal_terms(timed)
 
-    retrievals = repository.list_retrieval_records(claim_id, 'cus_demo')
+    retrievals = repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(retrievals) == 1
     retrieval = retrievals[0]
     assert isinstance(retrieval, PolicyRetrievalRecord)
@@ -163,10 +163,10 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert retrieval.source.system == journey['policy']['source_system']
     assert retrieval.source.reference == journey['policy']['source_reference']
     assert [item.code for item in retrieval.uncertainty] == [journey['policy']['review_reason']]
-    stored_after_lookup = repository.get_claim(claim_id, 'cus_demo')
+    stored_after_lookup = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_after_lookup is not None
     assert stored_after_lookup.claim_state.coverage.value == 'review_required'
-    assert repository.list_handoffs(claim_id, 'cus_demo') == []
+    assert repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b') == []
 
     evidence_spec = journey['turns'][3]
     queued = _message(
@@ -228,7 +228,7 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert evidence[0]['evidence_id'] in handoff['packet']['pending_items']
     assert handoff['packet']['policy_citation_refs'] == [retrieval.retrieval_id]
     assert retrieval.retrieval_id in handoff['packet']['source_refs']
-    review_signal = repository.list_review_signals(claim_id, 'cus_demo')[0]
+    review_signal = repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b')[0]
     assert review_signal.signal_id in handoff['packet']['source_refs']
     assert any(
         item.startswith('tag_registry:northwind-fnol-staff-tags:')
@@ -310,7 +310,7 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert final_customer['claim_id'] == claim_id
     assert final_customer['customer_next_step']['summary'] == resolution['customer_update']
     assert final_customer['handoff'] is None
-    final_internal = repository.get_claim(claim_id, 'cus_demo')
+    final_internal = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert final_internal is not None
     assert final_internal.claim_state.coverage.value == resolution['coverage']
     assert final_internal.claim_state.workflow_state.value == resolution['workflow_state']
@@ -344,4 +344,7 @@ def test_unrelated_claim_does_not_enter_the_rear_end_fixture_path(
 
     assert response['decision']['action'] == 'ASK'
     assert response['decision']['customer_next_step']['status'] == 'more_information_needed'
-    assert repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo') == []
+    assert (
+        repository.list_retrieval_records(created['claim']['claim_id'], 'cus_8f41a2c90d7e463b')
+        == []
+    )

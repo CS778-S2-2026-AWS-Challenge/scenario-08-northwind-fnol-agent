@@ -157,6 +157,37 @@ Workbench accounts: one per team member, `<GitHub name>@northwind.test` with the
 prints them; the launcher repeats them in its final report. The former
 `NORTHWIND_STAFF_BOOTSTRAP_*` settings are no longer read.
 
+Startup also loads the versioned `config/business-seed.json` manifest into the selected
+identity and business repositories. Its fixed synthetic customer accounts, policy records,
+and submitted Claims are development data. Provisioning inserts absent records only: repeated
+starts preserve user changes, passwords, and user-created Claims. Missing or invalid manifests
+and identity collisions stop startup; no alternative data source is selected. `claim_history`
+queries submitted Claims in that repository, while `policy.lookup` reads the separately stored
+synthetic policy records. Knowledge retrieval continues to use the approved MinIO corpus.
+`NORTHWIND_BUSINESS_SEED_PATH` selects the one manifest used for identities, policy lookup,
+prior Claims and Workbench seed cases. Tests pass that choice explicitly through
+`Settings.business_seed_path`; an empty path provisions no business data or developer claimant.
+The shipped invented customers use reserved `.invalid` addresses. The fixed prior Claim was
+lodged on 2026-09-04; its count naturally leaves the rolling window after 2027-09-04.
+
+### Business seed and existing local identities
+
+Existing accounts, passwords, sessions and Claims remain under their existing IDs. Startup does
+not relink an old randomly generated identity to a fixed seed ID by matching its email. The
+shipped seed uses new names and addresses, so old default accounts can coexist with it.
+
+If a custom manifest collides with an existing email, stop the backend and preserve the old
+SQLite identity file and MongoDB database. Either explicitly align that manifest's customer IDs
+and all dependent policies/Claims to the existing account, or select a fresh
+`NORTHWIND_IDENTITY_DB_PATH` and fresh `NORTHWIND_MONGODB_DATABASE` together before restarting.
+Do not reset only identity while reusing Claims owned by the old IDs. Keep the old pair for
+recovery; no data deletion or automatic ownership reassignment is required.
+
+The development Workbench seed routes use the selected manifest's three motor/home/contents
+cases. AT scenario snapshots are test-only inputs under `tests/fixtures/scenarios/`; runtime
+does not load them. These cases and the recorded history are invented business data, not real
+insurer records or evidence of a completed browser journey.
+
 Required settings: the backend refuses to start without `NORTHWIND_ENVIRONMENT`,
 `DATA_RUNTIME_PROFILE` and `AGENT_RUNTIME_PROFILE`, and with `AGENT_RUNTIME_PROFILE=model_gateway`
 it also needs `MODEL_PROFILE_ID`; the error names the missing setting. `PDF_MODEL_PROFILE_ID`

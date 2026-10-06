@@ -406,7 +406,9 @@ class GatewayAgent:
             messages=messages,
             response_schema=plan.response_schema,
             tools=tools,
-            required_tool_name='context.resolve' if tools else None,
+            required_tool_name=(
+                'context.resolve' if tools and plan.schema_id != 'claimant.turn.v1' else None
+            ),
             max_output_tokens=plan.request_profile.output_limit,
         )
 
@@ -943,7 +945,14 @@ class GatewayAgent:
                 exchange_completion,
             )
             invocations.append(_runtime_invocation_trace(1, response, observations[-1].latency_ms))
-            if plan.request_profile.requires_tool_continuation and not response.tool_calls:
+            # Ordinary claimant turns offer read-only references; the model may
+            # answer without consulting them. Evidence-action envelopes still
+            # require their source lookup before proposing reuse or removal.
+            if (
+                plan.request_profile.requires_tool_continuation
+                and plan.schema_id != 'claimant.turn.v1'
+                and not response.tool_calls
+            ):
                 raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
             if response.tool_calls:
                 if (

@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from enum import Enum
 from hashlib import sha256
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -91,6 +92,18 @@ def classify_claim_creation_failure(
     return _FAILURE_MATRIX[(code, delivery)]
 
 
+class ClaimHistoryChecks(BaseModel):
+    """Immutable, staff-only history observations at the lodging boundary."""
+
+    rules_version: Literal['lodging-history-v1'] = 'lodging-history-v1'
+    checked_at: datetime
+    count_past_12_months: int | None = Field(default=None, ge=0)
+    prior_claims_12m: Literal['hit', 'clear', 'not_checked']
+    possible_duplicate: Literal['hit', 'clear', 'not_checked']
+    duplicate_claim_ids: list[str] = Field(default_factory=list, max_length=50)
+    limitations: list[str] = Field(default_factory=list)
+
+
 class ClaimCreationOperationRecord(BaseModel):
     operation_id: str = Field(min_length=1, max_length=100)
     claim_id: str = Field(min_length=1, max_length=100)
@@ -106,6 +119,8 @@ class ClaimCreationOperationRecord(BaseModel):
     failure_code: ClaimCreationFailureCode | None = None
     recovery: ClaimCreationRecovery | None = None
     result: ExternalClaimResult | None = None
+    # Existing operations written before lodging-history-v1 have no observation.
+    history_checks: ClaimHistoryChecks | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -184,6 +199,7 @@ def assert_claim_creation_operation_transition(
         'evidence_snapshot_fingerprint',
         'route',
         'integration_source',
+        'history_checks',
         'created_at',
     )
     if any(getattr(current, name) != getattr(updated, name) for name in immutable_fields):

@@ -843,6 +843,9 @@ def test_fixture_event_construction_failure_leaves_no_claim(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    initial_count = repository.claim_count
+    initial_events = repository.replay_realtime_events(None, limit=10)
+
     def fail_event(*_: object, **__: object) -> RealtimeEvent:
         raise RuntimeError('event construction failed')
 
@@ -858,8 +861,8 @@ def test_fixture_event_construction_failure_leaves_no_claim(
                 json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
             )
 
-    assert repository.claim_count == 0
-    assert repository.replay_realtime_events(None, limit=10) == []
+    assert repository.claim_count == initial_count
+    assert repository.replay_realtime_events(None, limit=10) == initial_events
 
     def fail_sequence() -> int:
         raise RuntimeError('sequence allocation failed')
@@ -873,8 +876,8 @@ def test_fixture_event_construction_failure_leaves_no_claim(
                 json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
             )
 
-    assert repository.claim_count == 0
-    assert repository.replay_realtime_events(None, limit=10) == []
+    assert repository.claim_count == initial_count
+    assert repository.replay_realtime_events(None, limit=10) == initial_events
 
     response = client.post(
         '/api/v1/claims',
@@ -883,7 +886,10 @@ def test_fixture_event_construction_failure_leaves_no_claim(
     )
     assert response.status_code == 201
     events = repository.replay_realtime_events(None, limit=10)
-    assert [event.sequence for event in events] == [1]
+    assert events[:-1] == initial_events
+    initial_sequence = initial_events[-1].sequence if initial_events else 0
+    assert initial_sequence is not None
+    assert events[-1].sequence == initial_sequence + 1
 
 
 def test_scope_for_unsupported_principal_is_rejected() -> None:

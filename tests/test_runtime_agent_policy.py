@@ -327,7 +327,7 @@ def test_feature_setting_disables_model_assistance_without_disabling_runtime_saf
     assert policy is not None
     claim = WorkingClaim(
         claim_id='clm_feature',
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         revision=1,
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
@@ -379,7 +379,7 @@ def test_disabled_knowledge_retrieval_returns_unavailable_without_retriever_io()
     assert policy is not None
     claim = WorkingClaim(
         claim_id='clm_knowledge_feature',
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         revision=1,
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
@@ -488,7 +488,11 @@ def test_message_turn_persists_exact_release_and_configuration_versions() -> Non
     release = _release(configurations, releases)
     claims = FixtureRepository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository=claims,
         configuration_repository=configurations,
         release_set_repository=releases,
@@ -518,7 +522,7 @@ def test_message_turn_persists_exact_release_and_configuration_versions() -> Non
         )
         assert turn.status_code == 200, turn.text
 
-    decisions = claims.list_agent_decisions(claim['claim_id'], 'cus_demo')
+    decisions = claims.list_agent_decisions(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert len(decisions) == 1
     provenance = decisions[0].runtime_configuration
     assert provenance is not None
@@ -540,7 +544,7 @@ def test_knowledge_lookup_names_the_product_when_the_manifest_has_no_single_vers
     monkeypatch.setattr(model_agent, 'approved_version_for_product', lambda _product: None)
     claim = WorkingClaim(
         claim_id='clm_knowledge_version',
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         revision=1,
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
