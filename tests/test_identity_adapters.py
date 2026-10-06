@@ -21,6 +21,59 @@ from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRe
 from backend.domain.staff_identity import StaffAuthSessionRecord
 from backend.repositories.identity import DuplicateEmailConflict
 from backend.repositories.protocols import RevisionConflict
+from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'sqlite'])
+def test_business_seed_identity_preserves_existing_profile(adapter: str, tmp_path: Path) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if adapter == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'claimant.sqlite'))
+    )
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    customer = seed.customers[0]
+    first = repository.ensure_seed_account(
+        customer.customer_id, customer.email, customer.synthetic_password, customer.display_name
+    )
+    changed = replace(
+        first,
+        phone='021 555 0150',
+        email='edited-seed@example.invalid',
+        revision=first.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    repository.save_account(changed, first.revision)
+    again = repository.ensure_seed_account(
+        customer.customer_id, customer.email, 'different-seed-value', customer.display_name
+    )
+    assert again.revision == changed.revision
+    assert again.phone == '021 555 0150'
+    assert again.email == changed.email
+    assert repository.authenticate(changed.email, customer.synthetic_password) is not None
+    assert repository.authenticate(changed.email, 'different-seed-value') is None
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'sqlite'])
+@pytest.mark.parametrize('existing_seed_id', [False, True])
+def test_business_seed_identity_rejects_email_owned_by_another_customer(
+    adapter: str, existing_seed_id: bool, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if adapter == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'claimant.sqlite'))
+    )
+    existing = repository.create_account('already@example.invalid', 'secret', 'Existing')
+    assert existing is not None
+    if existing_seed_id:
+        repository.ensure_seed_account(
+            'cus_seed_conflict', 'original@example.invalid', 'seed-only', 'Seeded'
+        )
+    with pytest.raises(ValueError, match='email belongs to another customer'):
+        repository.ensure_seed_account(
+            'cus_seed_conflict', 'already@example.invalid', 'seed-only', 'Seeded'
+        )
 
 
 def test_fixture_claimant_identity_covers_account_and_session_lifecycle() -> None:

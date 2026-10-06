@@ -237,7 +237,7 @@ def test_local_mvp_example_preflights_the_complete_configured_bundle(
     assert result['readiness'] == {
         'persistence': 'verified',
         'evidence_storage': 'configured_service',
-        'policy': 'using_fixture',
+        'policy': 'verified',
         'claim_history': 'verified',
         'knowledge_documents': 'configured_service',
         'knowledge_retrieval': 'configured_service',

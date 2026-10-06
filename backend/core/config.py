@@ -185,6 +185,8 @@ class Settings:
     control_plane_db_path: str = '.northwind-control-plane.sqlite3'
     # Empty provisions no accounts; the runtime environment always uses the committed seed.
     staff_seed_path: str = ''
+    # Directly constructed test settings may opt out; runtime uses the packaged manifest.
+    business_seed_path: str = ''
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
     model_protocol_adapter: str = ''
@@ -396,6 +398,9 @@ class Settings:
                 '.northwind-control-plane.sqlite3',
             ).strip(),
             staff_seed_path='config/staff-seed.json',
+            business_seed_path=str(
+                Path(__file__).resolve().parents[2] / 'config' / 'business-seed.json'
+            ),
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,
             model_protocol_adapter=(

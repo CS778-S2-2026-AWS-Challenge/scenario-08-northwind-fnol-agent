@@ -499,6 +499,7 @@ def test_persistent_model_runtime_composes_and_runs_one_pdf_worker(
         repository=repository,
         evidence_storage=storage,
         policy_history=fixture_bundle.policy_history,
+        claim_history=fixture_bundle.claim_history,
         knowledge_documents=fixture_bundle.knowledge_documents,
         knowledge_retrieval=fixture_bundle.knowledge_retrieval,
     )

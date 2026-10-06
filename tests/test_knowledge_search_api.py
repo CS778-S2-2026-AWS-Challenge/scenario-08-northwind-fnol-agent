@@ -90,6 +90,7 @@ def client_for(retriever: ControlledRetriever) -> TestClient:
         repository=fixture.repository,
         evidence_storage=fixture.evidence_storage,
         policy_history=fixture.policy_history,
+        claim_history=fixture.claim_history,
         knowledge_documents=fixture.knowledge_documents,
         knowledge_retrieval=retriever,
     )

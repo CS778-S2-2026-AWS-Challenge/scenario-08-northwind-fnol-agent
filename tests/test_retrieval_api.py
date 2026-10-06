@@ -11,6 +11,12 @@ from backend.adapters.policy_history import (
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
+from backend.services.business_seed import (
+    BUSINESS_SEED_PATH,
+    load_business_seed,
+    provision_business_claims,
+    provision_business_policies,
+)
 from backend.services.support import now_utc
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
@@ -19,13 +25,17 @@ HISTORY_SEARCH = '/internal/v1/claim-history/search'
 
 
 @pytest.fixture
-def retrieval_adapter() -> MockPolicyHistoryAdapter:
-    return MockPolicyHistoryAdapter()
+def retrieval_adapter(retrieval_repository: FixtureRepository) -> MockPolicyHistoryAdapter:
+    return MockPolicyHistoryAdapter(retrieval_repository)
 
 
 @pytest.fixture
 def retrieval_repository() -> FixtureRepository:
-    return FixtureRepository()
+    repository = FixtureRepository()
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    provision_business_claims(repository, seed)
+    provision_business_policies(repository, seed)
+    return repository
 
 
 @pytest.fixture
@@ -37,6 +47,7 @@ def retrieval_client(
         Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         retrieval_repository,
         policy_history_adapter=retrieval_adapter,
+        claim_history_adapter=retrieval_adapter,
     )
     return TestClient(app)
 
@@ -68,7 +79,7 @@ def test_policy_retrieval_returns_facts_with_their_source_and_drops_provider_con
     assert body['status'] == 'evidence_found'
     assert body['connection_state'] == 'using_fixture'
     assert body['errors'] == []
-    assert body['source']['system'] == 'fixture_policy_administration'
+    assert body['source']['system'] == 'synthetic_customer_policy'
     assert body['source']['reference'] == 'synthetic-policy-101'
     assert body['source']['retrieved_at']
     assert body['facts']['policy_reference'] == 'synthetic-policy-101'
@@ -205,13 +216,13 @@ def test_history_retrieval_is_purpose_limited_and_carries_no_fraud_finding(
     assert body['status'] == 'evidence_found'
     assert body['connection_state'] == 'using_fixture'
     assert body['errors'] == []
-    assert body['facts']['history_reference'] == 'synthetic-history-204'
-    assert body['facts']['outcome'] == 'settled'
+    assert body['history']['claims'][0]['claim_id'] == 'synthetic-history-204'
+    assert body['facts'] is None
     for banned in ('fraud_finding', 'internal_note', 'Provider-only commentary'):
         assert banned not in allowed.text
     assert widened.status_code == 422
     stored = retrieval_repository.list_retrieval_records(claim_id, 'cus_demo')
-    assert [record.kind.value for record in stored] == ['claim_history']
+    assert stored == []  # Read-time projections do not create a second history store.
 
 
 def test_retrieval_requires_an_integration_principal_and_a_known_claim(
@@ -236,6 +247,49 @@ def test_retrieval_requires_an_integration_principal_and_a_known_claim(
     assert claimant_auth.status_code == 403
     assert unknown_claim.status_code == 404
     assert unknown_claim.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
+
+
+def test_history_without_reference_is_read_only_and_reports_missing_incident_date(
+    retrieval_client: TestClient,
+    retrieval_repository: FixtureRepository,
+) -> None:
+    historical = retrieval_repository._claims['synthetic-history-204']
+    historical.form.pop('incident.occurred_at')
+    with retrieval_client as client:
+        claim_id = create_claim(client, 'history-list')
+        result = client.post(HISTORY_SEARCH, headers=INTEGRATION_AUTH, json={'claim_id': claim_id})
+    assert result.status_code == 200
+    body = result.json()
+    summary = body['history']['claims'][0]
+    assert summary['claim_id'] == historical.claim_id
+    assert summary['occurred_at'] is None
+    assert 'Incident date is not recorded' in body['limitations'][0]
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+
+
+@pytest.mark.parametrize('timed_out', [False, True])
+def test_mongodb_query_failure_has_retryable_provider_outcome(
+    timed_out: bool,
+    retrieval_client: TestClient,
+    retrieval_repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pymongo.errors import ConnectionFailure, ExecutionTimeout
+
+    def unavailable(*_args: object, **_kwargs: object) -> object:
+        if timed_out:
+            raise ExecutionTimeout('private provider details')
+        raise ConnectionFailure('private provider details')
+
+    monkeypatch.setattr(retrieval_repository, 'query_lodged_claim_history', unavailable)
+    with retrieval_client as client:
+        claim_id = create_claim(client, f'history-query-failure-{timed_out}')
+        result = client.post(HISTORY_SEARCH, headers=INTEGRATION_AUTH, json={'claim_id': claim_id})
+    assert result.status_code == 200
+    assert result.json()['status'] == ('timeout' if timed_out else 'unavailable')
+    assert result.json()['errors'][0]['retryable'] is True
+    assert result.json()['history'] is None
+    assert 'private provider' not in result.text
 
 
 def test_history_retrieval_reports_outage_and_missing_records_without_inventing_facts(

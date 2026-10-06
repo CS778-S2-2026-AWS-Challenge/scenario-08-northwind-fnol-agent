@@ -404,10 +404,14 @@ implemented, not as failures of the corpus.
    which signs in and promotes the claim before the first upload.
 2. **Staff credentials.** Most end-state fields are readable only through the Workbench routes. The
    runner needs a staff login with `workbench:read`.
-3. **Policies.** The dev-stack policy lookup knows two hard-coded references only
-   (`synthetic-policy-101`, `synthetic-policy-ambiguous`), and no route adds policies yet. The
-   development team will add a "seed policies" switch under `/api/v1/workbench/demo`; the runner
-   seeds `setup.policies_in_system` through it. The interface is to be announced.
+3. **Policies.** The shared business-seed contract in `config/business-seed.json` supplies
+   `policies_in_system` to the selected repository. The runner maps each pack's setup into this
+   manifest shape, supplying fixed customer and record identities. It uses
+   `load_business_seed` and `provision_business_policies` from
+   `backend.services.business_seed` with the same selected repository as the application.
+   The provisioner creates absent records only; repeated setup cannot reset user edits.
+   No unauthenticated HTTP seed endpoint is introduced. See
+   [Fixtures and Test Conventions](fixtures_convention.md) for the shared manifest contract.
 4. **Coverage state (decided by the maintainer, 2026-09-30).** `coverage_unclear` counts only a
    policy lookup that carries an uncertainty marker (for example `COVERAGE_SECTION_INCOMPLETE` on
    `synthetic-policy-ambiguous`) or an Agent record that the loss may not be covered.
@@ -436,8 +440,11 @@ implemented, not as failures of the corpus.
    does not match the family requirement (`repair_quote`, `proof_of_ownership`), so main then
    reports those documents as not received.
    Assertions match Evidence by `original_filename`, not by kind.
-7. **Earlier claims.** No seed route creates submitted claims for an account. The runner creates
-   each earlier claim by driving the public API to creation.
+7. **Earlier claims.** `prior_submitted_claims` uses the same manifest and
+   `provision_business_claims` entry point. Each entry declares a fixed customer, Claim,
+   Session and claim number, plus family, incident date, submitted date and short description.
+   The provisioner creates a valid completed Claim and its Session atomically; existing
+   Claims are preserved. New Claims produced during a journey still use the public API.
 8. **History not checked.** The corpus does not plant `not_checked` history. On 2026-09-30 the
    maintainer proposed making it with a lookup-error switch; on 2026-10-01 he ruled that a lookup
    error is runtime logic, and that the corpus supplies valid materials, not system reactions.

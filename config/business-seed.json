@@ -1,0 +1,44 @@
+{
+  "version": "1",
+  "demo_customer_id": "cus_demo",
+  "customers": [
+    {"customer_id": "cus_demo", "email": "claimant.one@example.invalid", "display_name": "Demo Claimant One", "synthetic_password": "northwind-demo-one"},
+    {"customer_id": "cus_other", "email": "claimant.two@example.invalid", "display_name": "Demo Claimant Two", "synthetic_password": "northwind-demo-two"}
+  ],
+  "policies_in_system": [
+    {
+      "policy_number": "synthetic-policy-101",
+      "customer_id": "cus_demo",
+      "family": "motor",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 500,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "third_party_liability"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "synthetic-policy-ambiguous",
+      "customer_id": "cus_demo",
+      "family": "motor",
+      "effective_from": null,
+      "effective_to": null,
+      "excess_nzd": null,
+      "status": "active",
+      "coverage_sections": ["accidental_damage"],
+      "uncertainty": ["COVERAGE_SECTION_INCOMPLETE"]
+    }
+  ],
+  "prior_submitted_claims": [
+    {
+      "claim_id": "synthetic-history-204",
+      "session_id": "ses_seed_history204",
+      "customer_id": "cus_demo",
+      "family": "motor",
+      "incident_date": "2025-10-03",
+      "submitted_date": "2025-10-04",
+      "claim_number": "NW-SYN-HISTORY-204",
+      "incident_description": "Synthetic motor damage reported for a prior claim."
+    }
+  ]
+}

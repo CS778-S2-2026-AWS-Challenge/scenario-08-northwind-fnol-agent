@@ -15,7 +15,11 @@ from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter, MockHandoffDispatchAdapter
 from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.adapters.model_gateway import ModelGatewayRegistry
-from backend.adapters.policy_history import PolicyHistoryAdapter
+from backend.adapters.policy_history import (
+    MockPolicyHistoryAdapter,
+    MongoClaimHistoryAdapter,
+    PolicyHistoryAdapter,
+)
 from backend.adapters.staff_identity import (
     FixtureStaffIdentityRepository,
     SQLiteStaffIdentityRepository,
@@ -107,6 +111,13 @@ from backend.services.agent import (
     UnavailableAgent,
 )
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
+from backend.services.business_seed import (
+    BUSINESS_SEED_PATH,
+    load_business_seed,
+    provision_business_claims,
+    provision_business_identities,
+    provision_business_policies,
+)
 from backend.services.external_capability_dispatcher import (
     ExternalCapabilityDispatcher,
     controlled_external_capability_dispatcher,
@@ -162,6 +173,7 @@ def create_app(
     assessor_service_adapter: AssessorServiceAdapter | None = None,
     evidence_storage: EvidenceStorage | None = None,
     policy_history_adapter: PolicyHistoryAdapter | None = None,
+    claim_history_adapter: PolicyHistoryAdapter | None = None,
     handoff_dispatch_adapter: HandoffDispatchAdapter | None = None,
     data_runtime_bundle: DataRuntimeBundle | None = None,
     model_gateway_registry: ModelGatewayRegistry | None = None,
@@ -241,7 +253,12 @@ def create_app(
         )
     injected_data_dependencies = any(
         dependency is not None
-        for dependency in (repository, evidence_storage, policy_history_adapter)
+        for dependency in (
+            repository,
+            evidence_storage,
+            policy_history_adapter,
+            claim_history_adapter,
+        )
     )
     if data_runtime_bundle is not None and injected_data_dependencies:
         raise ValueError(
@@ -255,14 +272,24 @@ def create_app(
                 'Individual data dependency injection is allowed only for the fixture profile.'
             )
         fixture_bundle = build_data_runtime_bundle(resolved_settings)
+        resolved_repository = repository if repository is not None else fixture_bundle.repository
+        provision_business_policies(resolved_repository, load_business_seed(BUSINESS_SEED_PATH))
         bundle = DataRuntimeBundle(
             profile=resolved_settings.data_runtime_profile,
-            repository=repository or fixture_bundle.repository,
+            repository=resolved_repository,
             evidence_storage=evidence_storage or fixture_bundle.evidence_storage,
-            policy_history=policy_history_adapter or fixture_bundle.policy_history,
+            policy_history=(
+                policy_history_adapter
+                if policy_history_adapter is not None
+                else MockPolicyHistoryAdapter(resolved_repository)
+            ),
             knowledge_documents=fixture_bundle.knowledge_documents,
             knowledge_retrieval=fixture_bundle.knowledge_retrieval,
-            claim_history=policy_history_adapter or fixture_bundle.policy_history,
+            claim_history=(
+                claim_history_adapter
+                if claim_history_adapter is not None
+                else MongoClaimHistoryAdapter(resolved_repository)
+            ),
         )
     else:
         bundle = data_runtime_bundle or build_data_runtime_bundle(resolved_settings)
@@ -350,6 +377,15 @@ def create_app(
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
+    if resolved_settings.business_seed_path:
+        try:
+            business_seed = load_business_seed(resolved_settings.business_seed_path)
+            provision_business_identities(app.state.identity_repository, business_seed)
+            provision_business_policies(app.state.claim_repository, business_seed)
+            provision_business_claims(app.state.claim_repository, business_seed)
+        except Exception:
+            bundle.close()
+            raise
     app.state.realtime_dispatcher = realtime_dispatcher
     app.state.claimant_runtime_action_dispatcher = ClaimantRuntimeActionDispatcher()
     pdf_processor: PdfEvidenceProcessor | None = None
@@ -494,7 +530,7 @@ def create_app(
     resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage
     app.state.policy_history_adapter = bundle.policy_history
-    app.state.claim_history_adapter = bundle.claim_history or bundle.policy_history
+    app.state.claim_history_adapter = bundle.claim_history
     app.state.handoff_dispatch_adapter = handoff_dispatch_adapter or MockHandoffDispatchAdapter()
     readiness = bundle.readiness_checks()
     actual_integration_sources = {

@@ -44,7 +44,9 @@ verified against a transaction-capable supported MongoDB deployment, the protect
 evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
 `DATA_RUNTIME_PROFILE=local_mvp` is separately available for the verified local MongoDB + MinIO
 development composition. It does not claim Atlas object storage, Atlas Search, or production
-provider conformance; policy and claim-history lookups remain synthetic. MongoDB adapter
+provider conformance. Claim-history lookups read successfully lodged Claims from the selected
+repository. Policy lookup reads account-owned synthetic policy facts persisted by the versioned
+runtime seed; these facts are separate from MinIO knowledge documents. MongoDB adapter
 documents use `record_type` as their internal discriminator so domain fields such as
 Evidence `kind` and Retrieval `kind` remain unchanged.
 
@@ -404,6 +406,53 @@ the append-only audit collection through a bounded, filterable projection.
 49. Resolve the one immutable Claim decision referenced by `WorkingClaim.claim_decision_id`, and
     atomically create it with the Claim revision, actor-scoped replay result, audit fact, and
     realtime publication while rejecting concurrent or ordinary pointer changes.
+50. Query successfully lodged Claim history for one authenticated customer, excluding the
+    current Claim and retention-closed records. Return at most 50 safe summaries and an independent
+    count for the preceding 12 calendar months. An optional exact historical reference scopes
+    summaries without narrowing the count.
+51. Read or insert a synthetic runtime policy record by customer and policy reference. A repeated
+    seed preserves the existing record; it never overwrites operational data.
+
+## Lodged Claim history and runtime seed records
+
+`query_lodged_claim_history` reads existing `WorkingClaim` records rather than maintaining a
+second history store. Eligibility requires `terminal_disposition.value=completed`,
+`terminal_disposition.reason_code=CLAIM_CREATED`, `external_claim.creation_status=created`,
+and a non-empty external Claim identity. The current
+Claim, another customer's Claims, future-dated completions, and Claims with a RetentionOperation
+are excluded. Drafts, abandoned Claims, and closed-but-unlodged Claims are not lodged history.
+
+The query returns `LodgedClaimHistory`, containing `LodgedClaimSummary` records ordered by
+completion instant and Claim identity, descending. The required `limit` is between 1 and 50.
+Summaries contain only Claim identity, the supplied external Claim number, product family,
+completion time, and supplied incident date, description (at most 240 characters), and estimated
+amount. Missing facts remain absent. Internal review signals, notes, provider payloads, and
+adjudication or settlement statuses are not projected. Completion means successful FNOL lodging,
+not a decision to approve or pay the Claim.
+
+`count_past_12_months` counts every eligible Claim completed between the inclusive calendar date
+12 months before `as_of` and `as_of`, independent of the summary limit. Leap day clamps to
+February 28 in the preceding year. The optional `history_reference` matches the owned Claim ID,
+external Claim ID, or external Claim number exactly; it can retrieve a Claim older than the
+count window and does not alter the count. Summaries without a reference are the latest eligible
+Claims across all dates, not only the count window.
+
+MongoDB uses the `claim_customer_lodged_history` index to narrow by record type, customer, and
+completion state. Its aggregation converts stored ISO timestamps into instants with
+`$dateFromString`, excludes retention records through an owner-scoped candidate lookup, and
+computes the count and limited summaries in one `$facet`. This preserves timestamp-offset
+semantics but still examines the customer's completed candidates for conversion, counting, and
+sorting; the summary limit does not bound database reads and this is not a date-index-bounded
+query. The aggregation has a five-second execution limit. Fixture persistence applies the same
+predicate and calendar window to its selected in-memory repository.
+
+`SeededPolicyRecord` stores customer ownership, typed policy facts, and seed version provenance.
+MongoDB uses `record_type=customer_policy` with a stable customer/reference composite identity;
+`ensure_seed_policy` uses `$setOnInsert`. Fixture persistence uses the same identity and
+insert-only semantics. These records are separate from account `pol_` policy-number records and
+knowledge documents; neither a stored policy number nor a document upload fabricates policy
+entitlements. Runtime seeds may insert missing records but cannot replace existing policy or
+Claim data on process restart.
 
 ## Account Profile and Protected Record Mapping
 

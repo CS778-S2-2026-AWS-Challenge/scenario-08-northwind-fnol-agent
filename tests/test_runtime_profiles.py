@@ -1,5 +1,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +11,12 @@ from backend.adapters.knowledge import (
     FixtureKnowledgeDocumentStore,
     FixtureKnowledgeRetriever,
 )
-from backend.adapters.policy_history import MockPolicyHistoryAdapter
+from backend.adapters.policy_history import (
+    MockPolicyHistoryAdapter,
+    MongoClaimHistoryAdapter,
+    PolicyHistoryAdapter,
+    RepositoryPolicyAdapter,
+)
 from backend.app import create_app
 from backend.core.config import DataRuntimeProfile, IdentityMode, ObjectStorageAdapter, Settings
 from backend.core.runtime_profiles import (
@@ -24,6 +31,7 @@ from backend.core.runtime_profiles import (
 )
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch, KnowledgeSearchRequest
 from backend.repositories.fixture import FixtureRepository
+from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
 from backend.services.external_service_entry import ExternalServiceEntry
 from backend.services.knowledge_search import search_knowledge
 
@@ -75,6 +83,7 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
 
     assert bundle.profile is DataRuntimeProfile.FIXTURE
     assert isinstance(bundle.repository, FixtureRepository)
+    assert isinstance(bundle.claim_history, MongoClaimHistoryAdapter)
     assert bundle.readiness_checks() == {
         'persistence': 'using_fixture',
         'evidence_storage': 'using_fixture',
@@ -83,6 +92,78 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
         'knowledge_documents': 'using_fixture',
         'knowledge_retrieval': 'using_fixture',
     }
+
+
+def test_missing_history_source_is_rejected_without_policy_fallback() -> None:
+    bundle = build_data_runtime_bundle(Settings())
+
+    with pytest.raises(
+        RuntimeProfileConfigurationError, match='claim_history data source is required'
+    ):
+        replace(bundle, claim_history=cast(PolicyHistoryAdapter, None))
+
+
+def test_history_injection_is_independent_of_policy_and_uses_selected_repository() -> None:
+    repository = FixtureRepository()
+    policy = MockPolicyHistoryAdapter(repository)
+    app = create_app(Settings(), repository=repository, policy_history_adapter=policy)
+
+    assert app.state.policy_history_adapter is policy
+    assert isinstance(app.state.claim_history_adapter, MongoClaimHistoryAdapter)
+    assert app.state.claim_history_adapter._repository is repository
+
+    history = MockPolicyHistoryAdapter(repository)
+    explicitly_injected = create_app(Settings(), claim_history_adapter=history)
+    assert explicitly_injected.state.claim_history_adapter is history
+    with pytest.raises(ValueError, match='not both'):
+        create_app(
+            Settings(),
+            data_runtime_bundle=build_data_runtime_bundle(Settings()),
+            claim_history_adapter=history,
+        )
+
+
+def test_selected_business_seed_is_provisioned_at_startup_without_replacing_claims() -> None:
+    repository = FixtureRepository()
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        business_seed_path=str(BUSINESS_SEED_PATH),
+    )
+    first = create_app(settings, repository=repository)
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    snapshots = {
+        record.claim_id: repository.get_claim_internal(record.claim_id)
+        for record in seed.prior_submitted_claims
+    }
+    assert snapshots and all(claim is not None for claim in snapshots.values())
+
+    second = create_app(
+        settings, repository=repository, identity_repository=first.state.identity_repository
+    )
+    assert second.state.identity_repository is first.state.identity_repository
+    for claim_id, snapshot in snapshots.items():
+        assert repository.get_claim_internal(claim_id) == snapshot
+
+
+def test_missing_selected_seed_refuses_startup_and_closes_repository(tmp_path: Path) -> None:
+    class ClosableRepository(FixtureRepository):
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    repository = ClosableRepository()
+    with pytest.raises(FileNotFoundError):
+        create_app(
+            Settings(
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+                business_seed_path=str(tmp_path / 'missing-seed.json'),
+            ),
+            repository=repository,
+        )
+    assert repository.closed
 
 
 @pytest.mark.parametrize(
@@ -189,8 +270,8 @@ def test_capability_table_is_complete_and_local_mvp_is_explicitly_hybrid() -> No
     assert runtime_capability_statuses(DataRuntimeProfile.LOCAL_MVP) == {
         'persistence': 'verified',
         'evidence_storage': 'verified',
-        'policy': 'using_fixture',
-        'claim_history': 'using_fixture',
+        'policy': 'verified',
+        'claim_history': 'verified',
         'knowledge_documents': 'verified',
         'knowledge_retrieval': 'verified',
     }
@@ -262,12 +343,12 @@ def test_local_mvp_builds_mongodb_minio_and_synthetic_lookup_bundle(
     )
 
     assert bundle.repository is repository
-    assert isinstance(bundle.policy_history, MockPolicyHistoryAdapter)
+    assert isinstance(bundle.policy_history, RepositoryPolicyAdapter)
     assert id(bundle.knowledge_documents) == id(bundle.knowledge_retrieval)
     assert bundle.readiness_checks() == {
         'persistence': 'verified',
         'evidence_storage': 'configured_service',
-        'policy': 'using_fixture',
+        'policy': 'verified',
         'claim_history': 'verified',
         'knowledge_documents': 'configured_service',
         'knowledge_retrieval': 'configured_service',
@@ -582,7 +663,8 @@ def test_matching_non_fixture_label_cannot_hide_fixture_or_mixed_dependencies() 
         profile=DataRuntimeProfile.MONGODB,
         repository=FixtureRepository(),
         evidence_storage=MockEvidenceStorage(),
-        policy_history=MockPolicyHistoryAdapter(),
+        policy_history=MockPolicyHistoryAdapter(FixtureRepository()),
+        claim_history=fixture_bundle.claim_history,
         knowledge_documents=fixture_bundle.knowledge_documents,
         knowledge_retrieval=fixture_bundle.knowledge_retrieval,
     )

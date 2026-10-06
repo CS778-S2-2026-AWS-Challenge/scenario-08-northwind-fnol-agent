@@ -38,6 +38,7 @@ from backend.repositories.scenario_loader import (
 )
 from backend.repositories.staff_identity import StaffIdentityRepository
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
 from backend.services.demo_materials import associate_materials, material_content
 from backend.services.support import now_utc, request_fingerprint, require_idempotency_key
 
@@ -50,9 +51,6 @@ VALIDATION_SCENARIO_IDS = (
     'AT-16-field-states-contents',
 )
 VALIDATION_SEED_ROUTE = 'POST /api/v1/workbench/demo/seed-validation'
-DEMO_CLAIMANT_EMAIL = 'claimant.one@example.invalid'
-DEMO_CLAIMANT_PASSWORD = 'northwind-demo-one'
-DEMO_CLAIMANT_DISPLAY_NAME = 'Demo Claimant One'
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,25 +70,25 @@ def _replace_values(value: Any, replacements: dict[str, str]) -> Any:
 
 
 def _ensure_demo_claimant(identity_repository: IdentityRepository) -> CustomerAccountRecord:
-    account = next(
-        (item for item in identity_repository.list_accounts() if item.email == DEMO_CLAIMANT_EMAIL),
-        None,
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    customer = next(
+        (item for item in seed.customers if item.customer_id == seed.demo_customer_id), None
     )
-    if account is None:
-        account = identity_repository.create_account(
-            DEMO_CLAIMANT_EMAIL,
-            DEMO_CLAIMANT_PASSWORD,
-            DEMO_CLAIMANT_DISPLAY_NAME,
-        )
-        if account is None:
-            account = next(
-                (
-                    item
-                    for item in identity_repository.list_accounts()
-                    if item.email == DEMO_CLAIMANT_EMAIL
-                ),
-                None,
+    account = None
+    if customer is not None:
+        try:
+            account = identity_repository.ensure_seed_account(
+                customer.customer_id,
+                customer.email,
+                customer.synthetic_password,
+                customer.display_name,
             )
+        except ValueError as error:
+            raise ApiError(
+                status_code=409,
+                code='DEMO_CLAIMANT_UNAVAILABLE',
+                message='The synthetic claimant identity conflicts with an existing account.',
+            ) from error
     if account is None or not account.active:
         raise ApiError(
             status_code=409,

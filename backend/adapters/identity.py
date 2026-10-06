@@ -16,6 +16,7 @@ from backend.domain.identity import (
 )
 from backend.repositories.identity import DuplicateEmailConflict, IdentityRepository
 from backend.repositories.protocols import RevisionConflict
+from backend.services.business_seed import BUSINESS_SEED_PATH, BusinessSeed, load_business_seed
 
 
 def _password_hash(customer_id: str, password: str) -> str:
@@ -48,28 +49,51 @@ def _verify_sqlite_password(encoded: str, password: str) -> bool:
 class FixtureIdentityRepository(IdentityRepository):
     """Development/test identities only; never a production identity provider."""
 
-    def __init__(self) -> None:
-        seeds = (
-            ('cus_demo', 'claimant.one@example.invalid', 'northwind-demo-one', 'Demo Claimant One'),
-            (
-                'cus_other',
-                'claimant.two@example.invalid',
-                'northwind-demo-two',
-                'Demo Claimant Two',
-            ),
-        )
-        self._accounts = {
-            customer_id: CustomerAccountRecord(
-                customer_id=customer_id,
-                email=email,
-                password_hash=_password_hash(customer_id, password),
-                display_name=display_name,
-                legal_name=display_name,
-            )
-            for customer_id, email, password, display_name in seeds
-        }
+    def __init__(self, seed: BusinessSeed | None = None) -> None:
+        self._accounts: dict[str, CustomerAccountRecord] = {}
         self._sessions: dict[str, ClaimantAuthSessionRecord] = {}
         self._account_lock = RLock()
+        selected_seed = load_business_seed(BUSINESS_SEED_PATH) if seed is None else seed
+        for account in selected_seed.customers:
+            self.ensure_seed_account(
+                account.customer_id, account.email, account.synthetic_password, account.display_name
+            )
+
+    def ensure_seed_account(
+        self, customer_id: str, email: str, password: str, display_name: str
+    ) -> CustomerAccountRecord:
+        """Insert a fixed synthetic identity without resetting an existing account.
+
+        Args:
+            customer_id: Stable manifest identity.
+            email: Synthetic account email.
+            password: Synthetic password used only when inserting.
+            display_name: Initial account name.
+        Returns:
+            The persisted account, including any existing profile edits.
+        Raises:
+            ValueError: Another identity already owns the supplied email.
+        """
+        normalized = email.strip().lower()
+        with self._account_lock:
+            if any(
+                account.email == normalized and account.customer_id != customer_id
+                for account in self._accounts.values()
+            ):
+                raise ValueError('Business seed email belongs to another customer.')
+            existing = self._accounts.get(customer_id)
+            if existing is not None:
+                return deepcopy(existing)
+            account = CustomerAccountRecord(
+                customer_id=customer_id,
+                email=normalized,
+                password_hash=_password_hash(customer_id, password),
+                display_name=display_name.strip(),
+                legal_name=display_name.strip(),
+            )
+            validate_customer_account_profile(account)
+            self._accounts[customer_id] = account
+            return deepcopy(account)
 
     def authenticate(self, email: str, password: str) -> CustomerAccountRecord | None:
         normalized = email.strip().lower()
@@ -361,6 +385,60 @@ class SQLiteIdentityRepository(IdentityRepository):
         ):
             return None
         return self._account(row)
+
+    def ensure_seed_account(
+        self, customer_id: str, email: str, password: str, display_name: str
+    ) -> CustomerAccountRecord:
+        """Serialize fixed-ID insertion and preserve all existing account state.
+
+        Args:
+            customer_id: Stable manifest identity.
+            email: Synthetic account email.
+            password: Synthetic password used only when inserting.
+            display_name: Initial account name.
+        Returns:
+            The inserted or already persisted account.
+        Raises:
+            ValueError: Another identity already owns the supplied email.
+        """
+        with self._connection() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            collision = connection.execute(
+                'SELECT customer_id FROM accounts WHERE email = ? AND customer_id != ?',
+                (email.strip().lower(), customer_id),
+            ).fetchone()
+            if collision is not None:
+                raise ValueError('Business seed email belongs to another customer.')
+            existing = connection.execute(
+                'SELECT * FROM accounts WHERE customer_id = ?', (customer_id,)
+            ).fetchone()
+            if existing is not None:
+                return self._account(existing)
+            account = CustomerAccountRecord(
+                customer_id=customer_id,
+                email=email.strip().lower(),
+                password_hash=_sqlite_password_hash(password, os.urandom(16)),
+                display_name=display_name.strip(),
+                legal_name=display_name.strip(),
+            )
+            validate_customer_account_profile(account)
+            try:
+                connection.execute(
+                    'INSERT INTO accounts '
+                    '(customer_id, email, password_hash, display_name, legal_name, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (
+                        account.customer_id,
+                        account.email,
+                        account.password_hash,
+                        account.display_name,
+                        account.legal_name,
+                        account.updated_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError('Business seed email belongs to another customer.') from error
+        return account
 
     def create_account(
         self, email: str, password: str, display_name: str, phone: str = ''

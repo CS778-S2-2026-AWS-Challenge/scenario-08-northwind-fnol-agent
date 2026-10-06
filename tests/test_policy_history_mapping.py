@@ -1,8 +1,6 @@
 import datetime
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
 
 RETRIEVED_AT = datetime.datetime(2026, 8, 17, 0, 15, tzinfo=datetime.UTC)
 
@@ -193,96 +191,36 @@ def test_issue_108_does_not_expand_claimant_api_with_provider_records() -> None:
     assert 'history_retrievals' not in public_fields
 
 
-def test_mongodb_history_adapter_reads_a_terminal_claim_and_fails_closed() -> None:
+def test_repository_history_adapter_uses_lodged_seed_and_explicit_missing_claim() -> None:
+    import pytest
+
     from backend.adapters.policy_history import MongoClaimHistoryAdapter
     from backend.domain.retrieval import ClaimHistorySearchRequest, PolicySearchRequest
-
-    terminal = SimpleNamespace(value=SimpleNamespace(value='closed'))
-    historical = SimpleNamespace(
-        claim_id='clm-old',
-        customer_id='customer-1',
-        incident_type='motor',
-        created_at=RETRIEVED_AT,
-        terminal_disposition=terminal,
-    )
-
-    class Repository:
-        @staticmethod
-        def connection_status() -> str:
-            return 'verified'
-
-        @staticmethod
-        def get_claim_internal(claim_id: str) -> object:
-            return (
-                None
-                if claim_id == 'missing'
-                else SimpleNamespace(claim_id='clm-current', customer_id='customer-1')
-            )
-
-        @staticmethod
-        def list_historical_claims_for_customer(*_args: object) -> list[object]:
-            return [historical]
-
-    adapter = MongoClaimHistoryAdapter(cast(Any, Repository()))
-    assert adapter.connection_status() == 'verified'
-    request = ClaimHistorySearchRequest(claim_id='clm-current', history_reference='ignored')
-    envelope = adapter.search_claim_history(request)
-    assert envelope.provider == 'mongodb_claim_history'
-    assert envelope.payload['history_reference'] == 'clm-old'
-    assert envelope.payload['status'] == 'closed'
-
-    try:
-        adapter.search_claim_history(request.model_copy(update={'claim_id': 'missing'}))
-    except LookupError:
-        pass
-    else:
-        raise AssertionError('Missing current Claim must fail closed.')
-
-    try:
-        adapter.search_policy(PolicySearchRequest(claim_id='current', policy_reference='ignored'))
-    except LookupError:
-        pass
-    else:
-        raise AssertionError('History adapter must not provide policy lookup.')
-
-
-def test_history_repository_projections_filter_customer_current_and_open_claims() -> None:
     from backend.repositories.fixture import FixtureRepository
-    from backend.repositories.mongodb import MongoDBRepository
-
-    terminal = SimpleNamespace(value=SimpleNamespace(value='closed'))
-    old = SimpleNamespace(
-        claim_id='old',
-        customer_id='customer-1',
-        updated_at=RETRIEVED_AT,
-        terminal_disposition=terminal,
-    )
-    open_claim = SimpleNamespace(
-        claim_id='open',
-        customer_id='customer-1',
-        updated_at=RETRIEVED_AT,
-        terminal_disposition=None,
-    )
-    other = SimpleNamespace(
-        claim_id='other',
-        customer_id='customer-2',
-        updated_at=RETRIEVED_AT,
-        terminal_disposition=terminal,
+    from backend.services.business_seed import (
+        BUSINESS_SEED_PATH,
+        load_business_seed,
+        provision_business_claims,
     )
 
-    fixture = FixtureRepository()
-    fixture._claims.update(cast(dict[str, Any], {'old': old, 'open': open_claim, 'other': other}))
-    assert [
-        claim.claim_id
-        for claim in fixture.list_historical_claims_for_customer('customer-1', 'current')
-    ] == ['old']
-
-    class Repository(MongoDBRepository):
-        def _list(self, *_args: object, **_kwargs: object) -> list[Any]:
-            return [old, open_claim]
-
-    mongo = object.__new__(Repository)
-    assert [
-        claim.claim_id
-        for claim in mongo.list_historical_claims_for_customer('customer-1', 'current')
-    ] == ['old']
+    repository = FixtureRepository()
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    provision_business_claims(repository, seed)
+    history_claim = repository.get_claim_internal('synthetic-history-204')
+    assert history_claim is not None
+    current = history_claim.model_copy(update={'claim_id': 'current', 'active_session_id': None})
+    repository._claims[current.claim_id] = current
+    adapter = MongoClaimHistoryAdapter(repository)
+    envelope = adapter.search_claim_history(ClaimHistorySearchRequest(claim_id='current'))
+    assert envelope.history is not None
+    assert envelope.history.claims[0].claim_id == history_claim.claim_id
+    assert envelope.history.claims[0].occurred_at != history_claim.created_at
+    assert envelope.payload == {}
+    missing = adapter.search_claim_history(
+        ClaimHistorySearchRequest(claim_id='current', history_reference='not-owned')
+    )
+    assert missing.history is not None and missing.history.claims == []
+    with pytest.raises(LookupError):
+        adapter.search_claim_history(ClaimHistorySearchRequest(claim_id='missing'))
+    with pytest.raises(LookupError):
+        adapter.search_policy(PolicySearchRequest(claim_id='current', policy_reference='ignored'))

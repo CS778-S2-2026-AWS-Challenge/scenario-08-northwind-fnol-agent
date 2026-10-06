@@ -147,7 +147,8 @@ AGENT_TOOL_REGISTRY = MappingProxyType(
         ),
         'claim.history': _tool(
             'claim.history',
-            'Retrieve only the requested bounded prior-claim history reference.',
+            "Read this customer's lodged history count and bounded summaries; "
+            'optionally open one returned claim reference.',
             'claim_history_lookup',
             {
                 'type': 'object',
@@ -155,7 +156,7 @@ AGENT_TOOL_REGISTRY = MappingProxyType(
                     'history_reference': {'type': 'string', 'maxLength': 200},
                     'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
                 },
-                'required': ['history_reference'],
+                'required': [],
                 'additionalProperties': False,
             },
         ),

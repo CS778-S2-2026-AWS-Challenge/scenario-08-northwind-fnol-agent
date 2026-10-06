@@ -157,6 +157,16 @@ Workbench accounts: one per team member, `<GitHub name>@northwind.test` with the
 prints them; the launcher repeats them in its final report. The former
 `NORTHWIND_STAFF_BOOTSTRAP_*` settings are no longer read.
 
+Startup also loads the versioned `config/business-seed.json` manifest into the selected
+identity and business repositories. Its fixed synthetic customer accounts, policy records,
+and submitted Claims are development data. Provisioning inserts absent records only: repeated
+starts preserve user changes, passwords, and user-created Claims. Missing or invalid manifests
+and identity collisions stop startup; no alternative data source is selected. `claim_history`
+queries submitted Claims in that repository, while `policy.lookup` reads the separately stored
+synthetic policy records. Knowledge retrieval continues to use the approved MinIO corpus.
+Tests can pass an explicit seed path through `Settings.business_seed_path`; directly constructed
+test settings with an empty path do not provision submitted Claims at application startup.
+
 Required settings: the backend refuses to start without `NORTHWIND_ENVIRONMENT`,
 `DATA_RUNTIME_PROFILE` and `AGENT_RUNTIME_PROFILE`, and with `AGENT_RUNTIME_PROFILE=model_gateway`
 it also needs `MODEL_PROFILE_ID`; the error names the missing setting. `PDF_MODEL_PROFILE_ID`

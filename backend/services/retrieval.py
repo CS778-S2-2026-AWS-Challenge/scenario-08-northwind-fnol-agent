@@ -2,8 +2,8 @@ from pydantic import ValidationError
 
 from backend.adapters.policy_history import (
     PolicyHistoryAdapter,
+    ProviderLookupEnvelope,
     RetrievalUnavailable,
-    map_history_provider_payload,
     map_policy_provider_payload,
 )
 from backend.core.errors import ApiError
@@ -22,6 +22,7 @@ from backend.domain.retrieval import (
     PolicyRetrievalRecord,
     PolicySearchRequest,
     PolicySearchResponse,
+    RetrievalSource,
     RetrievalStatus,
 )
 from backend.repositories.protocols import PersistenceRepository
@@ -224,7 +225,7 @@ def search_claim_history(
 ) -> ClaimHistorySearchResponse:
     """Retrieve purpose-limited history evidence, never a fraud conclusion."""
 
-    claim = _claim(repository, payload.claim_id)
+    _claim(repository, payload.claim_id)
     result_id = new_id('his')
     connection_state = _connection_state(adapter)
     if not _provider_ready(connection_state):
@@ -263,21 +264,26 @@ def search_claim_history(
     connection_state = _connection_state(adapter)
     if not _provider_ready(connection_state):
         return _history_unavailable_response(result_id)
-    try:
-        record = map_history_provider_payload(
-            retrieval_id=result_id,
-            claim_id=claim.claim_id,
-            envelope=envelope,
-        )
-    except (ValidationError, AttributeError, KeyError, TypeError, ValueError) as error:
-        raise _malformed_provider_error('claim-history', error) from error
-    persist_retrieval_record(repository, record, claim.customer_id)
+    if not isinstance(envelope, ProviderLookupEnvelope) or envelope.history is None:
+        raise _malformed_provider_error('claim-history', TypeError('Invalid history envelope'))
+    history = envelope.history
+    limitations = [
+        f'Incident date is not recorded for Claim {item.claim_id}.'
+        for item in history.claims
+        if item.occurred_at is None
+    ]
+    if not history.claims:
+        limitations.append('No lodged Claim matches this customer-scoped lookup.')
     return ClaimHistorySearchResponse(
         result_id=result_id,
-        status=_status_for(record),
+        status=(RetrievalStatus.EVIDENCE_FOUND if history.claims else RetrievalStatus.NO_EVIDENCE),
         connection_state=connection_state,
-        source=record.source,
-        facts=record.facts,
-        uncertainty=record.uncertainty,
-        retrieved_at=record.source.retrieved_at,
+        source=RetrievalSource(
+            system=envelope.provider,
+            reference=envelope.provider_reference,
+            retrieved_at=envelope.retrieved_at,
+        ),
+        history=history,
+        limitations=limitations,
+        retrieved_at=envelope.retrieved_at,
     )

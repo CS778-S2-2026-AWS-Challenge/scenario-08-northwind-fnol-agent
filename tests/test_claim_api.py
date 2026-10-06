@@ -354,8 +354,8 @@ class ConversationOnlyAgent:
 
 
 class SpyPolicyHistoryAdapter(MockPolicyHistoryAdapter):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, repository: FixtureRepository) -> None:
+        super().__init__(repository)
         self.history_calls = 0
 
     def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
@@ -1887,17 +1887,20 @@ def test_high_impact_agent_proposal_is_recorded_but_not_executed(
     assert claim.external_claim is None
 
 
-def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revision(
+def test_agent_claim_history_lookup_without_reference_does_not_duplicate_history(
     app: FastAPI,
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
-    app.state.agent_turn_provider = ClaimHistoryLookupAgent(
-        {
-            'history_reference': 'synthetic-history-204',
-        }
+    from backend.services.business_seed import (
+        BUSINESS_SEED_PATH,
+        load_business_seed,
+        provision_business_claims,
     )
+
+    provision_business_claims(repository, load_business_seed(BUSINESS_SEED_PATH))
+    app.state.agent_turn_provider = ClaimHistoryLookupAgent({})
     created = create_claim(client, auth_headers, key='history-lookup-turn').json()
     claim_id = created['claim']['claim_id']
     session_id = created['session']['session_id']
@@ -1911,9 +1914,19 @@ def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revis
     history_records = [
         record for record in records if isinstance(record, ClaimHistoryRetrievalRecord)
     ]
-    assert len(history_records) == 1
-    assert history_records[0].facts.history_reference == 'synthetic-history-204'
-    assert history_records[0].source.system == 'fixture_claims_history'
+    assert history_records == []
+    assert repository.get_claim_internal('synthetic-history-204') is not None
+    from backend.services.messages import _claim_history_context_for_turn
+
+    current = repository.get_claim(claim_id, 'cus_demo')
+    assert current is not None
+    context = _claim_history_context_for_turn(
+        repository, app.state.claim_history_adapter, current, 'cus_demo', 1600
+    )
+    assert context['status'] == 'evidence_found'
+    history = context['history']
+    assert isinstance(history, dict)
+    assert [item['claim_id'] for item in history['claims']] == ['synthetic-history-204']
 
     replay = submit_message(
         client,
@@ -1933,7 +1946,7 @@ def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revis
                 if isinstance(record, ClaimHistoryRetrievalRecord)
             ]
         )
-        == 1
+        == 0
     )
 
 
@@ -1958,8 +1971,8 @@ def test_invalid_claim_history_tool_arguments_fail_atomically(
     repository: FixtureRepository,
     tool: dict[str, object],
 ) -> None:
-    adapter = SpyPolicyHistoryAdapter()
-    app.state.policy_history_adapter = adapter
+    adapter = SpyPolicyHistoryAdapter(repository)
+    app.state.claim_history_adapter = adapter
     app.state.agent_turn_provider = ClaimHistoryLookupAgent(tool)
     created = create_claim(client, auth_headers, key='invalid-history-tool').json()
     before_claim = repository.get_claim(created['claim']['claim_id'], 'cus_demo')

@@ -95,6 +95,38 @@ The four current reusable state scenarios are AT-01, AT-06, AT-08, and AT-12.
 PRES-01 is a presentation journey specification and should not be treated as a
 replacement for the official acceptance scenarios.
 
+## Synthetic business seed contract
+
+PR #1221 introduces a versioned `config/business-seed.json` manifest for synthetic
+customer accounts, policy lookup records, and submitted Claims. This is persisted
+development data, not evidence of production policy or a successful user journey.
+The manifest preserves the controlled corpus vocabulary so its runner can consume
+the shared contract. No new seed HTTP endpoint is declared by this manifest.
+
+The manifest has `version`, `demo_customer_id`, `customers`, `policies_in_system`,
+and `prior_submitted_claims`. Customer IDs, Claim IDs, and Session IDs are fixed.
+Customer profile text uses the identity domain validators. Synthetic passwords are
+development-only inputs and are hashed by the selected identity adapter; credentials
+and tokens from a real environment must never be included.
+
+Policy entries retain the corpus fields `policy_number`, `family`, `effective_from`,
+`effective_to`, `excess_nzd`, and `uncertainty`; required `status` and
+`coverage_sections` map to the existing `PolicyFacts` contract. `customer_id` binds
+each policy to its seeded owner. Submitted-Claim
+entries retain `family`, `incident_date`, and `submitted_date`, with explicit
+`claim_id`, `session_id`, `customer_id`, `claim_number`, and incident description.
+History is queried from these Claims and user-created Claims, not a second history
+dictionary. Dates are fixed input, never moved forward on each startup. Incident
+dates retain partial precision without inventing a time or timezone; synthetic
+submission dates use midnight UTC as their explicit seed timestamp convention.
+
+Provisioning inserts absent records only. Repeated startup preserves edited
+profiles, credentials, revisions, and user Claims. ID or normalized-email collisions
+with another identity fail explicitly. Fixture identity and durable identity use the
+same manifest and provisioning semantics; tests may select an empty manifest.
+Existing explicit queue-reset and validation-seed routes keep their separate
+authorization and empty-queue rules.
+
 ## Image-assisted journeys
 
 An image-assisted test has three separate concerns:

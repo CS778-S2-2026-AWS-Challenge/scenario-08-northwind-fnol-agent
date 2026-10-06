@@ -15,6 +15,7 @@ from backend.core.config import IdentityMode, Settings
 from backend.domain.models import AssessorLocation, CreateExternalClaimRequest, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.handoff_guard import HandoffPersistenceGuard
+from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
 from scripts import reset_demo as reset_command
 from tests.media_support import synthetic_image
 
@@ -126,12 +127,22 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
         assessor_service_adapter=assessor_adapter,
         evidence_storage=storage,
     )
+    seed_policies = load_business_seed(BUSINESS_SEED_PATH).policies_in_system
+    original_policies = [
+        repository.get_seed_policy(policy.customer_id, policy.policy_number)
+        for policy in seed_policies
+    ]
+    assert all(policy is not None for policy in original_policies)
 
     with TestClient(app) as client:
         _populate_demo(client, claims_adapter, assessor_adapter)
         first = client.post('/api/v1/workbench/demo/reset', headers=STAFF_AUTH)
         assert first.status_code == 200
         assert repository.list_claims_internal() == []
+        assert [
+            repository.get_seed_policy(policy.customer_id, policy.policy_number)
+            for policy in seed_policies
+        ] == original_policies
         assert first.json()['cleared']['claims'] == 1
         assert first.json()['cleared']['sessions'] == 1
         assert first.json()['cleared']['evidence'] == 1
