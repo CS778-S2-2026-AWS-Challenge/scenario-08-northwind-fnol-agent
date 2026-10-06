@@ -97,7 +97,7 @@ replacement for the official acceptance scenarios.
 
 ## Synthetic business seed contract
 
-PR #1221 introduces a versioned `config/business-seed.json` manifest for synthetic
+The versioned `config/business-seed.json` manifest supplies synthetic
 customer accounts, policy lookup records, and submitted Claims. This is persisted
 development data, not evidence of production policy or a successful user journey.
 The manifest preserves the controlled corpus vocabulary so its runner can consume

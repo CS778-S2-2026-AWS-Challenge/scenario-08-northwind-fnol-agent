@@ -4193,9 +4193,10 @@ adapter boundary and never appear in a response or in storage.
 
 Retrieves purpose-limited claim history. Requires an integration principal.
 
-The server scopes a lookup to the current Claim's customer. Only lodged (`completed`)
-Claims with a successful external creation belong to history; the current Claim is excluded.
-`history_reference` is optional and selects one lodged Claim by its ID or claim number.
+The server scopes a lookup to the current Claim's customer. Only lodged (`completed`,
+`CLAIM_CREATED`) Claims with a successful external creation belong to history; the current
+Claim is excluded. `history_reference` is optional and selects one lodged Claim by its
+Claim ID, external Claim ID, or claim number.
 Without it, the result contains at most `limit` recent lodged summaries. The independent
 `count_past_12_months` counts lodged Claims in the rolling calendar-year window, regardless
 of the selected reference. Each summary contains the claim ID and number, product family,
@@ -4236,7 +4237,12 @@ Response:
       "claim_id": "synthetic-history-204",
       "claim_number": "NW-SYN-HISTORY-204",
       "product_family": "motor",
-      "occurred_at": "2025-10-03",
+      "occurred_at": {
+        "date": "2025-10-03",
+        "time": null,
+        "timezone": null,
+        "precision": "partial"
+      },
       "lodged_at": "2025-10-04T00:00:00Z",
       "description": "Synthetic motor damage reported for a prior claim.",
       "stated_amount": null
