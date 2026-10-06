@@ -50,6 +50,7 @@
       "session_id": "ses_fixture_at06",
       "claim_id": "clm_fixture_at06",
       "customer_id": "cus_8f41a2c90d7e463b",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "The current report can proceed while a police document is generated.",
       "unresolved_questions": [],

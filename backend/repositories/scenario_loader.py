@@ -507,10 +507,6 @@ class EvidencePathFixtureSet(ContractModel):
 
 def load_scenario(path: Path) -> ScenarioFixture:
     payload = json.loads(path.read_text(encoding='utf-8'))
-    # Keep checked-in legacy scenario graphs loadable after model profile became
-    # a required session contract. New seeds write the profile explicitly.
-    for session in payload.get('sessions', []):
-        session.setdefault('model_profile_id', 'openrouter-gpt-4o')
     return ScenarioFixture.model_validate(payload)
 
 
