@@ -137,7 +137,7 @@ def published_model_catalog(
     records: dict[str, ConfigurationRecord] = {}
     for profile_id, model_identifier, base_url in (
         ('qwen-local', 'qwen3.8-27b', 'http://100.71.25.5:8080/v1'),
-        ('openrouter-gpt4o-mini', 'openai/gpt-4o-mini', 'https://openrouter.ai/api/v1'),
+        ('openrouter-gpt-4o', 'openai/gpt-4o-mini', 'https://openrouter.ai/api/v1'),
     ):
         record = ConfigurationRecord(
             configuration_id=f'cfg_{profile_id}',
@@ -171,7 +171,7 @@ def published_model_catalog(
                 if key in ModelRuntimeBinding.model_fields
             }
         )
-        for profile_id in ('qwen-local', 'openrouter-gpt4o-mini')
+        for profile_id in ('qwen-local', 'openrouter-gpt-4o')
     ]
     agent_values = {
         slot: values
@@ -256,7 +256,7 @@ def test_model_profile_can_change_between_turns_without_new_claim(
         session_id = created.json()['session']['session_id']
 
         revision = created.json()['claim']['revision']
-        for index, profile_id in enumerate(('qwen-local', 'openrouter-gpt4o-mini'), start=1):
+        for index, profile_id in enumerate(('qwen-local', 'openrouter-gpt-4o'), start=1):
             response = client.post(
                 f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
                 headers={
@@ -275,11 +275,11 @@ def test_model_profile_can_change_between_turns_without_new_claim(
 
         session = client.get(f'/api/v1/claims/{claim_id}/sessions/{session_id}', headers=headers)
         assert session.status_code == 200
-        assert session.json()['model_profile_id'] == 'openrouter-gpt4o-mini'
+        assert session.json()['model_profile_id'] == 'openrouter-gpt-4o'
         # One model call per turn, each on the profile the claimant selected for it.
         assert [request.model_profile_id for request in gateway.requests] == [
             'qwen-local',
-            'openrouter-gpt4o-mini',
+            'openrouter-gpt-4o',
         ]
 
 
@@ -310,7 +310,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
         model_gateway_registry=registry,
     )
     request = SimpleNamespace(app=app)
-    selected = model_configuration(request, 'openrouter-gpt4o-mini')
+    selected = model_configuration(request, 'openrouter-gpt-4o')
     assert selected is not None
     assert selected.model_identifier == 'openai/gpt-4o-mini'
     assert model_configuration(request, 'missing-profile') is None
@@ -322,7 +322,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
         assert body['default_model_profile_id'] == 'qwen-local'
         assert [item['id'] for item in body['models']] == [
             'qwen-local',
-            'openrouter-gpt4o-mini',
+            'openrouter-gpt-4o',
         ]
         created = client.post(
             '/api/v1/claims',
@@ -331,11 +331,11 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
                 'channel': 'web_agent',
                 'locale': 'en-NZ',
                 'incident_type': 'motor',
-                'model_profile_id': 'openrouter-gpt4o-mini',
+                'model_profile_id': 'openrouter-gpt-4o',
             },
         )
         assert created.status_code == 201
-        assert created.json()['session']['model_profile_id'] == 'openrouter-gpt4o-mini'
+        assert created.json()['session']['model_profile_id'] == 'openrouter-gpt-4o'
 
         unknown = client.post(
             '/api/v1/claims',
@@ -350,7 +350,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
         assert unknown.json()['error']['code'] == 'MODEL_PROFILE_UNAVAILABLE'
 
     gpt_default_app = create_app(
-        replace(settings, model_profile_id='openrouter-gpt4o-mini'),
+        replace(settings, model_profile_id='openrouter-gpt-4o'),
         repository=FixtureRepository(),
         configuration_repository=configurations,
         release_set_repository=releases,
@@ -363,9 +363,9 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
         )
 
     assert capabilities.status_code == 200
-    assert capabilities.json()['default_model_profile_id'] == 'openrouter-gpt4o-mini'
+    assert capabilities.json()['default_model_profile_id'] == 'openrouter-gpt-4o'
     assert [item['id'] for item in capabilities.json()['models']] == [
-        'openrouter-gpt4o-mini',
+        'openrouter-gpt-4o',
         'qwen-local',
     ]
 
@@ -496,7 +496,7 @@ def test_model_catalog_raises_when_active_snapshot_is_unavailable() -> None:
                     identity_mode=IdentityMode.DEVELOPER,
                     agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
                     model_protocol_adapter='openai_compatible',
-                    model_profile_id='openrouter-gpt4o-mini',
+                    model_profile_id='openrouter-gpt-4o',
                     model_provider='openrouter',
                     model_base_url='http://model.example.test/v1',
                     model_identifier='qwen3.8-27b',
@@ -554,7 +554,7 @@ def test_model_catalog_reads_profiles_from_an_active_release_snapshot() -> None:
                     identity_mode=IdentityMode.DEVELOPER,
                     agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
                     model_protocol_adapter='openai_compatible',
-                    model_profile_id='openrouter-gpt4o-mini',
+                    model_profile_id='openrouter-gpt-4o',
                     model_provider='openrouter',
                     model_base_url='http://model.example.test/v1',
                     model_identifier='qwen3.8-27b',

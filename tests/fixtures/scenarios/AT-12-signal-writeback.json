@@ -49,6 +49,7 @@
       "session_id": "ses_fixture_at12",
       "claim_id": "clm_fixture_at12",
       "customer_id": "cus_8f41a2c90d7e463b",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "Parked vehicle damage transferred for professional review.",
       "unresolved_questions": [],

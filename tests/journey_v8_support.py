@@ -80,6 +80,7 @@ def envelope(
     documents: Sequence[dict[str, Any]] = (),
     interpretations: Sequence[dict[str, Any]] = (),
     ready: bool = False,
+    escalation: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     if action is None:
         action = (
@@ -116,7 +117,7 @@ def envelope(
         'evidence_interpretations': list(interpretations),
         'summary_fields': list(summary_fields) if summary_fields is not None else None,
         'state_proposals': [],
-        'escalation': None,
+        'escalation': escalation,
         'ready_to_create': ready,
         'confirms_batch': confirms,
     }
@@ -129,7 +130,7 @@ class V8JourneyProvider:
                 ModelResponse(
                     completion_status=ModelCompletionStatus.COMPLETE,
                     structured_output=value,
-                    provider_model='openai/gpt-4o-mini',
+                    provider_model='openai/gpt-4o',
                 )
                 for value in proposals
             ]
@@ -146,18 +147,18 @@ class V8JourneyProvider:
         assert policy.controlled_rules.context_budget_policy is not None
         config = {
             **previous.values,
-            'profile_id': 'openrouter-gpt4o-mini',
+            'profile_id': 'openrouter-gpt-4o',
             'provider': 'openrouter',
-            'model_identifier': 'openai/gpt-4o-mini',
+            'model_identifier': 'openai/gpt-4o',
             'base_url': 'https://openrouter.example.test/v1',
             'document_input': False,
         }
         record = previous.model_copy(
-            update={'configuration_key': 'openrouter-gpt4o-mini', 'values': config}
+            update={'configuration_key': 'openrouter-gpt-4o', 'values': config}
         )
         snapshot = replace(
             template.runtime_configuration_snapshot,
-            configurations=MappingProxyType({'model:openrouter-gpt4o-mini': record}),
+            configurations=MappingProxyType({'model:openrouter-gpt-4o': record}),
         )
         policy = replace(
             policy,
@@ -165,7 +166,7 @@ class V8JourneyProvider:
             tool_policy=policy.tool_policy.model_copy(
                 update={
                     'provider_capabilities': {
-                        'openrouter-gpt4o-mini': provider_capability(
+                        'openrouter-gpt-4o': provider_capability(
                             ModelRuntimeConfiguration.model_validate(config)
                         )
                     },
@@ -181,7 +182,7 @@ class V8JourneyProvider:
         return self.agent.propose_turn(
             replace(
                 context,
-                model_profile_id='openrouter-gpt4o-mini',
+                model_profile_id='openrouter-gpt-4o',
                 runtime_configuration_snapshot=snapshot,
                 runtime_policy=policy,
                 branch_evaluation=evaluation,

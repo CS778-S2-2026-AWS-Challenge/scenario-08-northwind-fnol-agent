@@ -69,6 +69,7 @@ def _seeded(
         session_id=SESSION_ID,
         claim_id=CLAIM_ID,
         customer_id=CUSTOMER_ID,
+        model_profile_id='openrouter-gpt-4o',
         context_revision=1,
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,

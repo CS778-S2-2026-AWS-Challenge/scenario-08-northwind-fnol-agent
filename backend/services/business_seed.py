@@ -272,6 +272,7 @@ def build_seed_claim(record: SeedSubmittedClaim) -> tuple[WorkingClaim, SessionR
         session_id=record.session_id,
         claim_id=record.claim_id,
         customer_id=record.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=submitted_at,
         last_active_at=submitted_at,
     )

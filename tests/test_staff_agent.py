@@ -115,7 +115,7 @@ def _client(
                 business_seed_path='config/business-seed.json',
                 environment='test',
                 identity_mode=IdentityMode.DEVELOPER,
-                model_profile_id='openrouter-gpt4o-mini',
+                model_profile_id='openrouter-gpt-4o',
             ),
             repository=repository,
             agent_turn_provider=ControlledAgent(),
@@ -154,15 +154,15 @@ def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> Non
         response = client.post(
             '/api/v1/workbench/agent/sessions',
             headers=STAFF_HEADERS,
-            json={'title': 'GPT review', 'model_profile_id': 'openrouter-gpt4o-mini'},
+            json={'title': 'GPT review', 'model_profile_id': 'openrouter-gpt-4o'},
         )
         assert response.status_code == 201
         session_id = response.json()['session_id']
-        assert response.json()['model_profile_id'] == 'openrouter-gpt4o-mini'
+        assert response.json()['model_profile_id'] == 'openrouter-gpt-4o'
         repeated = client.post(
             '/api/v1/workbench/agent/sessions',
             headers=STAFF_HEADERS,
-            json={'title': 'GPT review', 'model_profile_id': 'openrouter-gpt4o-mini'},
+            json={'title': 'GPT review', 'model_profile_id': 'openrouter-gpt-4o'},
         )
         assert repeated.status_code == 201
         assert repeated.json()['session_id'] == session_id
@@ -184,7 +184,7 @@ def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> Non
         next_session = client.post(
             '/api/v1/workbench/agent/sessions',
             headers=STAFF_HEADERS,
-            json={'title': 'GPT review', 'model_profile_id': 'openrouter-gpt4o-mini'},
+            json={'title': 'GPT review', 'model_profile_id': 'openrouter-gpt-4o'},
         )
         different_model = client.post(
             '/api/v1/workbench/agent/sessions',
@@ -194,12 +194,12 @@ def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> Non
         different_title = client.post(
             '/api/v1/workbench/agent/sessions',
             headers=STAFF_HEADERS,
-            json={'title': 'Separate review', 'model_profile_id': 'openrouter-gpt4o-mini'},
+            json={'title': 'Separate review', 'model_profile_id': 'openrouter-gpt-4o'},
         )
 
     assert message.status_code == 201
     assert listed.status_code == 200
-    assert listed.json()['items'][0]['model_profile_id'] == 'openrouter-gpt4o-mini'
+    assert listed.json()['items'][0]['model_profile_id'] == 'openrouter-gpt-4o'
     assert next_session.json()['session_id'] != session_id
     assert different_model.json()['session_id'] not in {
         session_id,
@@ -210,8 +210,8 @@ def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> Non
         next_session.json()['session_id'],
         different_model.json()['session_id'],
     }
-    assert provider.contexts[0].model_profile_id == 'openrouter-gpt4o-mini'
-    assert message.json()['session']['model_profile_id'] == 'openrouter-gpt4o-mini'
+    assert provider.contexts[0].model_profile_id == 'openrouter-gpt-4o'
+    assert message.json()['session']['model_profile_id'] == 'openrouter-gpt-4o'
 
 
 def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
@@ -231,7 +231,7 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     records: dict[str, ConfigurationRecord] = {}
     for profile_id, model_identifier, base_url in (
         ('qwen-local', 'qwen3.8-27b', 'http://model.example.test/v1'),
-        ('openrouter-gpt4o-mini', 'openai/gpt-4o-mini', 'https://openrouter.ai/api/v1'),
+        ('openrouter-gpt-4o', 'openai/gpt-4o-mini', 'https://openrouter.ai/api/v1'),
     ):
         record = ConfigurationRecord(
             configuration_id=f'cfg_{profile_id}',
@@ -301,7 +301,7 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     assert body['default_model_profile_id'] == 'qwen-local'
     assert [item['id'] for item in body['models']] == [
         'qwen-local',
-        'openrouter-gpt4o-mini',
+        'openrouter-gpt-4o',
     ]
     assert [item['image_input'] for item in body['models']] == [True, False]
     assert [item['document_input'] for item in body['models']] == [True, False]
@@ -333,7 +333,7 @@ def _model_gateway_runtime_client(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
-        model_profile_id='openrouter-gpt4o-mini',
+        model_profile_id='openrouter-gpt-4o',
         model_provider='openrouter',
         model_protocol_adapter='test_gateway',
         model_base_url='https://model.example.test/v1',
@@ -435,7 +435,7 @@ def test_staff_agent_rejects_model_override_in_message_request() -> None:
     repository = FixtureRepository()
     provider = RecordingStaffAgent()
     with _client(repository, provider) as client:
-        session_id = _create_session(client, 'openrouter-gpt4o-mini')
+        session_id = _create_session(client, 'openrouter-gpt-4o')
         response = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
             headers=STAFF_HEADERS,

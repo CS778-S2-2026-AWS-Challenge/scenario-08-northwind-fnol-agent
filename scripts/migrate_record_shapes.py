@@ -17,6 +17,11 @@ changes nothing that is already current. Stop the backend while applying.
 
 An unfinished claim creation fingerprinted its evidence while it had an old kind; the apply
 refuses, writing nothing, until those creations have finished.
+
+A second, separately marked step renames the model profile ``openrouter-gpt4o-mini`` to
+``openrouter-gpt-4o``, the model it has always called (``openai/gpt-4o``). Every record whose
+``model_profile_id`` holds the old name is rewritten, so sessions and staff conversations
+started before the rename keep working.
 """
 
 from __future__ import annotations
@@ -40,6 +45,9 @@ from backend.repositories.mongodb import MongoDBConfigurationError, MongoDBConne
 from backend.services.branching import build_applied_branch_evaluation
 
 MIGRATION_ID = 'schema_migration:record-shapes-2026-10'
+PROFILE_RENAME_ID = 'schema_migration:model-profile-rename-2026-10'
+_OLD_PROFILE_ID = 'openrouter-gpt4o-mini'
+_NEW_PROFILE_ID = 'openrouter-gpt-4o'
 _REMOVED_KEY = 'current_action_satisfied'
 _KIND_KEYS = frozenset({'kind', 'document_kind'})
 _OLD_PHOTO_KINDS = frozenset({'incident_image', 'photo'})
@@ -182,6 +190,46 @@ def migrate_record_shapes(
     return report
 
 
+def rename_model_profile(
+    collection: Collection[dict[str, Any]], *, apply: bool = False
+) -> dict[str, Any]:
+    """Plan, and optionally apply, the model profile rename.
+
+    Args:
+        collection: The Northwind records collection.
+        apply: Write the changes when true; otherwise report only.
+
+    Returns:
+        A JSON-serialisable report of what was, or would be, changed.
+    """
+
+    marker = collection.find_one({'_id': PROFILE_RENAME_ID})
+    if marker is not None:
+        return {'status': 'already_applied', 'applied_at': marker['applied_at']}
+    stored = list(collection.find({'model_profile_id': _OLD_PROFILE_ID}))
+    report: dict[str, Any] = {
+        'status': 'applied' if apply else 'dry_run',
+        'renamed_records': len(stored),
+        'renamed_by_type': _count_by_type(stored),
+    }
+    if not apply:
+        return report
+    collection.update_many(
+        {'model_profile_id': _OLD_PROFILE_ID}, {'$set': {'model_profile_id': _NEW_PROFILE_ID}}
+    )
+    applied_at = datetime.now(UTC).isoformat()
+    collection.insert_one(
+        {
+            '_id': PROFILE_RENAME_ID,
+            'record_type': 'schema_migration',
+            'applied_at': applied_at,
+            'renamed_records': len(stored),
+        }
+    )
+    report['applied_at'] = applied_at
+    return report
+
+
 def _count_by_type(documents: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for document in documents:
@@ -203,6 +251,7 @@ def main() -> int:
         client.admin.command('ping')
         collection = client[config.database_name][config.collection_name]
         report = migrate_record_shapes(collection, apply=args.apply)
+        report['model_profile_rename'] = rename_model_profile(collection, apply=args.apply)
     except (MongoDBConfigurationError, PyMongoError) as error:
         print(json.dumps({'status': 'unavailable', 'reason': str(error)}))
         return 2

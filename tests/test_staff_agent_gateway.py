@@ -50,7 +50,7 @@ def _context() -> StaffAgentContext:
         conversation=(),
         knowledge=(),
         knowledge_status='no_evidence',
-        model_profile_id='openrouter-gpt4o-mini',
+        model_profile_id='openrouter-gpt-4o',
     )
 
 
@@ -72,7 +72,7 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
     assert result.output.answer == 'Check the evidence trail.'
     assert result.provider_model == 'openai/gpt-4o-mini'
     request = gateway.requests[0]
-    assert request.model_profile_id == 'openrouter-gpt4o-mini'
+    assert request.model_profile_id == 'openrouter-gpt-4o'
     assert request.required_capabilities == ModelCapabilities(structured_output=True)
     message_content = request.messages[1].content
     assert message_content is not None
@@ -99,7 +99,7 @@ def test_profile_selecting_staff_agent_uses_session_model_profile() -> None:
     result = ProfileSelectingStaffAgent(lambda profile_id: gateway).respond(_context())
 
     assert result.output.answer == 'Use the saved model profile.'
-    assert gateway.requests[0].model_profile_id == 'openrouter-gpt4o-mini'
+    assert gateway.requests[0].model_profile_id == 'openrouter-gpt-4o'
 
 
 @pytest.mark.parametrize(

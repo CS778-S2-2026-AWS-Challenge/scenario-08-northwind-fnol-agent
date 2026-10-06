@@ -42,7 +42,7 @@ from backend.services.runtime_agent_policy import registered_agent_tool_names
 _AUTHOR = 'repository-initial-release-author'
 _REVIEWER = 'repository-initial-release-reviewer'
 _REQUIRED_MODEL_PROFILES = frozenset(
-    {'qwen-local', 'openrouter-gpt4o-mini', 'google-gemini35-flash-lite'}
+    {'qwen-local', 'openrouter-gpt-4o', 'google-gemini35-flash-lite'}
 )
 _VALIDATION_EVIDENCE = (
     'Repository-defined initial Runtime release passed structural and binding validation.'

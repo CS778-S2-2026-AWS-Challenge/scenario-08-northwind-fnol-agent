@@ -34,7 +34,12 @@ class ReplyInconsistency:
 # Northwind has done: if the rewrite still has one, the turn stands rather than
 # failing the claimant's whole message.
 SOFT_PROBLEMS = frozenset(
-    {'leaves_claimant_stuck', 'ending_mismatch', 'claims_documents_block_lodging'}
+    {
+        'leaves_claimant_stuck',
+        'ending_mismatch',
+        'claims_documents_block_lodging',
+        'claims_report_already_sent',
+    }
 )
 
 
@@ -67,7 +72,9 @@ class ConsistencyReview:
                 'instruction': (
                     'Rewrite the reply so it matches what was actually recorded: do not name or '
                     'promise the rejected services, and do not say anything was arranged, '
-                    'booked, escalated or submitted. Offer a service only with offer_service, '
+                    'booked, escalated or submitted, and do not say the claims team already has '
+                    'the report before the claimant submits it. Offer a service only with '
+                    'offer_service, '
                     "never by asking in words. Northwind is the claimant's insurer: a question "
                     'you cannot answer goes into northwind_questions before the reply says the '
                     'claims team will handle it. Leave the claimant one clear thing to answer or '
