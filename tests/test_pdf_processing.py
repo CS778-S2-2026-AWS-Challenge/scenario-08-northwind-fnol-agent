@@ -76,7 +76,11 @@ def _uploaded_pdf(
     repository = FixtureRepository()
     storage = MockEvidenceStorage()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository=repository,
         evidence_storage=storage,
     )
@@ -492,7 +496,11 @@ def test_persistent_model_runtime_composes_and_runs_one_pdf_worker(
 ) -> None:
     repository, storage, claim_id, evidence_id, _ = _uploaded_pdf()
     fixture_bundle = build_data_runtime_bundle(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
     )
     persistent_bundle = DataRuntimeBundle(
         profile=DataRuntimeProfile.LOCAL_MVP,
@@ -514,6 +522,7 @@ def test_persistent_model_runtime_composes_and_runs_one_pdf_worker(
     registry.register('openai_compatible', lambda config: gateway)
     app = create_app(
         Settings(
+            business_seed_path='config/business-seed.json',
             environment='test',
             identity_mode=IdentityMode.DEVELOPER,
             data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,
@@ -684,7 +693,11 @@ def test_claimant_projection_never_exposes_processing_operation_or_provider_meta
         revision,
     )
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository=repository,
         evidence_storage=storage,
     )

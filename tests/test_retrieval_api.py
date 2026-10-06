@@ -44,7 +44,11 @@ def retrieval_client(
     retrieval_adapter: MockPolicyHistoryAdapter,
 ) -> TestClient:
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         retrieval_repository,
         policy_history_adapter=retrieval_adapter,
         claim_history_adapter=retrieval_adapter,
@@ -71,7 +75,7 @@ def test_policy_retrieval_returns_facts_with_their_source_and_drops_provider_con
         response = client.post(
             POLICY_SEARCH,
             headers=INTEGRATION_AUTH,
-            json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'},
+            json={'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'},
         )
 
     assert response.status_code == 200
@@ -80,9 +84,9 @@ def test_policy_retrieval_returns_facts_with_their_source_and_drops_provider_con
     assert body['connection_state'] == 'using_fixture'
     assert body['errors'] == []
     assert body['source']['system'] == 'synthetic_customer_policy'
-    assert body['source']['reference'] == 'synthetic-policy-101'
+    assert body['source']['reference'] == 'NW-MTR-2026-10482'
     assert body['source']['retrieved_at']
-    assert body['facts']['policy_reference'] == 'synthetic-policy-101'
+    assert body['facts']['policy_reference'] == 'NW-MTR-2026-10482'
     assert body['facts']['excess_amount'] == 500.0
     assert body['uncertainty'] == []
 
@@ -92,10 +96,11 @@ def test_policy_retrieval_returns_facts_with_their_source_and_drops_provider_con
     for banned in ('fraud_label', 'risk_score', 'policy_conclusion', 'elevated', 'covered'):
         assert banned not in payload
 
-    stored = retrieval_repository.list_retrieval_records(claim_id, 'cus_demo')
+    stored = retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(stored) == 1
     assert stored[0].retrieval_id == body['result_id']
-    assert stored[0].source.reference == 'synthetic-policy-101'
+    assert stored[0].source.reference == 'NW-MTR-2026-10482'
+    assert stored[0].facts is not None
     assert 'fraud_label' not in stored[0].facts.model_dump()
 
 
@@ -108,7 +113,7 @@ def test_policy_uncertainty_becomes_a_staff_review_signal_not_a_conclusion(
         response = client.post(
             POLICY_SEARCH,
             headers=INTEGRATION_AUTH,
-            json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-ambiguous'},
+            json={'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-20963'},
         )
 
     assert response.status_code == 200
@@ -116,7 +121,7 @@ def test_policy_uncertainty_becomes_a_staff_review_signal_not_a_conclusion(
     assert body['status'] == 'ambiguous'
     assert [item['code'] for item in body['uncertainty']] == ['COVERAGE_SECTION_INCOMPLETE']
 
-    signals = retrieval_repository.list_review_signals(claim_id, 'cus_demo')
+    signals = retrieval_repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(signals) == 1
     assert signals[0].review_type == 'professional_review'
     assert signals[0].reason_codes == ['COVERAGE_SECTION_INCOMPLETE']
@@ -140,7 +145,7 @@ def test_unavailable_provider_reports_the_limitation_and_stores_nothing(
         response = client.post(
             POLICY_SEARCH,
             headers=INTEGRATION_AUTH,
-            json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'},
+            json={'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'},
         )
         readiness = client.get('/health/ready')
 
@@ -158,8 +163,8 @@ def test_unavailable_provider_reports_the_limitation_and_stores_nothing(
     assert body['limitations'] == ['The policy provider is temporarily unavailable.']
     assert body['facts'] is None
     assert body['source'] is None
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
-    assert retrieval_repository.list_review_signals(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
+    assert retrieval_repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == []
     assert readiness.json()['checks']['policy'] == 'unavailable'
     assert readiness.json()['checks']['claim_history'] == 'unavailable'
 
@@ -183,7 +188,7 @@ def test_unknown_reference_is_no_evidence_rather_than_a_negative_finding(
     assert body['errors'] == []
     assert body['facts'] is None
     assert body['limitations'] == ['The provider holds no record for the requested reference.']
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_history_retrieval_is_purpose_limited_and_carries_no_fraud_finding(
@@ -197,7 +202,7 @@ def test_history_retrieval_is_purpose_limited_and_carries_no_fraud_finding(
             headers=INTEGRATION_AUTH,
             json={
                 'claim_id': claim_id,
-                'history_reference': 'synthetic-history-204',
+                'history_reference': 'clm_6d9231ab40e85fc7',
                 'purpose': 'relevant_history_review',
             },
         )
@@ -206,7 +211,7 @@ def test_history_retrieval_is_purpose_limited_and_carries_no_fraud_finding(
             headers=INTEGRATION_AUTH,
             json={
                 'claim_id': claim_id,
-                'history_reference': 'synthetic-history-204',
+                'history_reference': 'clm_6d9231ab40e85fc7',
                 'purpose': 'fraud_screening',
             },
         )
@@ -216,13 +221,22 @@ def test_history_retrieval_is_purpose_limited_and_carries_no_fraud_finding(
     assert body['status'] == 'evidence_found'
     assert body['connection_state'] == 'using_fixture'
     assert body['errors'] == []
-    assert body['history']['claims'][0]['claim_id'] == 'synthetic-history-204'
-    assert body['facts'] is None
+    assert body['history']['claims'][0]['claim_id'] == 'clm_6d9231ab40e85fc7'
+    assert 'facts' not in body
     for banned in ('fraud_finding', 'internal_note', 'Provider-only commentary'):
         assert banned not in allowed.text
     assert widened.status_code == 422
-    stored = retrieval_repository.list_retrieval_records(claim_id, 'cus_demo')
-    assert stored == []  # Read-time projections do not create a second history store.
+    stored = retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')
+    assert len(stored) == 1
+    assert stored[0].retrieval_id == body['result_id']
+    assert stored[0].model_dump(mode='json')['history'] == body['history']
+    # Consultation provenance reaches staff handoff without altering the source Claim.
+    from backend.services.handoff_context import build_handoff_transfer_context
+
+    claim = retrieval_repository.get_claim_internal(claim_id)
+    assert claim is not None
+    context = build_handoff_transfer_context(retrieval_repository, claim, evidence=[], handoffs=[])
+    assert body['result_id'] in context.history_retrieval_refs
 
 
 def test_retrieval_requires_an_integration_principal_and_a_known_claim(
@@ -230,7 +244,7 @@ def test_retrieval_requires_an_integration_principal_and_a_known_claim(
 ) -> None:
     with retrieval_client as client:
         claim_id = create_claim(client, 'retrieval-auth-claim')
-        body = {'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'}
+        body = {'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'}
         missing_auth = client.post(POLICY_SEARCH, json=body)
         claimant_auth = client.post(
             POLICY_SEARCH,
@@ -240,7 +254,7 @@ def test_retrieval_requires_an_integration_principal_and_a_known_claim(
         unknown_claim = client.post(
             POLICY_SEARCH,
             headers=INTEGRATION_AUTH,
-            json={'claim_id': 'clm_missing', 'policy_reference': 'synthetic-policy-101'},
+            json={'claim_id': 'clm_missing', 'policy_reference': 'NW-MTR-2026-10482'},
         )
 
     assert missing_auth.status_code == 401
@@ -249,11 +263,11 @@ def test_retrieval_requires_an_integration_principal_and_a_known_claim(
     assert unknown_claim.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
 
 
-def test_history_without_reference_is_read_only_and_reports_missing_incident_date(
+def test_history_without_reference_preserves_claim_and_records_missing_incident_date(
     retrieval_client: TestClient,
     retrieval_repository: FixtureRepository,
 ) -> None:
-    historical = retrieval_repository._claims['synthetic-history-204']
+    historical = retrieval_repository._claims['clm_6d9231ab40e85fc7']
     historical.form.pop('incident.occurred_at')
     with retrieval_client as client:
         claim_id = create_claim(client, 'history-list')
@@ -264,7 +278,7 @@ def test_history_without_reference_is_read_only_and_reports_missing_incident_dat
     assert summary['claim_id'] == historical.claim_id
     assert summary['occurred_at'] is None
     assert 'Incident date is not recorded' in body['limitations'][0]
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert len(retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
 
 @pytest.mark.parametrize('timed_out', [False, True])
@@ -313,11 +327,11 @@ def test_history_retrieval_reports_outage_and_missing_records_without_inventing_
         unavailable = client.post(
             HISTORY_SEARCH,
             headers=INTEGRATION_AUTH,
-            json={'claim_id': claim_id, 'history_reference': 'synthetic-history-204'},
+            json={'claim_id': claim_id, 'history_reference': 'clm_6d9231ab40e85fc7'},
         )
 
     assert absent.json()['status'] == 'no_evidence'
-    assert absent.json()['facts'] is None
+    assert 'facts' not in absent.json()
     assert unavailable.json()['status'] == 'unavailable'
     assert unavailable.json()['connection_state'] == 'unavailable'
     assert unavailable.json()['errors'] == [
@@ -327,14 +341,14 @@ def test_history_retrieval_reports_outage_and_missing_records_without_inventing_
             'retryable': True,
         }
     ]
-    assert unavailable.json()['facts'] is None
+    assert unavailable.json()['history'] is None
     assert unavailable.json()['source'] is None
     assert unavailable.json()['limitations'] == [
         'The claim-history provider is temporarily unavailable.'
     ]
     assert 'secret' not in unavailable.text
     assert 'mongodb://' not in unavailable.text
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert len(retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
 
 def test_connection_state_drift_fails_closed_before_persisting_retrieval(
@@ -350,15 +364,15 @@ def test_connection_state_drift_fails_closed_before_persisting_retrieval(
         response = client.post(
             POLICY_SEARCH,
             headers=INTEGRATION_AUTH,
-            json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'},
+            json={'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'},
         )
 
     assert response.status_code == 200
     assert response.json()['status'] == 'unavailable'
     assert response.json()['connection_state'] == 'unavailable'
-    assert response.json()['facts'] is None
+    assert response.json().get('facts') is None
     assert response.json()['source'] is None
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
     assert retrieval_adapter.reset_demo_state()['mock_retrieval_lookups'] == 0
 
     monkeypatch.setattr(retrieval_adapter, 'connection_status', lambda: 'pending_confirmation')
@@ -369,16 +383,18 @@ def test_connection_state_drift_fails_closed_before_persisting_retrieval(
             headers=INTEGRATION_AUTH,
             json={
                 'claim_id': history_claim_id,
-                'history_reference': 'synthetic-history-204',
+                'history_reference': 'clm_6d9231ab40e85fc7',
             },
         )
 
     assert history_response.status_code == 200
     assert history_response.json()['status'] == 'unavailable'
     assert history_response.json()['connection_state'] == 'unavailable'
-    assert history_response.json()['facts'] is None
+    assert history_response.json()['history'] is None
     assert history_response.json()['source'] is None
-    assert retrieval_repository.list_retrieval_records(history_claim_id, 'cus_demo') == []
+    assert (
+        retrieval_repository.list_retrieval_records(history_claim_id, 'cus_8f41a2c90d7e463b') == []
+    )
     assert retrieval_adapter.reset_demo_state()['mock_retrieval_lookups'] == 0
 
 
@@ -403,18 +419,18 @@ def test_connection_drift_during_retrieval_discards_evidence_before_persistence(
         claim_id = create_claim(client, f'{operation}-mid-query-drift')
         if operation == 'policy':
             endpoint = POLICY_SEARCH
-            payload = {'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'}
+            payload = {'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'}
         else:
             endpoint = HISTORY_SEARCH
-            payload = {'claim_id': claim_id, 'history_reference': 'synthetic-history-204'}
+            payload = {'claim_id': claim_id, 'history_reference': 'clm_6d9231ab40e85fc7'}
         response = client.post(endpoint, headers=INTEGRATION_AUTH, json=payload)
 
     assert response.status_code == 200
     assert response.json()['status'] == 'unavailable'
     assert response.json()['connection_state'] == 'unavailable'
-    assert response.json()['facts'] is None
+    assert response.json().get('facts') is None
     assert response.json()['source'] is None
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
     assert retrieval_adapter.reset_demo_state()['mock_retrieval_lookups'] == 1
 
 
@@ -436,11 +452,11 @@ def test_ready_provider_timeout_is_projected_without_persisting_evidence(
         claim_id = create_claim(client, f'{operation}-timeout')
         if operation == 'policy':
             endpoint = POLICY_SEARCH
-            payload = {'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'}
+            payload = {'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'}
             expected_message = 'The policy provider did not respond within the request budget.'
         else:
             endpoint = HISTORY_SEARCH
-            payload = {'claim_id': claim_id, 'history_reference': 'synthetic-history-204'}
+            payload = {'claim_id': claim_id, 'history_reference': 'clm_6d9231ab40e85fc7'}
             expected_message = (
                 'The claim-history provider did not respond within the request budget.'
             )
@@ -452,10 +468,10 @@ def test_ready_provider_timeout_is_projected_without_persisting_evidence(
     assert response.json()['errors'] == [
         {'code': 'timeout', 'message': expected_message, 'retryable': True}
     ]
-    assert response.json()['facts'] is None
+    assert response.json().get('facts') is None
     assert response.json()['source'] is None
     assert 'secret provider timeout' not in response.text
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 @pytest.mark.parametrize('operation', ['policy', 'history'])
@@ -481,11 +497,11 @@ def test_malformed_provider_payload_returns_bounded_failure_without_persisting_e
         claim_id = create_claim(client, f'{operation}-malformed')
         if operation == 'policy':
             endpoint = POLICY_SEARCH
-            payload = {'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'}
+            payload = {'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'}
             expected_message = 'The policy provider returned an unusable response.'
         else:
             endpoint = HISTORY_SEARCH
-            payload = {'claim_id': claim_id, 'history_reference': 'synthetic-history-204'}
+            payload = {'claim_id': claim_id, 'history_reference': 'clm_6d9231ab40e85fc7'}
             expected_message = 'The claim-history provider returned an unusable response.'
         response = client.post(endpoint, headers=INTEGRATION_AUTH, json=payload)
 
@@ -496,7 +512,7 @@ def test_malformed_provider_payload_returns_bounded_failure_without_persisting_e
         'request_id': response.headers['x-request-id'],
         'retryable': False,
     }
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
     assert 'malformed-reference' not in response.text
 
 
@@ -515,7 +531,7 @@ def test_provider_protocol_violation_returns_bounded_failure(
         claim_id = create_claim(client, f'{operation}-protocol-violation')
         endpoint = POLICY_SEARCH if operation == 'policy' else HISTORY_SEARCH
         reference_key = 'policy_reference' if operation == 'policy' else 'history_reference'
-        reference = 'synthetic-policy-101' if operation == 'policy' else 'synthetic-history-204'
+        reference = 'NW-MTR-2026-10482' if operation == 'policy' else 'clm_6d9231ab40e85fc7'
         response = client.post(
             endpoint,
             headers=INTEGRATION_AUTH,
@@ -525,7 +541,7 @@ def test_provider_protocol_violation_returns_bounded_failure(
     assert response.status_code == 502
     assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
     assert response.json()['error']['retryable'] is False
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 @pytest.mark.parametrize('operation', ['policy', 'history'])
@@ -546,7 +562,7 @@ def test_adapter_runtime_failure_returns_bounded_failure(
         claim_id = create_claim(client, f'{operation}-runtime-failure')
         endpoint = POLICY_SEARCH if operation == 'policy' else HISTORY_SEARCH
         reference_key = 'policy_reference' if operation == 'policy' else 'history_reference'
-        reference = 'synthetic-policy-101' if operation == 'policy' else 'synthetic-history-204'
+        reference = 'NW-MTR-2026-10482' if operation == 'policy' else 'clm_6d9231ab40e85fc7'
         response = client.post(
             endpoint,
             headers=INTEGRATION_AUTH,
@@ -557,7 +573,7 @@ def test_adapter_runtime_failure_returns_bounded_failure(
     assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
     assert response.json()['error']['retryable'] is False
     assert 'provider adapter internals' not in response.text
-    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_demo_reset_clears_retrieval_state_and_restores_the_provider(
@@ -573,7 +589,7 @@ def test_demo_reset_clears_retrieval_state_and_restores_the_provider(
         client.post(
             POLICY_SEARCH,
             headers=INTEGRATION_AUTH,
-            json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'},
+            json={'claim_id': claim_id, 'policy_reference': 'NW-MTR-2026-10482'},
         )
         reset = client.post(
             '/api/v1/workbench/demo/reset',

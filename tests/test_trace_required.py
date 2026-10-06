@@ -147,7 +147,7 @@ def test_non_authoritative_family_still_receives_model_reply_and_trace(
     turn = response.json()
     assert turn['agent_message'] is not None
     trace = repository.find_runtime_trace_for_trigger(
-        claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+        claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert trace is not None
     assert trace.model_invocations == 1

@@ -8,6 +8,7 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
+    initial_claim_count = repository.claim_count
     create_headers = {**auth_headers, 'Idempotency-Key': 'day5-create-retry'}
     payload = {'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'}
 
@@ -24,8 +25,8 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
     assert isinstance(claim_id, str)
     assert isinstance(session_id, str)
     assert created_body['claim']['revision'] == 1
-    assert repository.claim_count == 1
-    assert len(repository.list_sessions_for_claim(claim_id, 'cus_demo')) == 1
+    assert repository.claim_count == initial_claim_count + 1
+    assert len(repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
     turn = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
@@ -49,7 +50,7 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
     turn_revision = turn.json()['claim_revision']
     assert turn_revision > 1
 
-    stored_after_turn = repository.get_claim(claim_id, 'cus_demo')
+    stored_after_turn = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_after_turn is not None
     assert stored_after_turn.revision == turn_revision
     assert stored_after_turn.active_session_id == session_id
@@ -64,12 +65,12 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
     assert replay_body['claim']['form'] == persisted_payload['form']
     assert replay_body['claim']['customer_next_step'] == persisted_payload['customer_next_step']
 
-    stored_after_replay = repository.get_claim(claim_id, 'cus_demo')
+    stored_after_replay = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_after_replay is not None
     assert stored_after_replay.revision == turn_revision
     assert stored_after_replay.active_session_id == session_id
-    assert repository.claim_count == 1
-    sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    assert repository.claim_count == initial_claim_count + 1
+    sessions = repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(sessions) == 1
     assert sessions[0].session_id == session_id
 
@@ -81,7 +82,7 @@ def test_claim_creation_retry_does_not_duplicate_or_roll_back_newer_state(
     assert conflicting_reuse.status_code == 409
     assert conflicting_reuse.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
 
-    final_claim = repository.get_claim(claim_id, 'cus_demo')
+    final_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert final_claim is not None
     assert final_claim.revision == turn_revision
-    assert repository.claim_count == 1
+    assert repository.claim_count == initial_claim_count + 1

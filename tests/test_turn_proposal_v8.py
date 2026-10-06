@@ -68,8 +68,19 @@ def v8_context(message: str) -> AgentTurnContext:
     )
 
 
-def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts() -> None:
+@pytest.mark.parametrize('history_available', [False, True])
+def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts(
+    history_available: bool,
+) -> None:
     context = v8_context('My car cannot be driven. Please help with repairs.')
+    history_reads: list[int] = []
+
+    def load_history(limit: int) -> dict[str, object]:
+        history_reads.append(limit)
+        return {'status': 'empty'}
+
+    if history_available:
+        context = replace(context, claim_history_context_loader=load_history)
     plan = plan_model_turn(context)
     assert plan is not None
     assert plan.schema_id == 'claimant.turn.v1'
@@ -128,6 +139,12 @@ def test_v8_multi_intent_turn_uses_one_complete_envelope_and_preserves_facts() -
     )
     result = GatewayAgent(gateway).propose_turn(context)
     assert len(gateway.requests) == 1
+    assert history_reads == []
+    if history_available:
+        assert plan.request_profile.profile_id == 'claimant.lookup.v1'
+        assert any(item.resource_type == 'claim_history' for item in plan.context_plan.references)
+        assert gateway.requests[0].tools
+        assert gateway.requests[0].required_tool_name is None
     assert gateway.requests[0].prompt_version == 'northwind-fnol-claimant-v8'
     assert result.validated_turn is not None
     assert result.form_changes[0].value is False
@@ -300,7 +317,7 @@ def test_malformed_optional_question_preserves_facts_and_the_model_reply(
     app.state.agent_turn_provider = InvariantGuardedAgent(V8JourneyProvider([raw]))
     journey = Journey(client, 'home', 'optional-question')
     response = journey.send('The water is still dripping through the ceiling.')
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.form['property.ongoing_risk'].value == 'active_leak'
     assert claim.form['property.affected_areas'].value == ['ceiling']
@@ -341,7 +358,7 @@ def test_invalid_fact_is_dropped_and_the_rest_of_the_turn_stands(
 
     assert response.status_code == 200
     assert response.json()['agent_message'] is not None
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.form['incident.location'].value == 'Wellington'
     assert 'vehicle.drivable' not in claim.form
@@ -375,7 +392,7 @@ def test_bad_core_remains_atomic_even_when_optional_question_is_malformed(
     assert response.status_code == 200
     assert response.json()['agent_message'] is None
     assert response.json()['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.form == {}
 
 

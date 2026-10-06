@@ -189,7 +189,7 @@ def test_external_task_persistence_keeps_claim_and_evidence_origins(
     with pytest.raises(IdempotencyConflict):
         repository.save_external_task(changed_identity, claim.customer_id)
     with pytest.raises(KeyError):
-        repository.save_external_task(first, 'cus_other')
+        repository.save_external_task(first, 'cus_2b67e9d14a3c508f')
 
 
 def test_internal_external_task_api_maps_material_pages_and_logs(
@@ -215,7 +215,11 @@ def test_internal_external_task_api_maps_material_pages_and_logs(
         ),
         claim.customer_id,
     )
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
 
     with TestClient(create_app(settings, repository)) as client:
         with caplog.at_level(logging.INFO, logger='backend.api.integrations'):
@@ -254,7 +258,11 @@ def test_internal_external_task_api_truncates_limit_above_cap() -> None:
     repository.create_claim(claim, _session(claim))
     for number in range(1, 102):
         repository.save_external_task(_task(claim, number), claim.customer_id)
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
 
     with TestClient(create_app(settings, repository)) as client:
         response = client.get(
@@ -281,7 +289,11 @@ def test_internal_external_task_api_fails_closed_for_auth_claim_and_cursor(
     repository = FixtureRepository()
     claim = _claim()
     repository.create_claim(claim, _session(claim))
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     with TestClient(create_app(settings, repository)) as scoped_client:
         invalid_limit = scoped_client.get(
             f'/internal/v1/claims/{claim.claim_id}/external-tasks',

@@ -954,6 +954,26 @@ Evidence record or protected object.
 
 ## Retrieval and Review Invariants
 
+- A history lookup reads lodged Claims from the selected repository. A successful or empty
+  consultation also stores the bounded `history` projection, scoped `query`, source and timestamp
+  in its immutable `ClaimHistoryRetrievalRecord`. This audit snapshot is not a historical Claim
+  and is never queried as the next lookup's business source. `history_retrieval_refs` in staff
+  handoff packets reference these records. Older persisted records retain their readable `facts`
+  shape until an explicit stored-record migration replaces it.
+- MongoDB and memory exclude incomplete external creation consistently. Duplicate-candidate
+  lookup filters customer, completed/CLAIM_CREATED, successful external identity, family, incident
+  day and retention closure before limiting its result to 50 IDs. It is independent of the recent
+  summary page. A missing current confirmed incident day is `not_checked`. Prior Claims without
+  a resolvable single day are excluded; `clear` means no matching comparable-day candidate,
+  not proof that no duplicate exists.
+  MongoDB applies a five-second aggregate budget, and the existing customer/completion index
+  narrows the query before temporal conversion. This is not a date-indexed performance claim.
+- `ClaimCreationOperationRecord.history_checks` stores the pre-reservation staff observation:
+  checked time, `lodging-history-v1` rule version, independent count, check outcomes, duplicate
+  candidate IDs and limitations. It is immutable across retries and accepted with the existing
+  creation settlement transaction. Old operations have null checks, never a manufactured clear
+  result. Workbench projects only the accepted operation's checks, and claimant APIs omit them.
+
 - Structured policy/history results and knowledge citations preserve source, version,
   retrieval time, limitations, and visibility.
 - Raw provider payloads and discarded provider-only fields are not persisted as domain

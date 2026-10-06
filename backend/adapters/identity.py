@@ -16,7 +16,7 @@ from backend.domain.identity import (
 )
 from backend.repositories.identity import DuplicateEmailConflict, IdentityRepository
 from backend.repositories.protocols import RevisionConflict
-from backend.services.business_seed import BUSINESS_SEED_PATH, BusinessSeed, load_business_seed
+from backend.services.business_seed import BusinessSeed
 
 
 def _password_hash(customer_id: str, password: str) -> str:
@@ -53,8 +53,7 @@ class FixtureIdentityRepository(IdentityRepository):
         self._accounts: dict[str, CustomerAccountRecord] = {}
         self._sessions: dict[str, ClaimantAuthSessionRecord] = {}
         self._account_lock = RLock()
-        selected_seed = load_business_seed(BUSINESS_SEED_PATH) if seed is None else seed
-        for account in selected_seed.customers:
+        for account in seed.customers if seed is not None else ():
             self.ensure_seed_account(
                 account.customer_id, account.email, account.synthetic_password, account.display_name
             )

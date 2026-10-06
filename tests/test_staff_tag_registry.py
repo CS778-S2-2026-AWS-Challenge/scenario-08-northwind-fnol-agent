@@ -60,7 +60,7 @@ def _confirmed(value: object, field_ref: str) -> StructuredFormField:
         status=FormStatus.CONFIRMED,
         needed_for=NeededFor.CURRENT_ACTION,
         updated_at=timestamp,
-        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'),
     )
 
 
@@ -133,7 +133,9 @@ def test_workbench_projects_human_readable_tags_from_authoritative_records(
             status=FormStatus.PENDING_GENERATION,
             needed_for=NeededFor.LATER_ACTION,
             updated_at=now_utc(),
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'
+            ),
         ),
     }
     repository.save_claim(
@@ -164,7 +166,7 @@ def test_workbench_projects_human_readable_tags_from_authoritative_records(
             created_at=timestamp,
             updated_at=timestamp,
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     response = client.get(

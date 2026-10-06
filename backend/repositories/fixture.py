@@ -1,7 +1,7 @@
 from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from threading import Condition, Event, RLock
 from typing import Any
 
@@ -22,6 +22,7 @@ from backend.domain.claim_creation import (
 from backend.domain.claim_history import (
     LodgedClaimHistory,
     history_window_start,
+    incident_calendar_date,
     lodged_claim_summary,
 )
 from backend.domain.evidence import (
@@ -4450,6 +4451,41 @@ class FixtureRepository(PersistenceRepository):
                 (policy.customer_id, policy.facts.policy_reference), deepcopy(policy)
             )
 
+    def find_duplicate_lodged_claim_ids(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        product_family: str,
+        incident_date: date,
+        as_of: datetime,
+    ) -> list[str]:
+        matches = []
+        for claim in self._claims.values():
+            if (
+                claim.customer_id != customer_id
+                or claim.claim_id == current_claim_id
+                or claim.incident_type != product_family
+                or self._claim_access_closed(claim.claim_id)
+            ):
+                continue
+            terminal, external = claim.terminal_disposition, claim.external_claim
+            if (
+                terminal is None
+                or terminal.value.value != 'completed'
+                or terminal.reason_code.value != 'CLAIM_CREATED'
+                or terminal.recorded_at > as_of
+                or external is None
+                or external.creation_status.value != 'created'
+                or not external.external_claim_id
+            ):
+                continue
+            field = claim.form.get('incident.occurred_at')
+            occurred = incident_calendar_date(field.value) if field is not None else None
+            if occurred is not None and abs((occurred - incident_date).days) <= 3:
+                matches.append(claim.claim_id)
+        return sorted(matches)[:50]
+
     def query_lodged_claim_history(
         self,
         customer_id: str,
@@ -4475,6 +4511,13 @@ class FixtureRepository(PersistenceRepository):
             ):
                 continue
             if terminal.recorded_at > as_of or self._claim_access_closed(claim.claim_id):
+                continue
+            external = claim.external_claim
+            if (
+                external is None
+                or external.creation_status.value != 'created'
+                or not external.external_claim_id
+            ):
                 continue
             summary = lodged_claim_summary(claim)
             count += summary.lodged_at >= window_start

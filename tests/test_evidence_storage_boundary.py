@@ -26,7 +26,11 @@ from tests.media_support import synthetic_image
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    business_seed_path='config/business-seed.json',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 
 UPLOAD_PAYLOAD = {
     'kind': 'incident_photo',
@@ -333,10 +337,10 @@ def test_storage_outage_is_a_retryable_dependency_failure_not_a_rejected_file(
     assert error['code'] not in {'UNSUPPORTED_MEDIA_TYPE', 'VALIDATION_ERROR'}
 
     # The claim is untouched, so the claimant can retry without losing work.
-    claim = storage_repository.get_claim(claim_id, 'cus_demo')
+    claim = storage_repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.revision == 1
-    assert storage_repository.list_evidence(claim_id, 'cus_demo') == []
+    assert storage_repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b') == []
 
     assert readiness.json()['checks']['evidence_storage'] == 'unavailable'
 

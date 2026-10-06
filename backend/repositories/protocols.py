@@ -1,6 +1,6 @@
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from threading import Event
 from typing import Any, Literal, Protocol
 
@@ -512,6 +512,18 @@ class ClaimRepository(Protocol):
         history_reference: str | None = None,
     ) -> LodgedClaimHistory:
         """Return owned lodged summaries and an independent 12-month count."""
+        raise NotImplementedError
+
+    def find_duplicate_lodged_claim_ids(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        product_family: str,
+        incident_date: date,
+        as_of: datetime,
+    ) -> list[str]:
+        """Return up to 50 owned lodged candidates within three incident calendar days."""
         raise NotImplementedError
 
     def list_claims_internal(self) -> list[WorkingClaim]:

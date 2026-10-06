@@ -1,13 +1,24 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.identity import FixtureIdentityRepository
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.scenario_loader import load_scenario, seed_scenario
-from backend.services.demo_seed import SCENARIO_DIRECTORY
+from backend.repositories.scenario_loader import (
+    CANONICAL_SCENARIO_DIRECTORY as SCENARIO_DIRECTORY,
+)
+from backend.repositories.scenario_loader import (
+    load_scenario,
+    seed_scenario,
+)
+from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
 
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    business_seed_path='',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 
 
 def _load(scenario_id: str) -> tuple[FixtureRepository, str]:
@@ -18,7 +29,12 @@ def _load(scenario_id: str) -> tuple[FixtureRepository, str]:
 
 
 def _staff_client(repository: FixtureRepository) -> TestClient:
-    return TestClient(create_app(DEVELOPER_SETTINGS, repository))
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    app = create_app(
+        DEVELOPER_SETTINGS, repository, identity_repository=FixtureIdentityRepository(seed)
+    )
+    app.state.business_seed = seed
+    return TestClient(app)
 
 
 def _handoff_card(repository: FixtureRepository, claim_id: str) -> dict[str, object]:
@@ -354,7 +370,7 @@ def test_staff_queue_searches_each_documented_projection_field() -> None:
             assert [value['claim_id'] for value in response.json()['items']] == [claim_id]
         non_searchable_name = client.get(
             '/api/v1/workbench/claims',
-            params={'search': 'Demo Claimant One'},
+            params={'search': 'Maya Chen'},
             headers=headers,
         )
         active_item = client.get(
@@ -363,7 +379,7 @@ def test_staff_queue_searches_each_documented_projection_field() -> None:
             headers=headers,
         ).json()['items'][0]
         assert item['claimant']['display_name'] is None
-        assert active_item['claimant']['display_name'] == 'Demo Claimant One'
+        assert active_item['claimant']['display_name'] == 'Maya Chen'
         assert non_searchable_name.json()['items'] == []
 
     repository, claim_id = _load('AT-02-coverage-ambiguity')

@@ -79,7 +79,7 @@ def _set_eligibility(
 ) -> int:
     claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert claim is not None
 
@@ -227,13 +227,13 @@ def test_pause_rejects_terminal_or_non_resumable_claim(
 
     stored_claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     stored_session = repository.get_session(
         claim_id,
         session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert stored_claim is not None
@@ -245,7 +245,7 @@ def test_pause_rejects_terminal_or_non_resumable_claim(
     assert (
         repository.list_follow_ups(
             claim_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         == []
     )
@@ -286,7 +286,7 @@ def test_pause_response_revision_provenance_and_logging(
 
     before_pause = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert before_pause is not None
@@ -327,7 +327,7 @@ def test_pause_response_revision_provenance_and_logging(
     stored_session = repository.get_session(
         claim_id,
         session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert stored_session is not None
@@ -341,7 +341,7 @@ def test_pause_response_revision_provenance_and_logging(
 
     follow_ups = repository.list_follow_ups(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert len(follow_ups) == 1
@@ -394,7 +394,7 @@ def test_confirmation_recovery_activity_pairs_timestamp_with_confirmation_source
     assert proposed.status_code == 200
     proposed_revision = int(proposed.json()['revision'])
 
-    proposed_claim = repository.get_claim(claim_id, 'cus_demo')
+    proposed_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert proposed_claim is not None
     proposal_ref = proposed_claim.form['incident.description'].source_refs[-1]
 
@@ -410,7 +410,7 @@ def test_confirmation_recovery_activity_pairs_timestamp_with_confirmation_source
     assert confirmed.status_code == 200
     confirmed_revision = int(confirmed.json()['revision'])
 
-    confirmed_claim = repository.get_claim(claim_id, 'cus_demo')
+    confirmed_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert confirmed_claim is not None
     field = confirmed_claim.form['incident.description']
 
@@ -428,7 +428,7 @@ def test_confirmation_recovery_activity_pairs_timestamp_with_confirmation_source
     )
     assert paused.status_code == 200
 
-    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    stored_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert stored_session is not None
     assert stored_session.recovery_context is not None
     assert stored_session.recovery_context.last_meaningful_activity_at == field.updated_at
@@ -448,7 +448,7 @@ def test_contents_confirmation_recovery_activity_uses_confirmation_source(
 
     claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert claim is not None
 
@@ -472,7 +472,7 @@ def test_contents_confirmation_recovery_activity_uses_confirmation_source(
         accepted_status=FormStatus.PROPOSED,
         updated_by=ActorReference(
             actor_type=ActorType.CLAIMANT,
-            actor_id='cus_demo',
+            actor_id='cus_8f41a2c90d7e463b',
         ),
     )
 
@@ -505,7 +505,7 @@ def test_contents_confirmation_recovery_activity_uses_confirmation_source(
 
     confirmed_claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert confirmed_claim is not None
     assert len(confirmed_claim.contents_items) == 1
@@ -531,7 +531,7 @@ def test_contents_confirmation_recovery_activity_uses_confirmation_source(
     stored_session = repository.get_session(
         claim_id,
         session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert stored_session is not None
@@ -549,13 +549,13 @@ def _checkpoint_bundle(
 ) -> CheckpointBundle:
     claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     session = repository.get_session(
         claim_id,
         session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert claim is not None
@@ -608,7 +608,7 @@ def _checkpoint_bundle(
     )
 
     idempotency = IdempotencyRecord(
-        actor_id='cus_demo',
+        actor_id='cus_8f41a2c90d7e463b',
         route=(f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'),
         key=f'late-race-{suffix}',
         request_fingerprint=f'late-race-{suffix}',
@@ -639,12 +639,12 @@ def test_stale_new_session_activation_cannot_overwrite_acknowledged_pause(
 
     original_claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     original_session = repository.get_session(
         claim_id,
         session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert original_claim is not None
@@ -695,7 +695,7 @@ def test_stale_new_session_activation_cannot_overwrite_acknowledged_pause(
     )
 
     activation_idempotency = IdempotencyRecord(
-        actor_id='cus_demo',
+        actor_id='cus_8f41a2c90d7e463b',
         route=f'/api/v1/claims/{claim_id}/sessions',
         key='stale-session-activation',
         request_fingerprint='stale-session-activation',
@@ -724,17 +724,17 @@ def test_stale_new_session_activation_cannot_overwrite_acknowledged_pause(
 
     stored_claim = repository.get_claim(
         claim_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     stored_source_session = repository.get_session(
         claim_id,
         session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     stored_replacement = repository.get_session(
         claim_id,
         replacement_session.session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert stored_claim == paused_claim
@@ -747,7 +747,7 @@ def test_stale_new_session_activation_cannot_overwrite_acknowledged_pause(
         record
         for record in repository.list_follow_ups(
             claim_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         if record.status
         in {
@@ -852,7 +852,7 @@ def test_fixture_checkpoint_race_commits_exactly_one_bundle(
         record
         for record in repository.list_follow_ups(
             claim_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         if record.purpose == 'resume_incomplete_claim'
         and record.status

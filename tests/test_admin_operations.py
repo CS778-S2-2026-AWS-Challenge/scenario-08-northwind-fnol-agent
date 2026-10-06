@@ -107,7 +107,11 @@ def test_operation_metrics_use_persisted_model_usage_and_published_thresholds() 
 
     with TestClient(
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             configuration_repository=configurations,
             operation_repository=operations,
         )
@@ -185,7 +189,11 @@ def test_operation_cost_rounds_once_per_model_call() -> None:
 
     with TestClient(
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             configuration_repository=configurations,
             operation_repository=operations,
         )
@@ -208,7 +216,11 @@ def test_operation_metrics_are_explicit_when_operational_configuration_is_absent
     )
     with TestClient(
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             operation_repository=operations,
         )
     ) as client:
@@ -225,7 +237,13 @@ def test_operation_metrics_are_explicit_when_operational_configuration_is_absent
 
 def test_operational_configuration_rejects_incomplete_values() -> None:
     with TestClient(
-        create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+        create_app(
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            )
+        )
     ) as client:
         response = client.post(
             '/internal/v1/admin/configurations',

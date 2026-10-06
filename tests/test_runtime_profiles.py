@@ -13,8 +13,8 @@ from backend.adapters.knowledge import (
 )
 from backend.adapters.policy_history import (
     MockPolicyHistoryAdapter,
-    MongoClaimHistoryAdapter,
     PolicyHistoryAdapter,
+    RepositoryClaimHistoryAdapter,
     RepositoryPolicyAdapter,
 )
 from backend.app import create_app
@@ -31,7 +31,7 @@ from backend.core.runtime_profiles import (
 )
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch, KnowledgeSearchRequest
 from backend.repositories.fixture import FixtureRepository
-from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
+from backend.services.business_seed import BUSINESS_SEED_PATH, BusinessSeed, load_business_seed
 from backend.services.external_service_entry import ExternalServiceEntry
 from backend.services.knowledge_search import search_knowledge
 
@@ -83,7 +83,7 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
 
     assert bundle.profile is DataRuntimeProfile.FIXTURE
     assert isinstance(bundle.repository, FixtureRepository)
-    assert isinstance(bundle.claim_history, MongoClaimHistoryAdapter)
+    assert isinstance(bundle.claim_history, RepositoryClaimHistoryAdapter)
     assert bundle.readiness_checks() == {
         'persistence': 'using_fixture',
         'evidence_storage': 'using_fixture',
@@ -109,7 +109,7 @@ def test_history_injection_is_independent_of_policy_and_uses_selected_repository
     app = create_app(Settings(), repository=repository, policy_history_adapter=policy)
 
     assert app.state.policy_history_adapter is policy
-    assert isinstance(app.state.claim_history_adapter, MongoClaimHistoryAdapter)
+    assert isinstance(app.state.claim_history_adapter, RepositoryClaimHistoryAdapter)
     assert app.state.claim_history_adapter._repository is repository
 
     history = MockPolicyHistoryAdapter(repository)
@@ -164,6 +164,100 @@ def test_missing_selected_seed_refuses_startup_and_closes_repository(tmp_path: P
             repository=repository,
         )
     assert repository.closed
+
+
+@pytest.mark.parametrize('injected_repository', [False, True])
+def test_custom_seed_is_only_source_for_identities_policies_history_and_token(
+    tmp_path: Path, injected_repository: bool
+) -> None:
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    owner = seed.customers[0]
+    original_customer_id = owner.customer_id
+    owner.customer_id = 'cus_5796f2a018cd4b63'
+    owner.email = 'sarah.patel@example.invalid'
+    seed.primary_customer_id = owner.customer_id
+    seed.customers = [owner]
+    seed.demo_cases = []
+    seed.policies_in_system = [seed.policies_in_system[0]]
+    seed.policies_in_system[0].customer_id = owner.customer_id
+    seed.policies_in_system[0].policy_number = 'NW-MTR-2026-75182'
+    seed.prior_submitted_claims[0].customer_id = owner.customer_id
+    path = tmp_path / 'selected-business-seed.json'
+    path.write_text(seed.model_dump_json(), encoding='utf-8')
+    repository = FixtureRepository() if injected_repository else None
+    app = create_app(
+        Settings(
+            environment='test', identity_mode=IdentityMode.DEVELOPER, business_seed_path=str(path)
+        ),
+        repository=repository,
+    )
+    assert [account.customer_id for account in app.state.identity_repository.list_accounts()] == [
+        owner.customer_id
+    ]
+    assert (
+        app.state.claim_repository.get_seed_policy(
+            owner.customer_id, seed.policies_in_system[0].policy_number
+        )
+        is not None
+    )
+    default_policy = load_business_seed(BUSINESS_SEED_PATH).policies_in_system[0]
+    assert (
+        app.state.claim_repository.get_seed_policy(
+            original_customer_id, default_policy.policy_number
+        )
+        is None
+    )
+    history = app.state.claim_repository.query_lodged_claim_history(
+        owner.customer_id, 'current', limit=10, as_of=datetime(2026, 10, 6, tzinfo=UTC)
+    )
+    assert [claim.claim_id for claim in history.claims] == [seed.prior_submitted_claims[0].claim_id]
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/v1/claims',
+            headers={
+                'Authorization': 'Bearer synthetic-claimant',
+                'Idempotency-Key': 'selected-seed-owner',
+            },
+            json={'channel': 'web_agent', 'locale': 'en-NZ'},
+        )
+    assert response.status_code == 201
+    claim = app.state.claim_repository.get_claim_internal(response.json()['claim']['claim_id'])
+    assert claim is not None and claim.customer_id == owner.customer_id
+
+
+@pytest.mark.parametrize('selected_empty_manifest', [False, True])
+def test_no_business_seed_cannot_load_builtin_accounts_or_policies(
+    tmp_path: Path, selected_empty_manifest: bool
+) -> None:
+    path = tmp_path / 'empty-business-seed.json'
+    path.write_text(
+        BusinessSeed(
+            version='1',
+            primary_customer_id=None,
+            customers=[],
+            policies_in_system=[],
+            prior_submitted_claims=[],
+            demo_cases=[],
+        ).model_dump_json(),
+        encoding='utf-8',
+    )
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        business_seed_path=str(path) if selected_empty_manifest else '',
+    )
+    app = create_app(settings)
+    assert app.state.identity_repository.list_accounts() == []
+    original = load_business_seed(BUSINESS_SEED_PATH).policies_in_system[0]
+    assert (
+        app.state.claim_repository.get_seed_policy(original.customer_id, original.policy_number)
+        is None
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            '/api/v1/claims', headers={'Authorization': 'Bearer synthetic-claimant'}
+        )
+    assert response.status_code == 401
 
 
 @pytest.mark.parametrize(

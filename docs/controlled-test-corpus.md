@@ -412,9 +412,14 @@ implemented, not as failures of the corpus.
    The provisioner creates absent records only; repeated setup cannot reset user edits.
    No unauthenticated HTTP seed endpoint is introduced. See
    [Fixtures and Test Conventions](fixtures_convention.md) for the shared manifest contract.
+   The complete manifest supplies `version: "1"`, `primary_customer_id`, `customers`,
+   `policies_in_system`, `prior_submitted_claims`, and `demo_cases` (empty for corpus packs).
+   Customer entries include fixed IDs, reserved email, ordinary invented display name and the
+   development-only password input. The runner selects the manifest through
+   `Settings.business_seed_path`; identity, policy and Claim setup use that same selection.
 4. **Coverage state (decided by the maintainer, 2026-09-30).** `coverage_unclear` counts only a
    policy lookup that carries an uncertainty marker (for example `COVERAGE_SECTION_INCOMPLETE` on
-   `synthetic-policy-ambiguous`) or an Agent record that the loss may not be covered.
+   `NW-MTR-2026-20963`) or an Agent record that the loss may not be covered.
    `claim_state.coverage = review_required` on its own does not count, although the turn reducer
    (`backend/services/turn_reducer.py`, the `Coverage.REVIEW_REQUIRED` update) sets it for any cited
    policy record. Labels follow this rule. A pack plants the marker with
@@ -448,6 +453,12 @@ implemented, not as failures of the corpus.
 8. **History not checked.** The corpus does not plant `not_checked` history. On 2026-09-30 the
    maintainer proposed making it with a lookup-error switch; on 2026-10-01 he ruled that a lookup
    error is runtime logic, and that the corpus supplies valid materials, not system reactions.
+   Runtime captures `history_checks` in the creation operation without model involvement and
+   exposes accepted checks only in staff detail. The past-year count is independent of the
+   summary limit. Possible-duplicate checks compare a confirmed single incident day with owned
+   lodged records of the same family within three calendar days. A `clear` result means no
+   comparable recorded-day candidate was found; prior missing/range dates are not resolved or
+   invented. An unavailable query or missing current date remains `not_checked`.
    Simulating the error would stand in for real system behaviour with a fake state. An anonymous
    claimant cannot reach claim creation on main in any case (`docs/api.md`, evidence upload). How
    the product reports `not_checked` is tested by the product's own tests, not by these packs.

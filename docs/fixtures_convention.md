@@ -103,8 +103,8 @@ development data, not evidence of production policy or a successful user journey
 The manifest preserves the controlled corpus vocabulary so its runner can consume
 the shared contract. No new seed HTTP endpoint is declared by this manifest.
 
-The manifest has `version`, `demo_customer_id`, `customers`, `policies_in_system`,
-and `prior_submitted_claims`. Customer IDs, Claim IDs, and Session IDs are fixed.
+The manifest has `version`, `primary_customer_id`, `customers`, `policies_in_system`,
+`prior_submitted_claims`, and `demo_cases`. Customer IDs, Claim IDs, and Session IDs are fixed.
 Customer profile text uses the identity domain validators. Synthetic passwords are
 development-only inputs and are hashed by the selected identity adapter; credentials
 and tokens from a real environment must never be included.
@@ -126,6 +126,18 @@ with another identity fail explicitly. Fixture identity and durable identity use
 same manifest and provisioning semantics; tests may select an empty manifest.
 Existing explicit queue-reset and validation-seed routes keep their separate
 authorization and empty-queue rules.
+
+Application composition loads only `Settings.business_seed_path`. Fixture identity construction
+without an explicit manifest is empty. Runtime policy lookup, identity and demo-case provisioning
+cannot read a second packaged path. Business values use invented ordinary names and identifiers;
+email uses `.invalid` and any phone must use the corpus non-subscriber format `+64 00 000 NNNN`.
+Development-only credential inputs and adapter source labels remain explicitly non-production.
+
+`demo_cases` contain case identity, customer, family, recorded timestamp, registered fields,
+initial messages and contents descriptions. The development seed routes build the domain graph
+from those inputs; no AT snapshot supplies runtime Claim state. AT snapshots under
+`tests/fixtures/scenarios/` remain reusable regression inputs only. Dates are fixed, so test
+window assertions use an explicit clock instead of moving historical data on startup.
 
 ## Image-assisted journeys
 

@@ -4,6 +4,7 @@ from backend.adapters.policy_history import (
     PolicyHistoryAdapter,
     ProviderLookupEnvelope,
     RetrievalUnavailable,
+    map_history_provider_payload,
     map_policy_provider_payload,
 )
 from backend.core.errors import ApiError
@@ -225,7 +226,7 @@ def search_claim_history(
 ) -> ClaimHistorySearchResponse:
     """Retrieve purpose-limited history evidence, never a fraud conclusion."""
 
-    _claim(repository, payload.claim_id)
+    claim = _claim(repository, payload.claim_id)
     result_id = new_id('his')
     connection_state = _connection_state(adapter)
     if not _provider_ready(connection_state):
@@ -274,6 +275,10 @@ def search_claim_history(
     ]
     if not history.claims:
         limitations.append('No lodged Claim matches this customer-scoped lookup.')
+    record = map_history_provider_payload(
+        retrieval_id=result_id, claim_id=claim.claim_id, envelope=envelope, query=payload
+    )
+    persist_retrieval_record(repository, record, claim.customer_id)
     return ClaimHistorySearchResponse(
         result_id=result_id,
         status=(RetrievalStatus.EVIDENCE_FOUND if history.claims else RetrievalStatus.NO_EVIDENCE),

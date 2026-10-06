@@ -1,7 +1,7 @@
 """Regression evidence for lodged-history projection and ownership semantics."""
 
 import os
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -119,6 +119,9 @@ def test_fixture_history_scopes_counts_limits_and_exact_older_reference() -> Non
     assert inconsistent.terminal_disposition is not None
     inconsistent.terminal_disposition.reason_code = TerminalDispositionReasonCode.AUTHORISED_CLOSURE
     claims.append(inconsistent)
+    missing_external = _lodged_claim('missing-external', now)
+    missing_external.external_claim = None
+    claims.append(missing_external)
     repository._claims = {claim.claim_id: claim for claim in claims}
     result = repository.query_lodged_claim_history(
         'customer-1',
@@ -146,6 +149,46 @@ def test_fixture_history_scopes_counts_limits_and_exact_older_reference() -> Non
         history_reference='NUMBER-other',
     )
     assert result.claims == []
+
+
+def test_duplicate_history_query_is_not_limited_by_recent_summary_page() -> None:
+    now = datetime(2026, 10, 6, tzinfo=UTC)
+    repository = FixtureRepository()
+    for index in range(55):
+        claim = _lodged_claim(f'older-{index:02}', now - timedelta(days=index))
+        claim.form['incident.occurred_at'].value = '2026-01-01'
+        repository._claims[claim.claim_id] = claim
+    target = _lodged_claim('matching-old', now.replace(year=2024))
+    target.form['incident.occurred_at'].value = '2026-09-29'
+    repository._claims[target.claim_id] = target
+    assert repository.find_duplicate_lodged_claim_ids(
+        'customer-1', 'current', product_family='motor', incident_date=date(2026, 10, 2), as_of=now
+    ) == ['matching-old']
+    assert (
+        repository.find_duplicate_lodged_claim_ids(
+            'customer-1',
+            'current',
+            product_family='home',
+            incident_date=date(2026, 10, 2),
+            as_of=now,
+        )
+        == []
+    )
+    target.form['incident.occurred_at'].value = {
+        'start': '2026-09-29',
+        'end': '2026-10-03',
+        'precision': 'range',
+    }
+    assert (
+        repository.find_duplicate_lodged_claim_ids(
+            'customer-1',
+            'current',
+            product_family='motor',
+            incident_date=date(2026, 10, 2),
+            as_of=now,
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize('backend', ['fixture', 'mongodb'])
@@ -229,6 +272,20 @@ def test_real_mongodb_history_is_read_only_scoped_and_persistent() -> None:
             }
         )
         before = list(repository._collection.find({}))
+        for family in ('motor', 'home'):
+            assert repository.find_duplicate_lodged_claim_ids(
+                'customer-1',
+                'current',
+                product_family=family,
+                incident_date=date(2025, 9, 2),
+                as_of=now,
+            ) == fixture.find_duplicate_lodged_claim_ids(
+                'customer-1',
+                'current',
+                product_family=family,
+                incident_date=date(2025, 9, 2),
+                as_of=now,
+            )
         for reference in (None, 'NUMBER-old', 'external-old', 'old', 'NUMBER-other'):
             actual = repository.query_lodged_claim_history(
                 'customer-1',

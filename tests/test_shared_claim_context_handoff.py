@@ -28,7 +28,11 @@ def shared_context_client(
     shared_context_repository: FixtureRepository | MongoDBRepository,
 ) -> Iterator[TestClient]:
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         shared_context_repository,
     )
     with TestClient(app) as test_client:
@@ -106,8 +110,8 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
     assert isinstance(handoff_id, str)
     assert isinstance(next_step, dict)
 
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
-    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    handoffs = repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert len(handoffs) == 1
     handoff = handoffs[0]
@@ -141,7 +145,7 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
     assert replay_body['revision'] == support_body['revision']
     assert replay_body['handoff'] == support_body['handoff']
     assert replay_body['customer_next_step'] == next_step
-    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
     claimant_detail = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
     assert claimant_detail.status_code == 200

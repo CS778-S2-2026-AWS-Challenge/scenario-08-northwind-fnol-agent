@@ -78,7 +78,13 @@ def _projections(scenario: ScenarioFixture) -> tuple[list[dict[str, Any]], list[
     repository = FixtureRepository()
     seed_scenario(repository, scenario)
     claim_id = scenario.claim.claim_id
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        business_seed_path=str(
+            Path(__file__).resolve().parents[2] / 'config' / 'business-seed.json'
+        ),
+    )
     with TestClient(create_app(settings, repository)) as client:
         claimant = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
         staff = client.get(

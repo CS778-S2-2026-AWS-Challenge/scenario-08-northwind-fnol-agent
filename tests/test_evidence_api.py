@@ -109,10 +109,10 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
         'pending': 1,
         'needs_attention': 0,
     }
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.claim_state.evidence.value == 'pending'
-    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')[-1]
     assert evaluation.recomputation_reason == 'evidence_changed'
     assert evaluation.resulting_claim_revision == stored.revision
     assert response.json()['evidence']['evidence_id'] in {
@@ -436,7 +436,7 @@ def test_claimant_can_reuse_then_detach_existing_evidence_without_copying_it(
     proposal_ref, confirmation_ref = _seed_persisted_evidence_authority(
         repository,
         claim_id=target_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         evidence_id=evidence_id,
         action='reuse',
         expected_revision=1,
@@ -470,13 +470,16 @@ def test_claimant_can_reuse_then_detach_existing_evidence_without_copying_it(
         item for item in history.json()['items'] if item['evidence_id'] == evidence_id
     )
     assert history_item['linked_claim_ids'] == [target_id]
-    assert repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo') is not None
-    assert repository.get_evidence(source_id, evidence_id, 'cus_demo') is not None
+    assert (
+        repository.get_evidence_claim_link(target_id, evidence_id, 'cus_8f41a2c90d7e463b')
+        is not None
+    )
+    assert repository.get_evidence(source_id, evidence_id, 'cus_8f41a2c90d7e463b') is not None
 
     detach_proposal_ref, detach_confirmation_ref = _seed_persisted_evidence_authority(
         repository,
         claim_id=target_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         evidence_id=evidence_id,
         action='remove',
         expected_revision=2,
@@ -507,7 +510,7 @@ def test_claimant_can_reuse_then_detach_existing_evidence_without_copying_it(
         item for item in history_after.json()['items'] if item['evidence_id'] == evidence_id
     )
     assert history_item['linked_claim_ids'] == []
-    link = repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo')
+    link = repository.get_evidence_claim_link(target_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert link is not None
     assert link.state.value == 'detached'
 
@@ -525,7 +528,7 @@ def test_removing_source_evidence_marks_history_removed_and_replays_idempotently
     proposal_ref, confirmation_ref = _seed_persisted_evidence_authority(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         evidence_id=evidence_id,
         action='remove',
         expected_revision=revision,
@@ -581,7 +584,7 @@ def test_evidence_action_rejects_ineligible_source_without_changing_claim(
     claim_id = str(cast(dict[str, object], created['claim'])['claim_id'])
     evidence_id = upload_evidence(client, auth_headers, claim_id, f'action-{file_status}', 1)
     complete_upload(client, auth_headers, claim_id, evidence_id, f'action-{file_status}', 2)
-    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert evidence is not None
     repository.save_evidence(
         evidence.model_copy(
@@ -590,14 +593,14 @@ def test_evidence_action_rejects_ineligible_source_without_changing_claim(
                 'status': EvidenceStatus(status),
             }
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
     proposal_ref, confirmation_ref = _seed_persisted_evidence_authority(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         evidence_id=evidence_id,
         action='remove',
         expected_revision=3,
@@ -618,7 +621,7 @@ def test_evidence_action_rejects_ineligible_source_without_changing_claim(
             'confirmation_ref': confirmation_ref,
         },
     )
-    after = repository.get_claim(claim_id, 'cus_demo')
+    after = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
 
     assert response.status_code == 200
     assert response.json()['status'] == 'rejected'
@@ -639,7 +642,7 @@ def test_evidence_actions_reject_fabricated_refs_before_repository_mutation(
     evidence_id, _ = _make_ready_evidence(
         client, auth_headers, source_id, 'fabricated-reuse-evidence'
     )
-    before_target = repository.get_claim(target_id, 'cus_demo')
+    before_target = repository.get_claim(target_id, 'cus_8f41a2c90d7e463b')
     assert before_target is not None
 
     reuse = client.post(
@@ -654,10 +657,12 @@ def test_evidence_actions_reject_fabricated_refs_before_repository_mutation(
 
     assert reuse.status_code == 422
     assert reuse.json()['error']['code'] == 'VALIDATION_ERROR'
-    after_target = repository.get_claim(target_id, 'cus_demo')
+    after_target = repository.get_claim(target_id, 'cus_8f41a2c90d7e463b')
     assert after_target is not None
     assert after_target.revision == before_target.revision == 1
-    assert repository.get_evidence_claim_link(target_id, evidence_id, 'cus_demo') is None
+    assert (
+        repository.get_evidence_claim_link(target_id, evidence_id, 'cus_8f41a2c90d7e463b') is None
+    )
 
     remove = client.post(
         f'/api/v1/claims/{source_id}/evidence/{evidence_id}/remove',
@@ -671,10 +676,10 @@ def test_evidence_actions_reject_fabricated_refs_before_repository_mutation(
 
     assert remove.status_code == 422
     assert remove.json()['error']['code'] == 'VALIDATION_ERROR'
-    after_source = repository.get_claim(source_id, 'cus_demo')
+    after_source = repository.get_claim(source_id, 'cus_8f41a2c90d7e463b')
     assert after_source is not None
     assert after_source.revision == 4
-    stored_evidence = repository.get_evidence(source_id, evidence_id, 'cus_demo')
+    stored_evidence = repository.get_evidence(source_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert stored_evidence is not None
     assert stored_evidence.claimant_history_state.value != 'removed'
 
@@ -714,11 +719,11 @@ def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states
 ) -> None:
     first = client.post(
         '/api/v1/auth/sessions',
-        json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+        json={'email': 'maya.chen@example.invalid', 'password': 'northwind-demo-one'},
     )
     second = client.post(
         '/api/v1/auth/sessions',
-        json={'email': 'claimant.two@example.invalid', 'password': 'northwind-demo-two'},
+        json={'email': 'oliver.reed@example.invalid', 'password': 'northwind-demo-two'},
     )
     assert first.status_code == 201
     assert second.status_code == 201
@@ -740,7 +745,7 @@ def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states
         _seed_history_evidence(
             repository,
             claim_id=first_claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             evidence_id=f'evd-history-{file_status.value}',
             file_status=file_status,
             status=EvidenceStatus.PENDING if index == 0 else EvidenceStatus.RECEIVED,
@@ -748,7 +753,7 @@ def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states
     _seed_history_evidence(
         repository,
         claim_id=first_claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         evidence_id='evd-awaiting-upload',
         file_status=EvidenceFileStatus.AWAITING_UPLOAD,
         status=EvidenceStatus.PENDING,
@@ -756,7 +761,7 @@ def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states
     _seed_history_evidence(
         repository,
         claim_id=first_claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         evidence_id='evd-non-claimant-source',
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.EXTERNAL_SYSTEM,
@@ -764,7 +769,7 @@ def test_evidence_history_is_account_scoped_and_filters_non_claimant_file_states
     _seed_history_evidence(
         repository,
         claim_id=second_claim_id,
-        customer_id='cus_other',
+        customer_id='cus_2b67e9d14a3c508f',
         evidence_id='evd-other-claimant',
         file_status=EvidenceFileStatus.READY,
     )
@@ -867,12 +872,12 @@ def test_unresolved_evidence_remains_in_staff_pending_evidence_view(
     )
     assert registered.status_code == 201
     evidence_id = registered.json()['evidence']['evidence_id']
-    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert evidence is not None
     if file_status is EvidenceFileStatus.READY:
         repository.save_evidence(
             evidence.model_copy(update={'file_status': EvidenceFileStatus.READY}),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
 
     response = client.get(
@@ -943,7 +948,7 @@ def test_upload_completion_exposes_media_readiness_without_storage_details(
     assert upload['upload']['method'] == 'PUT'
     assert upload['upload']['headers'] == {'Content-Type': media_type}
     assert media_type in upload['constraints']['allowed_media_types']
-    stored_before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    stored_before = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert stored_before is not None
     assert stored_before.file_status.value == 'awaiting_upload'
     assert 'url' not in stored_before.provenance
@@ -1039,13 +1044,13 @@ def test_upload_completion_exposes_media_readiness_without_storage_details(
     assert 'upload_checksum' not in public_payload
     assert 'processing_state' not in public_payload
     assert 'file_contents' not in public_payload
-    stored_after = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    stored_after = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert stored_after is not None
     assert stored_after.provenance['processing_state'] == (
         'completed' if media_type == 'image/jpeg' else 'queued'
     )
     assert stored_after.provenance['storage_key'].endswith(evidence_id)
-    updated_claim = repository.get_claim(claim_id, 'cus_demo')
+    updated_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert updated_claim is not None
     assert updated_claim.form == {}
     assert updated_claim.evidence_summary.received == (1 if media_type == 'image/jpeg' else 0)
@@ -1097,8 +1102,8 @@ def test_processing_failure_is_claim_attention_and_retry_is_idempotent(
         f'/api/v1/workbench/claims/{claim_id}',
         headers={'Authorization': 'Bearer synthetic-staff'},
     )
-    claim = repository.get_claim(claim_id, 'cus_demo')
-    stored = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    stored = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
 
     assert failed.status_code == 200
     assert replay.json() == failed.json()
@@ -1280,7 +1285,7 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     assert repeated_decision.status_code == 422
     assert repeated_decision.json()['error']['code'] == 'VALIDATION_ERROR'
 
-    stored = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    stored = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     transitions = stored.provenance['transition_history']
     assert isinstance(transitions, list)
@@ -1495,7 +1500,7 @@ def test_evidence_rejects_protected_participant_extraction_before_persistence(
     evidence_id = upload_evidence(client, auth_headers, claim_id, 'protected', 1)
     complete_upload(client, auth_headers, claim_id, evidence_id, 'protected', 2)
     before_claim = repository.get_claim_internal(claim_id)
-    before_evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    before_evidence = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     route = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
     response = client.post(
         route,
@@ -1506,8 +1511,8 @@ def test_evidence_rejects_protected_participant_extraction_before_persistence(
     assert response.json()['error']['code'] == 'PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE'
     assert 'SYNTHETIC-SECRET-123' not in response.text
     assert repository.get_claim_internal(claim_id) == before_claim
-    assert repository.get_evidence(claim_id, evidence_id, 'cus_demo') == before_evidence
-    assert repository.find_idempotency('cus_demo', route, 'protected-process') is None
+    assert repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b') == before_evidence
+    assert repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'protected-process') is None
 
 
 def test_completion_transition_uses_storage_result_source(
@@ -1546,7 +1551,7 @@ def test_completion_transition_uses_storage_result_source(
 
     complete_upload(client, auth_headers, claim_id, evidence_id, 'storage-source', 2)
 
-    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert evidence is not None
     transitions = evidence.provenance['transition_history']
     assert isinstance(transitions, list)
@@ -1870,7 +1875,7 @@ def test_attention_evidence_updates_shared_evidence_dimension(
     )
 
     assert response.status_code == 201
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.claim_state.evidence.value == expected_state
     assert stored.evidence_summary.needs_attention == 1
@@ -2056,7 +2061,7 @@ def test_processing_cannot_replace_an_unresolved_field_from_an_earlier_source(
         assert decided.status_code == 200
         revision += 1
 
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
     field_before = before.form['incident.description']
     assert field_before.status.value == expected_status
@@ -2081,7 +2086,7 @@ def test_processing_cannot_replace_an_unresolved_field_from_an_earlier_source(
     assert expected_status in body['error']['details'][0]['reason']
 
     # The earlier fact keeps its value, source, and source references.
-    after = repository.get_claim(claim_id, 'cus_demo')
+    after = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert after is not None
     field_after = after.form['incident.description']
     assert field_after.model_dump(mode='json') == field_before.model_dump(mode='json')

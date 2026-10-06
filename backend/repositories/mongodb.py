@@ -9,7 +9,7 @@ document details below the repository boundary.
 import os
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from threading import Event
 from typing import Any, NoReturn, TypeVar, cast
 
@@ -4374,6 +4374,113 @@ class MongoDBRepository:
             # Concurrent insert-only seed runs have the same owner/reference identity.
             if self.get_seed_policy(policy.customer_id, policy.facts.policy_reference) is None:
                 raise
+
+    def find_duplicate_lodged_claim_ids(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        product_family: str,
+        incident_date: date,
+        as_of: datetime,
+    ) -> list[str]:
+        incident_field = {
+            '$getField': {'field': {'$literal': 'incident.occurred_at'}, 'input': '$form'}
+        }
+        pipeline: list[dict[str, Any]] = [
+            {
+                '$match': {
+                    'record_type': 'claim',
+                    'customer_id': customer_id,
+                    'claim_id': {'$ne': current_claim_id},
+                    'incident_type': product_family,
+                    'terminal_disposition.value': 'completed',
+                    'terminal_disposition.reason_code': 'CLAIM_CREATED',
+                    'external_claim.creation_status': 'created',
+                    'external_claim.external_claim_id': {'$type': 'string', '$nin': ['', None]},
+                }
+            },
+            {
+                '$set': {
+                    'incident_value': {
+                        '$let': {
+                            'vars': {'field': incident_field},
+                            'in': '$$field.value',
+                        }
+                    },
+                    'lodged_instant': {
+                        '$dateFromString': {
+                            'dateString': '$terminal_disposition.recorded_at',
+                            'onError': None,
+                            'onNull': None,
+                        }
+                    },
+                }
+            },
+            {
+                '$set': {
+                    'incident_day': {
+                        '$cond': [
+                            {'$eq': [{'$type': '$incident_value'}, 'string']},
+                            {'$substrCP': ['$incident_value', 0, 10]},
+                            {
+                                '$cond': [
+                                    {
+                                        '$in': [
+                                            '$incident_value.precision',
+                                            ['range', 'unknown', 'approximate'],
+                                        ]
+                                    },
+                                    None,
+                                    '$incident_value.date',
+                                ]
+                            },
+                        ]
+                    }
+                }
+            },
+            {
+                '$set': {
+                    'incident_instant': {
+                        '$dateFromString': {
+                            'dateString': '$incident_day',
+                            'format': '%Y-%m-%d',
+                            'onError': None,
+                            'onNull': None,
+                        }
+                    }
+                }
+            },
+            {
+                '$match': {
+                    'lodged_instant': {'$ne': None, '$lte': as_of},
+                    'incident_instant': {
+                        '$gte': datetime.combine(
+                            incident_date - timedelta(days=3), datetime.min.time(), UTC
+                        ),
+                        '$lt': datetime.combine(
+                            incident_date + timedelta(days=4), datetime.min.time(), UTC
+                        ),
+                    },
+                }
+            },
+            {
+                '$lookup': {
+                    'from': self._collection.name,
+                    'localField': 'claim_id',
+                    'foreignField': 'claim_id',
+                    'pipeline': [{'$match': {'record_type': 'retention_operation'}}, {'$limit': 1}],
+                    'as': 'access_closure',
+                }
+            },
+            {'$match': {'access_closure': {'$eq': []}}},
+            {'$sort': {'claim_id': 1}},
+            {'$limit': 50},
+            {'$project': {'_id': 0, 'claim_id': 1}},
+        ]
+        return [
+            str(item['claim_id']) for item in self._collection.aggregate(pipeline, maxTimeMS=5000)
+        ]
 
     def query_lodged_claim_history(
         self,

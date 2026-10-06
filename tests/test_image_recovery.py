@@ -211,7 +211,13 @@ def test_stop_waits_for_inflight_repair_and_prevents_next_record(
 
 
 def test_fixture_profile_does_not_start_background_recovery() -> None:
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
+    )
     assert app.state.image_recovery_worker is None
 
 

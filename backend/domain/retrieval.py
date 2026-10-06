@@ -69,7 +69,11 @@ class ClaimHistoryRetrievalRecord(ContractModel):
     claim_id: str = Field(min_length=1, max_length=100)
     kind: Literal[RetrievalKind.CLAIM_HISTORY] = RetrievalKind.CLAIM_HISTORY
     source: RetrievalSource
-    facts: ClaimHistoryFacts
+    # Persisted pre-1221 retrievals still contain facts; new consultations use history.
+    # Remove this reader only after those durable records have been migrated.
+    facts: ClaimHistoryFacts | None = None
+    history: LodgedClaimHistory | None = None
+    query: 'ClaimHistorySearchRequest | None' = None
     uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
 
 
@@ -141,7 +145,6 @@ class ClaimHistorySearchResponse(DataQueryProjection):
     result_id: str = Field(min_length=1, max_length=100)
     status: RetrievalStatus
     source: RetrievalSource | None = None
-    facts: ClaimHistoryFacts | None = None
     history: LodgedClaimHistory | None = None
     uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
     limitations: list[str] = Field(default_factory=list, max_length=100)

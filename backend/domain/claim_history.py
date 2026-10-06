@@ -1,11 +1,37 @@
 """Read-only, claimant-safe projections of successfully lodged Claims."""
 
 from calendar import monthrange
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import Field
 
 from backend.domain.models import ContractModel, TemporalFactValue, WorkingClaim
+
+
+def incident_calendar_date(value: object) -> date | None:
+    """Read a single recorded incident day without resolving uncertain ranges.
+
+    Args:
+        value: Registered temporal fact value or an ISO date/time string.
+    Returns:
+        The recorded calendar date, or None when no single date is known.
+    Raises:
+        None.
+    """
+    if isinstance(value, TemporalFactValue):
+        if value.precision.value in {'range', 'unknown', 'approximate'}:
+            return None
+        value = value.date
+    elif isinstance(value, dict):
+        if value.get('precision') in {'range', 'unknown', 'approximate'}:
+            return None
+        value = value.get('date')
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
 
 
 class LodgedClaimSummary(ContractModel):

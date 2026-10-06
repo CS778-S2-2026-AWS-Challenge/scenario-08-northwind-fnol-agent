@@ -149,6 +149,6 @@ def test_contents_item_and_theft_branch_complete_with_same_message_runtime(
     journey.create()
     record_property('planned_input_budget', json.dumps(journey.budget_measurements(repository)))
     assert len(journey.turns) <= 9
-    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_demo')
+    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
     assert session.repeated_question_count == 0

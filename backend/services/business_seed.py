@@ -2,12 +2,13 @@
 
 from datetime import UTC, date, datetime, time
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.identity import ProfileEmail, ProfileName
-from backend.domain.models import ContractModel, SessionRecord, WorkingClaim
+from backend.domain.models import ContractModel, FormStatus, SessionRecord, WorkingClaim
 from backend.domain.retrieval import PolicyFacts, RetrievalUncertainty, SeededPolicyRecord
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
@@ -72,7 +73,7 @@ class SeedPolicy(ContractModel):
             customer_id=self.customer_id,
             facts=self.policy_facts(),
             uncertainty=[
-                RetrievalUncertainty(code=code, detail=f'Synthetic seed policy marker: {code}.')
+                RetrievalUncertainty(code=code, detail=f'Policy source reports {code}.')
                 for code in self.uncertainty
             ],
         )
@@ -95,12 +96,38 @@ class SeedSubmittedClaim(ContractModel):
         return self
 
 
+class SeedDemoField(ContractModel):
+    value: Any
+    status: FormStatus
+
+
+class SeedDemoCase(ContractModel):
+    case_id: str = Field(pattern=r'^case_[a-f0-9]+$')
+    customer_id: str = Field(min_length=1, max_length=100)
+    family: Literal['motor', 'home', 'contents']
+    recorded_at: datetime
+    fields: dict[str, SeedDemoField]
+    messages: list[str] = Field(min_length=1, max_length=20)
+    contents_descriptions: list[str] = Field(max_length=20)
+
+    @model_validator(mode='after')
+    def validate_fields(self) -> 'SeedDemoCase':
+        if not set(self.fields).issubset(REGISTERED_FIELD_CODES):
+            raise ValueError('Demo case fields must use registered domain field codes.')
+        if self.recorded_at.tzinfo is None:
+            raise ValueError('Demo case recorded_at must include a timezone.')
+        if self.family != 'contents' and self.contents_descriptions:
+            raise ValueError('Only contents cases may supply contents items.')
+        return self
+
+
 class BusinessSeed(ContractModel):
     version: Literal['1']
-    demo_customer_id: str | None
+    primary_customer_id: str | None
     customers: list[SeedCustomer]
     policies_in_system: list[SeedPolicy]
     prior_submitted_claims: list[SeedSubmittedClaim]
+    demo_cases: list[SeedDemoCase]
 
     @model_validator(mode='after')
     def validate_links(self) -> 'BusinessSeed':
@@ -114,10 +141,15 @@ class BusinessSeed(ContractModel):
                 raise ValueError('Business seed identifiers and emails must be unique.')
         owners = {item.customer_id for item in self.policies_in_system}
         owners.update(item.customer_id for item in self.prior_submitted_claims)
+        owners.update(item.customer_id for item in self.demo_cases)
+        case_ids = [item.case_id for item in self.demo_cases]
+        families = [item.family for item in self.demo_cases]
+        if len(case_ids) != len(set(case_ids)) or len(families) != len(set(families)):
+            raise ValueError('Demo cases must have unique identifiers and material families.')
         if not owners.issubset(identities):
             raise ValueError('Business seed records must refer to declared customers.')
-        if self.demo_customer_id is not None and self.demo_customer_id not in identities:
-            raise ValueError('Demo customer must refer to a declared customer.')
+        if self.primary_customer_id is not None and self.primary_customer_id not in identities:
+            raise ValueError('Primary customer must refer to a declared customer.')
         return self
 
 
@@ -144,6 +176,17 @@ def provision_business_identities(repository: IdentityRepository, seed: Business
     Raises:
         ValueError: A fixed ID or email belongs to another identity.
     """
+    existing_by_email = {account.email: account for account in repository.list_accounts()}
+    for account in seed.customers:
+        existing = existing_by_email.get(account.email)
+        if existing is not None and existing.customer_id != account.customer_id:
+            raise ValueError(
+                'Business seed email belongs to another customer. No identities were provisioned. '
+                'Preserve the existing identity database and business dataset; select a fresh '
+                'NORTHWIND_IDENTITY_DB_PATH and a fresh business database for this seed, or '
+                'explicitly align the manifest with existing ownership. See README.md, '
+                'Business seed and existing local identities. Email is not ownership authority.'
+            )
     for account in seed.customers:
         repository.ensure_seed_account(
             account.customer_id, account.email, account.synthetic_password, account.display_name
@@ -204,7 +247,7 @@ def build_seed_claim(record: SeedSubmittedClaim) -> tuple[WorkingClaim, SessionR
                 'claim_number': record.claim_number,
                 'creation_status': 'created',
                 'route': f'standard_{record.family}_intake',
-                'next_step': 'Synthetic submitted Claim retained for history lookup.',
+                'next_step': 'Keep your claim number for future enquiries.',
                 'source': 'fixture',
                 'created_at': submitted_at,
             },
@@ -218,7 +261,7 @@ def build_seed_claim(record: SeedSubmittedClaim) -> tuple[WorkingClaim, SessionR
             },
             'customer_next_step': {
                 'status': 'created',
-                'summary': 'Synthetic submitted Claim.',
+                'summary': 'Your claim has been submitted.',
                 'responsible_party': 'system',
             },
             'created_at': submitted_at,

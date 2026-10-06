@@ -17,8 +17,8 @@ from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityR
 from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.adapters.policy_history import (
     MockPolicyHistoryAdapter,
-    MongoClaimHistoryAdapter,
     PolicyHistoryAdapter,
+    RepositoryClaimHistoryAdapter,
 )
 from backend.adapters.staff_identity import (
     FixtureStaffIdentityRepository,
@@ -112,7 +112,6 @@ from backend.services.agent import (
 )
 from backend.services.agent_action_execution import ClaimantRuntimeActionDispatcher
 from backend.services.business_seed import (
-    BUSINESS_SEED_PATH,
     load_business_seed,
     provision_business_claims,
     provision_business_identities,
@@ -273,7 +272,6 @@ def create_app(
             )
         fixture_bundle = build_data_runtime_bundle(resolved_settings)
         resolved_repository = repository if repository is not None else fixture_bundle.repository
-        provision_business_policies(resolved_repository, load_business_seed(BUSINESS_SEED_PATH))
         bundle = DataRuntimeBundle(
             profile=resolved_settings.data_runtime_profile,
             repository=resolved_repository,
@@ -288,7 +286,7 @@ def create_app(
             claim_history=(
                 claim_history_adapter
                 if claim_history_adapter is not None
-                else MongoClaimHistoryAdapter(resolved_repository)
+                else RepositoryClaimHistoryAdapter(resolved_repository)
             ),
         )
     else:
@@ -377,12 +375,14 @@ def create_app(
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
+    app.state.business_seed = None
     if resolved_settings.business_seed_path:
         try:
             business_seed = load_business_seed(resolved_settings.business_seed_path)
             provision_business_identities(app.state.identity_repository, business_seed)
             provision_business_policies(app.state.claim_repository, business_seed)
             provision_business_claims(app.state.claim_repository, business_seed)
+            app.state.business_seed = business_seed
         except Exception:
             bundle.close()
             raise

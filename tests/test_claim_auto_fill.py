@@ -24,8 +24,8 @@ def _post(
 def test_claim_auto_fill_manifest_is_owner_scoped_preference_gated_and_read_only(
     client: TestClient,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-    other = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
+    other = _login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
     claim = _post(
         client,
         '/api/v1/claims',
@@ -117,7 +117,7 @@ def test_claim_auto_fill_manifest_is_owner_scoped_preference_gated_and_read_only
 def test_claim_auto_fill_manifest_keeps_enabled_categories_ineligible_without_saved_data(
     client: TestClient,
 ) -> None:
-    owner = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    owner = _login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
     claim = _post(
         client,
         '/api/v1/claims',

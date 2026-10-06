@@ -21,7 +21,11 @@ from tests.media_support import synthetic_image
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+    business_seed_path='config/business-seed.json',
+)
 
 
 class _HeadBucketClient:
@@ -135,6 +139,7 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
     assert all(policy is not None for policy in original_policies)
 
     with TestClient(app) as client:
+        assert client.post('/api/v1/workbench/demo/reset', headers=STAFF_AUTH).status_code == 200
         _populate_demo(client, claims_adapter, assessor_adapter)
         first = client.post('/api/v1/workbench/demo/reset', headers=STAFF_AUTH)
         assert first.status_code == 200
@@ -233,7 +238,7 @@ def test_reset_fails_closed_for_minio_without_clearing_repository() -> None:
     assert created.status_code == 201
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'DEMO_RESET_UNAVAILABLE'
-    assert len(repository.list_claims_internal()) == 1
+    assert len(repository.list_claims_internal()) == 2
 
 
 def test_reset_command_reports_success_and_actionable_failure(

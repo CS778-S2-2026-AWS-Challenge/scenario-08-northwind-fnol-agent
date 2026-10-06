@@ -112,6 +112,6 @@ def test_home_completes_by_conversation_without_form_confirmation(
     journey.create()
     record_property('planned_input_budget', json.dumps(journey.budget_measurements(repository)))
     assert len(journey.turns) <= 8
-    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_demo')
+    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
     assert session.repeated_question_count == 0

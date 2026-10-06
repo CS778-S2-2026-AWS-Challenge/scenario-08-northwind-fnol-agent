@@ -56,7 +56,7 @@ def test_staff_review_writeback_uses_current_revision_and_stays_internal(
             ],
         ),
     )
-    signals = persist_retrieval_record(repository, retrieval, 'cus_demo')
+    signals = persist_retrieval_record(repository, retrieval, 'cus_8f41a2c90d7e463b')
     assert len(signals) == 1
     signal = signals[0]
 
@@ -114,13 +114,13 @@ def test_staff_review_writeback_uses_current_revision_and_stays_internal(
         retrieval.source.reference,
     ]
 
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_claim.revision == 2
     assert stored_claim.claim_state.workflow_state is WorkflowState.COLLECTING
     assert stored_claim.claim_state.fraud_signal is FraudSignal.NONE
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [retrieval]
-    assert repository.list_review_signals(claim_id, 'cus_demo') == [signal]
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == [retrieval]
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == [signal]
     stored_decisions = repository.list_signal_decisions(claim_id)
     assert len(stored_decisions) == 1
     assert stored_decisions[0].actor_id == 'stf_demo'
@@ -150,6 +150,6 @@ def test_staff_review_writeback_uses_current_revision_and_stays_internal(
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
     assert stale.json()['error']['current_revision'] == 2
     assert len(repository.list_signal_decisions(claim_id)) == 1
-    final_claim = repository.get_claim(claim_id, 'cus_demo')
+    final_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert final_claim is not None
     assert final_claim.revision == 2

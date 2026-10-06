@@ -240,7 +240,7 @@ class Journey:
             if turn['agent_message'] is None:
                 continue
             trace = repository.find_runtime_trace_for_trigger(
-                self.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+                self.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
             )
             assert trace is not None
             measurements.append(cast(dict[str, Any], trace.request_budget['invocations'][0]))
@@ -284,7 +284,7 @@ class Journey:
         )
         assert accepted.status_code == 200, accepted.text
         self.revision = accepted.json()['revision']
-        handoff = repository.get_handoff(self.claim_id, handoff_id, 'cus_demo')
+        handoff = repository.get_handoff(self.claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
         assert handoff is not None
         assert handoff.resume_workflow_state is not None
         assert handoff.resume_next_action is not None

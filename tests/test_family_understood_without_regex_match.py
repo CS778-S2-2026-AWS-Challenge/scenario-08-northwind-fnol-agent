@@ -162,7 +162,7 @@ def test_model_can_save_family_and_damage_in_one_turn_but_cannot_forge_provenanc
     assert response.json()['agent_message'] is not None, response.text
     assert response.json()['recovery'] is None
     assert len(provider.gateway.requests) == 1
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     expected_status = FormStatus.CONFIRMED if supported_quote else FormStatus.PROPOSED
     expected_source = FormSource.CLAIMANT if supported_quote else FormSource.INFERENCE

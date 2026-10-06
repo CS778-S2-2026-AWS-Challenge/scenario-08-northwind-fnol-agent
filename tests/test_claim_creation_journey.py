@@ -100,7 +100,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
         key='at01-complete-vp-requirements',
     )
     assert confirmed_body['customer_next_step']['status'] == 'ready_to_create'
-    ready_claim = repository.get_claim(claim_id, 'cus_demo')
+    ready_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert ready_claim is not None
     assert ready_claim.claim_state.workflow_state.value == 'ready_for_next'
 
@@ -130,7 +130,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
 
     repository._idempotency.pop(
         (
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
             f'/api/v1/claims/{claim_id}/creation',
             'at01-controlled-creation',
         )
@@ -177,13 +177,13 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     creation_decision = repository.get_agent_decision(
         claim_id,
         result['decision']['decision_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert creation_decision is not None
     assert creation_decision.action_code == 'claim.create'
     assert creation_decision.required_tools == [{'tool': 'claims_service.create_claim'}]
     creation_idempotency = repository.find_idempotency(
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
         f'/api/v1/claims/{claim_id}/creation',
         'at01-controlled-creation',
     )

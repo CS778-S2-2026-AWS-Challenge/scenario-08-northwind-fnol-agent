@@ -107,6 +107,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claim_history_checks import check_lodging_history
 from backend.services.external_service_entry import (
     ExternalServiceEntryDecision,
     assert_task_matches_entry,
@@ -2178,6 +2179,11 @@ def create_external_claim(
         route=expected_route,
         integration_source=adapter.integration_source,
         status=ClaimCreationOperationStatus.PREPARED,
+        history_checks=(
+            existing.history_checks
+            if existing is not None
+            else check_lodging_history(repository, claim, as_of=timestamp)
+        ),
         created_at=(existing.created_at if existing is not None else timestamp),
         updated_at=timestamp,
     )

@@ -46,7 +46,11 @@ from backend.repositories.scenario_loader import (  # noqa: E402
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+    business_seed_path=str(REPOSITORY_ROOT / 'config' / 'business-seed.json'),
+)
 
 
 def main() -> int:
@@ -110,6 +114,8 @@ def main() -> int:
                 f'canonical {len(scenario.evidence)}'
             )
 
+        if scenario.business_path is None:
+            raise ValueError(f'{scenario_id}: canonical scenario requires a business path')
         rows.append(
             (
                 scenario_id,

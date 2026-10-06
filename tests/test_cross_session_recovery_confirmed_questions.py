@@ -8,7 +8,11 @@ from backend.domain.models import SessionStatus
 from backend.repositories.fixture import FixtureRepository
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    business_seed_path='config/business-seed.json',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 
 
 def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None:
@@ -50,7 +54,7 @@ def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None
         turn_revision = int(turn.json()['claim_revision'])
         assert turn_revision == 3
 
-        decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
+        decision = repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')[-1]
         requirements = decision.next_action_requirements
         assert requirements
         assert all(requirement.startswith('confirm:') for requirement in requirements)
@@ -59,7 +63,7 @@ def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None
         stale_question = decision.customer_next_step.summary
         unrelated_question = 'Please keep the remaining claim notes available.'
 
-        source = repository.get_session(claim_id, session_id, 'cus_demo')
+        source = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
         assert source is not None
         assert source.context_revision == turn_revision
         repository.save_session(
@@ -82,8 +86,8 @@ def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None
         assert confirmed.status_code == 200
         assert confirmed.json()['revision'] == turn_revision + 1
 
-        claim = repository.get_claim(claim_id, 'cus_demo')
-        source = repository.get_session(claim_id, session_id, 'cus_demo')
+        claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+        source = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
         assert claim is not None
         assert source is not None
         assert all(claim.form[field_code].status.value == 'confirmed' for field_code in field_codes)

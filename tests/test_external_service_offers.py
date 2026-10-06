@@ -201,7 +201,7 @@ def test_contents_disclosure_includes_only_confirmed_items(
             updated_at=timestamp,
             updated_by=ActorReference(
                 actor_type=ActorType.CLAIMANT,
-                actor_id='cus_demo',
+                actor_id='cus_8f41a2c90d7e463b',
             ),
         )
 
@@ -303,7 +303,7 @@ def test_offer_decision_rejects_missing_stale_invalid_and_corrupt_replays(
     assert declined.status_code == 201
     assert declined.json()['action']['status'] == 'consent_declined'
 
-    idempotency_lookup = ('cus_demo', route, 'decline-offer')
+    idempotency_lookup = ('cus_8f41a2c90d7e463b', route, 'decline-offer')
     saved = repository._idempotency[idempotency_lookup]
     repository._idempotency[idempotency_lookup] = replace(saved, response_payload=None)
     corrupt_replay = client.post(

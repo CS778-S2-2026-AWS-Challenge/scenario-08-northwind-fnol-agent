@@ -119,7 +119,7 @@ def test_image_completion_settles_requirement_without_extracting_or_leaking_stor
     route = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete'
     headers = {**auth_headers, 'Idempotency-Key': 'image-complete', 'If-Match': '3'}
     payload = {'upload_checksum': f'sha256:{sha256(content).hexdigest()}'}
-    before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    before = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     completed = client.post(route, headers=headers, json=payload)
     replay = client.post(route, headers=headers, json=payload)
     assert completed.status_code == replay.status_code == 200
@@ -132,8 +132,8 @@ def test_image_completion_settles_requirement_without_extracting_or_leaking_stor
     assert body['evidence']['needed_for'] == ['current_action']
     for private_name in ('storage_key', 'upload_checksum', 'image_validation', 'provenance'):
         assert private_name not in completed.text
-    claim = repository.get_claim(claim_id, 'cus_demo')
-    stored = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    stored = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert before is not None and claim is not None and stored is not None
     assert claim.revision == 4 and claim.form == {}
     assert claim.evidence_summary.received == int(valid)
@@ -145,10 +145,10 @@ def test_image_completion_settles_requirement_without_extracting_or_leaking_stor
     assert stored.provenance.get('extraction_state') != 'proposed'
     if valid:
         assert stored.provenance['image_validation'] == 'decoded-v1'
-    assert len(repository.list_evidence(claim_id, 'cus_demo')) == 1
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert len(repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')) == 1
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     assert evaluations[-1].resulting_claim_revision == 4
-    assert repository.find_idempotency('cus_demo', route, 'image-complete') is not None
+    assert repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'image-complete') is not None
     listed = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=auth_headers)
     assert listed.json()['items'] == [body['evidence']]
     conflicting = client.post(
@@ -169,8 +169,8 @@ def test_image_final_read_failure_does_not_commit_evidence_or_idempotency(
     content = _image()
     claim_id, evidence_id, storage = _prepare_upload(client, auth_headers, content)
     route = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete'
-    before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    before = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
 
     def read_upload(
         *, claim_id: str, evidence_id: str, storage_key: str | None = None
@@ -183,7 +183,7 @@ def test_image_final_read_failure_does_not_commit_evidence_or_idempotency(
             return bytes([content[0] ^ 1]) + content[1:]
         if failure == 'size':
             return content[:-1]
-        claim = repository.get_claim(claim_id, 'cus_demo')
+        claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert claim is not None
         repository.save_claim(claim.model_copy(update={'revision': 4}), expected_revision=3)
         return content
@@ -199,10 +199,10 @@ def test_image_final_read_failure_does_not_commit_evidence_or_idempotency(
         assert result.json()['error']['retryable'] is True
     if failure == 'race':
         assert result.json()['error']['code'] == 'REVISION_CONFLICT'
-    assert repository.get_evidence(claim_id, evidence_id, 'cus_demo') == before
-    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == evaluations
-    assert repository.find_idempotency('cus_demo', route, 'image-read-failure') is None
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b') == before
+    assert repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b') == evaluations
+    assert repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'image-read-failure') is None
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.revision == (4 if failure == 'race' else 3)
 
@@ -234,7 +234,7 @@ def test_targeted_legacy_image_repair_is_dry_run_by_default_and_replayable(
 ) -> None:
     content = _image()
     claim_id, evidence_id, storage = _prepare_upload(client, auth_headers, content)
-    before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    before = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
     stored = storage.complete_upload(
         claim_id=claim_id,
@@ -255,16 +255,16 @@ def test_targeted_legacy_image_repair_is_dry_run_by_default_and_replayable(
             },
         }
     )
-    repository.save_evidence(legacy, 'cus_demo')
-    claim_before = repository.get_claim(claim_id, 'cus_demo')
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    repository.save_evidence(legacy, 'cus_8f41a2c90d7e463b')
+    claim_before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     preview = repair_processing_image(
         repository, storage, claim_id, evidence_id, 3, legacy.material_version
     )
     assert preview.evidence.file_status is EvidenceFileStatus.READY
-    assert repository.get_evidence(claim_id, evidence_id, 'cus_demo') == legacy
-    assert repository.get_claim(claim_id, 'cus_demo') == claim_before
-    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == evaluations
+    assert repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b') == legacy
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == claim_before
+    assert repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b') == evaluations
     with pytest.raises(ApiError) as wrong_generation:
         repair_processing_image(
             repository, storage, claim_id, evidence_id, 3, legacy.material_version + 1, apply=True
@@ -283,12 +283,12 @@ def test_targeted_legacy_image_repair_is_dry_run_by_default_and_replayable(
     )
     assert applied == replay
     assert applied.revision == 4
-    settled = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    settled = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert settled is not None
     assert settled.file_status is EvidenceFileStatus.READY
     assert settled.material_version == legacy.material_version
     assert settled.material_history == legacy.material_history
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.revision == 4 and claim.form == {}
     assert claim.evidence_summary.received == 1
 
@@ -307,14 +307,18 @@ def test_normal_identity_image_completion_has_provider_neutral_persisted_result(
         mongo._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
         repository = mongo
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.NORMAL),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.NORMAL,
+        ),
         repository=repository,
         identity_repository=FixtureIdentityRepository(),
     )
     with TestClient(app) as client:
         login = client.post(
             '/api/v1/auth/sessions',
-            json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+            json={'email': 'maya.chen@example.invalid', 'password': 'northwind-demo-one'},
         )
         assert login.status_code == 201
         headers = {'Authorization': f'Bearer {login.json()["access_token"]}'}

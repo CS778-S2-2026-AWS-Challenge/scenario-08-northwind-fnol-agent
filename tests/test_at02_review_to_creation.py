@@ -30,8 +30,8 @@ from tests.issue_928_support import prepare_claim_submission
 
 SCENARIO_PATH = (
     Path(__file__).resolve().parents[1]
-    / 'backend'
-    / 'demo_data'
+    / 'tests'
+    / 'fixtures'
     / 'scenarios'
     / 'AT-02-coverage-ambiguity.json'
 )
@@ -48,7 +48,14 @@ def repository() -> FixtureRepository:
 
 @pytest.fixture
 def client(repository: FixtureRepository) -> Iterator[TestClient]:
-    app = create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository)
+    app = create_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+    )
     with TestClient(app) as test_client:
         yield test_client
 
@@ -328,7 +335,7 @@ def test_review_then_creation_succeeds_and_keeps_the_conflict(
     # creation. AT-02 tests the professional-review boundary rather than the
     # separate claimant progression transition, so prepare that new prerequisite
     # as test state instead of changing production progression behavior here.
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     ready_for_payout_contact = claim.model_copy(
         update={

@@ -7,7 +7,6 @@ from pymongo.errors import PyMongoError
 from backend.domain.claim_history import LodgedClaimHistory
 from backend.domain.models import ContractModel
 from backend.domain.retrieval import (
-    ClaimHistoryFacts,
     ClaimHistoryRetrievalRecord,
     ClaimHistorySearchRequest,
     PolicyFacts,
@@ -85,24 +84,28 @@ def map_history_provider_payload(
     retrieval_id: str,
     claim_id: str,
     envelope: ProviderLookupEnvelope,
+    query: ClaimHistorySearchRequest,
 ) -> ClaimHistoryRetrievalRecord:
-    """Map the allow-listed history fields without carrying provider-only scoring."""
+    """Record the bounded result actually consulted, without provider-only scoring.
 
-    payload = envelope.payload
-    facts = ClaimHistoryFacts.model_validate(
-        {
-            'history_reference': payload.get('history_reference'),
-            'incident_type': payload.get('incident_type'),
-            'occurred_at': payload.get('occurred_at'),
-            'status': payload.get('status'),
-            'outcome': payload.get('outcome'),
-        }
-    )
+    Args:
+        retrieval_id: Stable consultation identity.
+        claim_id: Claim owning this consultation.
+        envelope: Typed repository history result.
+        query: Customer-scoped query parameters used by the caller.
+    Returns:
+        A consultation snapshot for staff provenance, not a historical Claim.
+    Raises:
+        ValueError: The adapter omitted the history projection or query scope differs.
+    """
+    if envelope.history is None or query.claim_id != claim_id:
+        raise ValueError('History consultation requires a scoped history projection.')
     return ClaimHistoryRetrievalRecord(
         retrieval_id=retrieval_id,
         claim_id=claim_id,
         source=_source(envelope),
-        facts=facts,
+        history=envelope.history,
+        query=query,
         uncertainty=_uncertainty(envelope),
     )
 
@@ -207,10 +210,10 @@ class MockPolicyHistoryAdapter(RepositoryPolicyAdapter):
 
     def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
         self._guard()
-        return MongoClaimHistoryAdapter(self._repository).search_claim_history(command)
+        return RepositoryClaimHistoryAdapter(self._repository).search_claim_history(command)
 
 
-class MongoClaimHistoryAdapter(PolicyHistoryAdapter):
+class RepositoryClaimHistoryAdapter(PolicyHistoryAdapter):
     """Read lodged Claim projections from the explicitly configured repository."""
 
     def __init__(self, repository: ClaimRepository) -> None:

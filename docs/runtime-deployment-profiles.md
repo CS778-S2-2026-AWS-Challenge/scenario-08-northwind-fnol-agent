@@ -151,10 +151,15 @@ The `local_mvp` profile is a bounded development composition, not promotion of t
 connection (`verified`); this describes connectivity, not production policy authority. Policy
 results remain labelled `synthetic_customer_policy`. Claim history projects submitted Claims from
 the selected repository, including user-created Claims and versioned synthetic seed Claims.
-Every environment-based startup loads `config/business-seed.json` and inserts missing identities,
+Every environment-based startup loads the manifest selected by `NORTHWIND_BUSINESS_SEED_PATH`
+(packaged default `config/business-seed.json`) and inserts missing identities,
 policy records, and submitted Claims without resetting existing records. The fixture profile
 uses the same manifest and repository-query adapters in memory. Missing or invalid selected seed
 data refuses startup. AWS, Cloudflare, and the complete MongoDB provider profile remain unavailable.
+Directly constructed settings select `business_seed_path` explicitly; an empty path supplies no
+seed. Identity, policy and demo-case components consume the same parsed object. Existing SQLite
+identity collisions never reassign ownership; the preservation and fresh-namespace procedure is
+in the repository README under "Business seed and existing local identities".
 
 ## GitHub Actions self-hosted runner
 

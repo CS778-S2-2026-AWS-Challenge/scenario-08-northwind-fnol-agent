@@ -12,7 +12,7 @@ def _session_headers(
 
     Existing claimant journey tests intentionally use the developer synthetic token.
     Account-owned payout data is stricter: it requires a real claimant session.
-    Demo Claimant One is the same persisted customer (cus_demo), so logging in here
+    Maya Chen is the same persisted customer (cus_8f41a2c90d7e463b), so logging in here
     preserves Claim ownership while exercising the real account/session boundary.
     """
 
@@ -22,7 +22,7 @@ def _session_headers(
     response = client.post(
         '/api/v1/auth/sessions',
         json={
-            'email': 'claimant.one@example.invalid',
+            'email': 'maya.chen@example.invalid',
             'password': 'northwind-demo-one',
         },
     )

@@ -9,8 +9,9 @@ from backend.adapters.policy_history import (
     map_history_provider_payload,
     map_policy_provider_payload,
 )
+from backend.domain.claim_history import LodgedClaimHistory
 from backend.domain.models import FraudSignal, WorkflowState
-from backend.domain.retrieval import ReviewSignalRecord
+from backend.domain.retrieval import ClaimHistorySearchRequest, ReviewSignalRecord
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import IdempotencyConflict
 from backend.services.retrieval_review import persist_retrieval_record
@@ -39,7 +40,7 @@ def test_policy_retrieval_persists_provenance_and_review_only_signal(
     repository: FixtureRepository,
 ) -> None:
     claim_id = create_claim(client, auth_headers, key='retrieval-policy-claim')
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
 
     record = map_policy_provider_payload(
@@ -72,11 +73,11 @@ def test_policy_retrieval_persists_provenance_and_review_only_signal(
         ),
     )
 
-    signals = persist_retrieval_record(repository, record, 'cus_demo')
+    signals = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
 
-    stored_records = repository.list_retrieval_records(claim_id, 'cus_demo')
-    stored_signals = repository.list_review_signals(claim_id, 'cus_demo')
-    after = repository.get_claim(claim_id, 'cus_demo')
+    stored_records = repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')
+    stored_signals = repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b')
+    after = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
 
     assert stored_records == [record]
     assert stored_signals == signals
@@ -107,7 +108,14 @@ def test_provider_risk_fields_do_not_create_a_review_signal_without_domain_uncer
     record = map_history_provider_payload(
         retrieval_id='ret_history_clean',
         claim_id=claim_id,
+        query=ClaimHistorySearchRequest(claim_id=claim_id),
         envelope=ProviderLookupEnvelope(
+            history=LodgedClaimHistory(
+                count_past_12_months=0,
+                claims=[],
+                as_of=datetime(2026, 8, 16, tzinfo=UTC),
+                window_start=datetime(2025, 8, 16, tzinfo=UTC),
+            ),
             provider='synthetic-history-service',
             provider_reference='hist-provider-clean',
             retrieved_at=datetime(2026, 8, 16, 1, 5, tzinfo=UTC),
@@ -122,12 +130,12 @@ def test_provider_risk_fields_do_not_create_a_review_signal_without_domain_uncer
         ),
     )
 
-    signals = persist_retrieval_record(repository, record, 'cus_demo')
+    signals = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
 
     assert signals == []
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [record]
-    assert repository.list_review_signals(claim_id, 'cus_demo') == []
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == [record]
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == []
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.revision == 1
     assert claim.claim_state.fraud_signal is FraudSignal.NONE
@@ -143,7 +151,14 @@ def test_history_uncertainty_maps_to_sourced_reasoned_professional_review_signal
     record = map_history_provider_payload(
         retrieval_id='ret_history_uncertain',
         claim_id=claim_id,
+        query=ClaimHistorySearchRequest(claim_id=claim_id),
         envelope=ProviderLookupEnvelope(
+            history=LodgedClaimHistory(
+                count_past_12_months=0,
+                claims=[],
+                as_of=datetime(2026, 8, 16, tzinfo=UTC),
+                window_start=datetime(2025, 8, 16, tzinfo=UTC),
+            ),
             provider='synthetic-history-service',
             provider_reference='hist-provider-uncertain',
             retrieved_at=datetime(2026, 8, 16, 1, 10, tzinfo=UTC),
@@ -162,7 +177,7 @@ def test_history_uncertainty_maps_to_sourced_reasoned_professional_review_signal
         ),
     )
 
-    signals = persist_retrieval_record(repository, record, 'cus_demo')
+    signals = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
 
     assert len(signals) == 1
     signal = signals[0]
@@ -170,7 +185,7 @@ def test_history_uncertainty_maps_to_sourced_reasoned_professional_review_signal
     assert signal.code == 'CLAIM_HISTORY_RETRIEVAL_UNCERTAINTY'
     assert signal.source_refs == ['ret_history_uncertain', 'hist-provider-uncertain']
     assert signal.reason_codes == ['HISTORY_MATCH_UNCERTAIN']
-    assert repository.list_review_signals(claim_id, 'cus_demo') == [signal]
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == [signal]
 
 
 def test_retrieval_bundle_is_idempotent_but_rejects_conflicting_rewrites(
@@ -197,20 +212,20 @@ def test_retrieval_bundle_is_idempotent_but_rejects_conflicting_rewrites(
         envelope=envelope,
     )
 
-    first = persist_retrieval_record(repository, record, 'cus_demo')
-    second = persist_retrieval_record(repository, record, 'cus_demo')
+    first = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
+    second = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
     assert second == first
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [record]
-    assert repository.list_review_signals(claim_id, 'cus_demo') == first
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == [record]
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == first
 
     conflicting = record.model_copy(
         update={'facts': record.facts.model_copy(update={'status': 'cancelled'})}
     )
     with pytest.raises(IdempotencyConflict):
-        persist_retrieval_record(repository, conflicting, 'cus_demo')
+        persist_retrieval_record(repository, conflicting, 'cus_8f41a2c90d7e463b')
 
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [record]
-    assert repository.list_review_signals(claim_id, 'cus_demo') == first
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == [record]
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == first
 
 
 def test_retrieval_bundle_enforces_claim_ownership_and_signal_provenance(
@@ -231,7 +246,7 @@ def test_retrieval_bundle_enforces_claim_ownership_and_signal_provenance(
     )
 
     with pytest.raises(KeyError):
-        persist_retrieval_record(repository, record, 'cus_other')
+        persist_retrieval_record(repository, record, 'cus_2b67e9d14a3c508f')
 
     invalid_signal = ReviewSignalRecord(
         signal_id='sig_invalid_provenance',
@@ -243,12 +258,12 @@ def test_retrieval_bundle_enforces_claim_ownership_and_signal_provenance(
         created_at=record.source.retrieved_at,
     )
     with pytest.raises(KeyError):
-        repository.save_retrieval_bundle(record, [invalid_signal], 'cus_demo')
+        repository.save_retrieval_bundle(record, [invalid_signal], 'cus_8f41a2c90d7e463b')
 
-    assert repository.list_retrieval_records(claim_id, 'cus_other') == []
-    assert repository.list_review_signals(claim_id, 'cus_other') == []
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == []
-    assert repository.list_review_signals(claim_id, 'cus_demo') == []
+    assert repository.list_retrieval_records(claim_id, 'cus_2b67e9d14a3c508f') == []
+    assert repository.list_review_signals(claim_id, 'cus_2b67e9d14a3c508f') == []
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_retrieval_uncertainty_capacity_is_preserved_in_review_signal(
@@ -275,12 +290,12 @@ def test_retrieval_uncertainty_capacity_is_preserved_in_review_signal(
         ),
     )
 
-    signals = persist_retrieval_record(repository, record, 'cus_demo')
+    signals = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
 
     assert len(signals) == 1
     assert signals[0].reason_codes == [f'UNCERTAINTY_{index:03d}' for index in range(100)]
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [record]
-    assert repository.list_review_signals(claim_id, 'cus_demo') == signals
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == [record]
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == signals
 
 
 def test_retrieval_bundle_rejects_conflicting_duplicate_signal_ids_before_writes(
@@ -316,10 +331,10 @@ def test_retrieval_bundle_rejects_conflicting_duplicate_signal_ids_before_writes
     )
 
     with pytest.raises(IdempotencyConflict):
-        repository.save_retrieval_bundle(record, [first, second], 'cus_demo')
+        repository.save_retrieval_bundle(record, [first, second], 'cus_8f41a2c90d7e463b')
 
-    assert repository.list_retrieval_records(claim_id, 'cus_demo') == []
-    assert repository.list_review_signals(claim_id, 'cus_demo') == []
+    assert repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b') == []
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_demo_reset_clears_retrieval_and_review_signal_stores(
@@ -344,7 +359,7 @@ def test_demo_reset_clears_retrieval_and_review_signal_stores(
             ],
         ),
     )
-    signals = persist_retrieval_record(repository, record, 'cus_demo')
+    signals = persist_retrieval_record(repository, record, 'cus_8f41a2c90d7e463b')
     assert len(signals) == 1
 
     first = repository.reset_demo_state()

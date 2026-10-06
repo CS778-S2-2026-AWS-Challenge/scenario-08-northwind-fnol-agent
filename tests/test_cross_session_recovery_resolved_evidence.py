@@ -17,9 +17,13 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
-SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'tests' / 'fixtures' / 'scenarios'
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    business_seed_path='config/business-seed.json',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 
 
 def test_resume_drops_resolved_evidence_pending_context() -> None:
@@ -29,9 +33,9 @@ def test_resume_drops_resolved_evidence_pending_context() -> None:
 
     claim_id = loaded.claim.claim_id
     session_id = loaded.claim.active_session_id or ''
-    claim = repository.get_claim(claim_id, 'cus_demo')
-    session = repository.get_session(claim_id, session_id, 'cus_demo')
-    evidence_records = repository.list_evidence(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
+    evidence_records = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert session is not None
 
@@ -63,7 +67,7 @@ def test_resume_drops_resolved_evidence_pending_context() -> None:
             resulting_revision=claim.revision,
             created_at=claim.updated_at,
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     paused_at = claim.updated_at + timedelta(minutes=1)
@@ -88,7 +92,7 @@ def test_resume_drops_resolved_evidence_pending_context() -> None:
                     'updated_at': paused_at + timedelta(minutes=1),
                 }
             ),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
 
     with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:

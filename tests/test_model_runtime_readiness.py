@@ -49,6 +49,7 @@ def test_published_but_non_ready_profile_cannot_be_selected(
 ) -> None:
     record = model_profiles._settings_configuration(
         Settings(
+            business_seed_path='config/business-seed.json',
             environment='test',
             agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
             model_profile_id='test-model',
@@ -64,6 +65,7 @@ def test_published_but_non_ready_profile_cannot_be_selected(
         app=SimpleNamespace(
             state=SimpleNamespace(
                 settings=Settings(
+                    business_seed_path='config/business-seed.json',
                     environment='test',
                     agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
                     model_profile_id='test-model',

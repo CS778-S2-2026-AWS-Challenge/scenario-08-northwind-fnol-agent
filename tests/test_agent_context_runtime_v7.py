@@ -657,6 +657,39 @@ def test_evidence_history_uses_claimant_scoped_lazy_source_and_narrow_proposal()
     assert proposal.source_claim_id == 'clm_old'
 
 
+@pytest.mark.parametrize(
+    ('message', 'task'),
+    [
+        ('The car was parked.', TurnTask.INTAKE),
+        ('Actually it was blue.', TurnTask.CORRECTION),
+        ('Compare these two addresses.', TurnTask.INTAKE),
+    ],
+)
+def test_history_is_discoverable_without_claimant_keywords(message: str, task: TurnTask) -> None:
+    calls: list[int] = []
+
+    def load_history(limit: int) -> dict[str, object]:
+        calls.append(limit)
+        return {'status': 'empty', 'source_refs': []}
+
+    context = replace(_context(message), claim_history_context_loader=load_history)
+    plan = plan_model_turn(context)
+    assert plan is not None
+    assert plan.route.task is task
+    assert plan.request_profile.profile_id == 'claimant.lookup.v1'
+    assert any(item.resource_type == 'claim_history' for item in plan.context_plan.references)
+    assert calls == []  # The model chooses whether to resolve the reference.
+
+    anonymous = replace(
+        context, claim=context.claim.model_copy(update={'customer_id': 'anonymous:session'})
+    )
+    anonymous_plan = plan_model_turn(anonymous)
+    assert anonymous_plan is not None
+    assert not any(
+        item.resource_type == 'claim_history' for item in anonymous_plan.context_plan.references
+    )
+
+
 def test_cross_claim_review_uses_only_customer_scoped_isolated_source() -> None:
     calls: list[int] = []
 
@@ -944,7 +977,7 @@ def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
     assert len(gateway.requests) == 1
 
 
-def test_v7_lookup_rejects_a_missing_required_context_continuation() -> None:
+def test_evidence_action_rejects_a_missing_required_context_continuation() -> None:
     response = ModelResponse(
         structured_output=_answer_output(),
         completion_status=ModelCompletionStatus.COMPLETE,
@@ -953,11 +986,15 @@ def test_v7_lookup_rejects_a_missing_required_context_continuation() -> None:
 
     with pytest.raises(ModelGatewayError) as error:
         GatewayAgent(gateway).propose_turn(
-            _context('What is the status of my claim?', conversation_messages=_messages(6))
+            replace(
+                _context('Show my previous uploads.'),
+                evidence_history_context_loader=lambda _: {'status': 'empty'},
+            )
         )
 
     assert error.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
     assert len(gateway.requests) == 1
+    assert gateway.requests[0].required_tool_name == 'context.resolve'
 
 
 def test_v7_lookup_rejects_a_recursive_tool_call() -> None:

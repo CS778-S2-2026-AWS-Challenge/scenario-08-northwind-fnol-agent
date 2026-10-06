@@ -3101,7 +3101,7 @@ created (`external_claim.creation_status = created`), then this staff-only objec
 {
   "severity": "standard",
   "reasons": ["third_party_recovery", "amount_unknown"],
-  "rules_version": "triage-rules-v1",
+  "rules_version": "triage-rules-v2",
   "amount_threshold": 5000.0
 }
 ```
@@ -3759,25 +3759,15 @@ revision.
 
 ### `POST /api/v1/workbench/demo/seed-scenarios`
 
-Loads a bounded, mixed local workbench demonstration queue through the canonical MVP journey
-catalogue. AT-01 exercises the clear path, AT-06 exercises claimant, external-agency, and
-internal pending-evidence waits, AT-04 and AT-05 exercise urgent and standard human handoff,
-and AT-02 exercises professional review. AT-10 is an additional created claim routed to an
-assessor; it does not replace a core path.
-This endpoint is not a handoff-only seed boundary. It is an explicit staff action: the
+Loads the selected business manifest's bounded motor, home and contents cases into the local
+Workbench queue. The cases contain registered facts and claimant messages; they do not preassign
+professional outcomes or create historical retrievals from AT snapshots. It is an explicit staff action: the
 workbench never calls it during page load. The route requires the synthetic staff credential, is
 available only in development and test environments, and returns
 `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` if claims already exist. Reset the local demo before loading
-this set again. Runtime demo records are maintained under `backend/demo_data/scenarios/`, not
-under the test fixture tree.
-
-AT-02 also supplies the bounded structured MVP record graph: its `customer_reference` and
-`claim_id` connect the Working Claim to typed policy and claim-history retrievals, evidence,
-messages, and a professional-review handoff. The handoff packet references those records by
-their stable identifiers. Policy/history payloads remain available only from the authorised
-Workbench claim-detail route; claimant routes do not expose retrieval records, provider
-references, claim history, internal messages, or the staff packet. Both web clients discover
-the queue and claim detail through these APIs rather than embedding fixture payloads or IDs.
+this set again. Runtime cases are defined in the configured business seed's `demo_cases`.
+AT snapshots under `tests/fixtures/scenarios/` are only regression inputs. Without a selected
+manifest containing cases the route returns `409 DEMO_CLAIMANT_UNAVAILABLE`.
 
 Response `200`:
 
@@ -3785,38 +3775,31 @@ Response `200`:
 {
   "status": "seeded",
   "scenario_ids": [
-    "AT-01-clear-motor",
-    "AT-06-pending-evidence",
-    "AT-04-urgent",
-    "AT-02-coverage-ambiguity",
-    "AT-05-human-request",
-    "AT-10-controlled-assessor"
+    "case_0c73e82a",
+    "case_91fe42d0",
+    "case_53ab18e6"
   ],
   "claim_ids": [
-    "clm_fixture_at01",
-    "clm_fixture_at06",
-    "clm_fixture_at04",
-    "clm_fixture_at02",
-    "clm_fixture_at05",
-    "clm_fixture_at10"
+    "clm_opaque_motor",
+    "clm_opaque_home",
+    "clm_opaque_contents"
   ]
 }
 ```
 
 ### `POST /api/v1/workbench/demo/seed-validation`
 
-Seeds the three Sprint 3 field-state validation paths: motor, home, and contents. The endpoint
+Seeds the configured business manifest's motor, home, and contents cases. The endpoint
 is available only in development and test environments, requires an active staff account, and
-uses the canonical scenarios `AT-14-field-states-motor`, `AT-15-field-states-home`, and
-`AT-16-field-states-contents`. It creates new opaque Claim, Session, Message, and Evidence
+uses the same selected `demo_cases` as `seed-scenarios`. It creates new opaque Claim, Session, Message, and Evidence
 identifiers for each request, assigns the current staff member, and provisions the synthetic
-claimant account `claimant.one@example.invalid` when the normal local identity store does not
-already contain it. The route uses the existing Claim, Session, Message, Evidence,
-`StaffPresenceRecord`, and idempotency contracts; it does not add fields or replace the older
-`seed-scenarios` queue.
+primary claimant account from that manifest when the normal local identity store does not
+already contain it. A missing manifest or empty `demo_cases` returns
+`409 DEMO_CLAIMANT_UNAVAILABLE`. The route uses the existing Claim, Session, Message, Evidence,
+`StaffPresenceRecord`, and idempotency contracts.
 
 The request has no body and requires an `Idempotency-Key`. The first accepted request persists all
-three graphs, presence lease, and retry response atomically. Repeating the same key replays the
+configured graphs, presence lease, and retry response atomically. Repeating the same key replays the
 original response without creating records. A different key is rejected with
 `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` when any Claim already exists. Persistence failure leaves no
 partial Claim graph. The synthetic cross-role reference is explicitly `unofficial` with
@@ -3835,9 +3818,9 @@ Response `200`:
 {
   "status": "seeded",
   "scenario_ids": [
-    "AT-14-field-states-motor",
-    "AT-15-field-states-home",
-    "AT-16-field-states-contents"
+    "case_0c73e82a",
+    "case_91fe42d0",
+    "case_53ab18e6"
   ],
   "claim_ids": [
     "clm_opaque_motor",
@@ -4193,6 +4176,13 @@ adapter boundary and never appear in a response or in storage.
 
 Retrieves purpose-limited claim history. Requires an integration principal.
 
+The staff-only Workbench Claim detail includes optional `history_checks` from the accepted
+creation operation: `checked_at`, `rules_version`, `count_past_12_months`, `prior_claims_12m`,
+`possible_duplicate`, `duplicate_claim_ids` and limitations. Counts are server-computed at lodging;
+`hit`, `clear` and `not_checked` remain distinct. Two or more prior lodged Claims produce
+`review_hint`; same-customer/same-family incidents within three days produce `possible_duplicate`.
+Neither alone is a fraud finding. The claimant Claim projection never includes this object.
+
 The server scopes a lookup to the current Claim's customer. Only lodged (`completed`,
 `CLAIM_CREATED`) Claims with a successful external creation belong to history; the current
 Claim is excluded. `history_reference` is optional and selects one lodged Claim by its
@@ -4228,7 +4218,6 @@ Response:
     "reference": "clm_01J4Y7Q2AW",
     "retrieved_at": "2026-08-19T03:46:20Z"
   },
-  "facts": null,
   "history": {
     "count_past_12_months": 1,
     "as_of": "2026-08-19T03:46:20Z",
@@ -4262,15 +4251,23 @@ rules match the policy endpoint.
 Results provide evidence only and MUST NOT return an automated fraud
 conclusion.
 
-The `history` projection replaces the former single fixture `facts` result for new
-lookups. Existing stored retrieval records remain readable; no new summary record is
-written by this query. The optional `facts` field is null for lodged-history lookups.
+The `history` projection replaces the former single fixture `facts` response field, which is
+removed. Each successful or empty repository lookup persists a `ClaimHistoryRetrievalRecord`
+containing the bounded projection, query and source timestamp under `result_id`. This immutable
+consultation snapshot provides staff/handoff provenance; it neither creates a historical Claim
+nor becomes the source for subsequent lookups. Existing stored single-record retrievals remain
+readable. Failed lookups do not fabricate evidence records.
 Summary incident dates preserve the registered field's precision: an existing string
 or a `TemporalFactValue` object may be returned. Missing values remain null.
 The count covers the inclusive calendar-year interval ending at `as_of`; February 29
 maps to February 28 in the preceding year. The recent list is not restricted to this
 window, so older lodged Claims remain available. A reference narrows the list, not the
 count. Other customers' references and the current Claim never produce a summary.
+
+An authenticated customer's turn offers the `claim-history.customer` context reference without
+requiring a history keyword. The model decides whether to load it within its context budget;
+the reference does not change an intake turn into a status request. Anonymous ownership never
+grants access to another customer's history.
 
 ### Shared data-query outcome projection
 

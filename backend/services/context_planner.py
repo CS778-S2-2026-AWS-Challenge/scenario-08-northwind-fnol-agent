@@ -374,7 +374,7 @@ def _catalogue(
     if 'claim-history' in route.capability_ids and (
         context.claim_history_context_loader is not None
     ):
-        cross_claim = any(
+        cross_claim = 'claim' in (context.message_text or '').casefold() and any(
             term in (context.message_text or '').casefold()
             for term in ('compare', 'across claims', 'all claims', 'multiple claims')
         )

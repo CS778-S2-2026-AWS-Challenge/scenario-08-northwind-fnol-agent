@@ -51,6 +51,22 @@ persisted and projected to the claimant; no model draft can describe creation as
 
 ## Authority, Revision, and Idempotency
 
+Before reserving a new creation operation, Runtime captures immutable staff-only `history_checks`
+from the customer-owned repository without consulting the model. The controlled rule marks
+`prior_claims_12m` as a hit at two or more other lodged Claims in the past calendar year. A
+separate possible-duplicate check uses the same customer and product family with a single
+confirmed incident calendar date within three days. Its candidate query is independent of the
+bounded recent-history list. These are review hints, never fraud findings or authority to deny
+creation. A missing or unconfirmed current incident date and failed reads remain
+`not_checked`, not a count of zero. Prior Claims without a resolvable single incident date
+are excluded from duplicate candidates; `clear` means no matching resolvable-date candidate,
+not definitive proof that no duplicate exists.
+
+The checks are part of the immutable creation-operation identity, reused on retry/reconciliation
+and accepted through the existing settlement transaction. Staff detail exposes the accepted
+operation's checks and triage reasons; claimant projections exclude them. No independent
+post-creation write can leave the accepted Claim without its recorded checks.
+
 - Required material facts and confirmations must satisfy the current controlled rule.
 - Motor, home, and contents use one deterministic requirement resolver over their mutually
   exclusive registered family branch plus shared fields. Creation rejects any missing or

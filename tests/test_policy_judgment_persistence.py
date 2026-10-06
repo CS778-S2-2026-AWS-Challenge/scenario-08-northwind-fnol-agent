@@ -109,7 +109,7 @@ def test_turn_signal_is_durable_and_staff_only(
     repository.save_agent_turn(**args, review_signals=[signal])
     claim = args['claim']
     assert repository.list_review_signals(claim.claim_id, claim.customer_id) == [signal]
-    assert repository.list_review_signals(claim.claim_id, 'cus_other') == []
+    assert repository.list_review_signals(claim.claim_id, 'cus_2b67e9d14a3c508f') == []
     staff = Principal('staff_test', 'staff', scopes=frozenset({'workbench:read'}))
     projected = list_workbench_signals(repository, staff, claim.claim_id, 20, None).items[0]
     assert projected.judgment_point_kind == signal.judgment_point_kind

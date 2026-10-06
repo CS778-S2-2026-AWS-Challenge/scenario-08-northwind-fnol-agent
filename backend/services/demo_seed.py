@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from backend.adapters.evidence_storage import (
@@ -31,25 +30,15 @@ from backend.repositories.protocols import (
     ValidationSeedGraph,
 )
 from backend.repositories.scenario_loader import (
-    ScenarioFixture,
-    load_mvp_journey_scenarios,
-    load_scenario,
+    ClaimSeedGraph,
     seed_scenario,
 )
 from backend.repositories.staff_identity import StaffIdentityRepository
 from backend.services.branching import build_applied_branch_evaluation
-from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
+from backend.services.business_seed import BusinessSeed, SeedDemoCase
 from backend.services.demo_materials import associate_materials, material_content
 from backend.services.support import now_utc, request_fingerprint, require_idempotency_key
 
-SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
-
-ADDITIONAL_WORKBENCH_DEMO_SCENARIO_IDS = ('AT-10-controlled-assessor',)
-VALIDATION_SCENARIO_IDS = (
-    'AT-14-field-states-motor',
-    'AT-15-field-states-home',
-    'AT-16-field-states-contents',
-)
 VALIDATION_SEED_ROUTE = 'POST /api/v1/workbench/demo/seed-validation'
 
 
@@ -69,10 +58,11 @@ def _replace_values(value: Any, replacements: dict[str, str]) -> Any:
     return value
 
 
-def _ensure_demo_claimant(identity_repository: IdentityRepository) -> CustomerAccountRecord:
-    seed = load_business_seed(BUSINESS_SEED_PATH)
+def _ensure_demo_claimant(
+    identity_repository: IdentityRepository, seed: BusinessSeed
+) -> CustomerAccountRecord:
     customer = next(
-        (item for item in seed.customers if item.customer_id == seed.demo_customer_id), None
+        (item for item in seed.customers if item.customer_id == seed.primary_customer_id), None
     )
     account = None
     if customer is not None:
@@ -98,14 +88,109 @@ def _ensure_demo_claimant(identity_repository: IdentityRepository) -> CustomerAc
     return account
 
 
+def _case_scenario(case: SeedDemoCase) -> ClaimSeedGraph:
+    """Build a persisted graph from the selected seed's business inputs.
+
+    Args:
+        case: Validated manifest case, without expected actions or test assertions.
+    Returns:
+        Fresh claim, session, and messages using the shared domain contracts.
+    """
+    claim_id, session_id = new_id('clm'), new_id('ses')
+    timestamp = case.recorded_at
+    actor = {'actor_type': 'claimant', 'actor_id': case.customer_id}
+    messages: list[dict[str, Any]] = []
+    for text in case.messages:
+        messages.append(
+            {
+                'message_id': new_id('msg'),
+                'claim_id': claim_id,
+                'session_id': session_id,
+                'actor': 'claimant',
+                'visibility': 'shared',
+                'content': {'type': 'text', 'text': text},
+                'in_reply_to': messages[-1]['message_id'] if messages else None,
+                'created_at': timestamp + timedelta(seconds=len(messages)),
+            }
+        )
+    source_refs = [message['message_id'] for message in messages]
+    form = {
+        code: {
+            'value': field.value,
+            'status': field.status,
+            'source': 'claimant',
+            'source_refs': source_refs if field.value is not None else [],
+            'needed_for': 'current_action',
+            'updated_at': timestamp,
+            'updated_by': actor,
+        }
+        for code, field in case.fields.items()
+    }
+    form['claim.product_family'] = {
+        'value': case.family,
+        'status': 'confirmed',
+        'source': 'claimant',
+        'source_refs': source_refs,
+        'needed_for': 'current_action',
+        'updated_at': timestamp,
+        'updated_by': actor,
+    }
+    return ClaimSeedGraph.model_validate(
+        {
+            'scenario_id': case.case_id,
+            'description': 'Business seed claim for staff and claimant exploration.',
+            'claim': {
+                'claim_id': claim_id,
+                'customer_id': case.customer_id,
+                'channel': 'web_agent',
+                'locale': 'en-NZ',
+                'incident_type': case.family,
+                'active_session_id': session_id,
+                'form': form,
+                'contents_items': [
+                    {
+                        'item_id': new_id('itm'),
+                        'description': description,
+                        'source': 'claimant',
+                        'source_refs': source_refs,
+                        'status': 'proposed',
+                        'needed_for': 'current_action',
+                        'updated_at': timestamp,
+                        'updated_by': actor,
+                    }
+                    for description in case.contents_descriptions
+                ],
+                'created_at': timestamp,
+                'updated_at': timestamp,
+                'customer_next_step': {
+                    'status': 'collecting',
+                    'summary': 'Confirm the incident details to continue.',
+                    'responsible_party': 'claimant',
+                    'can_resume': True,
+                },
+            },
+            'sessions': [
+                {
+                    'session_id': session_id,
+                    'claim_id': claim_id,
+                    'customer_id': case.customer_id,
+                    'started_at': timestamp,
+                    'last_active_at': timestamp,
+                }
+            ],
+            'messages': messages,
+        }
+    )
+
+
 def _validation_scenario(
-    scenario: ScenarioFixture,
+    scenario: ClaimSeedGraph,
     *,
     customer_id: str,
     staff_id: str,
-) -> ScenarioFixture:
+) -> ClaimSeedGraph:
     replacements = {
-        'cus_demo': customer_id,
+        scenario.claim.customer_id: customer_id,
         scenario.claim.claim_id: new_id('clm'),
         scenario.claim.active_session_id or '': new_id('ses'),
     }
@@ -125,7 +210,7 @@ def _validation_scenario(
         source=EvidenceSource.CLAIMANT,
         related_fields=['incident.description'],
         needed_for=['current_action'],
-        claimant_note='Synthetic evidence reference for the validation demonstration.',
+        claimant_note='An attachment was mentioned, but its file has not been provided.',
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -134,7 +219,7 @@ def _validation_scenario(
     payload['claim']['evidence_summary'] = evidence_summary_for([evidence]).model_dump(mode='json')
     payload['evidence'] = [evidence.model_dump(mode='json')]
     payload['messages'][-1]['evidence_refs'] = [evidence_id]
-    return ScenarioFixture.model_validate(payload)
+    return ClaimSeedGraph.model_validate(payload)
 
 
 def _validation_presence(
@@ -158,9 +243,9 @@ def _validation_presence(
 
 
 def _store_material_content(
-    scenarios: tuple[ScenarioFixture, ...],
+    scenarios: tuple[ClaimSeedGraph, ...],
     storage: EvidenceStorage,
-) -> tuple[ScenarioFixture, ...]:
+) -> tuple[ClaimSeedGraph, ...]:
     """Place each produced material's bytes in evidence storage and record where they are.
 
     Association attaches the produced materials as Evidence, but their bytes stayed in the
@@ -182,7 +267,7 @@ def _store_material_content(
             produced material cannot be stored as it is.
     """
 
-    stored_scenarios: list[ScenarioFixture] = []
+    stored_scenarios: list[ClaimSeedGraph] = []
     for scenario in scenarios:
         evidence: list[EvidenceRecord] = []
         for record in scenario.evidence:
@@ -230,12 +315,26 @@ def seed_validation_scenarios(
     staff_id: str,
     idempotency_key: str | None,
     *,
+    seed: BusinessSeed,
     evidence_storage: EvidenceStorage | None = None,
 ) -> DemoSeedResponse:
     """Seed the three validation paths through the shared persistence contract.
 
     When an evidence storage adapter is supplied, the produced materials' bytes are stored
     with it, so each material can be opened through the Workbench content route.
+
+    Args:
+        repository: Selected Claim persistence adapter.
+        identity_repository: Selected claimant identity adapter.
+        staff_identity_repository: Selected staff identity adapter.
+        staff_id: Authenticated staff principal.
+        idempotency_key: Request replay key.
+        seed: The manifest selected by Settings.business_seed_path.
+        evidence_storage: Selected storage for generated demonstration material.
+    Returns:
+        Identifiers of the committed graphs, or the original idempotent result.
+    Raises:
+        ApiError: Identity, empty-queue, persistence, or storage checks fail.
     """
     key = require_idempotency_key(idempotency_key)
     fingerprint = request_fingerprint({'route': VALIDATION_SEED_ROUTE, 'version': 1})
@@ -263,14 +362,15 @@ def seed_validation_scenarios(
             message='Reset the local demo before loading validation scenarios.',
         )
 
-    claimant = _ensure_demo_claimant(identity_repository)
+    base_scenarios = load_workbench_demo_scenarios(seed)
+    _ensure_demo_claimant(identity_repository, seed)
     scenarios = tuple(
         _validation_scenario(
-            load_scenario(SCENARIO_DIRECTORY / f'{scenario_id}.json'),
-            customer_id=claimant.customer_id,
+            scenario,
+            customer_id=scenario.claim.customer_id,
             staff_id=staff_id,
         )
-        for scenario_id in VALIDATION_SCENARIO_IDS
+        for scenario in base_scenarios
     )
     # The produced demonstration materials become Evidence on the claim of their family.
     # This runs after `_validation_scenario` rather than before it: that transform replaces
@@ -282,7 +382,7 @@ def seed_validation_scenarios(
     presence, expected_presence_revision = _validation_presence(repository, staff_id)
     response = DemoSeedResponse(
         status='seeded',
-        scenario_ids=list(VALIDATION_SCENARIO_IDS),
+        scenario_ids=[case.case_id for case in seed.demo_cases],
         claim_ids=[scenario.claim.claim_id for scenario in scenarios],
     )
     idempotency = IdempotencyRecord(
@@ -355,19 +455,39 @@ def seed_validation_scenarios(
 
 
 def load_workbench_demo_scenarios(
-    directory: Path = SCENARIO_DIRECTORY,
-) -> tuple[ScenarioFixture, ...]:
-    """Load the five canonical MVP paths plus bounded integration demonstrations."""
+    seed: BusinessSeed,
+) -> tuple[ClaimSeedGraph, ...]:
+    """Build the selected manifest's cases, without loading regression fixtures.
 
-    journey_scenarios = load_mvp_journey_scenarios(directory)
-    additional_scenarios = [
-        load_scenario(directory / f'{scenario_id}.json')
-        for scenario_id in ADDITIONAL_WORKBENCH_DEMO_SCENARIO_IDS
-    ]
-    return (*journey_scenarios, *additional_scenarios)
+    Args:
+        seed: The application's configured and validated manifest.
+    Returns:
+        Claim graphs from this source alone.
+    Raises:
+        ApiError: The selected manifest contains no cases.
+    """
+    if not seed.demo_cases:
+        raise ApiError(
+            status_code=409,
+            code='DEMO_CLAIMANT_UNAVAILABLE',
+            message='The selected business seed has no demo cases.',
+        )
+    return tuple(_case_scenario(case) for case in seed.demo_cases)
 
 
-def seed_workbench_demo_scenarios(repository: PersistenceRepository) -> DemoScenarioSeedResult:
+def seed_workbench_demo_scenarios(
+    repository: PersistenceRepository, seed: BusinessSeed
+) -> DemoScenarioSeedResult:
+    """Populate an empty staff queue from the selected business manifest.
+
+    Args:
+        repository: Selected Claim persistence adapter.
+        seed: Validated application manifest.
+    Returns:
+        Configured case IDs and newly generated Claim IDs.
+    Raises:
+        ApiError: The queue already contains a Claim.
+    """
     if repository.list_claims_internal():
         raise ApiError(
             status_code=409,
@@ -375,7 +495,7 @@ def seed_workbench_demo_scenarios(repository: PersistenceRepository) -> DemoScen
             message='Reset the local demo before loading the workbench scenario queue.',
         )
 
-    scenarios = load_workbench_demo_scenarios()
+    scenarios = load_workbench_demo_scenarios(seed)
     claim_ids: list[str] = []
     for scenario in scenarios:
         seed_scenario(repository, scenario)

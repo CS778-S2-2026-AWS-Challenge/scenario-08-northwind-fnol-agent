@@ -220,7 +220,7 @@ def test_follow_up_operation_lifecycle_identity_and_owner_parity(
         repository.get_follow_up_operation(
             claim.claim_id,
             scheduled.operation_id,
-            'cus_other',
+            'cus_2b67e9d14a3c508f',
         )
         is None
     )
@@ -229,7 +229,7 @@ def test_follow_up_operation_lifecycle_identity_and_owner_parity(
         repository.list_follow_up_operations(
             claim.claim_id,
             follow_up.follow_up_id,
-            'cus_other',
+            'cus_2b67e9d14a3c508f',
         )
         == []
     )

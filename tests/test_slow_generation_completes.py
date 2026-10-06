@@ -38,7 +38,9 @@ def test_legitimate_generation_near_configured_timeout_commits_facts(
         repository_release_values(bindings)['model:openrouter-gpt4o-mini']
     )
     timeout = (
-        Settings().model_timeout_seconds
+        Settings(
+            business_seed_path='config/business-seed.json',
+        ).model_timeout_seconds
         if timeout_source == 'bootstrap'
         else configuration.timeout_seconds
     )
@@ -83,11 +85,11 @@ def test_legitimate_generation_near_configured_timeout_commits_facts(
     journey = Journey(client, 'motor', f'slow-generation-{timeout_source}')
     turn = journey.send('The accident happened in Wellington.')
     assert len(calls) == 1
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.form['incident.location'].value == 'Wellington'
     assert turn['recovery'] is None
     trace = repository.find_runtime_trace_for_trigger(
-        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert trace is not None and trace.status == 'succeeded'
     assert trace.total_latency_ms == pytest.approx((timeout - 5) * 1000)

@@ -116,7 +116,9 @@ def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
     )
     assert journey.view()['form']['incident.injury_or_danger']['value'] is False
     third = journey.send('Actually my passenger has a sore neck')
-    handoff = repository.get_handoff(journey.claim_id, third['handoff']['handoff_id'], 'cus_demo')
+    handoff = repository.get_handoff(
+        journey.claim_id, third['handoff']['handoff_id'], 'cus_8f41a2c90d7e463b'
+    )
     assert handoff is not None
     assert handoff.priority.value == 'urgent'
     assert third['decision']['customer_next_step']['status'] == 'awaiting_staff'
@@ -167,7 +169,7 @@ def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
     journey.create()
     record_property('planned_input_budget', json.dumps(journey.budget_measurements(repository)))
     assert len(journey.turns) <= 9
-    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_demo')
+    session = repository.get_session(journey.claim_id, journey.session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
     assert session.repeated_question_count == 0, [
         (

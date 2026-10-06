@@ -1485,11 +1485,7 @@ def _claim_history_context_for_turn(
         'status': result.status.value,
         'connection_state': result.connection_state.value,
         'history': result.history.model_dump(mode='json') if result.history is not None else None,
-        'source_refs': (
-            [f'claim:{item.claim_id}' for item in result.history.claims]
-            if result.history is not None
-            else []
-        ),
+        'source_refs': ([result.result_id] if result.history is not None else []),
         'limitations': list(result.limitations),
     }
 
@@ -1551,11 +1547,7 @@ def _execute_claim_history_search(
         {
             'tool': 'claim_history',
             'status': result.status.value,
-            'source_refs': (
-                [f'claim:{item.claim_id}' for item in result.history.claims]
-                if result.history is not None
-                else []
-            ),
+            'source_refs': ([result.result_id] if result.history is not None else []),
             'history': result.history.model_dump(mode='json')
             if result.history is not None
             else None,

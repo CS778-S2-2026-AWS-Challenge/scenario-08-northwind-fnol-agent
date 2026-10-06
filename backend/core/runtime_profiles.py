@@ -21,8 +21,8 @@ from backend.adapters.knowledge_object_store import (
 from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
 from backend.adapters.policy_history import (
     MockPolicyHistoryAdapter,
-    MongoClaimHistoryAdapter,
     PolicyHistoryAdapter,
+    RepositoryClaimHistoryAdapter,
     RepositoryPolicyAdapter,
 )
 from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
@@ -30,11 +30,6 @@ from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBConnectionConfig, connect_mongodb_repository
 from backend.repositories.protocols import PersistenceRepository
-from backend.services.business_seed import (
-    BUSINESS_SEED_PATH,
-    load_business_seed,
-    provision_business_policies,
-)
 from backend.services.knowledge_ingestion import KnowledgeIngestionService
 from backend.services.knowledge_manifest import load_approved_sources
 
@@ -260,13 +255,12 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
         else:
             evidence_storage = MockEvidenceStorage()
         fixture_repository = FixtureRepository()
-        provision_business_policies(fixture_repository, load_business_seed(BUSINESS_SEED_PATH))
         bundle = DataRuntimeBundle(
             profile=DataRuntimeProfile.FIXTURE,
             repository=fixture_repository,
             evidence_storage=evidence_storage,
             policy_history=MockPolicyHistoryAdapter(fixture_repository),
-            claim_history=MongoClaimHistoryAdapter(fixture_repository),
+            claim_history=RepositoryClaimHistoryAdapter(fixture_repository),
             knowledge_documents=knowledge_documents,
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
         )
@@ -298,7 +292,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             repository=repository,
             evidence_storage=evidence_storage,
             policy_history=RepositoryPolicyAdapter(repository),
-            claim_history=MongoClaimHistoryAdapter(repository),
+            claim_history=RepositoryClaimHistoryAdapter(repository),
             knowledge_documents=knowledge_retrieval,
             knowledge_retrieval=knowledge_retrieval,
         )
