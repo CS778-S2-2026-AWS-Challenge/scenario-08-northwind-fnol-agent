@@ -179,9 +179,13 @@ function scorePack(packDir, casesDir) {
         actual: actualReasons,
       }
     : { result: 'not_implemented' }
-  const triage = !severity || severity === 'unassessed'
-    ? { result: 'not_implemented', expected: oracle.triage.expected_class, actual: severity || null }
-    : { result: severity === oracle.triage.expected_class ? 'pass' : 'fail', expected: oracle.triage.expected_class, actual: severity, reasons }
+  // A pack that expects no Claim (`triage.applies: false`) has no triage to score; a Claim that
+  // formed anyway fails the pack's own assertions instead.
+  const triage = oracle.triage.applies === false
+    ? { result: 'not_applicable', expected: null, actual: severity || null }
+    : !severity || severity === 'unassessed'
+      ? { result: 'not_implemented', expected: oracle.triage.expected_class, actual: severity || null }
+      : { result: severity === oracle.triage.expected_class ? 'pass' : 'fail', expected: oracle.triage.expected_class, actual: severity, reasons }
   const signalCodes = ((sources['staff:signals'] || {}).items || sources['staff:signals'] || []).map?.((item) => item.code) || []
   const reviewWritten = claimState.fraud_signal === 'review_required' || signalCodes.some((code) => !RETRIEVAL_ONLY_SIGNALS.has(code))
   const review = reviewWritten
@@ -233,15 +237,17 @@ function summarise(scores) {
   for (const s of scores) {
     const facts = `${s.facts.filter((f) => f.result === 'pass').length}/${s.facts.length}`
     const a = s.assertions
-    lines.push(`| ${s.case_id} | ${s.scenario_category} | ${s.journey.outcome} | ${s.journey.claim_number || 'None'} | ${s.journey.completed_without_follow_up ? 'Yes' : 'No'} | ${s.journey.claimant_messages} | ${s.journey.agent_questions} | ${s.journey.duration_s} | ${s.journey.turn_ms_median}/${s.journey.turn_ms_max} | ${facts} | ${s.triage.result} | ${s.review.result} | ${a.filter((x) => x.result === 'pass').length}/${a.filter((x) => x.result === 'fail').length}/${a.filter((x) => !['pass', 'fail'].includes(x.result)).length} |`)
+    const triageReasons = s.triage.reasons && s.triage.reasons.result !== 'not_implemented' ? ` (reasons ${s.triage.reasons.result})` : ''
+    lines.push(`| ${s.case_id} | ${s.scenario_category} | ${s.journey.outcome} | ${s.journey.claim_number || 'None'} | ${s.journey.completed_without_follow_up ? 'Yes' : 'No'} | ${s.journey.claimant_messages} | ${s.journey.agent_questions} | ${s.journey.duration_s} | ${s.journey.turn_ms_median}/${s.journey.turn_ms_max} | ${facts} | ${s.triage.result}${triageReasons} | ${s.review.result} | ${a.filter((x) => x.result === 'pass').length}/${a.filter((x) => x.result === 'fail').length}/${a.filter((x) => !['pass', 'fail'].includes(x.result)).length} |`)
   }
   const lodgedFirst = count((s) => s.journey.outcome === 'lodged_first_time')
   const lodgedRetry = count((s) => s.journey.outcome === 'lodged_after_retry')
-  const scoredTriage = scores.filter((s) => s.triage.result !== 'not_implemented')
+  const scoredTriage = scores.filter((s) => !['not_implemented', 'not_applicable'].includes(s.triage.result))
+  const reasonsPass = scoredTriage.filter((s) => s.triage.reasons && s.triage.reasons.result === 'pass').length
   return [
     `Packs: ${scores.length}. Lodged first time: ${lodgedFirst}. Lodged after a retry: ${lodgedRetry}. Stuck: ${count((s) => s.journey.outcome === 'stuck')}. Not run: ${count((s) => s.journey.outcome === 'runner_not_implemented')}.`,
     `Completed without follow-up (lodged, nothing owed by the claimant, no missing-information triage reason): ${count((s) => s.journey.completed_without_follow_up)}/${scores.length}. Within the effort target (under 5 minutes and under 10 questions): ${count((s) => s.journey.effort_within_target)}/${scores.length}.`,
-    `Triage scored: ${scoredTriage.length} (pass ${scoredTriage.filter((s) => s.triage.result === 'pass').length}); not implemented: ${scores.length - scoredTriage.length}. Review signals not implemented: ${count((s) => s.review.result === 'not_implemented')}.`,
+    `Triage scored: ${scoredTriage.length} (class pass ${scoredTriage.filter((s) => s.triage.result === 'pass').length}, reasons pass ${reasonsPass}); not implemented: ${count((s) => s.triage.result === 'not_implemented')}; not applicable (no Claim expected): ${count((s) => s.triage.result === 'not_applicable')}. Review signals not implemented: ${count((s) => s.review.result === 'not_implemented')}.`,
     '',
     ...lines,
   ].join('\n')

@@ -99,6 +99,15 @@ test('a lodged claim that triage says is missing information is not completed wi
   assert.deepEqual(journey.missing_information_reasons, ['document_outstanding'])
 })
 
+test('a pack that expects no Claim has no triage to score', () => {
+  const { runDir, casesDir } = syntheticRun()
+  const oracleFile = path.join(casesDir, 'CTL-M-900', 'oracle', 'labels.json')
+  const oracle = JSON.parse(fs.readFileSync(oracleFile, 'utf8'))
+  oracle.triage = { applies: false, expected_class: null, required_reasons: [], allowed_reasons: [] }
+  fs.writeFileSync(oracleFile, JSON.stringify(oracle))
+  assert.equal(scorePack(runDir, casesDir).triage.result, 'not_applicable')
+})
+
 test('triage reasons pass only with every required reason and nothing outside the allowed list', () => {
   const { runDir, casesDir } = syntheticRun()
   const staffFile = path.join(runDir, 'staff.json')
