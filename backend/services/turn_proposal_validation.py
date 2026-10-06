@@ -39,7 +39,6 @@ from backend.domain.models import (
     ProposedFormChange,
     StateChange,
 )
-from backend.domain.safety_vocabulary import WEAK_SAFETY_PATTERN
 from backend.domain.temporal_resolution import check_reported_time
 from backend.domain.turn_field_contract import TurnFieldContract, TurnFieldViolation
 from backend.services.turn_field_contract import validate_field_changes
@@ -184,11 +183,15 @@ def claimant_report_supports_value(
         return float(value) in stated
     if not isinstance(value, bool):
         return False
+    if field_code == 'incident.injury_or_danger':
+        # Whether the claimant's own words say someone was hurt or endangered
+        # ("the doctor said it's whiplash", "my passenger is bleeding") is the
+        # turn model's judgement; a word list misses most of them.
+        return True
     negative = bool(
         re.search(r"\b(?:no|none|nobody|not|never|cannot|can't|isn't|wasn't|without)\b", quote)
     )
     markers = {
-        'incident.injury_or_danger': WEAK_SAFETY_PATTERN,
         'parties.other_parties': r'\b(?:another|other|second|person|people|vehicle|party)\b',
         'vehicle.drivable': r'\b(?:driv(?:e|en|able)|roadworthy|safe|unsafe)\b',
         'property.ongoing_risk': r'\b(?:risk|leak|fire|flood|exposed|unsafe|danger)\b',

@@ -80,6 +80,7 @@ def envelope(
     documents: Sequence[dict[str, Any]] = (),
     interpretations: Sequence[dict[str, Any]] = (),
     ready: bool = False,
+    escalation: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     if action is None:
         action = (
@@ -116,7 +117,7 @@ def envelope(
         'evidence_interpretations': list(interpretations),
         'summary_fields': list(summary_fields) if summary_fields is not None else None,
         'state_proposals': [],
-        'escalation': None,
+        'escalation': escalation,
         'ready_to_create': ready,
         'confirms_batch': confirms,
     }

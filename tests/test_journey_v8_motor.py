@@ -38,8 +38,13 @@ def agent_turn_provider() -> V8JourneyProvider:
                 fields=[fact('incident.injury_or_danger', False, 'No one was hurt')],
                 question='vehicle.drivable',
             ),
+            # Danger happening now: the turn model escalates. An injury told
+            # after the event would only be recorded.
             envelope(
-                fields=[fact('incident.injury_or_danger', True, 'my passenger has a sore neck')]
+                fields=[fact('incident.injury_or_danger', True, 'my passenger is bleeding')],
+                action='escalate',
+                escalation={'kind': 'urgent_safety', 'reason': 'Passenger bleeding at the scene'},
+                reply='Please call 111 now. A Northwind specialist is joining this chat.',
             ),
             # The handoff opened by this turn silences the model entirely: the
             # two claimant messages sent while it is open are only recorded,
@@ -115,7 +120,7 @@ def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
         not in second['dynamic_form']['requirements']['missing_required_now']
     )
     assert journey.view()['form']['incident.injury_or_danger']['value'] is False
-    third = journey.send('Actually my passenger has a sore neck')
+    third = journey.send('Actually my passenger is bleeding and still in the car')
     handoff = repository.get_handoff(journey.claim_id, third['handoff']['handoff_id'], 'cus_demo')
     assert handoff is not None
     assert handoff.priority.value == 'urgent'

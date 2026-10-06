@@ -70,7 +70,10 @@ def test_replay_refreshes_current_state_without_reexecuting_any_turn_effect(
         url = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
         payload = {
             'client_message_id': 'q65-one-inbound',
-            'content': {'type': 'text', 'text': 'A passenger is injured on Symonds Street.'},
+            'content': {
+                'type': 'text',
+                'text': 'I want to speak to a person about the accident on Symonds Street.',
+            },
         }
         failed_headers = {**owner, 'Idempotency-Key': 'zz-original-failed', 'If-Match': '1'}
         first = client.post(url, headers=failed_headers, json=payload)
