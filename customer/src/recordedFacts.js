@@ -27,6 +27,14 @@ function fact(fieldCode, field) {
   }
 }
 
+function isRepeatedDerivedLoss(fieldCode, form) {
+  if (fieldCode !== 'loss.description') return false
+  const loss = form?.['loss.description']
+  const vehicleDamage = form?.['vehicle.damage_description']
+  if (!hasValue(loss) || !hasValue(vehicleDamage)) return false
+  return fieldValueText(loss).trim() === fieldValueText(vehicleDamage).trim()
+}
+
 export function turnRecord(message) {
   const record = message?.content?.turn_record
   return record && typeof record === 'object' ? record : null
@@ -41,7 +49,11 @@ export function factCardsByAgentMessage(messages, form) {
     const facts = []
     for (const item of turnRecord(message)?.recorded_facts || []) {
       const field = form?.[item.field_code]
-      if (placed.has(item.field_code) || !field || !CARD_STATUSES.has(field.status) || !hasValue(field)) {
+      if (placed.has(item.field_code)
+        || !field
+        || !CARD_STATUSES.has(field.status)
+        || !hasValue(field)
+        || isRepeatedDerivedLoss(item.field_code, form)) {
         continue
       }
       placed.add(item.field_code)

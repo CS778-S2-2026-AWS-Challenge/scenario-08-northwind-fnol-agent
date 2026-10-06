@@ -18,32 +18,55 @@ describe('TurnAttachments', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows recorded facts as an editable structured summary', async () => {
+  it('starts with a compact disclosure and confirms proposed facts while collapsed', async () => {
     const user = userEvent.setup()
     const onConfirmFacts = vi.fn()
+    render(
+      <TurnAttachments
+        facts={[
+          fact('claim.product_family', 'Claim type', 'motor', true),
+          fact('incident.location', 'Incident location', 'Queen Street', true),
+        ]}
+        onConfirmFacts={onConfirmFacts}
+      />,
+    )
+
+    const card = screen.getByRole('region', { name: 'Captured information' })
+    expect(within(card).getByText('Noted 2 details')).toBeVisible()
+    expect(within(card).getByText('Noted 2 details').previousElementSibling).toHaveAttribute('aria-hidden', 'true')
+    const disclosure = within(card).getByRole('button', { name: 'Review' })
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+    expect(document.getElementById(disclosure.getAttribute('aria-controls'))).not.toBeVisible()
+    expect(within(card).getByText('Claim type')).not.toBeVisible()
+    expect(within(card).getByRole('button', { name: 'Looks right' })).toBeVisible()
+
+    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
+    expect(onConfirmFacts).toHaveBeenCalledWith(['claim.product_family', 'incident.location'])
+  })
+
+  it('expands the current-turn details and preserves inline editing', async () => {
+    const user = userEvent.setup()
     const onSaveFact = vi.fn().mockResolvedValue(true)
     render(
       <TurnAttachments
-        facts={[fact('claim.product_family', 'Claim type', 'motor', true)]}
+        facts={[fact('claim.product_family', 'Claim type', 'motor', false)]}
         fieldInputs={{
           'claim.product_family': {
             value_type: 'enum',
             allowed_values: ['motor', 'home', 'contents'],
           },
         }}
-        onConfirmFacts={onConfirmFacts}
         onSaveFact={onSaveFact}
       />,
     )
 
     const card = screen.getByRole('region', { name: 'Captured information' })
-    expect(within(card).getByRole('heading', { name: 'Captured information' }).previousElementSibling)
-      .toHaveAttribute('aria-hidden', 'true')
-    expect(within(card).getByText('Recorded')).toBeVisible()
-    expect(within(card).getByText('Recorded').previousElementSibling).toHaveAttribute('aria-hidden', 'true')
+    expect(within(card).getByText('Noted 1 detail')).toBeVisible()
+    await user.click(within(card).getByRole('button', { name: 'Review' }))
+    expect(within(card).getByRole('button', { name: 'Hide' })).toHaveAttribute('aria-expanded', 'true')
     expect(within(card).getByText('Claim type')).toBeVisible()
     expect(within(card).getByText('Motor vehicle accident')).toBeVisible()
-    expect(within(card).getByText('Please review this detail. You can correct it at any time.')).toBeVisible()
+    expect(within(card).getByText('Review this detail. You can correct it at any time.')).toBeVisible()
 
     const edit = within(card).getByRole('button', { name: 'Edit Claim type in captured information' })
     expect(edit.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
@@ -51,9 +74,6 @@ describe('TurnAttachments', () => {
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Claim type' }), 'home')
     await user.click(within(card).getByRole('button', { name: 'Save' }))
     expect(onSaveFact).toHaveBeenCalledWith(expect.objectContaining({ fieldCode: 'claim.product_family' }), 'home')
-
-    await user.click(within(card).getByRole('button', { name: 'Looks right' }))
-    expect(onConfirmFacts).toHaveBeenCalledWith(['claim.product_family'])
   })
 
   it('marks what the claimant owes and lets them upload from the chip', () => {
