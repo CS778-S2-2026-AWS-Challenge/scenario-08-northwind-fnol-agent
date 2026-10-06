@@ -19,3 +19,12 @@ test('the Claude CLI backend needs no server and defaults to haiku', async () =>
 test('an unknown backend is refused instead of falling back', () => {
   assert.throws(() => claimantFromEnvironment({ CLAIMANT_BACKEND: 'openai', CLAIMANT_OLLAMA_URL: 'http://x', CLAIMANT_MODEL: 'm' }), /ollama or claude/)
 })
+
+test('an upload names its material and the upload spot, and a bare id means the chat', () => {
+  const { uploadEntries } = require('./claimant_simulator.cjs')
+  assert.deepEqual(uploadEntries([{ material: 'repair-quote', for: 'Repair quote' }, 'photo-wheel', { material: '', for: 'x' }, null]), [
+    { material: 'repair-quote', for: 'Repair quote' },
+    { material: 'photo-wheel', for: '' },
+  ])
+  assert.deepEqual(uploadEntries('repair-quote'), [])
+})

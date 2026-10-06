@@ -12,6 +12,9 @@ const RETRIEVAL_ONLY_SIGNALS = new Set(['POLICY_RETRIEVAL_UNCERTAINTY', 'CLAIM_H
 // Triage reasons (backend/domain/triage.py) that say something is still missing from the report:
 // the insurer has to come back to the claimant, so the claim was not completed without follow-up.
 const MISSING_INFORMATION_REASONS = new Set(['document_outstanding', 'fact_unresolved', 'policy_not_verified', 'amount_unknown'])
+// The end-state reads a pack with a Claim needs: the claimant's own view and the staff view
+// through the normal staff sign-in (#1222).
+const REQUIRED_READS = ['claimant:claim', 'claimant:evidence', 'claimant:messages', 'staff:claim', 'staff:claim.fields', 'staff:claim.handoffs', 'staff:claim.signals', 'staff:claim.evidence']
 
 function readJson(file, fallbackMissing = undefined) {
   if (!fs.existsSync(file)) {
@@ -28,13 +31,23 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2)
 }
 
-// The calendar day a temporal value names, in New Zealand time when it carries a clock time.
+// The calendar day a temporal value names. The runtime stores one of the forms in
+// `backend/domain/temporal_resolution.py`: `2026-10-01T17:20+13:00`, `2026-10-01`, or a date
+// with a part of day (`2026-10-01 evening`); a seeded earlier claim stores `{ date, precision }`.
+// A clock time is read in New Zealand time. Anything else is returned as it is, so it only
+// matches itself.
+const PARTS_OF_DAY = ['morning', 'afternoon', 'evening', 'night']
+
 function calendarDay(value) {
-  const text = String(value)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) return text
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+  if (value && typeof value === 'object' && typeof value.date === 'string') return calendarDay(value.date)
+  const text = String(value).trim()
+  const dated = text.match(/^(\d{4}-\d{2}-\d{2})(?:\s+([a-z]+))?$/)
+  if (dated && (!dated[2] || PARTS_OF_DAY.includes(dated[2]))) return dated[1]
+  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) {
+    const date = new Date(text)
+    if (!Number.isNaN(date.getTime())) return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+  }
+  return text
 }
 
 function sameValue(code, actual, expected) {
@@ -123,6 +136,15 @@ function scorePack(packDir, casesDir) {
     'staff:handoffs': body(staff['staff:claim.handoffs']),
     'staff:signals': body(staff['staff:claim.signals']),
     'staff:evidence': body(staff['staff:claim.evidence']),
+  }
+  // Every end-state read the scores rely on must have succeeded. A pack that has a Claim but a
+  // missing or failed read is reported as incomplete and kept out of every count, rather than
+  // scored on the gap.
+  const reads = { ...claimant, ...staff }
+  const missingReads = run.claim_id ? REQUIRED_READS.filter((key) => !reads[key] || reads[key].status !== 200) : []
+  const evidence = { complete: missingReads.length === 0, missing_reads: missingReads, staff_read_error: run.staff_read_error || null }
+  if (!evidence.complete) {
+    return { case_id: run.case_id, scenario_category: oracle.scenario_category, evidence, journey: { outcome: run.outcome, claim_number: run.claim_number } }
   }
   const claim = sources['claimant:claim'] || {}
   const staffClaim = sources['staff:claim'] || {}
@@ -225,15 +247,21 @@ function scorePack(packDir, casesDir) {
   // Staff side: what the claimant's questions look like in the staff to-answer list.
   const staffOpenItems = (staffClaim.open_items || []).map((item) => ({ owner: item.owner, state: item.state, subject: item.subject, claimant_wording: item.claimant_wording || null }))
 
-  return { case_id: run.case_id, scenario_category: oracle.scenario_category, journey, triage, review, innocent_controls: innocentControls, facts: factResults, optional_facts: optionalResults, incident_time: incidentTime, assertions, staff_open_items: staffOpenItems }
+  return { case_id: run.case_id, scenario_category: oracle.scenario_category, evidence, journey, triage, review, innocent_controls: innocentControls, facts: factResults, optional_facts: optionalResults, incident_time: incidentTime, assertions, staff_open_items: staffOpenItems }
 }
 
-function summarise(scores) {
+function summarise(allScores) {
+  // Packs whose end-state reads are incomplete are listed but kept out of every count.
+  const incomplete = allScores.filter((s) => !s.evidence.complete)
+  const scores = allScores.filter((s) => s.evidence.complete)
   const count = (predicate) => scores.filter(predicate).length
   const lines = [
     '| Pack | Category | Outcome | Claim | No follow-up | Messages | Questions | Time (s) | Turn median/max (ms) | Facts | Triage | Review | Assertions pass/fail/other |',
     '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ]
+  for (const s of incomplete) {
+    lines.push(`| ${s.case_id} | ${s.scenario_category} | ${s.journey.outcome} | ${s.journey.claim_number || 'None'} | evidence incomplete: ${s.evidence.missing_reads.join(', ')} | | | | | | | | |`)
+  }
   for (const s of scores) {
     const facts = `${s.facts.filter((f) => f.result === 'pass').length}/${s.facts.length}`
     const a = s.assertions
@@ -245,6 +273,7 @@ function summarise(scores) {
   const scoredTriage = scores.filter((s) => !['not_implemented', 'not_applicable'].includes(s.triage.result))
   const reasonsPass = scoredTriage.filter((s) => s.triage.reasons && s.triage.reasons.result === 'pass').length
   return [
+    `Evidence incomplete (kept out of every count): ${incomplete.length}${incomplete.length ? ` (${incomplete.map((s) => s.case_id).join(', ')})` : ''}.`,
     `Packs: ${scores.length}. Lodged first time: ${lodgedFirst}. Lodged after a retry: ${lodgedRetry}. Stuck: ${count((s) => s.journey.outcome === 'stuck')}. Not run: ${count((s) => s.journey.outcome === 'runner_not_implemented')}.`,
     `Completed without follow-up (lodged, nothing owed by the claimant, no missing-information triage reason): ${count((s) => s.journey.completed_without_follow_up)}/${scores.length}. Within the effort target (under 5 minutes and under 10 questions): ${count((s) => s.journey.effort_within_target)}/${scores.length}.`,
     `Triage scored: ${scoredTriage.length} (class pass ${scoredTriage.filter((s) => s.triage.result === 'pass').length}, reasons pass ${reasonsPass}); not implemented: ${count((s) => s.triage.result === 'not_implemented')}; not applicable (no Claim expected): ${count((s) => s.triage.result === 'not_applicable')}. Review signals not implemented: ${count((s) => s.review.result === 'not_implemented')}.`,

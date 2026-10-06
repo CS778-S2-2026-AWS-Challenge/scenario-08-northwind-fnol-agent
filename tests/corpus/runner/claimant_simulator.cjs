@@ -25,7 +25,9 @@ Rules:
   or mention documents it has not asked for, unless your persona says you would.
 - Hand over a material only when the agent explicitly asks you to send, upload or share that document or
   photo, or the screen shows an item with an Upload button for it. Then use the matching material id from
-  your brief. If you have nothing that matches, say so. A question about a fact (for example a cost or a
+  your brief. If the screen lists an upload spot the claim offers for that document, put the spot's exact
+  name in "for": that is how a person sends a document the claim asks for. Otherwise leave "for" empty and
+  the file goes with your chat message. If you have nothing that matches, say so. A question about a fact (for example a cost or a
   date) is not a request for a document: answer it in words and upload nothing.
 - A material that is not available yet: say you will have it later.
 - You send each document or photo once. When the agent describes or summarises a file you already sent,
@@ -42,15 +44,26 @@ Rules:
   leave "press" empty. Press a button when the agent asks you to use it, or when it is how you do what you
   already agreed to in the conversation. Never press an Edit button.
 - When you press a button, that is all you do this turn: leave the message empty and upload nothing.
-- When the agent asks you to check a summary, compare it with your brief and press "Looks right" (or "All
-  correct") when it is right. When the agent says your part is done and a button such as "Check your
-  details", "Add payout and contact details" or "Review and agree" is on the screen, press it: that is how
-  you finish your claim.
+- When the agent asks you to check or confirm a summary, compare it with your brief. If it is right and a
+  "Looks right" or "All correct" button is on the screen, press it. If no such button is on the screen,
+  confirm in words: reply only "Yes, that's all correct." and nothing else. If something is wrong, say what.
+- When the agent says your part is done and a button such as "Check your details", "Add payout and contact
+  details" or "Review and agree" is on the screen, press it: that is how you finish your claim.
+- Press only a button listed under "Buttons you can press".
 - Giving permission to share your details is your own choice: follow your persona, and otherwise agree only
   to what you already said yes to in the conversation.
 
 Reply with JSON only, no other text:
-{"message": "<what you type in the chat box, may be empty>", "upload": ["<material id>", ...], "press": "<button label or empty>"}`
+{"message": "<what you type in the chat box, may be empty>", "upload": [{"material": "<material id>", "for": "<upload spot or empty>"}, ...], "press": "<button label or empty>"}`
+
+// Each upload as { material, for }. `for` names the upload spot the claim offers for that
+// document, or is empty for the chat; a bare id from an older reply means the chat.
+function uploadEntries(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => (typeof entry === 'string' ? { material: entry, for: '' } : { material: String(entry?.material || ''), for: String(entry?.for || '').trim() }))
+    .filter((entry) => entry.material)
+}
 
 function claimantBrief(view) {
   const facts = Object.entries(view.facts).map(([key, value]) => `- ${key}: ${JSON.stringify(value)}`)
@@ -128,7 +141,7 @@ function askClaimant(prompt, { model = 'haiku', timeoutMs = 120000 } = {}) {
     const reply = JSON.parse(raw)
     return {
       message: typeof reply.message === 'string' ? reply.message : '',
-      upload: Array.isArray(reply.upload) ? reply.upload.map(String) : [],
+      upload: uploadEntries(reply.upload),
       press: typeof reply.press === 'string' ? reply.press.trim() : '',
       model: Object.keys(envelope.modelUsage || {}).join(',') || model,
       cost_usd: envelope.total_cost_usd || 0,
@@ -147,7 +160,11 @@ function askClaimant(prompt, { model = 'haiku', timeoutMs = 120000 } = {}) {
 
 const REPLY_SCHEMA = {
   type: 'object',
-  properties: { message: { type: 'string' }, upload: { type: 'array', items: { type: 'string' } }, press: { type: 'string' } },
+  properties: {
+    message: { type: 'string' },
+    upload: { type: 'array', items: { type: 'object', properties: { material: { type: 'string' }, for: { type: 'string' } }, required: ['material', 'for'] } },
+    press: { type: 'string' },
+  },
   required: ['message', 'upload', 'press'],
 }
 
@@ -175,7 +192,7 @@ async function askOllamaClaimant(prompt, { url, model, seed = 20261006, timeoutM
   const reply = JSON.parse(raw)
   return {
     message: typeof reply.message === 'string' ? reply.message : '',
-    upload: Array.isArray(reply.upload) ? reply.upload.map(String) : [],
+    upload: uploadEntries(reply.upload),
     press: typeof reply.press === 'string' ? reply.press.trim() : '',
     model: body.model || model,
     cost_usd: 0,
@@ -225,6 +242,7 @@ module.exports = {
   describeOllamaModel,
   claimantFromEnvironment,
   SYSTEM_PROMPT,
+  uploadEntries,
   buildClaimantPrompt,
   claimantBrief,
   promptScaffold,

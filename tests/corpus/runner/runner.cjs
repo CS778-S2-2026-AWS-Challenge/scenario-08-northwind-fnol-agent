@@ -94,7 +94,52 @@ async function preflight() {
 
 // ---------- the screen (what a person sees) ----------
 
+// The question sentences of a reply, normalised so the same question asked again matches; null
+// when the reply asks nothing.
+function questionKey(reply) {
+  const questions = String(reply)
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => sentence.includes('?'))
+    .map((sentence) => sentence.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim())
+  return questions.length ? questions.join(' | ') : null
+}
+
+// In the page: the places where the claim asks for a document and offers its own upload (the
+// to-do bar, the "Still to do" list, a requested file under a reply, a Documents card). A file
+// uploaded there carries the requested item's evidence kind; the chat composer records every
+// PDF as `other_document` (docs/controlled-test-corpus.md, "Evidence kinds and the upload path").
+// Each input is tagged so the runner uploads to exactly the spot the claimant named.
+function uploadSpotsInPage() {
+  const visible = (node) => node && node.getBoundingClientRect().width > 0
+  const spots = [
+    ['.open-items-bar', '.open-items-bar-text'],
+    ['li.open-item', 'strong'],
+    ['.turn-chip', '.turn-chip-text'],
+    ['li.claim-document-card', 'h4'],
+  ]
+  for (const node of document.querySelectorAll('[data-corpus-upload]')) node.removeAttribute('data-corpus-upload')
+  const titles = []
+  for (const [container, titleSelector] of spots) {
+    for (const node of document.querySelectorAll(container)) {
+      const input = node.querySelector('input[type=file]')
+      if (!input || !visible(node)) continue
+      const title = (node.querySelector(titleSelector)?.innerText || '').replace(/\s+/g, ' ').trim()
+      if (!title || titles.includes(title)) continue
+      input.setAttribute('data-corpus-upload', String(titles.length))
+      titles.push(title)
+    }
+  }
+  return titles
+}
+
 async function screenText(page) {
+  const now = await screenTextOnly(page)
+  const uploadSpots = await page.evaluate(uploadSpotsInPage)
+  if (uploadSpots.length) now.screen += `\nUpload spots the claim offers for requested documents: ${uploadSpots.map((title) => `"${title}"`).join(', ')}`
+  return { ...now, uploadSpots }
+}
+
+async function screenTextOnly(page) {
   return page.evaluate(() => {
     const visible = (node) => node && node.getBoundingClientRect().width > 0
     const text = (node) => (node ? node.innerText.replace(/\s+\n/g, '\n').trim() : '')
@@ -179,7 +224,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
   const hidden = hiddenValues(caseDir, view, promptScaffold())
   const out = path.join(outRoot, caseId)
   fs.mkdirSync(path.join(out, 'screens'), { recursive: true })
-  const record = { case_id: caseId, claimant_session: setup.claimant_session, claimant_model: claimant.info, started_at: new Date().toISOString(), outcome: null, stuck: null, claim_id: null, claim_number: null, claimant_messages: 0, retries: 0, repeated_questions: 0, nothing_to_answer: 0, turn_ms: [], uploads: [], presses: [], steps: [], cost_usd: 0 }
+  const record = { case_id: caseId, claimant_session: setup.claimant_session, claimant_model: claimant.info, started_at: new Date().toISOString(), outcome: null, stuck: null, claim_id: null, claim_number: null, claimant_messages: 0, retries: 0, repeated_questions: 0, nothing_to_answer: 0, turn_ms: [], uploads: [], upload_paths: [], presses: [], steps: [], cost_usd: 0 }
   const transcript = []
   const log = (name, line) => fs.appendFileSync(path.join(out, name), `${JSON.stringify(line)}\n`)
 
@@ -250,15 +295,31 @@ async function runPack(browser, caseId, claimant, outRoot) {
 
     // Types `text`, attaches `files` one after another and presses Enter, the way a person does.
     // Returns a reason when the files never became ready.
+    // `files` are `{ material, spot }`: the material, and the upload spot the claimant chose for it
+    // ('' for the chat).
     const sendAsClaimant = async (text, files, count) => {
-      const usable = files.filter((m) => MEDIA[path.extname(m.file).toLowerCase()])
+      const usable = files.filter((entry) => MEDIA[path.extname(entry.material.file).toLowerCase()])
+      const sentVia = []
       if (usable.length) {
-        // The composer takes one file per pick. A person picks the next file once the last one
-        // shows Ready in the tray; any other label ("Uploading…", "Upload incomplete",
-        // "Processing") means the file is not there yet.
+        // One file per pick. A person picks the next file once the last one shows Ready in the
+        // tray; any other label ("Uploading…", "Upload incomplete", "Processing") means the file
+        // is not there yet. A file sent through a requested item's own upload also lands in
+        // the tray, carrying that item's kind, and goes with the message.
         const trayLabels = () => page.locator('form.workspace-composer .composer-file-copy').evaluateAll((nodes) => nodes.map((node) => `${node.querySelector('strong')?.textContent?.trim()}: ${node.querySelector('small')?.textContent?.trim()}`))
-        for (const material of usable) {
-          await page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])').setInputFiles(path.join(caseDir, 'input', 'materials', material.file))
+        for (const { material, spot } of usable) {
+          let input = page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])')
+          let via = 'chat'
+          if (spot) {
+            const index = (await page.evaluate(uploadSpotsInPage)).indexOf(spot)
+            if (index >= 0) {
+              input = page.locator(`[data-corpus-upload="${index}"]`)
+              via = spot
+            } else {
+              log('claimant.jsonl', { at: new Date().toISOString(), upload_spot_missing: spot, material: material.id, reason: 'no such upload spot on the screen; sent through the chat' })
+            }
+          }
+          await input.setInputFiles(path.join(caseDir, 'input', 'materials', material.file))
+          sentVia.push({ material: material.id, via })
           await page.locator('form.workspace-composer .composer-attachments').getByText(material.file).first().waitFor({ timeout: 30000 })
           const ready = await page.waitForFunction(() => {
             const labels = [...document.querySelectorAll('form.workspace-composer .composer-file-copy small')].map((node) => (node.textContent || '').trim())
@@ -268,7 +329,8 @@ async function runPack(browser, caseId, claimant, outRoot) {
         }
         const failed = await page.locator('form.workspace-composer .composer-file-copy small', { hasText: 'Processing failed' }).count()
         if (failed) return `${failed} file(s) showed Processing failed`
-        record.uploads.push(...usable.map((m) => m.id))
+        record.uploads.push(...usable.map((entry) => entry.material.id))
+        record.upload_paths.push(...sentVia)
         if (!text) text = 'Here you go.'
       }
       await page.locator('#workspace-incident-input').fill(text)
@@ -277,7 +339,8 @@ async function runPack(browser, caseId, claimant, outRoot) {
       const sent = Date.now()
       await page.locator('#workspace-incident-input').press('Enter')
       record.claimant_messages += 1
-      transcript.push({ who: 'claimant', text: usable.length ? `${text} [attached: ${usable.map((m) => m.label).join(', ')}]` : text })
+      const attached = usable.map((entry) => (entry.spot ? `${entry.material.label} (to "${entry.spot}")` : entry.material.label))
+      transcript.push({ who: 'claimant', text: usable.length ? `${text} [attached: ${attached.join(', ')}]` : text })
       await waitForTurn(page, count)
       record.turn_ms.push(Date.now() - sent)
       return null
@@ -287,6 +350,9 @@ async function runPack(browser, caseId, claimant, outRoot) {
     let seenAgentCount = 0
     let answeredAgentCount = 0
     let lastAskedScreen = null
+    // A button the claimant named that is not on the screen: they are asked once more, told so.
+    let pressNote = null
+    let notedScreen = null
     let stalls = 0
     let nudged = false
     let retriedThisTurn = false
@@ -304,9 +370,19 @@ async function runPack(browser, caseId, claimant, outRoot) {
         seenAgentCount = now.agentCount
         stalls = 0
         transcript.push({ who: 'northwind', text: now.reply })
-        const key = now.reply.toLowerCase().replace(/[^a-z ]/g, '').trim()
-        if (askedBefore.has(key)) record.repeated_questions += 1
-        askedBefore.set(key, true)
+        // A question asked again is answered once more, as a person would: that is the run's one
+        // recovery for it and counts as a retry. Asked a third time, the journey is stuck (#1222).
+        const question = questionKey(now.reply)
+        if (question) {
+          const times = (askedBefore.get(question) || 0) + 1
+          askedBefore.set(question, times)
+          if (times === 2) {
+            record.repeated_questions += 1
+            record.retries += 1
+            record.retry_kinds = [...(record.retry_kinds || []), 'repeated question']
+          }
+          if (times >= 3) { record.outcome = 'stuck'; record.stuck = { step: 'conversation', reason: `the same question a third time: ${question}` }; break }
+        }
       }
 
       // A failed message or a reply the app could not put together: a person presses retry once.
@@ -333,18 +409,28 @@ async function runPack(browser, caseId, claimant, outRoot) {
         answeredAgentCount = now.agentCount
         lastAskedScreen = now.screen
         if (record.claimant_messages >= MAX_CLAIMANT_MESSAGES) { record.outcome = 'stuck'; record.stuck = { step: 'conversation', reason: `reached ${MAX_CLAIMANT_MESSAGES} claimant messages` }; break }
-        const prompt = buildClaimantPrompt(view, transcript, now.screen)
+        const prompt = buildClaimantPrompt(view, transcript, pressNote ? `${now.screen}\nNote: ${pressNote}` : now.screen)
+        pressNote = null
         assertNoLeak(prompt.system + prompt.brief, hidden)
         const reply = await claimant.ask(prompt)
         log('claimant.jsonl', { at: new Date().toISOString(), screen: now.screen, prompt: prompt.user, reply: reply.raw, model: reply.model, ms: reply.ms, tokens: reply.tokens, cost_usd: reply.cost_usd })
         record.cost_usd += reply.cost_usd || 0
         // A person sends each file once; a repeat pick is dropped and logged.
-        const repeats = reply.upload.filter((id) => record.uploads.includes(id))
+        const repeats = reply.upload.filter((entry) => record.uploads.includes(entry.material)).map((entry) => entry.material)
         if (repeats.length) log('claimant.jsonl', { at: new Date().toISOString(), ignored_upload: repeats, reason: 'already sent' })
-        const files = reply.upload.filter((id) => !record.uploads.includes(id)).map((id) => view.materials.find((m) => m.id === id)).filter(Boolean)
+        const files = reply.upload
+          .filter((entry) => !record.uploads.includes(entry.material))
+          .map((entry) => ({ material: view.materials.find((m) => m.id === entry.material), spot: entry.for }))
+          .filter((entry) => entry.material)
         const text = reply.message.trim()
         const index = reply.press ? now.pressable.indexOf(reply.press) : -1
         if (reply.press && index < 0) log('claimant.jsonl', { at: new Date().toISOString(), ignored_press: reply.press, reason: 'not a button on the screen' })
+        if (reply.press && index < 0 && !text && !files.length && notedScreen !== now.screen) {
+          notedScreen = now.screen
+          pressNote = `there is no "${reply.press}" button on the screen.`
+          lastAskedScreen = null
+          continue
+        }
         if (index >= 0) {
           stalls = 0
           const button = page.locator(`[data-corpus-press="${index}"]`)
@@ -366,7 +452,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
           await page.waitForTimeout(2500)
           // Pressing is the whole action for this turn: a person who presses "Review and agree"
           // does not also type in the chat, and a chat message would reopen the claim summary.
-          if (text || files.length) log('claimant.jsonl', { at: new Date().toISOString(), not_sent_with_press: { message: text, upload: files.map((m) => m.id) } })
+          if (text || files.length) log('claimant.jsonl', { at: new Date().toISOString(), not_sent_with_press: { message: text, upload: files.map((entry) => entry.material.id) } })
           continue
         }
         if (text || files.length) {
@@ -471,7 +557,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
 
 async function staffReads(record, outRoot) {
   if (!record.claim_id) return
-  const seed = readJson(path.join(REPO, 'config', 'staff-seed.json'))
+  const seed = readJson(path.join(BACKEND_REPO, 'config', 'staff-seed.json'))
   const login = await fetch(`${API}/api/v1/staff/auth/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'bdfa123@northwind.test', password: seed.password }) })
   if (!login.ok) throw new Error(`staff sign-in failed: HTTP ${login.status}`)
   const { access_token: token } = await login.json()
@@ -512,7 +598,14 @@ async function main() {
     for (const caseId of caseIds) {
       const started = Date.now()
       const record = await runPack(browser, caseId, claimant, outRoot)
-      await staffReads(record, outRoot).catch((error) => console.log(`  staff reads failed: ${error.message}`))
+      // Without the staff reads the pack cannot be scored; the reason is kept with the run so the
+      // scorer reports the pack as incomplete instead of scoring what is missing.
+      const staffError = await staffReads(record, outRoot).then(() => null, (error) => error.message)
+      if (staffError) {
+        record.staff_read_error = staffError
+        fs.writeFileSync(path.join(outRoot, caseId, 'run.json'), JSON.stringify(record, null, 1))
+        console.log(`  staff reads failed: ${staffError}`)
+      }
       console.log(`${caseId}: ${record.outcome}${record.claim_number ? ` ${record.claim_number}` : ''}${record.stuck ? ` (${record.stuck.step}: ${record.stuck.reason})` : ''}, ${record.claimant_messages} messages, ${Math.round((Date.now() - started) / 1000)} s`)
     }
   } finally {
@@ -521,7 +614,11 @@ async function main() {
   console.log(`run records: ${outRoot}`)
 }
 
-main().catch((error) => {
-  console.error(error.message)
-  process.exit(1)
-})
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message)
+    process.exit(1)
+  })
+}
+
+module.exports = { questionKey }

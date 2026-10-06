@@ -6,7 +6,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { test } = require('node:test')
 
-const { scorePack } = require('./score.cjs')
+const { scorePack, summarise, sameValue } = require('./score.cjs')
 
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -38,12 +38,13 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
   const runDir = path.join(root, 'run', 'CTL-M-900')
   const started = '2026-10-06T01:00:00.000Z'
   writeJson(path.join(runDir, 'run.json'), {
-    case_id: 'CTL-M-900', outcome: lodged ? 'lodged_first_time' : 'stuck', claim_number: lodged ? 'NWF-2026-000001' : null,
+    case_id: 'CTL-M-900', claim_id: 'clm_900', outcome: lodged ? 'lodged_first_time' : 'stuck', claim_number: lodged ? 'NWF-2026-000001' : null,
     claimant_messages: 2, retries: 0, repeated_questions: 0, nothing_to_answer: 0, turn_ms: [5000], uploads: [], stuck: null,
     started_at: started, finished_at: '2026-10-06T01:01:00.000Z',
   })
   writeJson(path.join(runDir, 'claimant.json'), {
     'claimant:claim': { status: 200, body: { workflow_state: 'created', form: { 'claim.product_family': { value: 'motor', status: 'confirmed' } }, open_items: [] } },
+    'claimant:evidence': { status: 200, body: { items: [] } },
     'claimant:messages': { status: 200, body: { items: [{ actor: 'agent', content: { type: 'text', text: agentText } }] } },
   })
   writeJson(path.join(runDir, 'staff.json'), {
@@ -52,7 +53,9 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
       { code: 'claim.product_family', field: { value: 'motor', status: 'confirmed' } },
       { code: 'vehicle.drivable', field: { value: true, status: 'confirmed' } },
     ] } },
+    'staff:claim.handoffs': { status: 200, body: { items: [] } },
     'staff:claim.signals': { status: 200, body: { items: [] } },
+    'staff:claim.evidence': { status: 200, body: { items: [] } },
   })
   writeJson(path.join(runDir, 'transcript.json'), [])
   return { runDir, casesDir }
@@ -118,4 +121,30 @@ test('triage reasons pass only with every required reason and nothing outside th
   const score = scorePack(runDir, casesDir)
   assert.equal(score.triage.reasons.result, 'fail')
   assert.deepEqual(score.triage.reasons.unexpected, ['document_outstanding'])
+})
+
+test('a pack whose staff or claimant reads failed is incomplete and kept out of every count', () => {
+  const complete = syntheticRun()
+  assert.equal(scorePack(complete.runDir, complete.casesDir).evidence.complete, true)
+  const missing = syntheticRun()
+  const staffFile = path.join(missing.runDir, 'staff.json')
+  const staff = JSON.parse(fs.readFileSync(staffFile, 'utf8'))
+  delete staff['staff:claim.handoffs']
+  staff['staff:claim.signals'].status = 500
+  fs.writeFileSync(staffFile, JSON.stringify(staff))
+  const score = scorePack(missing.runDir, missing.casesDir)
+  assert.equal(score.evidence.complete, false)
+  assert.deepEqual(score.evidence.missing_reads, ['staff:claim.handoffs', 'staff:claim.signals'])
+  const summary = summarise([scorePack(complete.runDir, complete.casesDir), score])
+  assert.match(summary, /Evidence incomplete \(kept out of every count\): 1 \(CTL-M-900\)/)
+  assert.match(summary, /Packs: 1\. Lodged first time: 1\./)
+})
+
+test('the incident day is read from every stored temporal form', () => {
+  assert.equal(sameValue('incident.occurred_at', '2026-09-11 night', '2026-09-11'), true)
+  assert.equal(sameValue('incident.occurred_at', '2026-09-11 morning', '2026-09-11'), true)
+  assert.equal(sameValue('incident.occurred_at', '2026-09-05T16:00+12:00', '2026-09-05'), true)
+  assert.equal(sameValue('incident.occurred_at', { date: '2026-09-05', precision: 'partial' }, '2026-09-05'), true)
+  assert.equal(sameValue('incident.occurred_at', '2026-09-12 night', '2026-09-11'), false)
+  assert.equal(sameValue('incident.occurred_at', 'last Friday night', '2026-09-11'), false)
 })
