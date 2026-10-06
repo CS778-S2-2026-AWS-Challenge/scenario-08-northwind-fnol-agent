@@ -14,7 +14,7 @@ function writeJson(file, value) {
 }
 
 // One synthetic pack and one run of it. `lodged` switches between a lodged and a stuck run.
-function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText] } = {}) {
+function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText], severity = 'fast_track', fraudSignal = 'none', innocentControls = [], staffOpenItems = [], expectedFraud = 'none', signals = [] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corpus-score-'))
   const casesDir = path.join(root, 'tests', 'corpus', 'controlled', 'v1', 'cases')
   writeJson(path.join(root, 'tests', 'corpus', 'tools', 'global_assertions.json'), {
@@ -27,9 +27,9 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
     case_id: 'CTL-M-900',
     family: 'motor',
     scenario_category: 'M1',
-    design: { innocent_controls: [] },
+    design: { innocent_controls: innocentControls },
     triage: { expected_class: 'fast_track', required_reasons: [], allowed_reasons: [] },
-    review_indicators: { expected_fraud_signal: 'none' },
+    review_indicators: { expected_fraud_signal: expectedFraud },
     expected_facts: { 'claim.product_family': 'motor', 'vehicle.drivable': true },
     assertions: [
       { id: 'F2', kind: 'forbidden', judge: 'state', path: 'staff:claim.claim_state.urgency', op: 'in', value: ['urgent', 'immediate_safety_risk'] },
@@ -48,13 +48,13 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
     'claimant:messages': { status: 200, body: { items: agentTurns.map((text) => ({ actor: 'agent', content: { type: 'text', text } })) } },
   })
   writeJson(path.join(runDir, 'staff.json'), {
-    'staff:claim': { status: 200, body: { claim_state: { severity: 'fast_track', urgency, fraud_signal: 'none' }, triage: { severity: 'fast_track', reasons: [] }, open_items: [] } },
+    'staff:claim': { status: 200, body: { claim_state: { severity, urgency, fraud_signal: fraudSignal }, triage: { severity, reasons: [] }, open_items: staffOpenItems } },
     'staff:claim.fields': { status: 200, body: { items: [
       { code: 'claim.product_family', field: { value: 'motor', status: 'confirmed' } },
       { code: 'vehicle.drivable', field: { value: true, status: 'confirmed' } },
     ] } },
     'staff:claim.handoffs': { status: 200, body: { items: [] } },
-    'staff:claim.signals': { status: 200, body: { items: [] } },
+    'staff:claim.signals': { status: 200, body: { items: signals.map((code) => ({ code })) } },
     'staff:claim.evidence': { status: 200, body: { items: [] } },
   })
   writeJson(path.join(runDir, 'transcript.json'), [])
@@ -132,6 +132,51 @@ test('triage reasons pass only with every required reason and nothing outside th
   const score = scorePack(runDir, casesDir)
   assert.equal(score.triage.reasons.result, 'fail')
   assert.deepEqual(score.triage.reasons.unexpected, ['document_outstanding'])
+})
+
+test('a pack that never lodged has its triage and review marked not lodged, not unimplemented', () => {
+  const stuck = syntheticRun({ lodged: false, severity: 'unassessed' })
+  const score = scorePack(stuck.runDir, stuck.casesDir)
+  assert.equal(score.triage.result, 'not_lodged')
+  assert.equal(score.review.result, 'not_lodged')
+  const summary = summarise([score])
+  assert.match(summary, /Triage scored: 0 .*not implemented: 0; .*not lodged: 1\./)
+  assert.match(summary, /Fraud review scored: 0 .*not implemented: 0; not lodged: 1\./)
+})
+
+test('an innocent control is judged only once the fraud signal is written', () => {
+  const quiet = syntheticRun({ innocentControls: ['non_date_inconsistency'] })
+  const quietScore = scorePack(quiet.runDir, quiet.casesDir)
+  assert.deepEqual(quietScore.innocent_controls, [{ control: 'non_date_inconsistency', result: 'not_implemented' }])
+  assert.match(summarise([quietScore]), /Innocent controls: 1 \(flagged 0, not implemented 1, not lodged 0\)/)
+  const flagged = syntheticRun({ innocentControls: ['non_date_inconsistency'], fraudSignal: 'review_required' })
+  const flaggedScore = scorePack(flagged.runDir, flagged.casesDir)
+  assert.deepEqual(flaggedScore.innocent_controls, [{ control: 'non_date_inconsistency', result: 'flagged' }])
+  assert.equal(flaggedScore.review.false_positive, true)
+  assert.match(summarise([flaggedScore]), /Fraud review scored: 1 \(false positives 1;/)
+})
+
+test('a staff signal outside the fraud contract never scores fraud review or innocent controls', () => {
+  for (const expectedFraud of ['none', 'review_required']) {
+    const { runDir, casesDir } = syntheticRun({ expectedFraud, signals: ['POLICY_JUDGMENT_PROPOSAL'], innocentControls: ['same_day_purchase'] })
+    const score = scorePack(runDir, casesDir)
+    assert.equal(score.review.result, 'not_implemented', `expected fraud signal ${expectedFraud}`)
+    assert.deepEqual(score.review.signal_codes, ['POLICY_JUDGMENT_PROPOSAL'])
+    assert.deepEqual(score.innocent_controls, [{ control: 'same_day_purchase', result: 'not_implemented' }])
+    assert.match(summarise([score]), /Fraud review scored: 0 .*not implemented: 1;/)
+  }
+})
+
+test('the staff to-answer list keeps each item kind, the proposed answer and the contact preference', () => {
+  const { runDir, casesDir } = syntheticRun({ staffOpenItems: [
+    { item_id: 'nwq_1', kind: 'question', owner: 'northwind', state: 'open', subject: 'Can I book the glazier?', claimant_wording: 'Can I book the glazier?', proposed_answer: 'The team will confirm.', basis: 'Asked in chat.', contact_preference: null },
+    { item_id: 'nwq_2', kind: 'contact_request', owner: 'northwind', state: 'open', subject: 'Call me back', claimant_wording: 'Call me back', proposed_answer: null, basis: null, contact_preference: 'phone' },
+  ] })
+  const items = scorePack(runDir, casesDir).staff_open_items
+  assert.deepEqual(items.map((item) => [item.kind, item.proposed_answer, item.basis, item.contact_preference]), [
+    ['question', 'The team will confirm.', 'Asked in chat.', null],
+    ['contact_request', null, null, 'phone'],
+  ])
 })
 
 test('a pack whose staff or claimant reads failed is incomplete and kept out of every count', () => {
