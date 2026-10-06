@@ -850,6 +850,10 @@ def test_context_reference_resolver_enforces_manifest_selector_and_limit() -> No
     with pytest.raises(ValueError, match='stale'):
         stale.resolve(reference.ref, 'page', 8)
 
+    unavailable = TurnContextResolver([reference], {})
+    with pytest.raises(ValueError, match='unavailable'):
+        unavailable.resolve(reference.ref, 'page', 8)
+
 
 @pytest.mark.parametrize('clause_ids', [['a', 'b', 'c', 'd'], [1], 'MOTOR-001', None])
 def test_policy_resolver_rejects_malformed_clause_selection(clause_ids: object) -> None:
@@ -1147,6 +1151,24 @@ def test_v7_lookup_schema_failure_identifies_stage_and_field(stage: str) -> None
     assert error.value.diagnostic_code == f'{stage}_output_schema_validation'
     assert error.value.diagnostic_path == 'reply'
     assert len(gateway.requests) == (2 if stage == 'continuation' else 1)
+
+
+def test_v7_proposal_validation_failure_is_prefixed_with_response_stage() -> None:
+    from tests.journey_v8_support import envelope
+
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=envelope(reply='   '),
+                completion_status=ModelCompletionStatus.COMPLETE,
+            )
+        ]
+    )
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(gateway).propose_turn(_context('What is the status of my claim?'))
+
+    assert error.value.diagnostic_code == 'initial_proposal_blank_reply'
+    assert error.value.diagnostic_path == 'reply'
 
 
 def test_v7_lookup_rejects_a_recursive_tool_call() -> None:

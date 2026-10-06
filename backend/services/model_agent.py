@@ -1235,8 +1235,7 @@ class GatewayAgent:
                             ModelGatewayErrorCode.MALFORMED_RESPONSE,
                             diagnostic_code='consistency_recall_truthfulness',
                             diagnostic_path=(
-                                'reply.'
-                                + second_review.inconsistencies[0].kind
+                                'reply.' + second_review.inconsistencies[0].kind
                                 if second_review.inconsistencies
                                 else 'reply'
                             ),
