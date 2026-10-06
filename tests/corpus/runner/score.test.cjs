@@ -14,7 +14,7 @@ function writeJson(file, value) {
 }
 
 // One synthetic pack and one run of it. `lodged` switches between a lodged and a stuck run.
-function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?' } = {}) {
+function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corpus-score-'))
   const casesDir = path.join(root, 'tests', 'corpus', 'controlled', 'v1', 'cases')
   writeJson(path.join(root, 'tests', 'corpus', 'tools', 'global_assertions.json'), {
@@ -45,7 +45,7 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
   writeJson(path.join(runDir, 'claimant.json'), {
     'claimant:claim': { status: 200, body: { workflow_state: 'created', form: { 'claim.product_family': { value: 'motor', status: 'confirmed' } }, open_items: [] } },
     'claimant:evidence': { status: 200, body: { items: [] } },
-    'claimant:messages': { status: 200, body: { items: [{ actor: 'agent', content: { type: 'text', text: agentText } }] } },
+    'claimant:messages': { status: 200, body: { items: agentTurns.map((text) => ({ actor: 'agent', content: { type: 'text', text } })) } },
   })
   writeJson(path.join(runDir, 'staff.json'), {
     'staff:claim': { status: 200, body: { claim_state: { severity: 'fast_track', urgency, fraud_signal: 'none' }, triage: { severity: 'fast_track', reasons: [] }, open_items: [] } },
@@ -88,6 +88,17 @@ test('only a lodged journey can meet the effort target', () => {
   assert.equal(scorePack(lodged.runDir, lodged.casesDir).journey.effort_within_target, true)
   const stuck = syntheticRun({ lodged: false })
   assert.equal(scorePack(stuck.runDir, stuck.casesDir).journey.effort_within_target, false)
+})
+
+test('every question sentence counts towards effort, a repeated question included', () => {
+  const { runDir, casesDir } = syntheticRun({
+    agentTurns: ['What is the registration?', 'What is the registration? What colour is it?', 'What is the registration? Is it drivable?', 'Thanks, that is everything.'],
+  })
+  assert.equal(scorePack(runDir, casesDir).journey.agent_questions, 5)
+  const many = syntheticRun({ agentTurns: ['When? Where? Who was driving? Anyone hurt? Drivable?', 'Photos? Quote? Police report? Witnesses? Other driver?'] })
+  const score = scorePack(many.runDir, many.casesDir)
+  assert.equal(score.journey.agent_questions, 10)
+  assert.equal(score.journey.effort_within_target, false)
 })
 
 test('a lodged claim that triage says is missing information is not completed without follow-up', () => {

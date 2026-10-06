@@ -8,6 +8,8 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
+const { questionSentences } = require('./runner.cjs')
+
 const RETRIEVAL_ONLY_SIGNALS = new Set(['POLICY_RETRIEVAL_UNCERTAINTY', 'CLAIM_HISTORY_RETRIEVAL_UNCERTAINTY'])
 // Triage reasons (backend/domain/triage.py) that say something is still missing from the report:
 // the insurer has to come back to the claimant, so the claim was not completed without follow-up.
@@ -158,8 +160,9 @@ function scorePack(packDir, casesDir) {
     : transcript.filter((turn) => turn.who === 'northwind').map((turn) => turn.text)
   const agentText = agentTurns.join('\n')
 
-  // Journey. A question is an agent turn that asks something.
-  const questions = agentTurns.filter((text) => text.includes('?')).length
+  // Journey. Every question sentence of every agent turn counts, a question asked again included,
+  // by the rule the runner uses to recognise a repeated question.
+  const questions = agentTurns.reduce((total, text) => total + questionSentences(text).length, 0)
   const durationMs = Date.parse(run.finished_at) - Date.parse(run.started_at)
   const owedByClaimant = (claim.open_items || []).filter((item) => item.owner === 'claimant' && item.state === 'open')
   const lodged = Boolean(run.claim_number)

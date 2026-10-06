@@ -112,7 +112,8 @@ A person's recoveries are allowed once each. A run that used one ends as `lodged
 never `lodged_first_time`. The recoveries are:
 
 - pressing "Retry message" or "Retry response";
-- answering a question once more when the agent asks it again (the same question sentences);
+- answering a question once more when the agent asks it again. Each question sentence is tracked
+  on its own, whatever else the reply asks with it, so each repeated question counts as one retry;
 - after about nine seconds with nothing to act on, typing "OK.".
 
 A pack is `stuck` when any of these happens:
@@ -130,7 +131,9 @@ A pack is `stuck` when any of these happens:
 `summary.md` it reports:
 
 - **Journey:** outcome, claim number, messages, agent questions, repeated questions, time, and the
-  effort target (under five minutes and under ten questions, lodged runs only).
+  effort target (under five minutes and under ten questions, lodged runs only). Every question
+  sentence counts as one question, a repeated one included, by the rule the runner uses to
+  recognise a repeat.
 - **Completed without follow-up:** lodged, nothing owed by the claimant, and no missing-information
   triage reason (`document_outstanding`, `fact_unresolved`, `policy_not_verified`,
   `amount_unknown`).

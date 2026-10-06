@@ -94,14 +94,30 @@ async function preflight() {
 
 // ---------- the screen (what a person sees) ----------
 
-// The question sentences of a reply, normalised so the same question asked again matches; null
-// when the reply asks nothing.
-function questionKey(reply) {
+// Each question sentence of a reply, normalised so the same question asked again matches, whatever
+// else the reply asks with it. A list number in front is dropped; a question is listed once.
+// The scorer counts questions with the same rule.
+function questionSentences(reply) {
   const questions = String(reply)
-    .split(/(?<=[.!?])\s+/)
+    .split(/(?<=[.!?])\s+|\n+/)
     .filter((sentence) => sentence.includes('?'))
-    .map((sentence) => sentence.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim())
-  return questions.length ? questions.join(' | ') : null
+    .map((sentence) => sentence.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^\d+ /, ''))
+    .filter(Boolean)
+  return [...new Set(questions)]
+}
+
+// Records the questions of one reply in `asked` (question -> times asked) and says which were
+// asked a second time (the claimant answers each once more) and which a third time (stuck, #1222).
+function trackQuestions(asked, reply) {
+  const repeated = []
+  const third = []
+  for (const question of questionSentences(reply)) {
+    const times = (asked.get(question) || 0) + 1
+    asked.set(question, times)
+    if (times === 2) repeated.push(question)
+    if (times >= 3) third.push(question)
+  }
+  return { repeated, third }
 }
 
 // In the page: the places where the claim asks for a document and offers its own upload (the
@@ -370,18 +386,15 @@ async function runPack(browser, caseId, claimant, outRoot) {
         seenAgentCount = now.agentCount
         stalls = 0
         transcript.push({ who: 'northwind', text: now.reply })
-        // A question asked again is answered once more, as a person would: that is the run's one
-        // recovery for it and counts as a retry. Asked a third time, the journey is stuck (#1222).
-        const question = questionKey(now.reply)
-        if (question) {
-          const times = (askedBefore.get(question) || 0) + 1
-          askedBefore.set(question, times)
-          if (times === 2) {
-            record.repeated_questions += 1
-            record.retries += 1
-            record.retry_kinds = [...(record.retry_kinds || []), 'repeated question']
-          }
-          if (times >= 3) { record.outcome = 'stuck'; record.stuck = { step: 'conversation', reason: `the same question a third time: ${question}` }; break }
+        // A question asked again is answered once more, as a person would: that is the one
+        // recovery for that question and counts as a retry. Asked a third time, the journey is
+        // stuck (#1222). Each question sentence is tracked on its own.
+        const { repeated, third } = trackQuestions(askedBefore, now.reply)
+        if (third.length) { record.outcome = 'stuck'; record.stuck = { step: 'conversation', reason: `the same question a third time: ${third.join(' | ')}` }; break }
+        for (const question of repeated) {
+          record.repeated_questions += 1
+          record.retries += 1
+          record.retry_kinds = [...(record.retry_kinds || []), `repeated question: ${question}`]
         }
       }
 
@@ -621,4 +634,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionKey }
+module.exports = { questionSentences, trackQuestions }
