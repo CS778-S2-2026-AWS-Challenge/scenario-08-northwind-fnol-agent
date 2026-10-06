@@ -14,7 +14,7 @@ function writeJson(file, value) {
 }
 
 // One synthetic pack and one run of it. `lodged` switches between a lodged and a stuck run.
-function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText], severity = 'fast_track', fraudSignal = 'none', innocentControls = [], staffOpenItems = [] } = {}) {
+function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText], severity = 'fast_track', fraudSignal = 'none', innocentControls = [], staffOpenItems = [], expectedFraud = 'none', signals = [] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corpus-score-'))
   const casesDir = path.join(root, 'tests', 'corpus', 'controlled', 'v1', 'cases')
   writeJson(path.join(root, 'tests', 'corpus', 'tools', 'global_assertions.json'), {
@@ -29,7 +29,7 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
     scenario_category: 'M1',
     design: { innocent_controls: innocentControls },
     triage: { expected_class: 'fast_track', required_reasons: [], allowed_reasons: [] },
-    review_indicators: { expected_fraud_signal: 'none' },
+    review_indicators: { expected_fraud_signal: expectedFraud },
     expected_facts: { 'claim.product_family': 'motor', 'vehicle.drivable': true },
     assertions: [
       { id: 'F2', kind: 'forbidden', judge: 'state', path: 'staff:claim.claim_state.urgency', op: 'in', value: ['urgent', 'immediate_safety_risk'] },
@@ -54,7 +54,7 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
       { code: 'vehicle.drivable', field: { value: true, status: 'confirmed' } },
     ] } },
     'staff:claim.handoffs': { status: 200, body: { items: [] } },
-    'staff:claim.signals': { status: 200, body: { items: [] } },
+    'staff:claim.signals': { status: 200, body: { items: signals.map((code) => ({ code })) } },
     'staff:claim.evidence': { status: 200, body: { items: [] } },
   })
   writeJson(path.join(runDir, 'transcript.json'), [])
@@ -141,19 +141,30 @@ test('a pack that never lodged has its triage and review marked not lodged, not 
   assert.equal(score.review.result, 'not_lodged')
   const summary = summarise([score])
   assert.match(summary, /Triage scored: 0 .*not implemented: 0; .*not lodged: 1\./)
-  assert.match(summary, /Review signals scored: 0 .*not implemented: 0; not lodged: 1\./)
+  assert.match(summary, /Fraud review scored: 0 .*not implemented: 0; not lodged: 1\./)
 })
 
-test('an innocent control is judged only once a review signal is written', () => {
+test('an innocent control is judged only once the fraud signal is written', () => {
   const quiet = syntheticRun({ innocentControls: ['non_date_inconsistency'] })
   const quietScore = scorePack(quiet.runDir, quiet.casesDir)
   assert.deepEqual(quietScore.innocent_controls, [{ control: 'non_date_inconsistency', result: 'not_implemented' }])
-  assert.match(summarise([quietScore]), /Innocent controls: 1 \(flagged 0, not flagged 0, not implemented 1, not lodged 0\)/)
+  assert.match(summarise([quietScore]), /Innocent controls: 1 \(flagged 0, not implemented 1, not lodged 0\)/)
   const flagged = syntheticRun({ innocentControls: ['non_date_inconsistency'], fraudSignal: 'review_required' })
   const flaggedScore = scorePack(flagged.runDir, flagged.casesDir)
   assert.deepEqual(flaggedScore.innocent_controls, [{ control: 'non_date_inconsistency', result: 'flagged' }])
   assert.equal(flaggedScore.review.false_positive, true)
-  assert.match(summarise([flaggedScore]), /Review signals scored: 1 \(false positives 1, false negatives 0\)/)
+  assert.match(summarise([flaggedScore]), /Fraud review scored: 1 \(false positives 1;/)
+})
+
+test('a staff signal outside the fraud contract never scores fraud review or innocent controls', () => {
+  for (const expectedFraud of ['none', 'review_required']) {
+    const { runDir, casesDir } = syntheticRun({ expectedFraud, signals: ['POLICY_JUDGMENT_PROPOSAL'], innocentControls: ['same_day_purchase'] })
+    const score = scorePack(runDir, casesDir)
+    assert.equal(score.review.result, 'not_implemented', `expected fraud signal ${expectedFraud}`)
+    assert.deepEqual(score.review.signal_codes, ['POLICY_JUDGMENT_PROPOSAL'])
+    assert.deepEqual(score.innocent_controls, [{ control: 'same_day_purchase', result: 'not_implemented' }])
+    assert.match(summarise([score]), /Fraud review scored: 0 .*not implemented: 1;/)
+  }
 })
 
 test('the staff to-answer list keeps each item kind, the proposed answer and the contact preference', () => {

@@ -10,7 +10,6 @@ const path = require('node:path')
 
 const { questionSentences } = require('./runner.cjs')
 
-const RETRIEVAL_ONLY_SIGNALS = new Set(['POLICY_RETRIEVAL_UNCERTAINTY', 'CLAIM_HISTORY_RETRIEVAL_UNCERTAINTY'])
 // Triage reasons (backend/domain/triage.py) that say something is still missing from the report:
 // the insurer has to come back to the claimant, so the claim was not completed without follow-up.
 const MISSING_INFORMATION_REASONS = new Set(['document_outstanding', 'fact_unresolved', 'policy_not_verified', 'amount_unknown'])
@@ -214,23 +213,21 @@ function scorePack(packDir, casesDir) {
       : !severity || severity === 'unassessed'
       ? { result: 'not_implemented', expected: oracle.triage.expected_class, actual: severity || null }
       : { result: severity === oracle.triage.expected_class ? 'pass' : 'fail', expected: oracle.triage.expected_class, actual: severity, reasons }
+  // Fraud review maps only to `claim_state.fraud_signal` (corpus standard, "What the labels map
+  // to"), which nothing on main writes. Other staff signals, such as a policy judgment proposal,
+  // are a different contract and never count. `none` is also the field's default, so only
+  // `review_required` shows the capability at work: it is scored, and a false positive when the
+  // pack expects none. Anything else stays not implemented, so a false negative cannot be told
+  // from the default until main writes the field.
   const signalCodes = ((sources['staff:signals'] || {}).items || sources['staff:signals'] || []).map?.((item) => item.code) || []
-  const reviewWritten = claimState.fraud_signal === 'review_required' || signalCodes.some((code) => !RETRIEVAL_ONLY_SIGNALS.has(code))
-  const review = reviewWritten
-    ? {
-        result: claimState.fraud_signal === oracle.review_indicators.expected_fraud_signal ? 'pass' : 'fail',
-        expected: oracle.review_indicators.expected_fraud_signal,
-        actual: claimState.fraud_signal,
-        false_positive: oracle.review_indicators.expected_fraud_signal === 'none' && claimState.fraud_signal === 'review_required',
-        false_negative: oracle.review_indicators.expected_fraud_signal === 'review_required' && claimState.fraud_signal !== 'review_required',
-      }
-    : { result: lodged ? 'not_implemented' : 'not_lodged', expected: oracle.review_indicators.expected_fraud_signal, signal_codes: signalCodes }
-  // An innocent control is only judged when a review signal was written; otherwise it carries the
+  const expectedFraud = oracle.review_indicators.expected_fraud_signal
+  const fraudWritten = claimState.fraud_signal === 'review_required'
+  const review = fraudWritten
+    ? { result: expectedFraud === 'review_required' ? 'pass' : 'fail', expected: expectedFraud, actual: claimState.fraud_signal, false_positive: expectedFraud === 'none' }
+    : { result: lodged ? 'not_implemented' : 'not_lodged', expected: expectedFraud, actual: claimState.fraud_signal || null, signal_codes: signalCodes }
+  // An innocent control is judged only when the fraud signal was written; otherwise it carries the
   // review's own result, never a "not flagged" that would read as a pass.
-  const innocentControls = (oracle.design.innocent_controls || []).map((control) => ({
-    control,
-    result: reviewWritten ? (claimState.fraud_signal === 'review_required' ? 'flagged' : 'not_flagged') : review.result,
-  }))
+  const innocentControls = (oracle.design.innocent_controls || []).map((control) => ({ control, result: fraudWritten ? 'flagged' : review.result }))
 
   // Facts: the confirmed value of every expected fact; optional facts must match when present.
   // The staff field list (`items: [{code, field}]`) holds the full form; the claimant's form is the
@@ -302,7 +299,7 @@ function summarise(allScores) {
     `Packs: ${scores.length}. Lodged first time: ${lodgedFirst}. Lodged after a retry: ${lodgedRetry}. Stuck: ${count((s) => s.journey.outcome === 'stuck')}. Not run: ${count((s) => s.journey.outcome === 'runner_not_implemented')}.`,
     `Completed without follow-up (lodged, nothing owed by the claimant, no missing-information triage reason): ${count((s) => s.journey.completed_without_follow_up)}/${scores.length}. Within the effort target (under 5 minutes and under 10 questions): ${count((s) => s.journey.effort_within_target)}/${scores.length}.`,
     `Triage scored: ${scoredTriage.length} (class pass ${scoredTriage.filter((s) => s.triage.result === 'pass').length}, reasons pass ${reasonsPass}); not implemented: ${count((s) => s.triage.result === 'not_implemented')}; not applicable (no Claim expected): ${count((s) => s.triage.result === 'not_applicable')}; not lodged: ${count((s) => s.triage.result === 'not_lodged')}.`,
-    `Review signals scored: ${scoredReview.length} (false positives ${scoredReview.filter((s) => s.review.false_positive).length}, false negatives ${scoredReview.filter((s) => s.review.false_negative).length}); not implemented: ${count((s) => s.review.result === 'not_implemented')}; not lodged: ${count((s) => s.review.result === 'not_lodged')}. Innocent controls: ${controls.length} (flagged ${controlCount('flagged')}, not flagged ${controlCount('not_flagged')}, not implemented ${controlCount('not_implemented')}, not lodged ${controlCount('not_lodged')}).`,
+    `Fraud review scored: ${scoredReview.length} (false positives ${scoredReview.filter((s) => s.review.false_positive).length}; false negatives cannot be told while none is the default); not implemented: ${count((s) => s.review.result === 'not_implemented')}; not lodged: ${count((s) => s.review.result === 'not_lodged')}. Innocent controls: ${controls.length} (flagged ${controlCount('flagged')}, not implemented ${controlCount('not_implemented')}, not lodged ${controlCount('not_lodged')}).`,
     '',
     ...lines,
   ].join('\n')

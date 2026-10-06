@@ -142,11 +142,12 @@ A pack is `stuck` when any of these happens:
   `amount_unknown`).
 - **Triage:** the class, and whether the reasons include every required reason and nothing outside
   the allowed list. A pack that never lodged is `not_lodged`: nothing was triaged.
-- **Review signals:** a review signal and its fraud flag, with false positives and false negatives
-  counted apart; `not_implemented` while main writes only retrieval-uncertainty signals, and
-  `not_lodged` for a pack that never lodged. Innocent controls are reported on their own, and are
-  judged `flagged` or `not_flagged` only once a review signal is written; until then they carry
-  the review's result.
+- **Fraud review:** `claim_state.fraud_signal` against the pack's expected fraud signal, the only
+  field the corpus standard maps it to. Nothing on main writes it, and its default is `none`, so
+  only `review_required` is scored: a pass, or a false positive when the pack expects none. Every
+  other pack is `not_implemented` (or `not_lodged`), and false negatives cannot be measured yet.
+  Other staff signals, such as a policy judgment proposal, never count. Innocent controls are
+  reported on their own: `flagged` when the signal is written, otherwise the review's result.
 - **Staff side:** each item of the staff to-answer list, with its kind (`question` or
   `contact_request`), the Agent's proposed answer and basis, or the claimant's contact preference.
 - **Facts:** expected facts against the confirmed value in the staff field list. Incident time is
