@@ -43,7 +43,7 @@ Settings (environment):
 
 ## Seeded customers
 
-Each pack's claimant is its own customer, signed in with the pack's name and email
+Each pack's claimant is its own customer, using the pack's name and email
 (`policyholder.name`, `claimant.email`). The rest is fixed by the pack ID, so the same packs always
 give the same manifest:
 
@@ -56,6 +56,19 @@ give the same manifest:
 The seed refuses the four policy numbers #1206 uses, a policy number shared by two packs, and a
 pack listed twice. Before a pack starts, the runner checks that its customer has no Claim other
 than its seeded earlier claims. A leftover Claim means the stores were not reset.
+
+`signed_in` packs log in before the first message. `anonymous_then_sign_in` packs start in a fresh
+unsigned-in browser context and send their first message anonymously. Their customer isolation
+check and phone setup use a separate browser context whose session is revoked and closed before
+the journey starts; those setup reads never reach the claimant model.
+
+When the claimant first selects a file, the runner waits for the product's visible instruction to
+sign in. It opens the existing UI login entry, signs in as the pack's seeded customer, and lets the
+client promote the current Claim. It verifies that the UI returns to the same Claim and the seeded
+account can read it, then selects the file again through the same requested upload spot. If the
+claimant reaches the payout card first, its visible `Log in to continue` gate triggers the same
+mechanical sign-in. The runner never calls promotion directly, starts a replacement Claim, or
+resends the initial message. A failed login or promotion leaves the pack `stuck`.
 
 ## The claimant
 
@@ -101,8 +114,10 @@ message, files to upload and at most one button to press. It answers only what i
 nothing, and sends each file once. When it presses a button, it does nothing else that turn.
 
 The runner fills the payout form, the contact choice and the agreement checkboxes by fixed rules.
-It logs in, adds the pack's phone to the profile so SMS can be chosen, and attaches files one at a
-time. It presses Send only after every file shows Ready.
+It signs in at the pack's declared entry or visible login gate, adds the pack's phone to the profile
+so SMS can be chosen, and attaches files one at a time. It presses Send only after every file shows
+Ready. Login is a mechanical prerequisite and does not count as a recovery. `run.json` records
+the anonymous sign-in trigger, original Claim, conversation session and whether promotion succeeded.
 
 Uploads follow "Evidence kinds and the upload path" in the corpus standard:
 
@@ -188,7 +203,6 @@ A summary table goes on the issue or PR.
 
 Not yet covered:
 
-- packs whose `claimant_session` is `anonymous_then_sign_in` (recorded as `runner_not_implemented`);
 - a material available only later. The claimant is told to say it will have it later, but the
   runner does not hold the file back, and every material in corpus v1 is `available_from: start`;
 - cost per pack. Standard `start-dev` does not keep the backend log, which is where model token

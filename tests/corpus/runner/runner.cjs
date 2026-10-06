@@ -229,6 +229,100 @@ async function waitUntilIdle(page, timeoutMs = 180000) {
   }, null, { timeout: timeoutMs })
 }
 
+// Authentication is a mechanical rule, never a claimant-model decision. Wait for the whole
+// login handler (including promotion), not merely the token it stores before promotion starts.
+async function signInSeededCustomer(page, account) {
+  await page.fill('#customer-email', account.email)
+  await page.fill('#customer-password', account.synthetic_password)
+  await page.click('button.login-submit')
+  await page.waitForFunction(() => !document.querySelector('form.login-form')
+    || Boolean(document.querySelector('form.login-form [role=alert]')?.textContent), null, { timeout: 30000 })
+  const error = await page.locator('form.login-form [role=alert]').textContent({ timeout: 500 }).catch(() => null)
+  if (error) throw new Error(`sign-in failed: ${error}`)
+  const token = await page.evaluate(() => localStorage.getItem('northwind.claimantToken'))
+  if (!token) throw new Error('sign-in did not establish an authenticated session')
+  return token
+}
+
+async function authenticatedRead(url, token) {
+  const response = await fetch(`${API}${url}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`)
+  return response.json()
+}
+
+// Check isolation and add the phone before any Claim is started. These setup reads and writes
+// are separate from the claimant's screen and are never passed to its model.
+async function prepareSeededCustomer(caseId, facts, token) {
+  const account = seedAccount(caseId, facts)
+  const claims = await authenticatedRead('/api/v1/claims', token)
+  const seeded = `clm_corpus_${packKey(caseId)}_p`
+  const leftover = (claims.items || []).filter((item) => !String(item.claim_id).startsWith(seeded))
+  if (leftover.length) throw new Error(`${account.email} already has ${leftover.length} claim(s) from an earlier run; reset the stores and seed again`)
+  const profile = await authenticatedRead('/api/v1/account', token)
+  if (profile.customer_id !== account.customer_id) throw new Error('sign-in returned a different seeded customer')
+  if (facts['claimant.phone']) {
+    const response = await fetch(`${API}/api/v1/account/profile`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'If-Match': String(profile.revision) }, body: JSON.stringify({ phone: facts['claimant.phone'] }) })
+    if (!response.ok) throw new Error(`profile setup: HTTP ${response.status}`)
+  }
+}
+
+async function startClaimantSession(browser, page, session, caseId, facts) {
+  const account = seedAccount(caseId, facts)
+  if (session === 'signed_in') {
+    await page.goto(`${CUSTOMER}/auth/login`)
+    await prepareSeededCustomer(caseId, facts, await signInSeededCustomer(page, account))
+  } else {
+    // A separate setup context checks the seeded account, then revokes its token and closes.
+    // The journey context remains fresh: its first message uses only the anonymous identity.
+    const setupContext = await browser.newContext()
+    let token = null
+    try {
+      const setupPage = await setupContext.newPage()
+      await setupPage.goto(`${CUSTOMER}/auth/login`)
+      token = await signInSeededCustomer(setupPage, account)
+      await prepareSeededCustomer(caseId, facts, token)
+    } finally {
+      try {
+        if (token) {
+          const response = await fetch(`${API}/api/v1/auth/session`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+          if (!response.ok) throw new Error(`setup sign-out: HTTP ${response.status}`)
+        }
+      } finally { await setupContext.close() }
+    }
+  }
+  await page.goto(`${CUSTOMER}/`)
+}
+
+async function signInAnonymousClaim(page, account, claimId) {
+  // Clicking the existing profile/login entry keeps App's current Claim in memory. Navigating
+  // directly to /auth/login would reload it and could lose the promotion target.
+  if (!(await page.locator('form.login-form').isVisible().catch(() => false))) await page.locator('button.intake-profile').click()
+  const token = await signInSeededCustomer(page, account)
+  await page.locator('#workspace-incident-input').waitFor({ state: 'visible', timeout: 30000 })
+  const resumedId = (page.url().match(/\/claims\/(clm_[a-z0-9]+)(?:$|[?#])/) || [null, null])[1]
+  if (resumedId !== claimId) throw new Error('sign-in did not return to the original anonymous Claim')
+  const profile = await authenticatedRead('/api/v1/account', token)
+  if (profile.customer_id !== account.customer_id) throw new Error('sign-in returned a different seeded customer')
+  // Ownership is checked by the server. A swallowed promotion error must not let an upload
+  // proceed under a token that cannot read this Claim. Do not call /promote as a repair.
+  const claim = await authenticatedRead(`/api/v1/claims/${claimId}`, token)
+  if (claim.claim_id !== claimId) throw new Error('sign-in read a different Claim')
+  return claim
+}
+
+async function selectClaimantFile(page, file, resolveInput, signIn) {
+  await (await resolveInput()).setInputFiles(file)
+  if (signIn) {
+    // Let the real product reject the anonymous selection. This is a visible login gate,
+    // not an upload failure or a human recovery, and the selection has created no Evidence.
+    await page.getByText('Sign in before uploading a file.', { exact: false }).first().waitFor({ timeout: 10000 })
+    await signIn('upload')
+    // Promotion rerenders the UI; resolve the selected upload spot again and make a fresh
+    // authenticated selection. Neither the initial message nor the Claim is recreated.
+    await (await resolveInput()).setInputFiles(file)
+  }
+}
+
 // ---------- one pack ----------
 
 async function runPack(browser, caseId, claimant, outRoot) {
@@ -244,7 +338,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
   const transcript = []
   const log = (name, line) => fs.appendFileSync(path.join(out, name), `${JSON.stringify(line)}\n`)
 
-  if (setup.claimant_session !== 'signed_in') {
+  if (!['signed_in', 'anonymous_then_sign_in'].includes(setup.claimant_session)) {
     record.outcome = 'runner_not_implemented'
     record.stuck = { step: 'start', reason: `claimant_session ${setup.claimant_session} is not driven yet` }
     fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(record, null, 1))
@@ -275,30 +369,23 @@ async function runPack(browser, caseId, claimant, outRoot) {
     record.steps.push({ step, name, file, at: new Date().toISOString() })
   }
 
+  let operation = 'runner'
+  let signedIn = setup.claimant_session === 'signed_in'
   try {
-    // Log in through the UI as the pack's seeded customer, so its policy and earlier claims are
-    // the ones the system finds (fixed rule). The synthetic password is never written to a record.
     const account = seedAccount(caseId, facts)
-    await page.goto(`${CUSTOMER}/auth/login`)
-    await page.fill('#customer-email', account.email)
-    await page.fill('#customer-password', account.synthetic_password)
-    await page.click('button.login-submit')
-    await page.waitForFunction(() => Boolean(localStorage.getItem('northwind.claimantToken')), null, { timeout: 30000 })
-    const token = await page.evaluate(() => localStorage.getItem('northwind.claimantToken'))
-    // The customer is used once per run: any Claim beyond its seeded earlier claims comes from an
-    // earlier run and would count as history, so the stores need a reset first.
-    const claims = await (await fetch(`${API}/api/v1/claims`, { headers: { Authorization: `Bearer ${token}` } })).json()
-    const seeded = `clm_corpus_${packKey(caseId)}_p`
-    const leftover = (claims.items || []).filter((item) => !String(item.claim_id).startsWith(seeded))
-    if (leftover.length) throw new Error(`${account.email} already has ${leftover.length} claim(s) from an earlier run; reset the stores and seed again`)
-    // A person would add their phone in the profile before choosing SMS; this does that step directly.
-    if (facts['claimant.phone']) {
-      const account = await (await fetch(`${API}/api/v1/account`, { headers: { Authorization: `Bearer ${token}` } })).json()
-      await fetch(`${API}/api/v1/account/profile`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'If-Match': String(account.revision) }, body: JSON.stringify({ phone: facts['claimant.phone'] }) })
+    await startClaimantSession(browser, page, setup.claimant_session, caseId, facts)
+    const signIn = async (trigger) => {
+      operation = 'sign-in'
+      record.anonymous_sign_in = { trigger, claim_id: record.claim_id, started_at: new Date().toISOString(), succeeded: false }
+      await shot('sign-in-required')
+      const claim = await signInAnonymousClaim(page, account, record.claim_id)
+      signedIn = true
+      Object.assign(record.anonymous_sign_in, { succeeded: true, conversation_session_id: claim.conversation_session_id, finished_at: new Date().toISOString() })
+      await shot('signed-in')
+      operation = 'runner'
     }
 
     // The first message, as written.
-    await page.goto(`${CUSTOMER}/`)
     await page.getByPlaceholder('Tell us what happened…').fill(view.initial_message)
     await shot('entry')
     const firstSent = Date.now()
@@ -323,18 +410,20 @@ async function runPack(browser, caseId, claimant, outRoot) {
         // the tray, carrying that item's kind, and goes with the message.
         const trayLabels = () => page.locator('form.workspace-composer .composer-file-copy').evaluateAll((nodes) => nodes.map((node) => `${node.querySelector('strong')?.textContent?.trim()}: ${node.querySelector('small')?.textContent?.trim()}`))
         for (const { material, spot } of usable) {
-          let input = page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])')
           let via = 'chat'
-          if (spot) {
-            const index = (await page.evaluate(uploadSpotsInPage)).indexOf(spot)
-            if (index >= 0) {
-              input = page.locator(`[data-corpus-upload="${index}"]`)
-              via = spot
-            } else {
+          const resolveInput = async () => {
+            if (spot) {
+              const index = (await page.evaluate(uploadSpotsInPage)).indexOf(spot)
+              if (index >= 0) {
+                via = spot
+                return page.locator(`[data-corpus-upload="${index}"]`)
+              }
+              via = 'chat'
               log('claimant.jsonl', { at: new Date().toISOString(), upload_spot_missing: spot, material: material.id, reason: 'no such upload spot on the screen; sent through the chat' })
             }
+            return page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])')
           }
-          await input.setInputFiles(path.join(caseDir, 'input', 'materials', material.file))
+          await selectClaimantFile(page, path.join(caseDir, 'input', 'materials', material.file), resolveInput, signedIn ? null : signIn)
           sentVia.push({ material: material.id, via })
           await page.locator('form.workspace-composer .composer-attachments').getByText(material.file).first().waitFor({ timeout: 30000 })
           const ready = await page.waitForFunction(() => {
@@ -381,6 +470,13 @@ async function runPack(browser, caseId, claimant, outRoot) {
         record.claim_number = (lodged.match(/NWF-[A-Z0-9-]+/) || [null])[0]
         record.outcome = record.retries ? 'lodged_after_retry' : 'lodged_first_time'
         break
+      }
+      // The payout card can require login even when the claimant has no files to send.
+      const loginGate = page.getByRole('button', { name: 'Log in to continue', exact: true })
+      if (!signedIn && await loginGate.isVisible().catch(() => false)) {
+        await signIn('payout')
+        lastAskedScreen = null
+        continue
       }
       if (now.reply && now.agentCount > seenAgentCount) {
         seenAgentCount = now.agentCount
@@ -539,7 +635,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
     if (!record.outcome) { record.outcome = 'stuck'; record.stuck = { step: 'runner', reason: 'step guard reached' } }
   } catch (error) {
     record.outcome = 'stuck'
-    record.stuck = { step: 'runner', reason: error.message.split('\n')[0] }
+    record.stuck = { step: operation, reason: error.message.split('\n')[0] }
     await shot('error').catch(() => {})
   } finally {
     // The claimant-side end state, read the way the app reads it, for the scorer.
@@ -547,7 +643,8 @@ async function runPack(browser, caseId, claimant, outRoot) {
       const endState = await page.evaluate(async (claimId) => {
         const token = localStorage.getItem('northwind.claimantToken')
         const read = async (url) => {
-          const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+          const headers = token ? { Authorization: `Bearer ${token}` } : { 'X-Northwind-Anonymous-Session': sessionStorage.getItem('northwind.anonymousSession') }
+          const response = await fetch(url, { headers })
           return { status: response.status, body: response.ok ? await response.json() : await response.text() }
         }
         const claim = await read(`/api/v1/claims/${claimId}`)
@@ -634,4 +731,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile }
