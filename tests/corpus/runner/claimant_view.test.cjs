@@ -74,6 +74,17 @@ test('no oracle or setup value reaches the claimant prompt', () => {
   assert.doesNotThrow(() => assertNoLeak(prompt.system + prompt.brief, hidden))
 })
 
+test('a material label that repeats an oracle or setup value fails the guard', () => {
+  const dir = syntheticPack()
+  for (const label of ['Receipt dated after the incident', 'Photo for anonymous_then_sign_in']) {
+    // The runner builds the view with the labels and derives the hidden values from that view.
+    const view = buildClaimantView(dir, { 'CTL-M-900': { 'photo-rear': label } })
+    const hidden = hiddenValues(dir, view, promptScaffold())
+    const prompt = buildClaimantPrompt(view, [], '')
+    assert.throws(() => assertNoLeak(prompt.system + prompt.brief, hidden), /oracle or setup value/, label)
+  }
+})
+
 test('a prompt that carries an oracle value fails the guard', () => {
   const dir = syntheticPack()
   const view = buildClaimantView(dir, LABELS)

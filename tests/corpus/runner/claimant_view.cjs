@@ -3,7 +3,7 @@
 //
 // The view is built field by field, not file by file. The simulator sees what a claimant knows:
 // the first message as written, the persona and answer policy, the facts, and for each material
-// the file and a hand-written plain-language label. It never sees `evidence_kind`, how a material
+// the file and a reviewed plain-language label. It never sees `evidence_kind`, how a material
 // was generated (prompt, purpose), materials marked `include: false`, `setup.json` or `oracle/`.
 const fs = require('node:fs')
 const path = require('node:path')
@@ -57,11 +57,14 @@ function stringLeaves(value, out = new Set()) {
 
 // Values that exist only in the oracle or the setup. A value the claimant legitimately knows (a
 // policy number in the facts, the product family) is not a leak, and neither is a word of the
-// fixed prompt template (`scaffold`), which is code and carries nothing from the pack.
+// fixed prompt template (`scaffold`), which is code and carries nothing from the pack. The
+// material labels are the runner's own text, not the pack's, so they never make a value allowed:
+// a label that repeats an oracle or setup value is caught like any other leak.
 function hiddenValues(caseDir, view, scaffold = '') {
   const hidden = stringLeaves(readJson(path.join(caseDir, 'oracle', 'labels.json')))
   stringLeaves(readJson(path.join(caseDir, 'setup.json')), hidden)
-  const allowed = `${JSON.stringify(view)}\n${scaffold}`.toLowerCase()
+  const packOnly = { ...view, materials: view.materials.map(({ label, ...material }) => material) }
+  const allowed = `${JSON.stringify(packOnly)}\n${scaffold}`.toLowerCase()
   return [...hidden].filter((value) => !allowed.includes(value.toLowerCase()))
 }
 

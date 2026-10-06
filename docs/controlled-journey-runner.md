@@ -75,11 +75,17 @@ What the claimant model may see (`claimant_view.cjs`):
 - the initial message;
 - the persona and answer policy;
 - the facts;
-- the materials, under hand-written labels (`material-labels.json`, currently the ten reference
-  packs).
+- the materials, under plain-language labels (`material-labels.json`, every pack of corpus v1).
+
+The labels say what the claimant holds, the way a claimant would name it. The ten reference packs
+were labelled by hand. The rest were drafted by the operator's local model from each file's content
+alone, without the file name, evidence kind, provenance, setup or oracle, and then reviewed one by
+one. Where a photo is unclear or a file is cut short on purpose, the label says what the claimant
+photographed or holds.
 
 It never sees evidence kinds, generation prompts, materials marked `include: false`, `setup.json`,
-or `oracle/`. A leak check stops the run if any of those values reaches the prompt.
+or `oracle/`. A leak check stops the run if any of those values reaches the prompt. The labels are
+the runner's own text, so a label that repeats one of those values is caught too.
 
 Each turn, the claimant model gets only what the screen shows:
 
@@ -183,7 +189,6 @@ A summary table goes on the issue or PR.
 Not yet covered:
 
 - packs whose `claimant_session` is `anonymous_then_sign_in` (recorded as `runner_not_implemented`);
-- material labels for packs beyond the ten reference packs;
 - a material available only later. The claimant is told to say it will have it later, but the
   runner does not hold the file back, and every material in corpus v1 is `available_from: start`;
 - cost per pack. Standard `start-dev` does not keep the backend log, which is where model token
