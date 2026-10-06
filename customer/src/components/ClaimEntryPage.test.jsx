@@ -19,7 +19,6 @@ describe('ClaimEntryPage saved claim row', () => {
         continueCard={{
           claimId: 'clm_saved',
           title: 'Motor claim',
-          statusLabel: 'Draft',
           savedLabel: 'Saved 23:06',
           detail: 'Describe the accident and any injuries.',
         }}
@@ -30,11 +29,12 @@ describe('ClaimEntryPage saved claim row', () => {
 
     const composer = screen.getByTestId('claim-composer').closest('.claim-starter')
     const resume = screen.getByRole('button', {
-      name: 'Motor claim, Draft. Continue your claim. Next: Describe the accident and any injuries. Saved 23:06',
+      name: 'Motor claim. Continue your claim. Next: Describe the accident and any injuries. Saved 23:06',
     })
 
     expect(within(composer).queryByRole('button', { name: /Continue your claim/ })).not.toBeInTheDocument()
-    expect(resume).toHaveTextContent('Motor claim · Draft')
+    expect(resume).toHaveTextContent('Motor claim')
+    expect(resume).not.toHaveTextContent(/Draft|Professional Review|Ready For Next|Awaiting Evidence/)
     expect(resume).toHaveTextContent('Continue your claim')
     expect(resume).toHaveTextContent('Next: Describe the accident and any injuries.')
     expect(resume).toHaveTextContent('Saved 23:06')

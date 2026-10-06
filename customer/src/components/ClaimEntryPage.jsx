@@ -34,7 +34,7 @@ export default function ClaimEntryPage({
               <button
                 className="entry-continue-card"
                 type="button"
-                aria-label={`${continueCard.title}, ${continueCard.statusLabel}. Continue your claim. Next: ${continueCard.detail} ${continueCard.savedLabel}`}
+                aria-label={`${continueCard.title}. Continue your claim. Next: ${continueCard.detail} ${continueCard.savedLabel}`}
                 onClick={() => onContinue(continueCard.claimId)}
               >
                 <span className="entry-continue-icon" aria-hidden="true">
@@ -48,7 +48,7 @@ export default function ClaimEntryPage({
                 </span>
                 <span className="entry-continue-copy">
                   <span className="entry-continue-kicker">
-                    {continueCard.title} · {continueCard.statusLabel}
+                    {continueCard.title}
                   </span>
                   <strong>Continue your claim</strong>
                   <span className="entry-continue-detail">Next: {continueCard.detail}</span>

@@ -1,15 +1,10 @@
-import { claimStatusLabel, claimTitle } from './formatters.js'
+import { claimTitle } from './formatters.js'
 import { claimantOwedItems, openItemsBarText } from './openItems.js'
 
 function savedTime(value) {
   const saved = value ? new Date(value) : null
   if (!saved || Number.isNaN(saved.getTime())) return null
   return saved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-}
-
-function savedClaimStatus(report) {
-  if (report.workflow_state === 'collecting') return 'Draft'
-  return report.workflow_state ? claimStatusLabel(report.workflow_state) : 'In progress'
 }
 
 // The one claim a returning claimant is offered under the landing composer:
@@ -27,7 +22,6 @@ export function continueClaimCard(reports = []) {
   return {
     claimId: latest.claim_id,
     title: claimTitle(latest),
-    statusLabel: savedClaimStatus(latest),
     savedLabel: savedAt ? `Saved ${savedAt}` : 'Saved',
     detail: latest.customer_next_step?.summary
       || openItemsBarText(latest.open_items)

@@ -23,7 +23,6 @@ describe('continue your claim card', () => {
     ])
     expect(card.claimId).toBe('clm_new')
     expect(card.title).toBe('Motor claim')
-    expect(card.statusLabel).toBe('Draft')
     expect(card.savedLabel).toBe(`Saved ${new Date('2026-10-02T02:00:00Z').toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -36,6 +35,7 @@ describe('continue your claim card', () => {
     const card = continueClaimCard([
       report('clm_next', '2026-10-02T02:00:00Z', {
         can_resume: true,
+        workflow_state: 'professional_review',
         customer_next_step: {
           summary: 'Describe the accident and any injuries.',
           can_resume: true,
@@ -44,6 +44,7 @@ describe('continue your claim card', () => {
     ])
 
     expect(card.detail).toBe('Describe the accident and any injuries.')
+    expect(card).not.toHaveProperty('statusLabel')
     expect(card).not.toHaveProperty('progress')
   })
 
