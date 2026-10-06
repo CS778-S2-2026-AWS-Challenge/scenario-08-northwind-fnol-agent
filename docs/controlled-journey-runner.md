@@ -1,0 +1,151 @@
+# Controlled journey runner
+
+The runner plays the claimant of each controlled-corpus pack through the real claimant UI on the
+`start-dev` stack, the way a person would, then a separate scorer compares the end state with the
+pack's oracle (#1222). Pack contents and labels are defined in the
+[Controlled Test Corpus Standard](controlled-test-corpus.md). The code is in `tests/corpus/runner/`.
+
+It runs only on `scripts/start-dev.ps1`: the backend must report `environment` development or
+test, `data_runtime_profile` `local_mvp`, and `agent` `configured`. It is not part of CI.
+
+## Run it
+
+A full run starts from empty stores. Journeys lodge real Claims, and those become the customer's
+history, so a second run on the same data would count the first run's Claims as earlier claims.
+
+1. Stop the backend.
+2. `node tests/corpus/runner/runner.cjs reset` drops the start-dev MongoDB database and deletes the
+   claimant identity file. It refuses while the backend answers, or when MongoDB is not local.
+3. Start the backend with `scripts/start-dev.ps1`. Startup provisions the packaged business seed
+   and the staff accounts again.
+4. `node tests/corpus/runner/runner.cjs seed CTL-M-002 CTL-H-006 …` writes every pack of the run
+   as one manifest in the shared business-seed shape (`config/business-seed.json`, #1221). It then
+   provisions the manifest through `load_business_seed` and the `provision_business_*` functions,
+   which insert absent records only.
+5. `node tests/corpus/runner/runner.cjs run CTL-M-002 CTL-H-006 …` runs the packs one after another.
+6. `node tests/corpus/runner/score.cjs <run folder>` scores the run.
+
+Settings (environment):
+
+| Setting | Used by | Content |
+| --- | --- | --- |
+| `CORPUS_CASES_DIR` | all | The corpus `cases` folder (a fetched release, outside git) |
+| `RUN_OUTPUT_DIR` | seed, run | Where manifests and run records go; outside the repository |
+| `NORTHWIND_MONGODB_URI`, `NORTHWIND_MONGODB_DATABASE` | reset, seed | The backend's values (start-dev: `northwind_fnol`) |
+| `CORPUS_PYTHON` | reset, seed | The Python that runs the backend (default `py -3.12`) |
+| `CORPUS_BACKEND_REPO` | reset, seed, run | The checkout the backend runs from, if not this one |
+| `CLAIMANT_BACKEND` | run | `ollama` (default) or `claude` |
+| `CLAIMANT_OLLAMA_URL`, `CLAIMANT_MODEL` | run | The claimant model, for example `qwen3.8:27b` on the operator's Ollama |
+| `NODE_PATH` | run | A folder whose `node_modules` holds Playwright |
+
+## Seeded customers
+
+Each pack's claimant is its own customer, signed in with the pack's name and email
+(`policyholder.name`, `claimant.email`). The rest is fixed by the pack ID, so the same packs always
+give the same manifest:
+
+- customer `cus_corpus_<pack>`;
+- a synthetic development password;
+- each policy in `policies_in_system`, owned by that customer, with status `active` and no coverage
+  sections;
+- each earlier claim as `clm_corpus_<pack>_p<n>` with claim number `NW-SYN-<pack>-P<n>`.
+
+The seed refuses the four policy numbers #1206 uses, a policy number shared by two packs, and a
+pack listed twice. Before a pack starts, the runner checks that its customer has no Claim other
+than its seeded earlier claims. A leftover Claim means the stores were not reset.
+
+## The claimant
+
+The claimant model is independent of the system under test and of the team's keys. Each run
+records the model's name and version.
+
+| Backend | Model | Behaviour |
+| --- | --- | --- |
+| `ollama` | The operator's own model; the reference runs used `qwen3.8:27b` | Temperature 0 and a fixed seed, so the same screen gives the same reply |
+| `claude` | The Claude Code CLI on the operator's own login, with no tools and no session | Replies can differ from run to run |
+
+The system's reply review already uses Claude Haiku 4.5, so the reference runs use the Ollama
+model.
+
+What the claimant model may see (`claimant_view.cjs`):
+
+- the initial message;
+- the persona and answer policy;
+- the facts;
+- the materials, under hand-written labels (`material-labels.json`, currently the ten reference
+  packs).
+
+It never sees evidence kinds, generation prompts, materials marked `include: false`, `setup.json`,
+or `oracle/`. A leak check stops the run if any of those values reaches the prompt.
+
+Each turn, the claimant model gets only what the screen shows:
+
+- the latest reply;
+- the cards under it;
+- the to-do bar;
+- the open service card;
+- any alert;
+- the buttons it can press.
+
+Network traffic is recorded for evidence but never given to it. The claimant model replies with a
+message, files to upload and at most one button to press. It answers only what is asked, invents
+nothing, and sends each file once. When it presses a button, it does nothing else that turn.
+
+The runner fills the payout form, the contact choice and the agreement checkboxes by fixed rules.
+It logs in, adds the pack's phone to the profile so SMS can be chosen, and attaches files one at a
+time. It presses Send only after every file shows Ready.
+
+## Recovery and stuck
+
+A person's recoveries are allowed once each. A run that used one ends as `lodged_after_retry`,
+never `lodged_first_time`. The recoveries are:
+
+- pressing "Retry message" or "Retry response";
+- after about nine seconds with nothing to act on, typing "OK.".
+
+A pack is `stuck` when any of these happens:
+
+- a second failure follows a recovery;
+- after the nudge, there is still nothing to act on;
+- the claimant reaches 30 messages;
+- a file never shows Ready;
+- a wait times out.
+
+## Scoring
+
+`score.cjs` is the only reader of `oracle/`. Every comparison is mechanical. Per pack and in
+`summary.md` it reports:
+
+- **Journey:** outcome, claim number, messages, agent questions, repeated questions, time, and the
+  effort target (under five minutes and under ten questions, lodged runs only).
+- **Completed without follow-up:** lodged, nothing owed by the claimant, and no missing-information
+  triage reason (`document_outstanding`, `fact_unresolved`, `policy_not_verified`,
+  `amount_unknown`).
+- **Triage:** the class, and whether the reasons include every required reason and nothing outside
+  the allowed list.
+- **Review signals:** a review signal and its fraud flag; `not_implemented` while main writes only
+  retrieval-uncertainty signals.
+- **Facts:** expected facts against the confirmed value in the staff field list, with incident time
+  compared by New Zealand calendar day.
+- **Assertions:** the pack's assertions and the corpus-wide `global_assertions.json`. A `forbidden`
+  assertion passes when its condition does not hold. Rubric-only text assertions are left for a
+  person.
+
+Capabilities main does not implement are reported as `not_implemented` and kept out of the pass
+and fail counts.
+
+## Evidence and limits
+
+Run records stay outside the repository:
+
+- screenshots of every turn;
+- the claimant prompts and replies;
+- the network log (authentication bodies are not recorded; tokens and passwords are masked);
+- the claimant and staff end states.
+
+A summary table goes on the issue or PR.
+
+Not yet covered:
+
+- packs whose `claimant_session` is `anonymous_then_sign_in` (recorded as `runner_not_implemented`);
+- material labels for packs beyond the ten reference packs.
