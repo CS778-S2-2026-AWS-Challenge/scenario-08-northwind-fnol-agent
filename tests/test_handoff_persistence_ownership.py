@@ -160,7 +160,7 @@ def test_handoff_guard_fails_closed_without_matching_atomic_audit(
         key_prefix='handoff-audit-guard',
     )
     claim = repository.get_claim_internal(claim_id)
-    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert handoff is not None
 
@@ -244,7 +244,7 @@ def test_handoff_guard_fails_closed_without_matching_atomic_audit(
         )
 
     assert repository.get_claim_internal(claim_id) == claim
-    assert repository.get_handoff(claim_id, handoff_id, 'cus_demo') == handoff
+    assert repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b') == handoff
 
 
 def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
@@ -282,7 +282,7 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert message.status_code == 200
     assert message.json()['claim_revision'] == 4
 
-    in_progress = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    in_progress = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert in_progress is not None
     assert in_progress.status is HandoffStatus.IN_PROGRESS
     assert in_progress.assigned_to == 'stf_demo'
@@ -328,7 +328,7 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert body['customer_update']['created_by'] == 'stf_demo'
 
     stored_claim = repository.get_claim_internal(claim_id)
-    stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_handoff is not None
     assert stored_claim.revision == 5
@@ -347,7 +347,7 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
         'handoff-lifecycle-resolve',
     ]
     assert [event.actor.actor_id for event in audits] == [
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
         'stf_demo',
         'stf_demo',
         'stf_demo',
@@ -390,12 +390,12 @@ def test_claimant_message_during_open_handoff_is_silenced_without_upgrading_it(
     body = response.json()
     assert body['agent_message'] is None
     assert body['decision'] is None
-    unchanged = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    unchanged = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert unchanged is not None
     assert unchanged.handoff_id == handoff_id
     assert unchanged.support_need is not None
     assert unchanged.support_need.value == 'human_requested'
-    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
 
 def test_requeue_mutates_handoff_with_same_atomic_audit_bundle(
@@ -431,7 +431,7 @@ def test_requeue_mutates_handoff_with_same_atomic_audit_bundle(
     assert requeued.status_code == 200, requeued.text
     assert requeued.json()['revision'] == 4
     stored_claim = repository.get_claim_internal(claim_id)
-    stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_handoff is not None
     assert stored_claim.assignee_id is None
@@ -484,7 +484,7 @@ def test_legacy_support_resolution_without_continuation_preserves_claim_state(
         handoff_id,
         key='legacy-handoff-continuation-accept',
     )
-    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     claim_before = repository.get_claim_internal(claim_id)
     assert handoff is not None
     assert claim_before is not None
@@ -495,7 +495,7 @@ def test_legacy_support_resolution_without_continuation_preserves_claim_state(
                 'resume_next_action': None,
             }
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
@@ -647,9 +647,11 @@ def test_staff_message_requires_handoff_owner_and_same_session_reply_reference(
         handoff_id,
         key='staff-message-authority-accept',
     )
-    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert handoff is not None
-    repository.save_handoff(handoff.model_copy(update={'assigned_to': 'stf_other'}), 'cus_demo')
+    repository.save_handoff(
+        handoff.model_copy(update={'assigned_to': 'stf_other'}), 'cus_8f41a2c90d7e463b'
+    )
 
     wrong_assignee = client.post(
         f'/api/v1/workbench/claims/{claim_id}/messages',
@@ -663,7 +665,7 @@ def test_staff_message_requires_handoff_owner_and_same_session_reply_reference(
     assert wrong_assignee.status_code == 403
     assert wrong_assignee.json()['error']['code'] == 'ACCESS_DENIED'
 
-    repository.save_handoff(handoff, 'cus_demo')
+    repository.save_handoff(handoff, 'cus_8f41a2c90d7e463b')
     other_claim = client.post(
         '/api/v1/claims',
         headers={**auth_headers, 'Idempotency-Key': 'reply-reference-other-claim'},
@@ -738,7 +740,7 @@ def test_repeated_support_request_reuses_owned_handoff_without_conflict(
     assert repeated.json()['revision'] == 3
     assert repeated.json()['handoff']['handoff_id'] == handoff_id
 
-    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    handoffs = repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(handoffs) == 1
     assert handoffs[0].assigned_to == 'stf_demo'
     assert handoffs[0].status is HandoffStatus.ACCEPTED
@@ -859,7 +861,7 @@ def test_persistence_guard_rejects_owner_bypass_and_non_owner_write(
     )
 
     stored_claim = repository.get_claim_internal(claim_id)
-    stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_handoff is not None
     assert stored_claim.revision == 3
@@ -869,7 +871,7 @@ def test_persistence_guard_rejects_owner_bypass_and_non_owner_write(
     with pytest.raises(HandoffPersistenceConflict):
         guarded.save_handoff(
             stored_handoff.model_copy(update={'assigned_to': 'stf_other'}),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
 
     continued = stored_handoff.model_copy(update={'status': HandoffStatus.IN_PROGRESS})
@@ -889,7 +891,7 @@ def test_persistence_guard_rejects_owner_bypass_and_non_owner_write(
         )
 
     unchanged_claim = repository.get_claim_internal(claim_id)
-    unchanged_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    unchanged_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert unchanged_claim is not None
     assert unchanged_handoff is not None
     assert unchanged_claim.revision == 3
@@ -908,7 +910,7 @@ def test_guard_preserves_parent_revision_as_the_first_concurrency_check(
         key_prefix='handoff-revision',
     )
     claim = repository.get_claim_internal(claim_id)
-    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert handoff is not None
     guarded = guarded_handoff_repository(repository)
@@ -936,7 +938,7 @@ def test_guard_preserves_parent_revision_as_the_first_concurrency_check(
 
     with pytest.raises(KeyError):
         guarded.save_staff_mutation(
-            next_claim.model_copy(update={'customer_id': 'cus_other'}),
+            next_claim.model_copy(update={'customer_id': 'cus_2b67e9d14a3c508f'}),
             claim.revision,
             retry,
             handoff=accepted,
@@ -962,7 +964,7 @@ def test_guard_rejects_invalid_handoff_creation_records(
         key_prefix='handoff-create-guard',
     )
     claim = repository.get_claim_internal(claim_id)
-    stored = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    stored = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert stored is not None
     guarded = guarded_handoff_repository(repository)
@@ -1022,7 +1024,7 @@ def test_guard_rejects_invalid_staff_lifecycle_mutations(
         key_prefix='handoff-state-guard',
     )
     claim = repository.get_claim_internal(claim_id)
-    queued = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    queued = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert queued is not None
     guarded = guarded_handoff_repository(repository)
@@ -1115,7 +1117,7 @@ def test_guard_preserves_acceptance_resolution_and_terminal_state(
         key='handoff-terminal-accept',
     )
     claim = repository.get_claim_internal(claim_id)
-    accepted = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    accepted = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert accepted is not None
     assert accepted.accepted_at is not None
@@ -1157,7 +1159,7 @@ def test_guard_preserves_acceptance_resolution_and_terminal_state(
             ),
         )
 
-    guarded.save_handoff(accepted, 'cus_demo')
+    guarded.save_handoff(accepted, 'cus_8f41a2c90d7e463b')
     assert guarded_handoff_repository(guarded) is guarded
     assert guarded.get_claim_internal(claim_id) == claim
 
@@ -1180,7 +1182,7 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
         handoff_id,
         key='handoff-terminal-rewrite-accept',
     )
-    accepted_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    accepted_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert accepted_handoff is not None
     assert accepted_handoff.resume_workflow_state is not None
     assert accepted_handoff.resume_next_action is not None
@@ -1217,7 +1219,7 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
     )
     assert resolved.status_code == 200
     claim = repository.get_claim_internal(claim_id)
-    terminal = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    terminal = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert terminal is not None
     assert terminal.resolved_at is not None

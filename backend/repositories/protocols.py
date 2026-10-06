@@ -1,6 +1,6 @@
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from threading import Event
 from typing import Any, Literal, Protocol
 
@@ -15,6 +15,7 @@ from backend.domain.audit import (
     AuditVisibility,
 )
 from backend.domain.claim_creation import ClaimCreationOperationRecord
+from backend.domain.claim_history import LodgedClaimHistory
 from backend.domain.external_services import (
     ExternalTaskAttempt,
     ExternalTaskEvidenceLink,
@@ -60,7 +61,7 @@ from backend.domain.retention import (
     RetentionRecordTombstone,
     RetentionStepStatus,
 )
-from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
+from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord, SeededPolicyRecord
 from backend.domain.runtime import RuntimeTurnRecords, RuntimeWorkItemRecord
 from backend.domain.staff_agent import (
     StaffAgentExecutionRecord,
@@ -491,6 +492,38 @@ class ClaimRepository(Protocol):
         raise NotImplementedError
 
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
+        raise NotImplementedError
+
+    def get_seed_policy(self, customer_id: str, policy_number: str) -> SeededPolicyRecord | None:
+        """Read the explicitly owned policy record without a fixture fallback."""
+        raise NotImplementedError
+
+    def ensure_seed_policy(self, policy: SeededPolicyRecord) -> None:
+        """Provision a policy only if its customer/reference identity is absent."""
+        raise NotImplementedError
+
+    def query_lodged_claim_history(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        limit: int,
+        as_of: datetime,
+        history_reference: str | None = None,
+    ) -> LodgedClaimHistory:
+        """Return owned lodged summaries and an independent 12-month count."""
+        raise NotImplementedError
+
+    def find_duplicate_lodged_claim_ids(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        product_family: str,
+        incident_date: date,
+        as_of: datetime,
+    ) -> list[str]:
+        """Return up to 50 owned lodged candidates within three incident calendar days."""
         raise NotImplementedError
 
     def list_claims_internal(self) -> list[WorkingClaim]:

@@ -15,9 +15,13 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
-SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'tests' / 'fixtures' / 'scenarios'
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    business_seed_path='config/business-seed.json',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 
 
 def seeded_scenario(name: str) -> tuple[FixtureRepository, str, str]:
@@ -34,8 +38,8 @@ def pause_active_session(
     *,
     clear_context: bool = False,
 ) -> None:
-    claim = repository.get_claim(claim_id, 'cus_demo')
-    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert session is not None
 
@@ -71,7 +75,7 @@ def pause_active_session(
 
 def test_resume_uses_latest_persisted_context_without_duplication() -> None:
     repository, claim_id, active_session_id = seeded_scenario('AT-08-resume')
-    source = repository.get_session(claim_id, active_session_id, 'cus_demo')
+    source = repository.get_session(claim_id, active_session_id, 'cus_8f41a2c90d7e463b')
     assert source is not None
     pause_active_session(repository, claim_id, active_session_id)
 
@@ -90,17 +94,17 @@ def test_resume_uses_latest_persisted_context_without_duplication() -> None:
     assert body['resume']['unresolved_questions'] == source.unresolved_questions
     assert source.pending_items[0] in body['resume']['pending_items']
     assert source.prior_commitments[0] in body['resume']['prior_commitments']
-    assert repository.claim_count == 1
-    assert len(repository.list_sessions_for_claim(claim_id, 'cus_demo')) == 3
+    assert repository.claim_count == 2
+    assert len(repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')) == 3
 
 
 def test_resume_revision_baseline_is_atomic_and_idempotent() -> None:
     repository, claim_id, active_session_id = seeded_scenario('AT-08-resume')
     pause_active_session(repository, claim_id, active_session_id)
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
     assert before.active_session_id is None
-    sessions_before = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    sessions_before = repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
     headers = {**AUTH, 'Idempotency-Key': 'resume-revision-baseline'}
 
     with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
@@ -122,22 +126,22 @@ def test_resume_revision_baseline_is_atomic_and_idempotent() -> None:
     resumed_session_id = body['session_id']
     assert isinstance(resumed_session_id, str)
 
-    after = repository.get_claim(claim_id, 'cus_demo')
-    resumed = repository.get_session(claim_id, resumed_session_id, 'cus_demo')
-    sessions_after = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    after = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    resumed = repository.get_session(claim_id, resumed_session_id, 'cus_8f41a2c90d7e463b')
+    sessions_after = repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert after is not None
     assert resumed is not None
     assert after.revision == before.revision + 1
     assert after.active_session_id == resumed_session_id
     assert resumed.context_revision == before.revision
     assert len(sessions_after) == len(sessions_before) + 1
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
 
 
 def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> None:
     repository, claim_id, active_session_id = seeded_scenario('AT-06-pending-evidence')
     pause_active_session(repository, claim_id, active_session_id, clear_context=True)
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
 
     commitment = (
@@ -168,7 +172,7 @@ def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> N
             resulting_revision=claim.revision,
             created_at=claim.updated_at,
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
@@ -184,9 +188,9 @@ def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> N
     assert body['resume']['summary'] == claim.customer_next_step.summary
     assert 'Police said the report will be available next week.' in body['resume']['pending_items']
     assert commitment in body['resume']['prior_commitments']
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.active_session_id == body['session_id']
     assert stored.revision == claim.revision + 1
@@ -195,7 +199,7 @@ def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> N
 def test_resume_uses_confirmed_description_when_session_summary_is_empty() -> None:
     repository, claim_id, active_session_id = seeded_scenario('AT-08-resume')
     pause_active_session(repository, claim_id, active_session_id, clear_context=True)
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     description = claim.form['incident.description'].value
     assert isinstance(description, str)
@@ -214,12 +218,12 @@ def test_resume_uses_confirmed_description_when_session_summary_is_empty() -> No
 def test_resume_rebuilds_question_and_generic_pending_item() -> None:
     repository, claim_id, active_session_id = seeded_scenario('AT-06-pending-evidence')
     pause_active_session(repository, claim_id, active_session_id, clear_context=True)
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
 
-    evidence = repository.list_evidence(claim_id, 'cus_demo')[0]
+    evidence = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')[0]
     evidence_without_note = evidence.model_copy(update={'claimant_note': None})
-    repository.save_evidence(evidence_without_note, 'cus_demo')
+    repository.save_evidence(evidence_without_note, 'cus_8f41a2c90d7e463b')
 
     question = 'Please confirm the remaining claim detail before we continue.'
     repository.save_agent_decision(
@@ -246,7 +250,7 @@ def test_resume_rebuilds_question_and_generic_pending_item() -> None:
             resulting_revision=claim.revision,
             created_at=claim.updated_at,
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:

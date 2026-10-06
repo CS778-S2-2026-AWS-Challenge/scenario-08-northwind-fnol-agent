@@ -1,0 +1,72 @@
+# Claim graph regression fixtures
+
+These test-only persisted-state records contain synthetic data only and
+exercise the stable scenario identifiers from
+`docs/archive/sprint-1/planning/day3-implementation-map.md`.
+They preserve reusable API, persistence, and role-visibility regression coverage.
+Runtime demo endpoints use the selected business seed manifest instead.
+
+| Scenario | Coverage |
+|---|---|
+| `AT-01-clear-motor.json` | Clear journey with confirmed material facts |
+| `AT-02-coverage-ambiguity.json` | Ambiguous coverage with linked policy/history data routed to a typed professional-review handoff card |
+| `AT-04-urgent.json` | Injury/danger report with an urgent handoff card |
+| `AT-05-human-request.json` | Explicit human-support request with a standard-priority handoff card |
+| `AT-06-pending-evidence.json` | Claimant-owned future evidence, expected timing, and non-blocking work |
+| `AT-08-resume.json` | Cross-session summary, unresolved work, pending evidence, and prior commitment |
+| `AT-12-signal-writeback.json` | Shared claim state with an internal-only review signal |
+| `AT-10-controlled-assessor.json` | Source-linked completed disposition, created claim, assessor route, evidence state, and next responsible action |
+| `AT-13-staff-action-lifecycle.json` | Completed assign, review, resolve, and claimant-safe write-back audit trail |
+
+## Week 6 Field-State Examples
+
+The `AT-14-field-states-motor.json`, `AT-15-field-states-home.json`, and
+`AT-16-field-states-contents.json` records are synthetic P2.2 examples for the
+three representative product families. They demonstrate the shared field
+states `confirmed`, `proposed` (inferred), `missing`, and `disputed`, together
+with family-specific inactive projections. The contents example stores item
+records in `WorkingClaim.contents_items`; it does not invent flattened
+`contents.*` form fields.
+
+These records are validation fixtures, not additional canonical business paths,
+and are intentionally excluded from `load_mvp_journey_scenarios()`.
+
+Validate the reusable scenario records from the repository root:
+
+```powershell
+python scripts/run_scenarios.py
+```
+
+The loader rejects broken claim/session links. Claimant API tests also verify
+that storage provenance and internal-only messages do not cross the claimant
+visibility boundary.
+
+## Connected MVP Journey
+
+The canonical `business_path` field assigns exactly one scenario to each current
+MVP path: clear, pending, urgent, professional review, and handoff.
+`load_mvp_journey_scenarios()` rejects a missing or duplicate path and is the
+shared loading boundary used by regression tests and the scenario validation script.
+AT-10 remains a bounded external-service regression case; it does not replace any
+of the five MVP paths.
+AT-10 carries the same authoritative `terminal_disposition=completed` record that successful
+Claim creation writes; Workbench does not infer that placement from its fixture workflow state.
+
+Path entry fixtures retain only expected entry baselines and visibility
+classifications. They derive business path, Claim State, evidence, customer next
+step, and handoffs from these canonical records.
+
+## Linked MVP Record Graph
+
+AT-02 is the bounded structured-data example for issue #251. Its synthetic
+`linked_records` baseline connects one customer and Working Claim to two typed
+retrieval records (policy and relevant claim history), the complete evidence set,
+one handoff, and the complete scenario message set. The loader rejects missing,
+duplicate, cross-claim, or wrong-type identifiers and requires the handoff packet
+to reference the same policy, history, and evidence records.
+
+The staff Workbench receives policy/history detail only from the claim-detail API.
+Claimant projections do not include retrieval records, provider references, claim
+history, internal messages, or the staff handoff packet. Neither page embeds the
+fixture identifiers or record payloads; they discover claims and details through
+the existing list/detail APIs.

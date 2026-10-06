@@ -25,7 +25,7 @@ SENT_AT = PREPARED_AT + timedelta(minutes=2)
 SERVICE = 'vehicle_damage_assessment_routing'
 ACTION = 'vehicle_damage_assessment'
 PERMITTED = ['claim_id', 'external_claim_id', 'location.region']
-CUSTOMER = 'cus_demo'
+CUSTOMER = 'cus_8f41a2c90d7e463b'
 
 
 def _authorisation(

@@ -45,7 +45,7 @@ def _save_message(
             content={'type': 'text', 'text': message_id},
             created_at=timestamp,
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
 
@@ -136,7 +136,7 @@ def test_claim_conversation_history_pages_visible_messages_across_sessions(
         auth_headers,
         'claim-conversation-history',
     )
-    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_8f41a2c90d7e463b')
     assert first_session is not None
     second_session = first_session.model_copy(
         update={
@@ -198,12 +198,12 @@ def test_claim_conversation_history_conceals_another_claimants_claim(
     repository: FixtureRepository,
 ) -> None:
     claim_id, _ = _claim_and_session(client, auth_headers, 'claim-conversation-owner')
-    owned_claim = repository.get_claim(claim_id, 'cus_demo')
+    owned_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert owned_claim is not None
     other_claim = owned_claim.model_copy(
         update={
             'claim_id': 'clm_other_conversation',
-            'customer_id': 'cus_other',
+            'customer_id': 'cus_2b67e9d14a3c508f',
             'active_session_id': None,
         }
     )

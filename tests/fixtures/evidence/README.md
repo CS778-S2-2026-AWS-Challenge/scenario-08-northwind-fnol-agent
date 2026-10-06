@@ -27,7 +27,7 @@ professional-review, and handoff entry baselines, and classifies the complete
 canonical evidence set for each path. It does **not** own a second copy of any
 `EvidenceRecord` or `HandoffRecord`.
 
-Each entry names a canonical scenario in `backend/demo_data/scenarios`. The
+Each entry names a canonical scenario in `tests/fixtures/scenarios`. The
 scenario owns its `business_path`; the path fixture cannot declare a second path
 mapping. Its entry baseline records the expected workflow, Agent action,
 evidence state, claimant status and responsibility, plus the bounded handoff
@@ -107,7 +107,7 @@ a file that never arrived, or never will, cannot be the thing another record
 disagrees with.
 
 `test_evidence_fixture_service.py` sweeps every evidence record in
-`backend/demo_data/scenarios`, `tests/fixtures/professional_review`, the
+`tests/fixtures/scenarios`, `tests/fixtures/professional_review`, the
 lifecycle catalogue, and the resolved path entries. Parsing already forces the
 domain `EvidenceRecord`; the path loader additionally proves each entry points
 back to the canonical record rather than a private copy.

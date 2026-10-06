@@ -29,7 +29,9 @@ def _described(status: FormStatus) -> dict[str, StructuredFormField]:
             status=status,
             needed_for=NeededFor.CURRENT_ACTION,
             updated_at=datetime(2026, 9, 20, tzinfo=UTC),
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'
+            ),
         )
     }
 
@@ -38,7 +40,7 @@ def _claim(form: dict[str, StructuredFormField]) -> WorkingClaim:
     decided_at = datetime(2026, 9, 20, tzinfo=UTC)
     return WorkingClaim(
         claim_id='clm_narrative',
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         channel='web_agent',
         locale='en-NZ',
         created_at=decided_at,
@@ -90,7 +92,7 @@ def test_cooldown_starts_at_consent_decision_and_handoff_wins(
     decided_at = datetime(2026, 9, 20, tzinfo=UTC)
     claim = WorkingClaim(
         claim_id='clm_cooldown',
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         channel='web_agent',
         locale='en-NZ',
         created_at=decided_at,
@@ -106,7 +108,7 @@ def test_cooldown_starts_at_consent_decision_and_handoff_wins(
             ExternalServiceConsent(
                 consent_ref='cns_declined',
                 requested_action='submit_request',
-                granted_by={'actor_type': 'claimant', 'actor_id': 'cus_demo'},
+                granted_by={'actor_type': 'claimant', 'actor_id': 'cus_8f41a2c90d7e463b'},
                 service_identity=identity,
                 status='declined',
                 granted_at=decided_at,

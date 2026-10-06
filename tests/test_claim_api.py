@@ -354,8 +354,8 @@ class ConversationOnlyAgent:
 
 
 class SpyPolicyHistoryAdapter(MockPolicyHistoryAdapter):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, repository: FixtureRepository) -> None:
+        super().__init__(repository)
         self.history_calls = 0
 
     def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
@@ -441,7 +441,7 @@ def test_form_participant_fields_materialize_role_safe_records(
     assert body['witnesses'][0]['name'] == 'Synthetic Witness'
     assert body['witnesses'][0]['phone'] == '+64 21 555 0101'
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.driver is not None
     assert stored.driver.licence_number is not None
@@ -485,11 +485,11 @@ def test_conversation_only_turn_maps_atomic_repository_conflicts(
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == expected_code
-    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
+    messages = repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert len(messages) == 1
     assert messages[0].actor.value == 'claimant'
     assert messages[0].content['text'] == 'Thanks, there is nothing else to add.'
-    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+    assert repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_message_turn_scopes_uploaded_evidence_to_the_current_claim(
@@ -587,7 +587,11 @@ def test_message_turn_rejects_internal_evidence_before_agent_invocation(
         monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
     agent = CapturingEvidenceAgent()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository,
         agent,
     )
@@ -612,7 +616,7 @@ def test_message_turn_rejects_internal_evidence_before_agent_invocation(
                 created_at=timestamp,
                 updated_at=timestamp,
             ),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
 
         denied = submit_message(
@@ -905,7 +909,7 @@ def test_vp_family_journey_confirms_registered_facts_and_enters_payout_contact(
     assert claimant_view['customer_next_step']['status'] == 'ready_to_create'
     assert claimant_view['primary_action']['action_code'] == 'claimant.review_payout_contact'
     assert claimant_view['external_claim'] is None
-    final_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    final_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert final_session is not None
     assert final_session.repeated_question_count == 0
     if family == 'contents':
@@ -1216,15 +1220,15 @@ def test_default_contents_journey_preserves_the_report_without_inventing_a_provi
         'contents.items'
     ]
     assert claimant_view['external_service_action'] is None
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_claim.contents_items == []
-    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
     assert session.status is SessionStatus.ACTIVE
     claimant_messages = [
         message.content['text']
-        for message in repository.list_messages(claim_id, session_id, 'cus_demo')
+        for message in repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
         if message.actor.value == 'claimant'
     ]
     assert claimant_messages == [first_message, second_message]
@@ -1255,8 +1259,8 @@ def test_question_accounting_and_provenance_survive_a_new_session(
 
     assert turn.status_code == 200, turn.text
     turn_body = turn.json()
-    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_8f41a2c90d7e463b')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert first_session is not None
     assert stored_claim is not None
     assert first_session.question_turn_count == 1
@@ -1284,7 +1288,7 @@ def test_question_accounting_and_provenance_survive_a_new_session(
     assert resume_body['resume']['requested_fact_count'] == 1
     assert resume_body['resume']['remaining_question_budget'] == 8
     assert 'question_history' not in resume_body['resume']
-    latest_claim = repository.get_claim(claim_id, 'cus_demo')
+    latest_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert latest_claim is not None
     support = client.post(
         f'/api/v1/claims/{claim_id}/support-requests',
@@ -1325,7 +1329,7 @@ def test_question_budget_stops_additional_agent_questions_and_requests_follow_up
     created = create_claim(client, auth_headers, key='question-budget').json()
     claim_id = created['claim']['claim_id']
     session_id = created['session']['session_id']
-    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
     repository.save_session(
         session.model_copy(
@@ -1360,7 +1364,7 @@ def test_question_budget_stops_additional_agent_questions_and_requests_follow_up
     second_body = second.json()
     assert second_body['decision']['customer_next_step']['status'] == 'question_budget_reached'
     assert 'saved' in second_body['agent_message']['content']['text'].casefold()
-    final_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    final_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert final_session is not None
     assert final_session.question_turn_count == 1
     assert final_session.requested_fact_count == 1
@@ -1417,7 +1421,7 @@ def test_applied_message_evaluation_retains_message_branch_candidates(
 
     assert turn.status_code == 200, turn.text
     turn_body = turn.json()
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     applied = evaluations[-1]
     branch_results = {item.branch_id: item for item in applied.branch_results}
     claimant_message_id = turn_body['claimant_message']['message_id']
@@ -1448,7 +1452,7 @@ def test_claim_read_carries_the_latest_dynamic_form_to_the_current_revision(
         client_message_id='read-dynamic-form-client',
         text='Another car hit mine.',
     ).json()
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     unrelated_revision = stored.model_copy(
         update={
@@ -1570,9 +1574,9 @@ def test_form_update_records_registered_field_and_revision(
     assert response.json()['updated_fields']['incident.description']['source'] == 'claimant'
     assert (
         response.json()['updated_fields']['incident.description']['updated_by']['actor_id']
-        == 'cus_demo'
+        == 'cus_8f41a2c90d7e463b'
     )
-    evaluations = repository.list_branch_evaluations(claim['claim_id'], 'cus_demo')
+    evaluations = repository.list_branch_evaluations(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert evaluations[-1].evaluated_against_claim_revision == 2
     assert evaluations[-1].resulting_claim_revision == 2
     assert evaluations[-1].recomputation_reason == 'form_updated'
@@ -1670,7 +1674,10 @@ def test_anonymous_claim_promotion_rekeys_message_replay_authority(
     retired_turn = repository.find_idempotency(anonymous_actor, route, 'anonymous-promotion-turn')
     assert retired_turn is not None
     assert retired_turn.retired is True
-    assert repository.find_idempotency('cus_demo', route, 'anonymous-promotion-turn') is not None
+    assert (
+        repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'anonymous-promotion-turn')
+        is not None
+    )
 
     delayed_create_retry = create_claim(
         client,
@@ -1701,9 +1708,15 @@ def test_anonymous_claim_promotion_rekeys_message_replay_authority(
     assert replay.json() == first.json()
     assert delayed_create_retry.status_code == 409
     assert delayed_create_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
-    assert len(repository.list_claims_internal()) == 1
+    assert {claim.claim_id for claim in repository.list_claims_internal()} == {
+        claim_id,
+        'clm_6d9231ab40e85fc7',
+    }
     assert stale_anonymous_replay.status_code == 404
-    assert repository.find_idempotency('cus_demo', route, 'promoted-replay-alias') is not None
+    assert (
+        repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'promoted-replay-alias')
+        is not None
+    )
 
 
 def test_anonymous_claim_promotion_conflict_is_atomic(
@@ -1718,7 +1731,7 @@ def test_anonymous_claim_promotion_conflict_is_atomic(
     claim_id = created['claim']['claim_id']
     repository.save_idempotency(
         IdempotencyRecord(
-            actor_id='cus_demo',
+            actor_id='cus_8f41a2c90d7e463b',
             route='/api/v1/claims',
             key='promotion-conflict',
             request_fingerprint='different-request',
@@ -1735,7 +1748,7 @@ def test_anonymous_claim_promotion_conflict_is_atomic(
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
     assert repository.get_claim(claim_id, anonymous_actor) is not None
-    assert repository.get_claim(claim_id, 'cus_demo') is None
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') is None
     assert (
         repository.find_idempotency(anonymous_actor, '/api/v1/claims', 'promotion-conflict')
         is not None
@@ -1845,9 +1858,9 @@ def test_message_turn_persists_messages_proposed_field_and_validated_action(
     decision = repository.find_agent_decision_for_trigger(
         claim_id,
         body['claimant_message']['message_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert decision is not None
     assert decision.authority.outcome.value == 'authorised'
     assert decision.reason_codes == ['MATERIAL_FACTS_PROPOSED']
@@ -1877,9 +1890,9 @@ def test_high_impact_agent_proposal_is_recorded_but_not_executed(
     decision = repository.find_agent_decision_for_trigger(
         claim_id,
         body['claimant_message']['message_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert decision is not None
     assert decision.authority.outcome.value == 'review_required'
     assert claim is not None
@@ -1887,17 +1900,20 @@ def test_high_impact_agent_proposal_is_recorded_but_not_executed(
     assert claim.external_claim is None
 
 
-def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revision(
+def test_agent_claim_history_lookup_without_reference_does_not_duplicate_history(
     app: FastAPI,
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
-    app.state.agent_turn_provider = ClaimHistoryLookupAgent(
-        {
-            'history_reference': 'synthetic-history-204',
-        }
+    from backend.services.business_seed import (
+        BUSINESS_SEED_PATH,
+        load_business_seed,
+        provision_business_claims,
     )
+
+    provision_business_claims(repository, load_business_seed(BUSINESS_SEED_PATH))
+    app.state.agent_turn_provider = ClaimHistoryLookupAgent({})
     created = create_claim(client, auth_headers, key='history-lookup-turn').json()
     claim_id = created['claim']['claim_id']
     session_id = created['session']['session_id']
@@ -1907,13 +1923,24 @@ def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revis
     assert response.status_code == 200
     body = response.json()
     assert body['claim_revision'] == 3
-    records = repository.list_retrieval_records(claim_id, 'cus_demo')
+    records = repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')
     history_records = [
         record for record in records if isinstance(record, ClaimHistoryRetrievalRecord)
     ]
     assert len(history_records) == 1
-    assert history_records[0].facts.history_reference == 'synthetic-history-204'
-    assert history_records[0].source.system == 'fixture_claims_history'
+    assert history_records[0].history is not None
+    assert repository.get_claim_internal('clm_6d9231ab40e85fc7') is not None
+    from backend.services.messages import _claim_history_context_for_turn
+
+    current = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    assert current is not None
+    context = _claim_history_context_for_turn(
+        repository, app.state.claim_history_adapter, current, 'cus_8f41a2c90d7e463b', 1600
+    )
+    assert context['status'] == 'evidence_found'
+    history = context['history']
+    assert isinstance(history, dict)
+    assert [item['claim_id'] for item in history['claims']] == ['clm_6d9231ab40e85fc7']
 
     replay = submit_message(
         client,
@@ -1929,11 +1956,11 @@ def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revis
         len(
             [
                 record
-                for record in repository.list_retrieval_records(claim_id, 'cus_demo')
+                for record in repository.list_retrieval_records(claim_id, 'cus_8f41a2c90d7e463b')
                 if isinstance(record, ClaimHistoryRetrievalRecord)
             ]
         )
-        == 1
+        == 3
     )
 
 
@@ -1943,12 +1970,12 @@ def test_agent_claim_history_lookup_preserves_facts_with_two_stage_message_revis
         {'history_reference': []},
         {'history_reference': {}},
         {'history_reference': '   '},
-        {'history_reference': 'synthetic-history-204', 'limit': None},
-        {'history_reference': 'synthetic-history-204', 'limit': '10'},
-        {'history_reference': 'synthetic-history-204', 'limit': 2.5},
-        {'history_reference': 'synthetic-history-204', 'limit': True},
-        {'history_reference': 'synthetic-history-204', 'limit': 0},
-        {'history_reference': 'synthetic-history-204', 'limit': 51},
+        {'history_reference': 'clm_6d9231ab40e85fc7', 'limit': None},
+        {'history_reference': 'clm_6d9231ab40e85fc7', 'limit': '10'},
+        {'history_reference': 'clm_6d9231ab40e85fc7', 'limit': 2.5},
+        {'history_reference': 'clm_6d9231ab40e85fc7', 'limit': True},
+        {'history_reference': 'clm_6d9231ab40e85fc7', 'limit': 0},
+        {'history_reference': 'clm_6d9231ab40e85fc7', 'limit': 51},
     ],
 )
 def test_invalid_claim_history_tool_arguments_fail_atomically(
@@ -1958,11 +1985,11 @@ def test_invalid_claim_history_tool_arguments_fail_atomically(
     repository: FixtureRepository,
     tool: dict[str, object],
 ) -> None:
-    adapter = SpyPolicyHistoryAdapter()
-    app.state.policy_history_adapter = adapter
+    adapter = SpyPolicyHistoryAdapter(repository)
+    app.state.claim_history_adapter = adapter
     app.state.agent_turn_provider = ClaimHistoryLookupAgent(tool)
     created = create_claim(client, auth_headers, key='invalid-history-tool').json()
-    before_claim = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
+    before_claim = repository.get_claim(created['claim']['claim_id'], 'cus_8f41a2c90d7e463b')
     assert before_claim is not None
 
     response = submit_message(
@@ -1975,14 +2002,19 @@ def test_invalid_claim_history_tool_arguments_fail_atomically(
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'AGENT_TOOL_NOT_PERMITTED'
     assert adapter.history_calls == 0
-    assert repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo') == []
+    assert (
+        repository.list_retrieval_records(created['claim']['claim_id'], 'cus_8f41a2c90d7e463b')
+        == []
+    )
     stored_messages = repository.list_messages(
-        created['claim']['claim_id'], created['session']['session_id'], 'cus_demo'
+        created['claim']['claim_id'], created['session']['session_id'], 'cus_8f41a2c90d7e463b'
     )
     assert len(stored_messages) == 1
     assert stored_messages[0].actor.value == 'claimant'
-    assert repository.list_agent_decisions(created['claim']['claim_id'], 'cus_demo') == []
-    after_claim = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
+    assert (
+        repository.list_agent_decisions(created['claim']['claim_id'], 'cus_8f41a2c90d7e463b') == []
+    )
+    after_claim = repository.get_claim(created['claim']['claim_id'], 'cus_8f41a2c90d7e463b')
     assert after_claim is not None
     assert after_claim.revision == before_claim.revision + 1
     assert after_claim.model_dump(exclude={'revision', 'updated_at'}) == before_claim.model_dump(
@@ -2028,12 +2060,12 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
     assert alias_conflict.status_code == 409
     assert alias_conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
-    alias = repository.find_idempotency('cus_demo', route, 'turn-b')
+    alias = repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'turn-b')
     assert alias is not None
     assert alias.message_id == first.json()['claimant_message']['message_id']
     assert conflict.status_code == 409
     assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
-    assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 2
+    assert len(repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')) == 2
 
 
 def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
@@ -2070,7 +2102,7 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     assert later_update.status_code == 200
     assert later_update.json()['revision'] == first.json()['current_claim_revision'] + 1
     stored = repository.find_idempotency(
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         'historical-turn',
     )
@@ -2078,7 +2110,7 @@ def test_message_turn_replay_preserves_turn_revision_after_later_claim_mutation(
     decision = repository.find_agent_decision_for_trigger(
         claim_id,
         first.json()['claimant_message']['message_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert decision is not None
     repository.save_idempotency(
@@ -2133,7 +2165,7 @@ def test_persisted_legacy_response_fails_closed_when_child_is_missing(
     assert first.status_code == 200, first.text
     first_body = first.json()
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
-    stored = repository.find_idempotency('cus_demo', route, 'runtime-replay-original')
+    stored = repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'runtime-replay-original')
     assert stored is not None
     assert stored.agent_message_id == first_body['agent_message']['message_id']
     if missing_child == 'claimant_message':
@@ -2141,7 +2173,9 @@ def test_persisted_legacy_response_fails_closed_when_child_is_missing(
         repository._messages.pop(stored.message_id)
     elif missing_child == 'decision':
         corrupted = replace(stored, decision_id=None, response_payload=first_body)
-        repository._idempotency[('cus_demo', route, 'runtime-replay-original')] = corrupted
+        repository._idempotency[('cus_8f41a2c90d7e463b', route, 'runtime-replay-original')] = (
+            corrupted
+        )
     else:
         assert stored.agent_message_id is not None
         repository._messages.pop(stored.agent_message_id)
@@ -2166,7 +2200,7 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
     created = create_claim(client, auth_headers, key='message-only-replay').json()
     claim_id = created['claim']['claim_id']
     session_id = created['session']['session_id']
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     support = client.post(
         f'/api/v1/claims/{claim_id}/support-requests',
@@ -2192,7 +2226,9 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
     first_body = first.json()
     historical_revision = first_body['claim_revision']
     idempotency_route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
-    stored = repository.find_idempotency('cus_demo', idempotency_route, 'message-only-replay-turn')
+    stored = repository.find_idempotency(
+        'cus_8f41a2c90d7e463b', idempotency_route, 'message-only-replay-turn'
+    )
     assert stored is not None
     assert stored.response_payload is not None
     legacy_payload = dict(stored.response_payload)
@@ -2206,7 +2242,7 @@ def test_message_only_replay_rehydrates_current_revision_from_legacy_payload(
         )
     )
 
-    current_claim = repository.get_claim(claim_id, 'cus_demo')
+    current_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert current_claim is not None
     later_update = client.patch(
         f'/api/v1/claims/{claim_id}/form',
@@ -2248,7 +2284,11 @@ def test_mongodb_replay_with_new_key_survives_repository_restart(
 ) -> None:
     mongo_client: Any = mongomock.MongoClient()
     database_name = 'message_replay_restart'
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     headers = {'Authorization': 'Bearer synthetic-claimant'}
     first_repository = MongoDBRepository(mongo_client, database_name)
     monkeypatch.setattr(first_repository, '_atomic', lambda operation: operation(None))
@@ -2315,7 +2355,11 @@ def test_mongodb_promotion_rekeys_replay_authority_across_restart(
 ) -> None:
     mongo_client: Any = mongomock.MongoClient()
     database_name = 'message_promotion_restart'
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     anonymous_session = str(uuid4())
     anonymous_actor = f'anonymous:{anonymous_session}'
     anonymous_headers = {'X-Northwind-Anonymous-Session': anonymous_session}
@@ -2361,7 +2405,8 @@ def test_mongodb_promotion_rekeys_replay_authority_across_restart(
     assert retired_turn is not None
     assert retired_turn.retired is True
     assert (
-        restarted_repository.find_idempotency('cus_demo', route, 'mongo-promotion-turn') is not None
+        restarted_repository.find_idempotency('cus_8f41a2c90d7e463b', route, 'mongo-promotion-turn')
+        is not None
     )
 
     with TestClient(create_app(settings, repository=restarted_repository)) as restarted_client:
@@ -2384,9 +2429,14 @@ def test_mongodb_promotion_rekeys_replay_authority_across_restart(
     assert replay.json() == first.json()
     assert delayed_create_retry.status_code == 409
     assert delayed_create_retry.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
-    assert len(restarted_repository.list_claims_internal()) == 1
+    assert {claim.claim_id for claim in restarted_repository.list_claims_internal()} == {
+        claim_id,
+        'clm_6d9231ab40e85fc7',
+    }
     assert (
-        restarted_repository.find_idempotency('cus_demo', route, 'mongo-promotion-alias')
+        restarted_repository.find_idempotency(
+            'cus_8f41a2c90d7e463b', route, 'mongo-promotion-alias'
+        )
         is not None
     )
 
@@ -2397,7 +2447,11 @@ def test_mongodb_promotion_conflict_leaves_anonymous_authority_unchanged(
     mongo_client: Any = mongomock.MongoClient()
     repository = MongoDBRepository(mongo_client, 'message_promotion_conflict')
     monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     anonymous_session = str(uuid4())
     anonymous_actor = f'anonymous:{anonymous_session}'
     anonymous_headers = {'X-Northwind-Anonymous-Session': anonymous_session}
@@ -2412,7 +2466,7 @@ def test_mongodb_promotion_conflict_leaves_anonymous_authority_unchanged(
         claim_id = created['claim']['claim_id']
         repository.save_idempotency(
             IdempotencyRecord(
-                actor_id='cus_demo',
+                actor_id='cus_8f41a2c90d7e463b',
                 route='/api/v1/claims',
                 key='mongo-promotion-conflict',
                 request_fingerprint='different-request',
@@ -2431,7 +2485,7 @@ def test_mongodb_promotion_conflict_leaves_anonymous_authority_unchanged(
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
     assert repository.get_claim(claim_id, anonymous_actor) is not None
-    assert repository.get_claim(claim_id, 'cus_demo') is None
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') is None
     assert (
         repository.find_idempotency(
             anonymous_actor,
@@ -2448,7 +2502,11 @@ def test_mongodb_replay_fails_closed_for_corrupted_runtime_and_handoff_links(
     mongo_client: Any = mongomock.MongoClient()
     repository = MongoDBRepository(mongo_client, 'message_corrupt_links')
     monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     headers = {'Authorization': 'Bearer synthetic-claimant'}
 
     with TestClient(create_app(settings, repository=repository)) as client:
@@ -2466,14 +2524,14 @@ def test_mongodb_replay_fails_closed_for_corrupted_runtime_and_handoff_links(
         assert runtime_turn.status_code == 200, runtime_turn.text
         runtime_route = f'/api/v1/claims/{runtime_claim_id}/sessions/{runtime_session_id}/messages'
         runtime_idempotency = repository.find_idempotency(
-            'cus_demo', runtime_route, 'corrupt-runtime-turn'
+            'cus_8f41a2c90d7e463b', runtime_route, 'corrupt-runtime-turn'
         )
         assert runtime_idempotency is not None
         assert runtime_idempotency.runtime_result_id is not None
         runtime_records = repository.get_runtime_turn_for_trigger(
             runtime_claim_id,
             runtime_idempotency.message_id or '',
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         assert runtime_records is not None
         repository._collection.update_one(
@@ -2514,7 +2572,7 @@ def test_mongodb_replay_fails_closed_for_corrupted_runtime_and_handoff_links(
         assert handoff_turn.status_code == 200, handoff_turn.text
         handoff_route = f'/api/v1/claims/{handoff_claim_id}/sessions/{handoff_session_id}/messages'
         handoff_idempotency = repository.find_idempotency(
-            'cus_demo', handoff_route, 'corrupt-handoff-turn'
+            'cus_8f41a2c90d7e463b', handoff_route, 'corrupt-handoff-turn'
         )
         assert handoff_idempotency is not None
         assert handoff_idempotency.handoff_id is not None
@@ -2596,10 +2654,10 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     assert explicit_correction.json()['revision'] == confirmed.json()['revision'] + 1
     corrected = explicit_correction.json()['updated_fields']['incident.description']
     assert corrected['source'] == 'claimant'
-    assert corrected['updated_by']['actor_id'] == 'cus_demo'
+    assert corrected['updated_by']['actor_id'] == 'cus_8f41a2c90d7e463b'
     assert replay.json() == confirmed.json()
     assert replay.json()['primary_action']['claim_revision'] == replay.json()['revision']
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     assert [item.recomputation_reason for item in evaluations[-2:]] == [
         'form_confirmed',
         'form_updated',
@@ -2668,7 +2726,7 @@ def test_contents_item_confirmation_and_natural_language_correction_preserve_his
     assert corrected_item['loss_type'] == 'stolen'
     assert corrected_item['status'] == 'confirmed'
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert len(stored.contents_items) == 1
     assert stored.contents_items[0].item_id == first_item['item_id']
@@ -2680,7 +2738,7 @@ def test_contents_item_confirmation_and_natural_language_correction_preserve_his
         'superseded',
         'confirmed',
     ]
-    final_claim = repository.get_claim(claim_id, 'cus_demo')
+    final_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert final_claim is not None
     final_item = final_claim.contents_items[0]
     assert final_item.status is FormStatus.CONFIRMED
@@ -2700,7 +2758,7 @@ def test_contents_item_confirmation_and_natural_language_correction_preserve_his
     conflict_turn = conflicted.json()
     assert conflict_turn['decision']['customer_next_step']['status'] == 'clarification_needed'
     assert conflict_turn['decision']['customer_next_step']['required_items'] == ['contents.items']
-    stored_after_conflict = repository.get_claim(claim_id, 'cus_demo')
+    stored_after_conflict = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_after_conflict is not None
     assert len(stored_after_conflict.contents_items) == 1
     disputed_item = stored_after_conflict.contents_items[0]
@@ -2710,7 +2768,7 @@ def test_contents_item_confirmation_and_natural_language_correction_preserve_his
     decision = repository.find_agent_decision_for_trigger(
         claim_id,
         conflict_turn['claimant_message']['message_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert decision is not None
     assert decision.discrepancy_candidates[0].field_code == 'contents.items'
@@ -2732,8 +2790,8 @@ def test_confirmed_family_patch_atomically_updates_claim_and_branch_projection(
 
     assert response.status_code == 200
     assert response.json()['updated_fields']['claim.product_family']['value'] == 'home'
-    stored = repository.get_claim(claim_id, 'cus_demo')
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.incident_type == 'home'
     assert stored.form['claim.product_family'].value == 'home'
@@ -2787,8 +2845,8 @@ def test_family_confirmation_uses_same_atomic_projection_as_patch(
     assert response.status_code == 200
     assert replay.status_code == 200
     assert replay.json() == response.json()
-    stored = repository.get_claim(claim_id, 'cus_demo')
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert response.json()['confirmed_fields']['claim.product_family']['value'] == 'home'
     assert stored.incident_type == 'home'
@@ -2811,8 +2869,11 @@ def test_family_confirmation_uses_same_atomic_projection_as_patch(
     )
     assert stale.status_code == 409
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
-    assert repository.get_claim(claim_id, 'cus_demo') == stored
-    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == history_before_stale_write
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == stored
+    assert (
+        repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
+        == history_before_stale_write
+    )
 
 
 def test_created_claim_rejects_family_change_without_partial_state(
@@ -2835,7 +2896,7 @@ def test_created_claim_rejects_family_change_without_partial_state(
             ]
         },
     )
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     locked = claim.model_copy(
         update={
@@ -2855,8 +2916,8 @@ def test_created_claim_rejects_family_change_without_partial_state(
         }
     )
     repository.save_claim(locked, expected_revision=claim.revision)
-    before = repository.get_claim(claim_id, 'cus_demo')
-    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
 
     patch_response = client.patch(
         f'/api/v1/claims/{claim_id}/form',
@@ -2878,8 +2939,10 @@ def test_created_claim_rejects_family_change_without_partial_state(
     assert patch_response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     assert confirmation_response.status_code == 409
     assert confirmation_response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
-    assert repository.get_claim(claim_id, 'cus_demo') == before
-    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == evaluations_before
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == before
+    assert (
+        repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b') == evaluations_before
+    )
 
 
 def test_form_correction_persists_current_transition_and_immutable_previous_evaluation(
@@ -2910,7 +2973,7 @@ def test_form_correction_persists_current_transition_and_immutable_previous_eval
 
     assert collision.status_code == 200
     assert corrected.status_code == 200
-    started, *evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    started, *evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     assert (started.recomputation_reason, started.resulting_claim_revision) == ('claim_started', 1)
     assert len(evaluations) == 2
     previous_collision = next(
@@ -2995,7 +3058,7 @@ def test_message_reads_hide_internal_records_and_validate_session_state(
         claim_id,
         session_id,
         turn['claimant_message']['message_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert claimant_record is not None
     repository.save_message(
@@ -3008,7 +3071,7 @@ def test_message_reads_hide_internal_records_and_validate_session_state(
             content={'type': 'status', 'text': 'Internal validation details.'},
             created_at=claimant_record.created_at + timedelta(seconds=1),
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     listed = client.get(
@@ -3073,7 +3136,7 @@ def test_message_turn_requires_headers_active_session_and_owned_evidence(
         },
         json={**payload, 'evidence_refs': ['evd_missing']},
     )
-    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
     repository.save_session(session.model_copy(update={'status': SessionStatus.CLOSED}))
     closed_session = client.post(
@@ -3102,8 +3165,8 @@ def test_message_turn_rejects_a_non_current_session_and_cross_session_client_id(
     claim_id = created['claim']['claim_id']
     first_session_id = created['session']['session_id']
     first_turn = submit_message(client, auth_headers, claim_id, first_session_id)
-    claim = repository.get_claim(claim_id, 'cus_demo')
-    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert first_session is not None
     second_session = first_session.model_copy(
@@ -3224,9 +3287,9 @@ def test_claim_collection_filters_ownership_and_paginates_updated_claims(
         json={'updates': [{'field_code': 'incident.description', 'value': 'Updated'}]},
     )
 
-    owned_claim = repository.get_claim(second['claim_id'], 'cus_demo')
+    owned_claim = repository.get_claim(second['claim_id'], 'cus_8f41a2c90d7e463b')
     assert owned_claim is not None
-    updated_claim = repository.get_claim(first['claim_id'], 'cus_demo')
+    updated_claim = repository.get_claim(first['claim_id'], 'cus_8f41a2c90d7e463b')
     assert updated_claim is not None
     # Fixture seeding: this precondition is outside the save_claim() transaction
     # boundary (pointer change or revision-neutral write), so it is stored directly.
@@ -3236,7 +3299,7 @@ def test_claim_collection_filters_ownership_and_paginates_updated_claims(
     other_claim = owned_claim.model_copy(
         update={
             'claim_id': 'clm_other',
-            'customer_id': 'cus_other',
+            'customer_id': 'cus_2b67e9d14a3c508f',
             'active_session_id': 'ses_other',
         }
     )
@@ -3254,7 +3317,9 @@ def test_claim_collection_filters_ownership_and_paginates_updated_claims(
         headers=auth_headers,
     )
     cursor = page_one.json()['page']['next_cursor']
-    page_two = client.get(f'/api/v1/claims?limit=1&cursor={cursor}', headers=auth_headers)
+    page_two = client.get(
+        f'/api/v1/claims?limit=1&workflow_state=collecting&cursor={cursor}', headers=auth_headers
+    )
     updated_after = client.get(
         '/api/v1/claims',
         headers=auth_headers,
@@ -3309,8 +3374,8 @@ def test_claim_remains_readable_across_multiple_persisted_sessions(
     created = create_claim(client, auth_headers, key='multiple-sessions').json()
     claim_id = created['claim']['claim_id']
     first_session_id = created['session']['session_id']
-    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_8f41a2c90d7e463b')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert first_session is not None
     assert claim is not None
 
@@ -3324,7 +3389,7 @@ def test_claim_remains_readable_across_multiple_persisted_sessions(
     second_session = SessionRecord(
         session_id='ses_second',
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         context_revision=claim.revision,
         started_at=first_session.started_at + timedelta(seconds=1),
         last_active_at=first_session.last_active_at + timedelta(seconds=1),
@@ -3359,7 +3424,8 @@ def test_claim_remains_readable_across_multiple_persisted_sessions(
     assert claim_read.json()['revision'] == 2
     assert claim_read.json()['conversation_session_id'] == second_session.session_id
     assert [
-        session.session_id for session in repository.list_sessions_for_claim(claim_id, 'cus_demo')
+        session.session_id
+        for session in repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
     ] == [
         first_session_id,
         second_session.session_id,
@@ -3375,7 +3441,7 @@ def test_resume_creates_new_session_with_saved_context(
     claim_id = created['claim']['claim_id']
     first_session_id = created['session']['session_id']
 
-    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_8f41a2c90d7e463b')
     assert first_session is not None
 
     prepared_session = first_session.model_copy(
@@ -3403,7 +3469,7 @@ def test_resume_creates_new_session_with_saved_context(
     paused_session = repository.get_session(
         claim_id,
         first_session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert paused_session is not None
     assert paused_session.status is SessionStatus.PAUSED
@@ -3424,11 +3490,11 @@ def test_resume_creates_new_session_with_saved_context(
     assert resumed['resume']['pending_items'] == paused_session.pending_items
     assert resumed['resume']['prior_commitments'] == paused_session.prior_commitments
 
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_claim.active_session_id == resumed['session_id']
 
-    sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    sessions = repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert [session.session_id for session in sessions] == [
         first_session_id,
         resumed['session_id'],

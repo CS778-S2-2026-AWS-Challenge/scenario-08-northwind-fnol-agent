@@ -2597,6 +2597,7 @@ class FailingGateway:
 
 def model_gateway_settings(protocol: str) -> Settings:
     return Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -2638,7 +2639,7 @@ def submit_model_message(
         session_id = created.json()['session']['session_id']
         if repository_setup is not None:
             repository_setup(repository, claim_id)
-        before_claim = repository.get_claim(claim_id, 'cus_demo')
+        before_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert before_claim is not None
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
@@ -2666,19 +2667,21 @@ def assert_model_message_failure_is_atomic(
     idempotency_suffix: str = 'message',
 ) -> None:
     """Failure saves inbound once but applies no proposed Claim or lifecycle facts."""
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == before_claim.revision + 1
     assert stored.model_dump(exclude={'revision', 'updated_at'}) == before_claim.model_dump(
         exclude={'revision', 'updated_at'}
     )
-    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
+    messages = repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert len(messages) == 1
     assert messages[0].actor is ActorType.CLAIMANT
     assert messages[0].visibility is MessageVisibility.CLAIMANT_VISIBLE
-    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+    assert repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b') == []
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
-    checkpoint = repository.find_idempotency('cus_demo', route, f'{protocol}-{idempotency_suffix}')
+    checkpoint = repository.find_idempotency(
+        'cus_8f41a2c90d7e463b', route, f'{protocol}-{idempotency_suffix}'
+    )
     assert checkpoint is not None
     assert checkpoint.message_id == messages[0].message_id
     assert checkpoint.revision_before_message == before_claim.revision
@@ -2789,6 +2792,7 @@ def test_custom_protocol_registration_composes_without_route_changes() -> None:
     registry = ModelGatewayRegistry()
     registry.register('custom_test', lambda _config: StaticGateway(response))
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter='custom_test',
         model_profile_id='synthetic-model',
@@ -2822,6 +2826,7 @@ def test_published_model_cannot_override_runtime_authority(
     value: object,
 ) -> None:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter='openai_compatible',
         model_base_url='https://approved-model.example/v1',
@@ -2888,6 +2893,7 @@ def test_published_model_cannot_override_runtime_authority(
 
 def test_published_model_capabilities_project_image_and_document_support() -> None:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         data_runtime_profile=DataRuntimeProfile.FIXTURE,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -2955,6 +2961,7 @@ def test_configuration_backed_gateway_injects_only_the_call_resolver() -> None:
 
     registry.register('openai_compatible', build_recording_gateway)
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         data_runtime_profile=DataRuntimeProfile.FIXTURE,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -3009,6 +3016,7 @@ def test_prompt_identifier_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch
 def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
     gateway = ConfigurationBackedModelGateway(
         Settings(
+            business_seed_path='config/business-seed.json',
             agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
             model_protocol_adapter='openai_compatible',
             model_base_url='https://model.example.test/v1',
@@ -3041,6 +3049,7 @@ def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
 
 def test_explicit_unpublished_profile_fails_closed_instead_of_falling_back() -> None:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         data_runtime_profile=DataRuntimeProfile.FIXTURE,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -3115,6 +3124,7 @@ def test_gateway_agent_requires_structured_output_at_composition() -> None:
         lambda _config: OpenAICompatibleModelGateway(gateway_config(structured_output=False)),
     )
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter='no_structured_output',
         model_profile_id='synthetic-model',

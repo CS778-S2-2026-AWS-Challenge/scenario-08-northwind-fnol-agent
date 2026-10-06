@@ -3,7 +3,7 @@
   "description": "Synthetic home field-state example for the Week 6 validation prototype.",
   "claim": {
     "claim_id": "clm_fixture_at15",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 1,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -27,7 +27,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T02:01:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.description": {
         "value": "A pipe burst overnight and damaged the kitchen floor.",
@@ -37,7 +37,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T02:02:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.type": {
         "value": "water",
@@ -47,7 +47,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T02:02:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "property.address": {
         "value": "14 Synthetic Lane, Auckland",
@@ -57,7 +57,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T02:03:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "property.affected_areas": {
         "value": ["kitchen floor", "lower cabinets"],
@@ -67,7 +67,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T02:02:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "property.ongoing_risk": {
         "value": "active_leak",
@@ -141,7 +141,7 @@
     {
       "session_id": "ses_fixture_at15",
       "claim_id": "clm_fixture_at15",
-      "customer_id": "cus_demo",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "Home water damage with an unresolved cause and policy applicability.",
       "unresolved_questions": ["resolve:incident.cause", "confirm:property.habitable"],

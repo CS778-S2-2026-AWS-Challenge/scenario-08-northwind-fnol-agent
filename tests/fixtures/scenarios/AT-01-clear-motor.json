@@ -4,7 +4,7 @@
   "business_path": "clear",
   "claim": {
     "claim_id": "clm_fixture_at01",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 4,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -28,7 +28,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-12T00:10:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       }
     },
     "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
@@ -49,7 +49,7 @@
     {
       "session_id": "ses_fixture_at01",
       "claim_id": "clm_fixture_at01",
-      "customer_id": "cus_demo",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "A low-speed parked vehicle incident with the material facts confirmed.",
       "unresolved_questions": [],

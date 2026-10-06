@@ -88,10 +88,10 @@ def test_v8_api_budget_overflow_preserves_input_without_provider_or_controlled_f
     assert body['agent_message'] is None
     assert body['recovery']['rule_id'] == 'claimant_turn.model_dependency_terminal'
     assert provider.gateway.requests == []
-    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
-    saved = repository.list_messages(claim_id, session_id, 'cus_demo')
+    assert repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b') == []
+    saved = repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert len(saved) == 1 and saved[0].content['text'] == message
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.revision == 2 and claim.form == {}
     assert any(
         getattr(record, 'diagnostic', None) == 'context_budget_exceeded'

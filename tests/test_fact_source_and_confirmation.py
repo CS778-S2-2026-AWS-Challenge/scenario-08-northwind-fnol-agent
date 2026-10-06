@@ -24,7 +24,7 @@ from backend.repositories.fixture import FixtureRepository
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
-CUSTOMER_ID = 'cus_demo'
+CUSTOMER_ID = 'cus_8f41a2c90d7e463b'
 FIELD = 'incident.description'
 EXTRACTED = 'Rear panel damage is visible in the supplied photograph.'
 
@@ -36,7 +36,11 @@ def repository() -> FixtureRepository:
 
 @pytest.fixture
 def client(repository: FixtureRepository) -> TestClient:
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     return TestClient(create_app(settings, repository))
 
 

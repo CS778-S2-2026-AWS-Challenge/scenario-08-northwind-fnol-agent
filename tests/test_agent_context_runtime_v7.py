@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -62,11 +63,7 @@ from backend.domain.prompt_pack import (
 from backend.services.agent import AgentEvidenceReference, AgentTurnContext
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
-from backend.services.context_resolver import (
-    ContextResultBudgetExceeded,
-    TurnContextResolver,
-    resolver_for_turn,
-)
+from backend.services.context_resolver import TurnContextResolver, resolver_for_turn
 from backend.services.model_agent import GatewayAgent
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import (
@@ -661,6 +658,39 @@ def test_evidence_history_uses_claimant_scoped_lazy_source_and_narrow_proposal()
     assert proposal.source_claim_id == 'clm_old'
 
 
+@pytest.mark.parametrize(
+    ('message', 'task'),
+    [
+        ('The car was parked.', TurnTask.INTAKE),
+        ('Actually it was blue.', TurnTask.CORRECTION),
+        ('Compare these two addresses.', TurnTask.INTAKE),
+    ],
+)
+def test_history_is_discoverable_without_claimant_keywords(message: str, task: TurnTask) -> None:
+    calls: list[int] = []
+
+    def load_history(limit: int) -> dict[str, object]:
+        calls.append(limit)
+        return {'status': 'empty', 'source_refs': []}
+
+    context = replace(_context(message), claim_history_context_loader=load_history)
+    plan = plan_model_turn(context)
+    assert plan is not None
+    assert plan.route.task is task
+    assert plan.request_profile.profile_id == 'claimant.lookup.v1'
+    assert any(item.resource_type == 'claim_history' for item in plan.context_plan.references)
+    assert calls == []  # The model chooses whether to resolve the reference.
+
+    anonymous = replace(
+        context, claim=context.claim.model_copy(update={'customer_id': 'anonymous:session'})
+    )
+    anonymous_plan = plan_model_turn(anonymous)
+    assert anonymous_plan is not None
+    assert not any(
+        item.resource_type == 'claim_history' for item in anonymous_plan.context_plan.references
+    )
+
+
 def test_cross_claim_review_uses_only_customer_scoped_isolated_source() -> None:
     calls: list[int] = []
 
@@ -863,11 +893,11 @@ def test_policy_resolver_rejects_malformed_clause_selection(clause_ids: object) 
         version='v1',
         summary='Policy',
         available_selectors=['clauses'],
-        max_resolve_tokens=1200,
+        max_resolve_tokens=2500,
     )
     resolver = TurnContextResolver([reference], {(reference.ref, 'clauses'): {}})
     with pytest.raises(ValueError, match='at most three strings'):
-        resolver.resolve(reference.ref, 'clauses', 1200, clause_ids)  # type: ignore[arg-type]
+        resolver.resolve(reference.ref, 'clauses', 2500, clause_ids)  # type: ignore[arg-type]
 
 
 def test_policy_clause_selection_cannot_be_used_on_history_reference() -> None:
@@ -891,61 +921,86 @@ def test_policy_resolver_passes_selection_and_bounded_limit_without_truncation(
     from unittest.mock import Mock
 
     full_clause = 'A complete policy clause. ' * 80
-    loader = Mock(return_value={'chunks': [{'text': full_clause}]})
+    loader = Mock(return_value={'chunks': [{'chunk_id': 'doc#MOTOR-001', 'text': full_clause}]})
     context = replace(_context('What does my policy say?'), knowledge_context_loader=loader)
     plan = plan_model_turn(context)
     assert plan is not None
     reference = next(
         ref for ref in plan.context_plan.references if ref.resource_type == 'policy_version'
     )
-    assert reference.max_resolve_tokens == 1200
+    assert reference.max_resolve_tokens == 2500
     result = resolver_for_turn(context, plan.context_plan).resolve(
         reference.ref,
         'matching_facts_and_guidance',
-        1200,
+        2500,
         selected,
     )
-    loader.assert_called_once_with(1200, selected)
-    assert result.content == {'approved_guidance': {'chunks': [{'text': full_clause}]}}
+    loader.assert_called_once_with(2500, selected)
+    assert result.content == {
+        'approved_guidance': {
+            'chunks': [{'chunk_id': 'doc#MOTOR-001', 'text': full_clause}],
+            'returned_clause_ids': ['MOTOR-001'],
+            'not_included': [],
+        }
+    }
     assert not result.truncated
-    with pytest.raises(ContextResultBudgetExceeded, match='exceeds'):
-        resolver_for_turn(context, plan.context_plan).resolve(
-            reference.ref,
-            'matching_facts_and_guidance',
-            10,
-            selected,
-        )
 
 
-def test_policy_result_budget_failure_identifies_tool_limit() -> None:
+def test_policy_result_budget_returns_whole_clauses_and_allows_follow_up() -> None:
+    clauses = {
+        'MTR-BEN-01': 'First complete clause. ' * 35,
+        'MTR-BEN-02': 'Second complete clause. ' * 35,
+    }
+
+    def load(_limit: int, clause_ids: Sequence[str]) -> dict[str, object]:
+        return {
+            'chunks': [
+                {'chunk_id': f'doc#{clause_id}', 'text': clauses[clause_id]}
+                for clause_id in clause_ids
+            ]
+        }
+
     context = replace(
         _context('Will my policy pay for a rental car?'),
-        knowledge_context_loader=lambda _limit, _ids: {'chunks': [{'text': 'clause ' * 300}]},
+        knowledge_context_loader=load,
     )
     plan = plan_model_turn(context)
     assert plan is not None
     reference = next(
         ref for ref in plan.context_plan.references if ref.resource_type == 'policy_version'
     )
-    response = ModelResponse(
-        tool_calls=[
-            ModelToolCall(
-                call_id='call_policy',
-                name='context.resolve',
-                arguments={
-                    'ref': reference.ref,
-                    'selector': 'matching_facts_and_guidance',
-                    'max_tokens': 10,
-                    'clause_ids': ['MTR-BEN-03'],
-                },
-            )
-        ],
-        completion_status=ModelCompletionStatus.COMPLETE,
+    resolver = resolver_for_turn(context, plan.context_plan)
+    first = resolver.resolve(
+        reference.ref,
+        'matching_facts_and_guidance',
+        400,
+        ['MTR-BEN-01', 'MTR-BEN-02'],
     )
-    with pytest.raises(ModelGatewayError) as error:
-        GatewayAgent(_RecordingGateway([response])).propose_turn(context)
-    assert error.value.diagnostic_code == 'context_result_budget_exceeded'
-    assert error.value.diagnostic_path == 'context.resolve.max_tokens'
+    assert isinstance(first.content, dict)
+    guidance = first.content['approved_guidance']
+    assert isinstance(guidance, dict)
+    assert guidance['returned_clause_ids'] == ['MTR-BEN-01']
+    assert guidance['not_included'] == [
+        {
+            'clause_id': 'MTR-BEN-02',
+            'reason': 'too long for this turn, request it on its own',
+        }
+    ]
+    assert first.truncated
+    assert clauses['MTR-BEN-01'] == guidance['chunks'][0]['text']
+
+    follow_up = resolver.resolve(
+        reference.ref,
+        'matching_facts_and_guidance',
+        400,
+        ['MTR-BEN-02'],
+    )
+    assert isinstance(follow_up.content, dict)
+    follow_up_guidance = follow_up.content['approved_guidance']
+    assert isinstance(follow_up_guidance, dict)
+    assert follow_up_guidance['returned_clause_ids'] == ['MTR-BEN-02']
+    assert follow_up_guidance['not_included'] == []
+    assert not follow_up.truncated
 
 
 @pytest.mark.parametrize(
@@ -1002,6 +1057,7 @@ def test_policy_directory_is_inline_for_resolved_product_on_any_turn(
     assert plan.context_payload['policy_clause_directory_status'] == directory_status
     assert plan.context_payload['policy_clause_directory_limitations'] == limitations
     assert any(ref.resource_type == 'policy_version' for ref in plan.context_plan.references)
+    assert 'capability.policy-search@v2' in plan.fragment_refs
 
 
 def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
@@ -1123,7 +1179,12 @@ def test_v7_lookup_schema_failure_identifies_stage_and_field(stage: str) -> None
         completion_status=ModelCompletionStatus.COMPLETE,
     )
     responses = [invalid]
+    context = _context('What is the status of my claim?', conversation_messages=_messages(6))
     if stage == 'continuation':
+        context = replace(
+            _context('Show my previous uploads.'),
+            evidence_history_context_loader=lambda _: {'status': 'empty'},
+        )
         responses.insert(
             0,
             ModelResponse(
@@ -1132,8 +1193,8 @@ def test_v7_lookup_schema_failure_identifies_stage_and_field(stage: str) -> None
                         call_id='call_history',
                         name='context.resolve',
                         arguments={
-                            'ref': 'ctxref:ses_v7:conversation.older',
-                            'selector': 'page',
+                            'ref': 'ctxref:ses_v7:evidence.history',
+                            'selector': 'history',
                             'max_tokens': 120,
                         },
                     )
@@ -1144,9 +1205,7 @@ def test_v7_lookup_schema_failure_identifies_stage_and_field(stage: str) -> None
     gateway = _RecordingGateway(responses)
 
     with pytest.raises(ModelGatewayError) as error:
-        GatewayAgent(gateway).propose_turn(
-            _context('What is the status of my claim?', conversation_messages=_messages(6))
-        )
+        GatewayAgent(gateway).propose_turn(context)
 
     assert error.value.diagnostic_code == f'{stage}_output_schema_validation'
     assert error.value.diagnostic_path == 'reply'

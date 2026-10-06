@@ -73,7 +73,7 @@ def test_supplement_after_creation_appends_without_overwriting(
     # The claimant hears the model, not a Runtime template.
     assert turn['agent_message']['content']['text'].startswith('Thanks, I have added')
     assert turn['recovery'] is None
-    assert repository.get_claim(journey.claim_id, 'cus_demo') is not None
+    assert repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b') is not None
 
 
 def test_view_after_creation_lists_the_original_messages(client: TestClient) -> None:

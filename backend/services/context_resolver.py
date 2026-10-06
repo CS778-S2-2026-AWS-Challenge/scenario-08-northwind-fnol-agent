@@ -15,6 +15,53 @@ class ContextResultBudgetExceeded(ValueError):
     """A complete structured result cannot fit the requested reference budget."""
 
 
+_POLICY_OMISSION_REASON = 'too long for this turn, request it on its own'
+
+
+def _fit_policy_result(value: dict[str, object], token_limit: int) -> dict[str, object]:
+    """Keep whole policy clauses that fit and identify clauses to request next."""
+
+    guidance = value.get('approved_guidance')
+    if not isinstance(guidance, dict):
+        return value
+    chunks = guidance.get('chunks')
+    if not isinstance(chunks, list):
+        return value
+    fitted_guidance = dict(guidance)
+    fitted_guidance['chunks'] = []
+    fitted_guidance['returned_clause_ids'] = []
+    omitted: list[dict[str, str]] = []
+    fitted = {**value, 'approved_guidance': fitted_guidance}
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        clause_id = chunk.get('chunk_id') or chunk.get('clause_id')
+        candidate_chunks = [*fitted_guidance['chunks'], chunk]
+        candidate_ids = [
+            *fitted_guidance['returned_clause_ids'],
+            str(clause_id).rsplit('#', 1)[-1],
+        ]
+        candidate_guidance = {
+            **fitted_guidance,
+            'chunks': candidate_chunks,
+            'returned_clause_ids': candidate_ids,
+            'not_included': omitted,
+        }
+        candidate = {**value, 'approved_guidance': candidate_guidance}
+        if estimate_tokens(json.dumps(candidate, separators=(',', ':'))) <= token_limit:
+            fitted_guidance = candidate_guidance
+            fitted = candidate
+        elif clause_id is not None:
+            omitted.append(
+                {
+                    'clause_id': str(clause_id).rsplit('#', 1)[-1],
+                    'reason': _POLICY_OMISSION_REASON,
+                }
+            )
+    fitted_guidance['not_included'] = omitted
+    return {**fitted, 'approved_guidance': fitted_guidance}
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedContextChunk:
     ref: str
@@ -78,10 +125,16 @@ class TurnContextResolver:
             content: dict[str, object] | str = encoded[:max_chars]
             truncated = len(encoded) > max_chars
         else:
-            content = value
+            content = _fit_policy_result(value, bounded_limit) if policy_source else value
             estimated_tokens = estimate_tokens(json.dumps(value, separators=(',', ':')))
-            truncated = estimated_tokens > bounded_limit
-            if truncated:
+            fitted_guidance = content.get('approved_guidance') if policy_source else None
+            omitted_clauses = (
+                fitted_guidance.get('not_included') if isinstance(fitted_guidance, dict) else None
+            )
+            truncated = bool(omitted_clauses) or (
+                estimate_tokens(json.dumps(content, separators=(',', ':'))) > bounded_limit
+            )
+            if truncated and policy_source is None:
                 raise ContextResultBudgetExceeded(
                     'Structured Context Reference content exceeds its bounded result: '
                     f'{estimated_tokens} > {bounded_limit} tokens.'

@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from typing import Any, cast
+from unittest.mock import Mock
 
 import mongomock
 import pytest
@@ -31,6 +32,7 @@ from backend.domain.claim_creation import (
     ClaimCreationOperationRecord,
     ClaimCreationOperationStatus,
     ClaimCreationRecovery,
+    ClaimHistoryChecks,
     assert_claim_creation_operation_transition,
     claim_creation_operation_id,
     classify_claim_creation_failure,
@@ -71,6 +73,8 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.services import integrations
+from backend.services.claim_history_checks import check_lodging_history
 from backend.services.integrations import assessor_operation_id
 from backend.services.support import now_utc, request_fingerprint
 
@@ -506,6 +510,20 @@ def test_claim_creation_operation_transition_guards_identity_time_and_lifecycle(
     with pytest.raises(ValueError, match='identity is immutable'):
         assert_claim_creation_operation_transition(
             prepared,
+            prepared.model_copy(
+                update={
+                    'history_checks': ClaimHistoryChecks(
+                        checked_at=prepared.created_at,
+                        prior_claims_12m='clear',
+                        possible_duplicate='clear',
+                        count_past_12_months=0,
+                    )
+                }
+            ),
+        )
+    with pytest.raises(ValueError, match='identity is immutable'):
+        assert_claim_creation_operation_transition(
+            prepared,
             prepared.model_copy(update={'route': 'standard_home_intake'}),
         )
     with pytest.raises(ValueError, match='time cannot move backwards'):
@@ -552,7 +570,7 @@ def test_claim_creation_repository_rejects_invalid_reservation_and_transitions(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=str(session['session_id']),
         decision_id=decision_id,
         revision=1,
@@ -563,7 +581,7 @@ def test_claim_creation_repository_rejects_invalid_reservation_and_transitions(
         update={
             'operation_id': claim_creation_operation_id(claim_id, decision_id),
             'claim_id': claim_id,
-            'customer_id': 'cus_demo',
+            'customer_id': 'cus_8f41a2c90d7e463b',
             'authorised_decision_id': decision_id,
             'evidence_snapshot_fingerprint': evidence_snapshot_fingerprint([]),
         }
@@ -624,7 +642,7 @@ def prepare_assessor_request(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=session_id,
         decision_id=create_decision,
         revision=1,
@@ -652,7 +670,7 @@ def prepare_assessor_request(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=session_id,
         decision_id=route_decision,
         revision=revision,
@@ -828,6 +846,7 @@ def test_claim_creation_returns_complete_result_and_deduplicates_by_working_clai
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
+    initial_claim_count = repository.claim_count
     created = create_working_claim(client)
     claim = created['claim']
     session = created['session']
@@ -838,7 +857,7 @@ def test_claim_creation_returns_complete_result_and_deduplicates_by_working_clai
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=str(session['session_id']),
         decision_id=decision_id,
         revision=1,
@@ -864,7 +883,7 @@ def test_claim_creation_returns_complete_result_and_deduplicates_by_working_clai
     assert body['next_step'] == 'Claims intake review'
     assert body['expected_by'] is not None
     assert body['created_at'] is not None
-    assert repository.claim_count == 1
+    assert repository.claim_count == initial_claim_count + 1
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     assert stored.revision == 2
@@ -876,6 +895,20 @@ def test_claim_creation_returns_complete_result_and_deduplicates_by_working_clai
     assert claimant_view.json()['customer_next_step']['can_resume'] is False
     assert 'external_claim_fingerprint' not in claimant_view.json()
     assert 'assessor_routing' not in claimant_view.json()
+    operation = repository.get_claim_creation_operation(
+        claim_creation_operation_id(claim_id, decision_id)
+    )
+    assert operation is not None and operation.history_checks is not None
+    assert operation.history_checks.count_past_12_months == initial_claim_count
+    assert operation.history_checks.prior_claims_12m == 'clear'
+    assert operation.history_checks.possible_duplicate == 'not_checked'
+    assert 'history_checks' not in claimant_view.json()
+    staff_view = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    )
+    assert staff_view.status_code == 200, staff_view.text
+    assert staff_view.json()['history_checks'] == operation.history_checks.model_dump(mode='json')
 
 
 def test_claim_creation_rejects_claimant_auth_stale_state_and_unauthorised_decision(
@@ -892,7 +925,7 @@ def test_claim_creation_rejects_claimant_auth_stale_state_and_unauthorised_decis
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=str(session['session_id']),
         decision_id=decision_id,
         revision=1,
@@ -941,7 +974,7 @@ def test_claim_creation_rejects_authorisation_from_an_older_revision(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=str(session['session_id']),
         decision_id=decision_id,
         revision=1,
@@ -993,7 +1026,7 @@ def test_claim_creation_rejects_changed_replay_and_unknown_provider_fields(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=str(session['session_id']),
         decision_id=decision_id,
         revision=1,
@@ -1035,7 +1068,7 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=session_id,
         decision_id=create_decision,
         revision=1,
@@ -1053,7 +1086,7 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=session_id,
         decision_id=route_decision,
         revision=consent_revision,
@@ -1304,7 +1337,7 @@ def test_assessor_result_receipt_is_idempotent_without_duplicate_claim_changes()
     assert first_claim == replayed_claim
     assert adapter.result_invocations == 1
     assert len(repository.list_external_task_results_internal(claim_id)) == 1
-    assert len(repository.list_evidence(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
 
 def test_assessor_result_retry_finishes_after_an_interrupted_result_write(
@@ -1402,7 +1435,7 @@ def test_assessor_result_requires_assignment_and_available_storage() -> None:
     assert unavailable.json()['error']['retryable'] is True
     assert outage_repository.get_claim_internal(claim_id) == before
     assert outage_repository.list_external_task_results_internal(claim_id) == []
-    evidence = outage_repository.list_evidence(claim_id, 'cus_demo')
+    evidence = outage_repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(evidence) == 1
     assert evidence[0].status is EvidenceStatus.PENDING
     assert evidence[0].file_status is EvidenceFileStatus.NOT_AVAILABLE
@@ -1424,7 +1457,7 @@ def test_assessor_result_rejects_missing_authority_identity_and_malformed_output
         route = f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result'
         before = repository.get_claim_internal(claim_id)
         assert before is not None
-        before_evidence = repository.list_evidence(claim_id, 'cus_demo')
+        before_evidence = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
 
         missing_auth = client.post(route)
         missing_claim = client.post(
@@ -1465,7 +1498,7 @@ def test_assessor_result_rejects_missing_authority_identity_and_malformed_output
     assert error['request_id'].startswith('req_')
     assert repository.get_claim_internal(claim_id) == before
     assert repository.list_external_task_results_internal(claim_id) == []
-    assert repository.list_evidence(claim_id, 'cus_demo') == before_evidence
+    assert repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b') == before_evidence
 
 
 def test_assessor_routing_requires_consent_from_the_shared_claim_context() -> None:
@@ -1496,7 +1529,7 @@ def test_assessor_routing_requires_consent_from_the_shared_claim_context() -> No
     'granted_by',
     [
         ActorReference(actor_type=ActorType.STAFF, actor_id='stf_other_actor'),
-        ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_other_claimant'),
+        ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_2b67e9d14a3c508f_claimant'),
     ],
 )
 def test_assessor_routing_rejects_consent_from_staff_or_another_claimant(
@@ -1807,7 +1840,7 @@ def test_retryable_assessor_operation_rejects_stale_authority_before_provider_re
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=original_decision.session_id,
             decision_id=fresh_decision_id,
             revision=revision + 1,
@@ -1958,7 +1991,7 @@ def test_assessor_routing_is_not_authorised_by_severity_alone(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=session_id,
         decision_id=create_decision,
         revision=1,
@@ -1976,7 +2009,7 @@ def test_assessor_routing_is_not_authorised_by_severity_alone(
     save_authorisation(
         repository,
         claim_id=claim_id,
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         session_id=session_id,
         decision_id=severity_decision,
         revision=consent_revision,
@@ -2169,7 +2202,7 @@ def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() 
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2203,7 +2236,7 @@ def test_claim_creation_rejects_an_adapter_result_with_a_mismatched_source() -> 
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2225,7 +2258,11 @@ def test_claim_creation_rejects_an_adapter_result_with_a_mismatched_source() -> 
     assert stored.revision == 1
 
 
-def test_claim_creation_reconciles_submitted_timeout_without_duplicate_creation() -> None:
+def test_claim_creation_reconciles_submitted_timeout_without_duplicate_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history_check = Mock(wraps=check_lodging_history)
+    monkeypatch.setattr(integrations, 'check_lodging_history', history_check)
     repository = FixtureRepository()
     adapter = InterruptedClaimsAdapter()
     app = create_app(repository=repository, claims_service_adapter=adapter)
@@ -2238,7 +2275,7 @@ def test_claim_creation_reconciles_submitted_timeout_without_duplicate_creation(
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2256,6 +2293,7 @@ def test_claim_creation_reconciles_submitted_timeout_without_duplicate_creation(
         recovered = client.post(
             '/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload
         )
+        replayed = client.post('/internal/v1/claims/create', headers=INTEGRATION_AUTH, json=payload)
 
     assert interrupted.status_code == 503
     assert unresolved is not None
@@ -2268,6 +2306,11 @@ def test_claim_creation_reconciles_submitted_timeout_without_duplicate_creation(
     accepted = repository.get_claim_creation_operation(operation_id)
     assert accepted is not None
     assert accepted.status is ClaimCreationOperationStatus.ACCEPTED
+    assert accepted.history_checks is not None
+    assert accepted.history_checks == unresolved.history_checks
+    history_check.assert_called_once()
+    assert replayed.status_code == 200
+    assert replayed.json() == recovered.json()
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     assert stored.external_claim == accepted.result
@@ -2286,7 +2329,7 @@ def test_claim_creation_reconciliation_preserves_original_submitted_delivery() -
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2325,7 +2368,7 @@ def test_claim_creation_retries_same_operation_after_unsubmitted_failure() -> No
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2350,6 +2393,7 @@ def test_claim_creation_retries_same_operation_after_unsubmitted_failure() -> No
     assert accepted is not None
     assert accepted.status is ClaimCreationOperationStatus.ACCEPTED
     assert accepted.created_at == failed.created_at
+    assert accepted.history_checks == failed.history_checks
 
 
 def test_claim_creation_persists_terminal_adapter_failure_without_claim_projection() -> None:
@@ -2367,7 +2411,7 @@ def test_claim_creation_persists_terminal_adapter_failure_without_claim_projecti
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2419,7 +2463,7 @@ def test_claim_creation_recovers_recorded_result_after_settlement_revision_confl
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2479,7 +2523,7 @@ def test_claim_creation_reservation_loser_reconciles_without_duplicate_provider_
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2542,7 +2586,7 @@ def test_claim_creation_rejects_context_mismatch_before_provider_invocation(
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2583,12 +2627,12 @@ def test_claim_creation_accepts_complete_nonempty_evidence_snapshot() -> None:
             created_at=timestamp,
             updated_at=timestamp,
         )
-        repository.save_evidence(evidence, 'cus_demo')
+        repository.save_evidence(evidence, 'cus_8f41a2c90d7e463b')
         decision_id = 'dec_complete_evidence_snapshot'
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,
@@ -2629,7 +2673,7 @@ def test_mongodb_claim_creation_operation_survives_repository_restart() -> None:
         save_authorisation(
             repository,
             claim_id=claim_id,
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             session_id=str(session['session_id']),
             decision_id=decision_id,
             revision=1,

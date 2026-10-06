@@ -12,6 +12,7 @@ def _client(tmp_path: Path) -> TestClient:
     return TestClient(
         create_app(
             Settings(
+                business_seed_path='config/business-seed.json',
                 environment='test',
                 identity_mode=IdentityMode.NORMAL,
                 identity_db_path=str(tmp_path / 'claimant.sqlite3'),

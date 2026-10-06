@@ -13,8 +13,7 @@ rather than a fact this module gets to invent:
   condition and the file lifecycle are separate vocabularies; before that, four did not,
   and this module reported them as named gaps rather than coercing them into a
   neighbouring value.
-- `SCENARIO_FOR_FAMILY` is the whole of the mapping from a claim family to the
-  demonstration claim its materials attach to.
+- The supplied claim families determine which claim each material attaches to.
 - `MATERIAL_CLASS_KIND` is the whole of the mapping from a catalogue class to the
   Evidence kind, chosen so the existing staff tag projection recognises them.
 
@@ -42,7 +41,7 @@ from backend.domain.models import (
     EvidenceStatus,
     WorkingClaim,
 )
-from backend.repositories.scenario_loader import ScenarioFixture
+from backend.repositories.scenario_loader import ClaimSeedGraph
 
 MATERIALS_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'materials'
 MANIFEST_PATH = MATERIALS_DIRECTORY / 'materials.json'
@@ -50,17 +49,6 @@ DEMO_MATERIAL_SCHEME = 'demo-material://'
 
 RECORD_HELD_AS = 'record'
 INCIDENT_EVIDENCE_CLASS = 'Incident evidence'
-
-# Which demonstration claim carries each family's materials.
-#
-# These are `VALIDATION_SCENARIO_IDS` from `demo_seed`, which #583 made a seeded product
-# demonstration rather than test-only scenario files. Each is a claim of exactly one
-# family, which is what lets a family's materials attach to one claim and to no other.
-SCENARIO_FOR_FAMILY: dict[str, str] = {
-    'motor': 'AT-14-field-states-motor',
-    'home': 'AT-15-field-states-home',
-    'contents': 'AT-16-field-states-contents',
-}
 
 # The catalogue condition resolved to the persisted pair, and nothing else in this module
 # decides it. Every catalogue condition now has a counterpart, which it did not before the
@@ -146,7 +134,7 @@ class UnassociatedMaterial:
 class MaterialAssociationResult:
     """The scenarios with their materials attached, and what could not be attached."""
 
-    scenarios: tuple[ScenarioFixture, ...]
+    scenarios: tuple[ClaimSeedGraph, ...]
     associated: tuple[str, ...]
     unassociated: tuple[UnassociatedMaterial, ...]
 
@@ -468,19 +456,18 @@ def evidence_record_for(
 
 
 def associate_materials(
-    scenarios: tuple[ScenarioFixture, ...],
+    scenarios: tuple[ClaimSeedGraph, ...],
     materials: list[dict[str, Any]] | None = None,
 ) -> MaterialAssociationResult:
     """Attach every associable material to the demonstration claim of its family.
 
-    The composed scenario is rebuilt through `ScenarioFixture.model_validate` rather than
+    The composed scenario is rebuilt through `ClaimSeedGraph.model_validate` rather than
     copied, so the fixture's own rule that `evidence_summary` and `claim_state.evidence`
     derive from the evidence records checks this composition instead of a second copy of
     that rule living here.
 
     Args:
-        scenarios: The scenarios to attach materials to. Any whose identifier is not a
-            demonstration claim for a family is returned unchanged.
+        scenarios: One configured claim per family to attach materials to.
         materials: The manifest entries; read from the manifest when omitted.
 
     Returns:
@@ -489,11 +476,18 @@ def associate_materials(
     """
 
     entries = load_material_manifest() if materials is None else materials
+    scenario_for_family: dict[str, str] = {}
+    for scenario in scenarios:
+        family = scenario.claim.incident_type
+        if family is not None:
+            if family in scenario_for_family:
+                raise MaterialAssociationError('Supply only one demonstration claim per family.')
+            scenario_for_family[family] = scenario.scenario_id
     by_scenario: dict[str, list[dict[str, Any]]] = {}
     unassociated: list[UnassociatedMaterial] = []
     for material in entries:
         family = str(material['claim_path'])
-        scenario_id = SCENARIO_FOR_FAMILY.get(family)
+        scenario_id = scenario_for_family.get(family)
         if scenario_id is None:
             unassociated.append(
                 UnassociatedMaterial(
@@ -506,25 +500,8 @@ def associate_materials(
         by_scenario.setdefault(scenario_id, []).append(material)
 
     catalogue = {str(material['path']): str(material['claim_path']) for material in entries}
-    supplied = {scenario.scenario_id for scenario in scenarios}
-
-    # A material whose claim is mapped but not supplied would otherwise be in neither
-    # list: grouped away from `unassociated`, and never reached by the loop below. Every
-    # catalogued material has to come back in exactly one of the two.
-    for scenario_id, orphaned in by_scenario.items():
-        if scenario_id in supplied:
-            continue
-        for material in orphaned:
-            unassociated.append(
-                UnassociatedMaterial(
-                    path=str(material['path']),
-                    condition=str(material['demonstrates_condition']),
-                    reason=f'{scenario_id} carries this family but was not supplied',
-                )
-            )
-
     associated: list[str] = []
-    composed: list[ScenarioFixture] = []
+    composed: list[ClaimSeedGraph] = []
     for scenario in scenarios:
         candidates = by_scenario.get(scenario.scenario_id)
         if not candidates:
@@ -554,9 +531,9 @@ def associate_materials(
 
 
 def _with_evidence(
-    scenario: ScenarioFixture,
+    scenario: ClaimSeedGraph,
     records: list[EvidenceRecord],
-) -> ScenarioFixture:
+) -> ClaimSeedGraph:
     """Rebuild a scenario around a new evidence set, deriving what the claim must state.
 
     Args:
@@ -564,14 +541,14 @@ def _with_evidence(
         records: The complete evidence set the rebuilt scenario carries.
 
     Returns:
-        The rebuilt scenario, validated by `ScenarioFixture`'s own derivation rules.
+        The rebuilt scenario, validated by `ClaimSeedGraph`'s own derivation rules.
     """
 
     payload = scenario.model_dump(mode='json')
     payload['evidence'] = [record.model_dump(mode='json') for record in records]
     payload['claim']['evidence_summary'] = evidence_summary_for(records).model_dump(mode='json')
     payload['claim']['claim_state']['evidence'] = evidence_state_for(records).value
-    return ScenarioFixture.model_validate(payload)
+    return ClaimSeedGraph.model_validate(payload)
 
 
 def material_content(record: EvidenceRecord) -> bytes | None:

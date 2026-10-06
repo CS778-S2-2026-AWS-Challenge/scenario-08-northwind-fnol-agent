@@ -309,8 +309,8 @@ def _validate_tool_requests(
                 message='The Agent supplied an invalid policy lookup request.',
             )
         if tool == 'claim_history' and operation in {'search_claim_history', 'lookup'}:
-            if (
-                not isinstance(request.get('history_reference'), str)
+            if request.get('history_reference') is not None and (
+                not isinstance(request['history_reference'], str)
                 or not str(request['history_reference']).strip()
             ):
                 raise ApiError(
@@ -1463,42 +1463,30 @@ def _policy_context_for_turn(
 
 def _claim_history_context_for_turn(
     repository: PersistenceRepository,
+    adapter: PolicyHistoryAdapter,
     claim: WorkingClaim,
     customer_id: str,
     max_tokens: int,
 ) -> dict[str, object]:
     """Return a bounded claimant-owned cross-Claim projection without internal fields."""
 
-    max_items = max(1, min(10, max_tokens // 80))
-    claims = sorted(
-        (
-            item
-            for item in repository.list_claims_for_customer(customer_id)
-            if item.claim_id != claim.claim_id
+    if claim.customer_id != customer_id:
+        raise ApiError(
+            status_code=403, code='FORBIDDEN', message='Claim history is not accessible.'
+        )
+    result = search_claim_history(
+        repository,
+        adapter,
+        ClaimHistorySearchRequest(
+            claim_id=claim.claim_id, limit=max(1, min(10, max_tokens // 160))
         ),
-        key=lambda item: (item.updated_at, item.claim_id),
-        reverse=True,
-    )[:max_items]
+    )
     return {
-        'status': (
-            RetrievalStatus.EVIDENCE_FOUND.value if claims else RetrievalStatus.NO_EVIDENCE.value
-        ),
-        'claims': [
-            {
-                'claim_id': item.claim_id,
-                'revision': item.revision,
-                'product_family': item.incident_type,
-                'workflow_state': item.claim_state.workflow_state.value,
-                'next_action': item.claim_state.next_action.value,
-                'created_at': item.created_at.isoformat(),
-                'updated_at': item.updated_at.isoformat(),
-            }
-            for item in claims
-        ],
-        'source_refs': [f'claim:{item.claim_id}:revision:{item.revision}' for item in claims],
-        'limitations': (
-            [] if claims else ['No other Claim is available in the authenticated customer scope.']
-        ),
+        'status': result.status.value,
+        'connection_state': result.connection_state.value,
+        'history': result.history.model_dump(mode='json') if result.history is not None else None,
+        'source_refs': ([result.result_id] if result.history is not None else []),
+        'limitations': list(result.limitations),
     }
 
 
@@ -1525,10 +1513,10 @@ def _execute_claim_history_search(
     if tool is None:
         return None
     raw_reference = tool.get('history_reference')
-    if not isinstance(raw_reference, str):
+    if raw_reference is not None and not isinstance(raw_reference, str):
         return None
-    history_reference = raw_reference.strip()
-    if not history_reference:
+    history_reference = raw_reference.strip() if isinstance(raw_reference, str) else None
+    if history_reference == '':
         return None
     if 'limit' not in tool:
         limit = 10
@@ -1539,28 +1527,10 @@ def _execute_claim_history_search(
         limit = raw_limit
     if not 1 <= limit <= 50:
         return None
-    existing = next(
-        (
-            record
-            for record in reversed(repository.list_retrieval_records(claim_id, customer_id))
-            if isinstance(record, ClaimHistoryRetrievalRecord)
-            and record.facts.history_reference == history_reference
-        ),
-        None,
-    )
-    if existing is not None:
-        return (
-            existing,
-            {
-                'tool': 'claim_history',
-                'status': (
-                    RetrievalStatus.AMBIGUOUS.value
-                    if existing.uncertainty
-                    else RetrievalStatus.EVIDENCE_FOUND.value
-                ),
-                'source_refs': [existing.retrieval_id],
-                'limitations': [],
-            },
+    current = repository.get_claim(claim_id, customer_id)
+    if current is None:
+        raise ApiError(
+            status_code=403, code='FORBIDDEN', message='Claim history is not accessible.'
         )
     result = search_claim_history(
         repository,
@@ -1572,21 +1542,15 @@ def _execute_claim_history_search(
             limit=limit,
         ),
     )
-    record = next(
-        (
-            record
-            for record in repository.list_retrieval_records(claim_id, customer_id)
-            if isinstance(record, ClaimHistoryRetrievalRecord)
-            and record.retrieval_id == result.result_id
-        ),
-        None,
-    )
     return (
-        record,
+        None,
         {
             'tool': 'claim_history',
             'status': result.status.value,
-            'source_refs': [record.retrieval_id] if record is not None else [],
+            'source_refs': ([result.result_id] if result.history is not None else []),
+            'history': result.history.model_dump(mode='json')
+            if result.history is not None
+            else None,
             'limitations': list(result.limitations),
         },
     )
@@ -2098,6 +2062,7 @@ def submit_message(
     repository: PersistenceRepository,
     agent: AgentTurnProvider,
     policy_history_adapter: PolicyHistoryAdapter,
+    claim_history_adapter: PolicyHistoryAdapter,
     principal: Principal,
     claim_id: str,
     session_id: str,
@@ -2776,6 +2741,7 @@ def submit_message(
         ),
         claim_history_context_loader=lambda max_tokens: _claim_history_context_for_turn(
             repository,
+            claim_history_adapter,
             claim,
             principal.subject,
             max_tokens,
@@ -3043,7 +3009,7 @@ def submit_message(
         )
         history_outcome = _execute_claim_history_search(
             repository,
-            policy_history_adapter,
+            claim_history_adapter,
             claim_id,
             principal.subject,
             proposal,

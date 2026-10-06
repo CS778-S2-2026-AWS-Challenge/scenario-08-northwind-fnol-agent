@@ -31,7 +31,6 @@ from backend.repositories.scenario_loader import ScenarioFixture, load_scenario
 from backend.services.demo_materials import (
     CONDITION_STATUS,
     MATERIALS_DIRECTORY,
-    SCENARIO_FOR_FAMILY,
     MaterialAssociationError,
     associate_materials,
     evidence_record_for,
@@ -39,9 +38,14 @@ from backend.services.demo_materials import (
 )
 from backend.services.support import now_utc
 
-SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'backend' / 'demo_data' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'tests' / 'fixtures' / 'scenarios'
 
 NOW = now_utc()
+SCENARIO_FOR_FAMILY = {
+    'motor': 'AT-14-field-states-motor',
+    'home': 'AT-15-field-states-home',
+    'contents': 'AT-16-field-states-contents',
+}
 
 
 @pytest.fixture(scope='module')
@@ -485,8 +489,8 @@ def test_a_material_whose_claim_was_not_supplied_is_reported_not_dropped(
     assert len(result.associated) + len(result.unassociated) == len(materials)
     reasons = {item.reason for item in result.unassociated}
     assert reasons == {
-        f'{SCENARIO_FOR_FAMILY["home"]} carries this family but was not supplied',
-        f'{SCENARIO_FOR_FAMILY["contents"]} carries this family but was not supplied',
+        'no demonstration claim exists for the home family',
+        'no demonstration claim exists for the contents family',
     }
     assert all(path.startswith('motor/') for path in result.associated)
 

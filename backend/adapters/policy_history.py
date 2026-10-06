@@ -2,10 +2,11 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from pydantic import Field
+from pymongo.errors import PyMongoError
 
+from backend.domain.claim_history import LodgedClaimHistory
 from backend.domain.models import ContractModel
 from backend.domain.retrieval import (
-    ClaimHistoryFacts,
     ClaimHistoryRetrievalRecord,
     ClaimHistorySearchRequest,
     PolicyFacts,
@@ -14,6 +15,7 @@ from backend.domain.retrieval import (
     RetrievalSource,
     RetrievalUncertainty,
 )
+from backend.repositories.protocols import ClaimRepository
 from backend.services.support import now_utc
 
 
@@ -30,6 +32,7 @@ class ProviderLookupEnvelope(ContractModel):
     retrieved_at: datetime
     payload: dict[str, Any]
     uncertainty: list[ProviderUncertainty] = Field(default_factory=list, max_length=100)
+    history: LodgedClaimHistory | None = None
 
 
 def _source(envelope: ProviderLookupEnvelope) -> RetrievalSource:
@@ -81,24 +84,28 @@ def map_history_provider_payload(
     retrieval_id: str,
     claim_id: str,
     envelope: ProviderLookupEnvelope,
+    query: ClaimHistorySearchRequest,
 ) -> ClaimHistoryRetrievalRecord:
-    """Map the allow-listed history fields without carrying provider-only scoring."""
+    """Record the bounded result actually consulted, without provider-only scoring.
 
-    payload = envelope.payload
-    facts = ClaimHistoryFacts.model_validate(
-        {
-            'history_reference': payload.get('history_reference'),
-            'incident_type': payload.get('incident_type'),
-            'occurred_at': payload.get('occurred_at'),
-            'status': payload.get('status'),
-            'outcome': payload.get('outcome'),
-        }
-    )
+    Args:
+        retrieval_id: Stable consultation identity.
+        claim_id: Claim owning this consultation.
+        envelope: Typed repository history result.
+        query: Customer-scoped query parameters used by the caller.
+    Returns:
+        A consultation snapshot for staff provenance, not a historical Claim.
+    Raises:
+        ValueError: The adapter omitted the history projection or query scope differs.
+    """
+    if envelope.history is None or query.claim_id != claim_id:
+        raise ValueError('History consultation requires a scoped history projection.')
     return ClaimHistoryRetrievalRecord(
         retrieval_id=retrieval_id,
         claim_id=claim_id,
         source=_source(envelope),
-        facts=facts,
+        history=envelope.history,
+        query=query,
         uncertainty=_uncertainty(envelope),
     )
 
@@ -129,100 +136,54 @@ class PolicyHistoryAdapter(Protocol):
         raise NotImplementedError
 
 
-_FIXTURE_POLICIES: dict[str, dict[str, Any]] = {
-    'NW-MTR-204518': {
-        'policy_reference': 'NW-MTR-204518',
-        'product': 'motor',
-        'status': 'active',
-        'effective_from': '2026-01-01T00:00:00Z',
-        'effective_to': '2027-01-01T00:00:00Z',
-        'excess_amount': 500.0,
-        'currency': 'NZD',
-        'coverage_sections': [
-            'accidental_damage',
-            'third_party_liability',
-            'alternative_transport',
-        ],
-    },
-    'NW-MTR-204519': {
-        'policy_reference': 'NW-MTR-204519',
-        'product': 'motor',
-        'status': 'active',
-        'effective_from': '2026-01-01T00:00:00Z',
-        'effective_to': '2027-01-01T00:00:00Z',
-        'excess_amount': 500.0,
-        'currency': 'NZD',
-        'coverage_sections': ['accidental_damage', 'third_party_liability'],
-    },
-    'NW-HOM-204518': {
-        'policy_reference': 'NW-HOM-204518',
-        'product': 'home',
-        'status': 'active',
-        'effective_from': '2026-01-01T00:00:00Z',
-        'effective_to': '2027-01-01T00:00:00Z',
-        'excess_amount': 750.0,
-        'currency': 'NZD',
-        'coverage_sections': ['building_damage', 'emergency_repairs', 'temporary_accommodation'],
-    },
-    'NW-CON-204518': {
-        'policy_reference': 'NW-CON-204518',
-        'product': 'contents',
-        'status': 'active',
-        'effective_from': '2026-01-01T00:00:00Z',
-        'effective_to': '2027-01-01T00:00:00Z',
-        'excess_amount': 400.0,
-        'currency': 'NZD',
-        'coverage_sections': ['accidental_damage', 'theft', 'temporary_storage'],
-    },
-    'synthetic-policy-101': {
-        'policy_reference': 'synthetic-policy-101',
-        'product': 'motor',
-        'status': 'active',
-        'effective_from': '2026-01-01T00:00:00Z',
-        'effective_to': '2027-01-01T00:00:00Z',
-        'excess_amount': 500.0,
-        'currency': 'NZD',
-        'coverage_sections': ['accidental_damage', 'third_party_liability'],
-        # Provider-only fields below are deliberately present in the fixture so
-        # tests can prove the mapping discards them.
-        'fraud_label': 'elevated',
-        'risk_score': 0.82,
-        'policy_conclusion': 'covered',
-    },
-    'synthetic-policy-ambiguous': {
-        'policy_reference': 'synthetic-policy-ambiguous',
-        'product': 'motor',
-        'status': 'active',
-        'coverage_sections': ['accidental_damage'],
-    },
-}
+class RepositoryPolicyAdapter(PolicyHistoryAdapter):
+    """Read synthetic customer policy records from the selected persistence store."""
 
-_FIXTURE_HISTORIES: dict[str, dict[str, Any]] = {
-    'synthetic-history-204': {
-        'history_reference': 'synthetic-history-204',
-        'incident_type': 'motor',
-        'occurred_at': '2025-10-03T00:00:00Z',
-        'status': 'closed',
-        'outcome': 'settled',
-        'fraud_finding': 'none',
-        'internal_note': 'Provider-only commentary that must not cross the boundary.',
-    },
-}
+    def __init__(self, repository: ClaimRepository) -> None:
+        self._repository = repository
 
-_AMBIGUOUS_POLICY_UNCERTAINTY = ProviderUncertainty(
-    code='COVERAGE_SECTION_INCOMPLETE',
-    detail='The fixture policy does not state whether this event type is covered.',
-)
+    def connection_status(self) -> str:
+        status = getattr(self._repository, 'connection_status', None)
+        if not callable(status):
+            raise ValueError('The policy repository must declare its connection status.')
+        return str(status())
+
+    def search_policy(self, command: PolicySearchRequest) -> ProviderLookupEnvelope:
+        try:
+            current = self._repository.get_claim_internal(command.claim_id)
+            if current is None:
+                raise LookupError(command.claim_id)
+            policy = self._repository.get_seed_policy(current.customer_id, command.policy_reference)
+        except PyMongoError as error:
+            code = 'PROVIDER_TIMEOUT' if error.timeout else 'PROVIDER_UNAVAILABLE'
+            raise RetrievalUnavailable(code, 'Policy records could not be read.') from error
+        if policy is None:
+            raise LookupError(command.policy_reference)
+        return ProviderLookupEnvelope(
+            provider='synthetic_customer_policy',
+            provider_reference=policy.facts.policy_reference,
+            retrieved_at=now_utc(),
+            payload=policy.facts.model_dump(mode='json'),
+            uncertainty=[
+                ProviderUncertainty.model_validate(item.model_dump()) for item in policy.uncertainty
+            ],
+        )
+
+    def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
+        raise ValueError('Claim history requires its explicitly selected adapter.')
 
 
-class MockPolicyHistoryAdapter(PolicyHistoryAdapter):
+class MockPolicyHistoryAdapter(RepositoryPolicyAdapter):
     """Deterministic fixture retrieval with a controllable outage.
 
     The outage is explicit rather than random so the unavailable path is a
     demonstrable business path rather than a flaky test.
     """
 
-    def __init__(self, outage: RetrievalUnavailable | None = None) -> None:
+    def __init__(
+        self, repository: ClaimRepository, outage: RetrievalUnavailable | None = None
+    ) -> None:
+        super().__init__(repository)
         self._outage = outage
         self._lookups = 0
 
@@ -245,31 +206,52 @@ class MockPolicyHistoryAdapter(PolicyHistoryAdapter):
 
     def search_policy(self, command: PolicySearchRequest) -> ProviderLookupEnvelope:
         self._guard()
-        payload = _FIXTURE_POLICIES.get(command.policy_reference)
-        if payload is None:
-            raise LookupError(command.policy_reference)
-        uncertainty = (
-            [_AMBIGUOUS_POLICY_UNCERTAINTY]
-            if command.policy_reference == 'synthetic-policy-ambiguous'
-            else []
-        )
-        return ProviderLookupEnvelope(
-            provider='fixture_policy_administration',
-            provider_reference=command.policy_reference,
-            retrieved_at=now_utc(),
-            payload=payload,
-            uncertainty=uncertainty,
-        )
+        return super().search_policy(command)
 
     def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
         self._guard()
-        payload = _FIXTURE_HISTORIES.get(command.history_reference)
-        if payload is None:
-            raise LookupError(command.history_reference)
+        return RepositoryClaimHistoryAdapter(self._repository).search_claim_history(command)
+
+
+class RepositoryClaimHistoryAdapter(PolicyHistoryAdapter):
+    """Read lodged Claim projections from the explicitly configured repository."""
+
+    def __init__(self, repository: ClaimRepository) -> None:
+        self._repository = repository
+
+    def connection_status(self) -> str:
+        status = getattr(self._repository, 'connection_status', None)
+        if not callable(status):
+            raise ValueError('The claim-history repository must declare its connection status.')
+        return str(status())
+
+    def search_policy(self, command: PolicySearchRequest) -> ProviderLookupEnvelope:
+        raise LookupError('policy lookup is not provided by the claim history adapter')
+
+    def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
+        retrieved_at = now_utc()
+        try:
+            current = self._repository.get_claim_internal(command.claim_id)
+            if current is None:
+                raise LookupError(command.claim_id)
+            history = self._repository.query_lodged_claim_history(
+                current.customer_id,
+                current.claim_id,
+                limit=command.limit,
+                history_reference=command.history_reference,
+                as_of=retrieved_at,
+            )
+        except PyMongoError as error:
+            code = 'PROVIDER_TIMEOUT' if error.timeout else 'PROVIDER_UNAVAILABLE'
+            raise RetrievalUnavailable(code, 'Claim history could not be read.') from error
         return ProviderLookupEnvelope(
-            provider='fixture_claims_history',
-            provider_reference=command.history_reference,
-            retrieved_at=now_utc(),
-            payload=payload,
-            uncertainty=[],
+            provider=(
+                'fixture_claim_history'
+                if self.connection_status() == 'using_fixture'
+                else 'mongodb_claim_history'
+            ),
+            provider_reference=current.claim_id,
+            retrieved_at=retrieved_at,
+            payload={},
+            history=history,
         )

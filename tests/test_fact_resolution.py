@@ -53,7 +53,11 @@ def test_runtime_preserves_model_questions_without_duplicating_the_selected_ques
 NOW = datetime(2026, 9, 8, 2, 0, tzinfo=UTC)
 CLAIMANT = ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_fact')
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
-SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+SETTINGS = Settings(
+    business_seed_path='config/business-seed.json',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 
 
 def field(value: object, *, source_ref: str = 'msg_original') -> StructuredFormField:
@@ -556,11 +560,11 @@ def test_runtime_preserves_cross_session_conflict_and_recovers_full_provenance(
 
         claimant_view = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     occurred_at = stored.form['incident.occurred_at']
     assert occurred_at.status is FormStatus.DISPUTED
-    decisions = repository.list_agent_decisions(claim_id, 'cus_demo')
+    decisions = repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
     assert decisions[-2].discrepancy_candidates[0].field_code == 'incident.occurred_at'
     assert [message.content['text'] for message in agent.contexts[-1].provenance_messages] == [
         'It happened around 8pm.',
@@ -588,13 +592,13 @@ def test_runtime_applies_explicit_claimant_correction_without_fraud_signal() -> 
             'time-correction',
         )
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     occurred_at = stored.form['incident.occurred_at']
     assert occurred_at.value == '9pm'
     assert occurred_at.resolution_state is FactResolutionState.RESOLVED
     assert occurred_at.assertions[-1].relation is AssertionRelation.CORRECTION
-    assert repository.list_review_signals(claim_id, 'cus_demo') == []
+    assert repository.list_review_signals(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_question_budget_is_persisted_across_a_restarted_claim_session() -> None:
@@ -637,7 +641,7 @@ def test_question_budget_is_persisted_across_a_restarted_claim_session() -> None
             )
             revision = int(turn['claim_revision'])
 
-    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    stored_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert stored_session is not None
     assert stored_session.question_turn_count == 9
     assert stored_session.repeated_question_count == 8
@@ -718,7 +722,7 @@ def test_exhausted_budget_does_not_block_a_claim_whose_requirements_are_ready() 
     assert claim['customer_next_step']['status'] == 'ready_to_create'
     assert claim['primary_action']['action_code'] == 'claimant.review_payout_contact'
     assert claim['primary_action']['available'] is True
-    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    stored_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert stored_session is not None
     assert stored_session.question_turn_count == 10
     assert stored_session.post_session_follow_up_required is False
@@ -727,8 +731,8 @@ def test_exhausted_budget_does_not_block_a_claim_whose_requirements_are_ready() 
 def test_claimant_form_mutation_responses_filter_internal_retrieval_provenance() -> None:
     scenario = load_scenario(
         Path(__file__).parents[1]
-        / 'backend'
-        / 'demo_data'
+        / 'tests'
+        / 'fixtures'
         / 'scenarios'
         / 'AT-02-coverage-ambiguity.json'
     )
@@ -795,8 +799,8 @@ def test_claimant_form_mutation_responses_filter_internal_retrieval_provenance()
 def test_claimant_message_response_filters_internal_retrieval_provenance() -> None:
     scenario = load_scenario(
         Path(__file__).parents[1]
-        / 'backend'
-        / 'demo_data'
+        / 'tests'
+        / 'fixtures'
         / 'scenarios'
         / 'AT-02-coverage-ambiguity.json'
     )
@@ -806,10 +810,10 @@ def test_claimant_message_response_filters_internal_retrieval_provenance() -> No
         created = _create_claim(client, 'home', 'create-message-projection-claim')
         claim_id = str(created['claim']['claim_id'])
         session_id = str(created['session']['session_id'])
-        claim = repository.get_claim(claim_id, 'cus_demo')
+        claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert claim is not None
         retrieval = scenario.retrievals[0].model_copy(update={'claim_id': claim_id})
-        persist_retrieval_record(repository, retrieval, 'cus_demo')
+        persist_retrieval_record(repository, retrieval, 'cus_8f41a2c90d7e463b')
         policy_field = scenario.claim.form['policy.policy_number']
         claim_with_policy = claim.model_copy(
             update={
@@ -850,7 +854,7 @@ def test_claimant_message_response_filters_internal_retrieval_provenance() -> No
     decision = repository.find_agent_decision_for_trigger(
         claim_id,
         turn['claimant_message']['message_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert decision is not None
     persisted = decision.form_changes['policy.policy_number']
@@ -858,6 +862,6 @@ def test_claimant_message_response_filters_internal_retrieval_provenance() -> No
     assert any(
         'ret_fixture_at02_policy' in assertion.source_refs for assertion in persisted.assertions
     )
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert 'ret_fixture_at02_policy' in stored_claim.form['policy.policy_number'].source_refs

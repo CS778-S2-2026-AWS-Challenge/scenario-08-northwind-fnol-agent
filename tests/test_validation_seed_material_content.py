@@ -9,15 +9,19 @@ drive the seed through its API and open each material the way the Workbench prev
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import EvidenceStorageUnavailable, MockEvidenceStorage
-from backend.app import create_app
+from backend.app import create_app as _create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.models import EvidenceRecord
 from backend.repositories.fixture import FixtureRepository
+from backend.services.business_seed import load_business_seed
 from backend.services.demo_materials import (
     DEMO_MATERIAL_SCHEME,
     MATERIALS_DIRECTORY,
@@ -27,8 +31,18 @@ from backend.services.demo_materials import (
 
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 SEED_PATH = '/api/v1/workbench/demo/seed-validation'
-SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+SETTINGS = Settings(
+    business_seed_path='',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 PRODUCED_FILES = 24
+
+
+def create_app(*args: Any, **kwargs: Any) -> FastAPI:
+    app = _create_app(*args, **kwargs)
+    app.state.business_seed = load_business_seed(Path('config/business-seed.json'))
+    return app
 
 
 def _materials(

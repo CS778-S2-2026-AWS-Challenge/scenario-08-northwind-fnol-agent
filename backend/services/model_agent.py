@@ -957,7 +957,14 @@ class GatewayAgent:
                 exchange_completion,
             )
             invocations.append(_runtime_invocation_trace(1, response, observations[-1].latency_ms))
-            if plan.request_profile.requires_tool_continuation and not response.tool_calls:
+            # Ordinary claimant turns offer read-only references; the model may
+            # answer without consulting them. Evidence-action envelopes still
+            # require their source lookup before proposing reuse or removal.
+            if (
+                plan.request_profile.requires_tool_continuation
+                and plan.schema_id != 'claimant.turn.v1'
+                and not response.tool_calls
+            ):
                 raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
             if response.tool_calls:
                 if (
@@ -1025,6 +1032,7 @@ class GatewayAgent:
                         for key in (
                             'returned_clause_ids',
                             'not_found',
+                            'not_included',
                             'guidance_status',
                         ):
                             if key in guidance:
@@ -1256,7 +1264,13 @@ class GatewayAgent:
                     # noise: fail through persist-first recovery rather than
                     # spend another model call on a repair.
                     raise ModelGatewayError(
-                        ModelGatewayErrorCode.MALFORMED_RESPONSE
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                        diagnostic_code=f'{response_stage}_field_contract_violation',
+                        diagnostic_path=(
+                            f'field_changes.{contract_error.violations[0].field_code}'
+                            if contract_error.violations
+                            else 'field_changes'
+                        ),
                     ) from contract_error
                 violations = [item.model_dump(mode='json') for item in contract_error.violations]
                 logger.info(

@@ -374,7 +374,7 @@ def _catalogue(
     if 'claim-history' in route.capability_ids and (
         context.claim_history_context_loader is not None
     ):
-        cross_claim = any(
+        cross_claim = 'claim' in (context.message_text or '').casefold() and any(
             term in (context.message_text or '').casefold()
             for term in ('compare', 'across claims', 'all claims', 'multiple claims')
         )
@@ -507,7 +507,7 @@ def plan_context(
                 summary=f'Bounded {entry.resource_id} context is available on demand.',
                 available_selectors=entry.selectors or ['current'],
                 max_resolve_tokens=min(
-                    1200 if resource_type == 'policy_version' else 600,
+                    2500 if resource_type == 'policy_version' else 600,
                     max(1, available - estimate_json_tokens(inline)),
                 ),
             )

@@ -118,11 +118,11 @@ def test_upload_targets_existing_requirement_and_preserves_metadata(
     assert completed_item['related_fields'] == original['related_fields']
     assert completed_item['needed_for'] == original['needed_for']
     assert completed_item['claimant_note'] == original['claimant_note']
-    assert len(repository.list_evidence(claim_id, 'cus_demo')) == 1
-    stored = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert len(repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')) == 1
+    stored = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.provenance['transition_history'][-2]['to'] == 'awaiting_upload'
-    assert stored.provenance['transition_history'][-2]['actor_id'] == 'cus_demo'
+    assert stored.provenance['transition_history'][-2]['actor_id'] == 'cus_8f41a2c90d7e463b'
     assert stored.provenance['transition_history'][-1]['to'] == 'processing'
 
 
@@ -156,7 +156,7 @@ def test_first_upload_preserves_message_created_requirement_provenance(
         },
     )
     assert turn.status_code == 200, turn.text
-    requirements = repository.list_evidence(claim_id, 'cus_demo')
+    requirements = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(requirements) == 1
     requirement = requirements[0]
     assert requirement.file_status is EvidenceFileStatus.NOT_AVAILABLE
@@ -179,7 +179,7 @@ def test_first_upload_preserves_message_created_requirement_provenance(
     )
 
     assert requested.status_code == 201, requested.text
-    awaiting = repository.get_evidence(claim_id, requirement.evidence_id, 'cus_demo')
+    awaiting = repository.get_evidence(claim_id, requirement.evidence_id, 'cus_8f41a2c90d7e463b')
     assert awaiting is not None
     assert awaiting.material_version == 1
     assert awaiting.material_history == []
@@ -221,7 +221,7 @@ def test_upload_replaces_failed_or_invalid_material_on_the_same_identity(
         created_at=timestamp,
         updated_at=timestamp,
     )
-    repository.save_evidence(evidence, 'cus_demo')
+    repository.save_evidence(evidence, 'cus_8f41a2c90d7e463b')
 
     response = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
@@ -235,7 +235,7 @@ def test_upload_replaces_failed_or_invalid_material_on_the_same_identity(
 
     assert response.status_code == 201
     assert response.json()['evidence_id'] == evidence.evidence_id
-    replaced = repository.get_evidence(claim_id, evidence.evidence_id, 'cus_demo')
+    replaced = repository.get_evidence(claim_id, evidence.evidence_id, 'cus_8f41a2c90d7e463b')
     assert replaced is not None
     assert replaced.file_status is EvidenceFileStatus.AWAITING_UPLOAD
     assert replaced.status is EvidenceStatus.PENDING
@@ -279,7 +279,7 @@ def test_message_requirement_replacement_preserves_source_and_corrects_fact(
         },
     )
     assert turn.status_code == 200, turn.text
-    requirements = repository.list_evidence(claim_id, 'cus_demo')
+    requirements = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(requirements) == 1
     requirement = requirements[0]
     evidence_id = requirement.evidence_id
@@ -335,7 +335,7 @@ def test_message_requirement_replacement_preserves_source_and_corrects_fact(
     assert processed.status_code == 200
     processed_revision = int(processed.json()['revision'])
 
-    claim_with_proposals = repository.get_claim(claim_id, 'cus_demo')
+    claim_with_proposals = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim_with_proposals is not None
     extracted = claim_with_proposals.form['incident.description']
     repository.save_claim(
@@ -364,7 +364,7 @@ def test_message_requirement_replacement_preserves_source_and_corrects_fact(
     )
 
     timestamp = datetime.now(UTC)
-    old_material = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    old_material = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert old_material is not None
     old_checksum = old_material.provenance['upload_checksum']
     old_reference = EvidenceReference(
@@ -386,7 +386,7 @@ def test_message_requirement_replacement_preserves_source_and_corrects_fact(
             'updated_at': timestamp,
         }
     )
-    repository.save_evidence(invalid_material, 'cus_demo')
+    repository.save_evidence(invalid_material, 'cus_8f41a2c90d7e463b')
 
     replacement = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
@@ -398,8 +398,8 @@ def test_message_requirement_replacement_preserves_source_and_corrects_fact(
         json=_upload_payload(evidence_id, kind=requirement.kind),
     )
     assert replacement.status_code == 201
-    archived = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
-    claim_after_replacement = repository.get_claim(claim_id, 'cus_demo')
+    archived = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
+    claim_after_replacement = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert archived is not None
     assert claim_after_replacement is not None
     assert archived.material_version == 2
@@ -466,7 +466,7 @@ def test_message_requirement_replacement_preserves_source_and_corrects_fact(
         },
     )
     assert corrected_processing.status_code == 200
-    corrected = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    corrected = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert corrected is not None
     proposal = corrected_processing.json()['proposed_fields']['incident.description']
     assert proposal['value'] == 'Corrected extracted description.'
@@ -546,7 +546,7 @@ def test_existing_requirement_upload_rejects_wrong_claim_kind_and_active_state(
     assert accepted.status_code == 201
     assert active_state.status_code == 409
     assert active_state.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
-    stored = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    stored = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.related_fields == ['incident.description']
     assert stored.needed_for == ['current_action']
@@ -576,8 +576,8 @@ def test_existing_requirement_is_unchanged_when_storage_is_unavailable(
     )
     assert registered.status_code == 201
     evidence_id = str(registered.json()['evidence']['evidence_id'])
-    before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
-    claim_before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b')
+    claim_before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     storage = cast(MockEvidenceStorage, cast(FastAPI, client.app).state.evidence_storage)
     storage.set_outage(
         EvidenceStorageUnavailable(
@@ -599,8 +599,8 @@ def test_existing_requirement_is_unchanged_when_storage_is_unavailable(
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
     assert response.json()['error']['retryable'] is True
-    assert repository.get_evidence(claim_id, evidence_id, 'cus_demo') == before
-    assert repository.get_claim(claim_id, 'cus_demo') == claim_before
+    assert repository.get_evidence(claim_id, evidence_id, 'cus_8f41a2c90d7e463b') == before
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == claim_before
 
 
 @pytest.mark.parametrize(
@@ -637,7 +637,7 @@ def test_existing_requirement_upload_rejects_ineligible_identity_or_state(
         created_at=timestamp,
         updated_at=timestamp,
     )
-    repository.save_evidence(evidence, 'cus_demo')
+    repository.save_evidence(evidence, 'cus_8f41a2c90d7e463b')
 
     response = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
@@ -650,7 +650,9 @@ def test_existing_requirement_upload_rejects_ineligible_identity_or_state(
     )
 
     assert response.status_code == (404 if source is EvidenceSource.STAFF else 409)
-    assert repository.get_evidence(claim_id, evidence.evidence_id, 'cus_demo') == evidence
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert (
+        repository.get_evidence(claim_id, evidence.evidence_id, 'cus_8f41a2c90d7e463b') == evidence
+    )
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.revision == 1

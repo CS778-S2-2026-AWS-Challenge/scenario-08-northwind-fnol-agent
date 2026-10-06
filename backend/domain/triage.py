@@ -15,6 +15,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
 
 from backend.domain.branch_registry import BranchRegistrySnapshot
+from backend.domain.claim_creation import ClaimHistoryChecks
 from backend.domain.currency import to_nzd
 from backend.domain.evidence import evidence_kind
 from backend.domain.field_registry import parse_registered_number
@@ -38,7 +39,7 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import PolicyRetrievalRecord
 
-TRIAGE_RULES_VERSION = 'triage-rules-v1'
+TRIAGE_RULES_VERSION = 'triage-rules-v2'
 # A business setting, not an industry constant: insurers set the value line
 # for straight-through handling by their own capacity. NZD 5,000 follows the
 # published industry example; exactly the threshold is still fast-track.
@@ -75,6 +76,9 @@ class TriageReason(str, Enum):
     AMOUNT_OVER_THRESHOLD = 'amount_over_threshold'
     AMOUNT_UNKNOWN = 'amount_unknown'
     THIRD_PARTY_RECOVERY = 'third_party_recovery'
+    REVIEW_HINT = 'review_hint'
+    POSSIBLE_DUPLICATE = 'possible_duplicate'
+    HISTORY_NOT_CHECKED = 'history_not_checked'
 
 
 REASON_SEVERITY: dict[TriageReason, Severity] = {
@@ -91,6 +95,9 @@ REASON_SEVERITY: dict[TriageReason, Severity] = {
     TriageReason.AMOUNT_OVER_THRESHOLD: Severity.STANDARD,
     TriageReason.AMOUNT_UNKNOWN: Severity.STANDARD,
     TriageReason.THIRD_PARTY_RECOVERY: Severity.STANDARD,
+    TriageReason.REVIEW_HINT: Severity.STANDARD,
+    TriageReason.POSSIBLE_DUPLICATE: Severity.STANDARD,
+    TriageReason.HISTORY_NOT_CHECKED: Severity.STANDARD,
 }
 
 
@@ -113,6 +120,7 @@ def triage_claim(
     registry: BranchRegistrySnapshot,
     amount_threshold: float = DEFAULT_AMOUNT_THRESHOLD,
     interpreted_kinds: Mapping[str, str] | None = None,
+    history_checks: ClaimHistoryChecks | None = None,
 ) -> ClaimTriage | None:
     """Return the staff-only triage of a created Claim, or None before creation."""
     if not claim_is_created(claim):
@@ -128,6 +136,13 @@ def triage_claim(
         amount_threshold=amount_threshold,
         interpreted_kinds=interpreted_kinds,
     )
+    if history_checks is not None:
+        if history_checks.prior_claims_12m == 'hit':
+            reasons.append(TriageReason.REVIEW_HINT)
+        if history_checks.possible_duplicate == 'hit':
+            reasons.append(TriageReason.POSSIBLE_DUPLICATE)
+        if 'not_checked' in {history_checks.prior_claims_12m, history_checks.possible_duplicate}:
+            reasons.append(TriageReason.HISTORY_NOT_CHECKED)
     return ClaimTriage(
         severity=max(
             (REASON_SEVERITY[reason] for reason in reasons),

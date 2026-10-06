@@ -92,13 +92,18 @@ def citation_chunk() -> KnowledgeChunk:
 
 
 def client_for(retriever: ControlledRetriever) -> TestClient:
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     fixture = build_data_runtime_bundle(settings)
     bundle = DataRuntimeBundle(
         profile=fixture.profile,
         repository=fixture.repository,
         evidence_storage=fixture.evidence_storage,
         policy_history=fixture.policy_history,
+        claim_history=fixture.claim_history,
         knowledge_documents=fixture.knowledge_documents,
         knowledge_retrieval=retriever,
     )

@@ -19,7 +19,13 @@ from backend.domain.staff_identity import StaffAccountRecord
 
 def _client() -> TestClient:
     return TestClient(
-        create_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+        create_app(
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            )
+        )
     )
 
 
@@ -42,7 +48,11 @@ def test_admin_customer_profile_validation_is_normalized_and_atomic(
         else SQLiteIdentityRepository(str(tmp_path / 'admin-profile.sqlite'))
     )
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         identity_repository=repository,
     )
     with TestClient(app) as client:
@@ -106,7 +116,11 @@ def test_admin_maps_persisted_profile_invariant_failures_to_validation_errors(
 ) -> None:
     repository = FixtureIdentityRepository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         identity_repository=repository,
     )
 
@@ -131,7 +145,11 @@ def test_admin_maps_persisted_profile_invariant_failures_to_validation_errors(
 
     repository = FixtureIdentityRepository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         identity_repository=repository,
     )
 
@@ -139,18 +157,18 @@ def test_admin_maps_persisted_profile_invariant_failures_to_validation_errors(
         raise ValueError('invalid_legal_name')
 
     monkeypatch.setattr(repository, 'save_account', reject_save)
-    before = repository.get_account('cus_demo')
+    before = repository.get_account('cus_8f41a2c90d7e463b')
     assert before is not None
     with TestClient(app) as client:
         rejected_patch = client.patch(
-            '/internal/v1/admin/accounts/customers/cus_demo',
+            '/internal/v1/admin/accounts/customers/cus_8f41a2c90d7e463b',
             headers=_headers('defensive-patch-validation', before.revision),
             json={'display_name': 'Valid Request Name'},
         )
         assert rejected_patch.status_code == 422
         assert rejected_patch.json()['error']['code'] == 'VALIDATION_ERROR'
 
-    after = repository.get_account('cus_demo')
+    after = repository.get_account('cus_8f41a2c90d7e463b')
     assert after is not None
     assert after.display_name == before.display_name
     assert after.revision == before.revision
@@ -167,10 +185,8 @@ def test_admin_customer_repository_races_preserve_the_authoritative_winner(
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'customer-race.sqlite'))
     )
-    account = (
-        repository.get_account('cus_demo')
-        if repository_kind == 'fixture'
-        else repository.create_account('race@example.invalid', 'race-password', 'Original Customer')
+    account = repository.create_account(
+        'race@example.invalid', 'race-password', 'Original Customer'
     )
     assert account is not None
     endpoint = f'/internal/v1/admin/accounts/customers/{account.customer_id}'
@@ -193,7 +209,11 @@ def test_admin_customer_repository_races_preserve_the_authoritative_winner(
 
     monkeypatch.setattr(repository, 'save_account', race_save)
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         identity_repository=repository,
     )
     idempotency_key = f'customer-{repository_kind}-race'
@@ -264,7 +284,11 @@ def test_admin_staff_repository_races_preserve_the_authoritative_winner(
 
     monkeypatch.setattr(repository, 'save_account', race_save)
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         staff_identity_repository=repository,
     )
     idempotency_key = f'staff-{repository_kind}-race'
@@ -300,12 +324,8 @@ def test_admin_display_name_alias_updates_visible_canonical_name(
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'admin-canonical.sqlite'))
     )
-    account = (
-        repository.get_account('cus_demo')
-        if repository_kind == 'fixture'
-        else repository.create_account(
-            'canonical@example.invalid', 'canonical-password', 'Original Name'
-        )
+    account = repository.create_account(
+        'canonical@example.invalid', 'canonical-password', 'Original Name'
     )
     assert account is not None
     customer_id = account.customer_id
@@ -320,7 +340,11 @@ def test_admin_display_name_alias_updates_visible_canonical_name(
         account.revision,
     )
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         identity_repository=repository,
     )
     with TestClient(app) as client:
@@ -350,7 +374,9 @@ def test_admin_can_read_and_update_customer_account_through_identity_repository(
         customers = client.get('/internal/v1/admin/accounts/customers', headers=_headers())
         assert customers.status_code == 200
         customer = next(
-            item for item in customers.json()['items'] if item['customer_id'] == 'cus_demo'
+            item
+            for item in customers.json()['items']
+            if item['customer_id'] == 'cus_8f41a2c90d7e463b'
         )
         assert customer['active'] is True
         assert customer['allowed_actions'] == [
@@ -363,7 +389,7 @@ def test_admin_can_read_and_update_customer_account_through_identity_repository(
         ]
 
         updated = client.patch(
-            '/internal/v1/admin/accounts/customers/cus_demo',
+            '/internal/v1/admin/accounts/customers/cus_8f41a2c90d7e463b',
             headers=_headers('customer-update', 1),
             json={'display_name': 'Updated Demo', 'active': False},
         )
@@ -373,15 +399,15 @@ def test_admin_can_read_and_update_customer_account_through_identity_repository(
         assert updated.json()['revision'] == 2
 
         audit = client.get(
-            '/internal/v1/admin/accounts/customers/cus_demo/audit', headers=_headers()
+            '/internal/v1/admin/accounts/customers/cus_8f41a2c90d7e463b/audit', headers=_headers()
         )
         assert audit.status_code == 200
-        assert audit.json()['items'][-1]['subject']['subject_id'] == 'cus_demo'
+        assert audit.json()['items'][-1]['subject']['subject_id'] == 'cus_8f41a2c90d7e463b'
         assert audit.json()['items'][-1]['outcome'] == 'succeeded'
 
         denied = client.post(
             '/api/v1/auth/sessions',
-            json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+            json={'email': 'maya.chen@example.invalid', 'password': 'northwind-demo-one'},
         )
         assert denied.status_code == 401
 
@@ -541,7 +567,7 @@ def test_admin_account_boundaries_reject_missing_empty_and_stale_operations() ->
         assert missing_customer.json()['error']['code'] == 'ACCOUNT_NOT_FOUND'
 
         empty_customer = client.patch(
-            '/internal/v1/admin/accounts/customers/cus_demo',
+            '/internal/v1/admin/accounts/customers/cus_8f41a2c90d7e463b',
             headers=_headers('empty-customer-update', 1),
             json={},
         )

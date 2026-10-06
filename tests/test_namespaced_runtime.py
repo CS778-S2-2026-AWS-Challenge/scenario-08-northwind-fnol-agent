@@ -223,6 +223,7 @@ def test_model_profile_can_change_between_turns_without_new_claim(
     registry = ModelGatewayRegistry()
     registry.register('openai_compatible', lambda _config: gateway)
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -287,6 +288,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
 ) -> None:
     monkeypatch.setenv('NORTHWIND_MODEL_API_KEY', 'test-gpt-key')
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -371,6 +373,7 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection(
 def test_model_catalog_filters_unpublished_and_invalid_profiles_before_bootstrap() -> None:
     configurations = ConfigurationRepository()
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -443,6 +446,7 @@ def test_model_catalog_filters_unpublished_and_invalid_profiles_before_bootstrap
 
 def test_capabilities_returns_no_model_catalog_for_controlled_runtime() -> None:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.CONTROLLED,
@@ -464,6 +468,7 @@ def test_model_catalog_returns_empty_for_controlled_runtime_directly() -> None:
         app=SimpleNamespace(
             state=SimpleNamespace(
                 settings=Settings(
+                    business_seed_path='config/business-seed.json',
                     environment='test',
                     identity_mode=IdentityMode.DEVELOPER,
                     agent_runtime_profile=AgentRuntimeProfile.CONTROLLED,
@@ -486,6 +491,7 @@ def test_model_catalog_raises_when_active_snapshot_is_unavailable() -> None:
         app=SimpleNamespace(
             state=SimpleNamespace(
                 settings=Settings(
+                    business_seed_path='config/business-seed.json',
                     environment='test',
                     identity_mode=IdentityMode.DEVELOPER,
                     agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -543,6 +549,7 @@ def test_model_catalog_reads_profiles_from_an_active_release_snapshot() -> None:
         app=SimpleNamespace(
             state=SimpleNamespace(
                 settings=Settings(
+                    business_seed_path='config/business-seed.json',
                     environment='test',
                     identity_mode=IdentityMode.DEVELOPER,
                     agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -562,6 +569,7 @@ def test_model_catalog_reads_profiles_from_an_active_release_snapshot() -> None:
 
 def test_model_catalog_does_not_bootstrap_when_model_settings_are_incomplete() -> None:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.CONTROLLED,

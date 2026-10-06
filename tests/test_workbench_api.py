@@ -241,17 +241,17 @@ def _create_claim_with_context(
         },
     ).json()
 
-    claim = repository.get_claim(claim_id, 'cus_demo')
-    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     decision = repository.find_agent_decision_for_trigger(
         claim_id,
         turn['claimant_message']['message_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     evidence_record = repository.get_evidence(
         claim_id,
         evidence['evidence']['evidence_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert claim is not None
     assert session is not None
@@ -302,13 +302,13 @@ def _create_claim_with_context(
                 ],
             }
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     repository.save_evidence(
         evidence_record.model_copy(
             update={'provenance': {'internal_object_ref': 'fixture://evidence/synthetic'}}
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     repository.save_message(
         MessageRecord(
@@ -320,7 +320,7 @@ def _create_claim_with_context(
             content={'type': 'note', 'text': 'Internal review note.'},
             created_at=decision.created_at + timedelta(seconds=1),
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     return claim_id, session_id
 
@@ -332,7 +332,7 @@ def test_staff_reads_progressive_claim_detail_and_paged_resources(
     repository: FixtureRepository,
 ) -> None:
     claim_id, session_id = _create_claim_with_context(client, auth_headers, repository)
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
 
     response = client.get(
@@ -385,7 +385,7 @@ def test_staff_detail_projects_source_context_and_disputed_or_conflicting_gaps(
 ) -> None:
     claim_id, _ = _create_claim_with_context(client, auth_headers, repository)
     claim = repository.get_claim_internal(claim_id)
-    evidence = repository.list_evidence(claim_id, 'cus_demo')[0]
+    evidence = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')[0]
     assert claim is not None
     field_code, field = next(iter(claim.form.items()))
     repository.save_claim(
@@ -420,7 +420,7 @@ def test_staff_detail_projects_source_context_and_disputed_or_conflicting_gaps(
                 ],
             }
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
@@ -505,7 +505,7 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
         created_at=recorded_at,
         updated_at=recorded_at,
     )
-    repository.save_external_task(task, 'cus_demo')
+    repository.save_external_task(task, 'cus_8f41a2c90d7e463b')
 
     detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
     gap = next(
@@ -662,7 +662,7 @@ def test_workbench_keeps_provider_reference_separate_when_no_result_exists(
             created_at=recorded_at,
             updated_at=recorded_at,
         ),
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     response = client.get(
@@ -935,7 +935,7 @@ def test_external_wait_count_matches_the_named_pending_task_projection(
                 created_at=recorded_at,
                 updated_at=recorded_at,
             ),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
 
     detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
@@ -993,7 +993,7 @@ def test_staff_lists_claims_for_workbench_queue(
     payload = response.json()
     assert payload['page'] == {'next_cursor': None}
     item = next(item for item in payload['items'] if item['claim_id'] == claim_id)
-    assert item['claimant']['customer_id'] == 'cus_demo'
+    assert item['claimant']['customer_id'] == 'cus_8f41a2c90d7e463b'
     assert item['claimant']['display_name'] is None
     assert item['work_summary']['queue_key'] == 'processing'
     assert item['priority_projection']['level'] == 'standard'
@@ -1195,13 +1195,15 @@ def test_workbench_active_views_and_counts_share_filtered_authorised_projection(
         assert evidence.status_code == 201
         if index == 3:
             evidence_id = evidence.json()['evidence']['evidence_id']
-            stored_evidence = repository.get_evidence(claim.claim_id, evidence_id, 'cus_demo')
+            stored_evidence = repository.get_evidence(
+                claim.claim_id, evidence_id, 'cus_8f41a2c90d7e463b'
+            )
             assert stored_evidence is not None
             repository.save_evidence(
                 stored_evidence.model_copy(
                     update={'responsible_party': ResponsibleParty.EXTERNAL_PARTY}
                 ),
-                'cus_demo',
+                'cus_8f41a2c90d7e463b',
             )
 
     response = client.get(
@@ -1274,10 +1276,10 @@ def test_active_claims_use_oldest_status_entry_then_updated_at_fallback(
     early = datetime(2026, 9, 9, 10, tzinfo=UTC)
     late = datetime(2026, 9, 9, 12, tzinfo=UTC)
     for claim_id, entered_at in ((first_human, late), (second_human, early)):
-        handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
+        handoff = repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')[0]
         repository.save_handoff(
             handoff.model_copy(update={'created_at': entered_at}),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
 
     pending_ids: list[str] = []
@@ -1321,8 +1323,7 @@ def test_active_claims_use_oldest_status_entry_then_updated_at_fallback(
         first_human,
     ]
     assert all(
-        item['claimant']['display_name'] == 'Demo Claimant One'
-        for item in human_response.json()['items']
+        item['claimant']['display_name'] == 'Maya Chen' for item in human_response.json()['items']
     )
     assert [item['active_claim']['entered_at'] for item in human_response.json()['items']] == [
         early.isoformat().replace('+00:00', 'Z'),
@@ -1862,7 +1863,7 @@ def test_handoff_acceptance_is_atomic_revision_safe_and_idempotent(
     assert replay.status_code == 200
     assert replay.json() == accepted.json()
     claim = repository.get_claim_internal(claim_id)
-    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert handoff is not None
     assert claim.assignee_id == 'stf_demo'
@@ -2207,7 +2208,7 @@ def test_transfer_acceptance_updates_handoff_and_revokes_existing_coworkers(
     assert transfer_accepted.status_code == 200
 
     claim = repository.get_claim_internal(claim_id)
-    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     coworkers = [item for item in repository._claim_coworkers.values() if item.claim_id == claim_id]
     assert claim is not None
     assert handoff is not None
@@ -2485,7 +2486,9 @@ def test_presence_projection_handles_unknown_staff_and_rejects_non_staff_pool_re
     assert unknown.online is False
     assert unknown.available is False
     with pytest.raises(ApiError) as error:
-        list_online_staff(repository, Principal(subject='cus_demo', actor_type='claimant'))
+        list_online_staff(
+            repository, Principal(subject='cus_8f41a2c90d7e463b', actor_type='claimant')
+        )
     assert error.value.code == 'ACCESS_DENIED'
 
 

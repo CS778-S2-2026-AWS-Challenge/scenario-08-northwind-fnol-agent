@@ -63,7 +63,7 @@ def test_asset_note_round_trips_and_clears_for_each_asset_type(
     asset_type: str,
     details: dict[str, object],
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     created = client.post(
         '/api/v1/account/assets',
         headers={**owner, 'Idempotency-Key': f'note-create-{asset_type}'},
@@ -96,7 +96,7 @@ def test_asset_note_round_trips_and_clears_for_each_asset_type(
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
     assert stale.json()['error']['current_revision'] == 2
 
-    fresh_session = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    fresh_session = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     readback = client.get(
         f'/api/v1/account/assets/{asset["asset_id"]}',
         headers=fresh_session,
@@ -127,7 +127,7 @@ def test_asset_note_validation_does_not_mutate_the_asset(
     client: TestClient,
     note: str,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
     route = f'/api/v1/account/assets/{asset["asset_id"]}'
 
@@ -144,8 +144,8 @@ def test_account_assets_are_owned_paginated_revisioned_and_soft_deleted(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-    other = _login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
+    other = _login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
     asset = _create_asset(client, owner)
     asset_id = asset['asset_id']
 
@@ -258,7 +258,7 @@ def test_asset_selection_prefills_proposals_and_snapshot_remains_immutable(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
     created_claim = client.post(
         '/api/v1/claims',
@@ -361,7 +361,7 @@ def test_terminal_claim_rejects_asset_selection_without_any_write(
     repository: FixtureRepository,
     disposition: TerminalDispositionValue,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
     created = client.post(
         '/api/v1/claims',
@@ -437,7 +437,7 @@ def test_terminal_claim_rejects_asset_selection_without_any_write(
 def test_asset_contract_rejects_unapproved_policy_fields_and_anonymous_account_access(
     client: TestClient,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     mismatch = client.post(
         '/api/v1/account/assets',
         headers={**owner, 'Idempotency-Key': 'asset-mismatch'},
@@ -483,7 +483,7 @@ def test_asset_patch_rejects_null_and_cross_type_content_without_mutation(
     payload: dict[str, object],
     expected_field: str,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
     route = f'/api/v1/account/assets/{asset["asset_id"]}'
 
@@ -532,7 +532,7 @@ def test_property_and_contents_assets_prefill_only_their_approved_claim_facts(
     family: str,
     expected_fields: set[str],
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     created_asset = client.post(
         '/api/v1/account/assets',
         headers={**owner, 'Idempotency-Key': f'create-{asset_type}'},
@@ -602,7 +602,7 @@ def test_property_and_contents_assets_prefill_only_their_approved_claim_facts(
 
 
 def test_asset_selection_errors_are_concealed_and_revision_safe(client: TestClient) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
     created_claim = client.post(
         '/api/v1/claims',
@@ -661,7 +661,7 @@ def test_asset_selection_race_is_typed_and_leaves_no_partial_write(
     race_mode: str,
     expected_status: int,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
     claim = client.post(
         '/api/v1/claims',
@@ -735,7 +735,7 @@ def test_asset_selection_maps_concurrent_idempotency_conflict(
     repository: FixtureRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset = _create_asset(client, owner)
     claim = client.post(
         '/api/v1/claims',

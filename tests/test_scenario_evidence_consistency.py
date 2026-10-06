@@ -99,7 +99,7 @@ def test_scenario_rejects_an_unknown_policy_retrieval_reference(tmp_path: Path) 
 def test_scenario_rejects_a_linked_graph_for_another_customer(tmp_path: Path) -> None:
     source = CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json'
     payload = json.loads(source.read_text(encoding='utf-8'))
-    payload['linked_records']['customer_id'] = 'cus_other'
+    payload['linked_records']['customer_id'] = 'cus_2b67e9d14a3c508f'
     invalid = tmp_path / source.name
     invalid.write_text(json.dumps(payload), encoding='utf-8')
 

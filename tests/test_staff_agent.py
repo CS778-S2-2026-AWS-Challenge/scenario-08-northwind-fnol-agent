@@ -112,6 +112,7 @@ def _client(
     return TestClient(
         create_app(
             Settings(
+                business_seed_path='config/business-seed.json',
                 environment='test',
                 identity_mode=IdentityMode.DEVELOPER,
                 model_profile_id='openrouter-gpt4o-mini',
@@ -218,6 +219,7 @@ def _model_catalog_client(
     provider: StaffAgentTurnProvider | None = None,
 ) -> TestClient:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -315,7 +317,11 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
 
 
 def test_staff_agent_capabilities_is_empty_for_controlled_runtime() -> None:
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     with TestClient(create_app(settings)) as client:
         response = client.get(
             '/api/v1/workbench/agent/capabilities',
@@ -332,6 +338,7 @@ def _model_gateway_runtime_client(
     registry = ModelGatewayRegistry()
     registry.register('test_gateway', lambda _config: gateway)
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -873,10 +880,10 @@ def test_staff_agent_execution_surfaces_permission_denial_without_claim_mutation
             json={},
         )
         assert accepted.status_code == 200, accepted.text
-        stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+        stored_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
         assert stored_handoff is not None
         repository.save_handoff(
-            stored_handoff.model_copy(update={'assigned_to': 'stf_other'}), 'cus_demo'
+            stored_handoff.model_copy(update={'assigned_to': 'stf_other'}), 'cus_8f41a2c90d7e463b'
         )
         provider.draft_claim_id = claim_id
         provider.draft_action_code = 'human.resolve_handoff'

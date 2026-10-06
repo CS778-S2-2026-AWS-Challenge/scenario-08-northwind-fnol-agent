@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.domain.branch_registry import build_default_registry
+from backend.domain.claim_creation import ClaimHistoryChecks
 from backend.domain.currency import to_nzd
 from backend.domain.models import (
     ActorReference,
@@ -67,7 +68,7 @@ def _field(value: object, status: FormStatus = FormStatus.CONFIRMED) -> Structur
         status=status,
         needed_for=NeededFor.CURRENT_ACTION,
         updated_at=NOW,
-        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'),
     )
 
 
@@ -84,7 +85,7 @@ def _claim(form: dict[str, object] | None = None, **updates: Any) -> WorkingClai
     facts.update(form or {})
     claim = WorkingClaim(
         claim_id='clm_triage',
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         channel='web_agent',
         locale='en-NZ',
         incident_type='motor',
@@ -152,6 +153,7 @@ def _triage(
     handoffs: list[HandoffRecord] | None = None,
     policy_records: list[PolicyRetrievalRecord] | None = None,
     requirements: RequirementResolution | None = None,
+    history_checks: ClaimHistoryChecks | None = None,
 ) -> Any:
     return triage_claim(
         claim,
@@ -165,6 +167,7 @@ def _triage(
         active_branches=['family.motor'],
         requirements=requirements or RequirementResolution(),
         registry=REGISTRY,
+        history_checks=history_checks,
     )
 
 
@@ -175,6 +178,37 @@ def test_a_clear_single_party_claim_is_fast_track() -> None:
     assert triage.reasons == []
     assert triage.rules_version == TRIAGE_RULES_VERSION
     assert triage.amount_threshold == DEFAULT_AMOUNT_THRESHOLD == 5000.0
+
+
+@pytest.mark.parametrize(
+    ('count', 'duplicate', 'reasons'),
+    [
+        (1, 'clear', []),
+        (2, 'clear', ['review_hint']),
+        (0, 'hit', ['possible_duplicate']),
+        (None, 'not_checked', ['history_not_checked']),
+    ],
+)
+def test_lodging_history_is_staff_follow_up_not_a_fraud_determination(
+    count: int | None, duplicate: str, reasons: list[str]
+) -> None:
+    checks = ClaimHistoryChecks.model_validate(
+        {
+            'checked_at': NOW,
+            'count_past_12_months': count,
+            'prior_claims_12m': 'not_checked'
+            if count is None
+            else 'hit'
+            if count >= 2
+            else 'clear',
+            'possible_duplicate': duplicate,
+        }
+    )
+    claim = _claim()
+    triage = _triage(claim, history_checks=checks)
+    assert triage.reasons == reasons
+    assert triage.severity is (Severity.STANDARD if reasons else Severity.FAST_TRACK)
+    assert claim.claim_state.fraud_signal is FraudSignal.NONE
 
 
 @pytest.mark.parametrize(
@@ -329,7 +363,9 @@ def test_amount_threshold_boundary_and_contents_total() -> None:
             status=FormStatus.CONFIRMED,
             needed_for=NeededFor.CURRENT_ACTION,
             updated_at=NOW,
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'
+            ),
         )
         for index, (description, amount) in enumerate([('Laptop', 2199.0), ('Headphones', 349.0)])
     ]
@@ -393,7 +429,9 @@ def test_contents_amounts_are_converted_to_nzd() -> None:
             status=FormStatus.CONFIRMED,
             needed_for=NeededFor.CURRENT_ACTION,
             updated_at=NOW,
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'
+            ),
         )
 
     # USD 3,000 is about NZD 5,314 at the reference rate, above the NZD threshold.
@@ -517,7 +555,11 @@ def test_each_app_applies_its_own_amount_threshold() -> None:
 
     def probe_app(threshold: float) -> TestClient:
         app = create_app(
-            Settings(environment='test', triage_amount_threshold_nzd=threshold),
+            Settings(
+                environment='test',
+                triage_amount_threshold_nzd=threshold,
+                business_seed_path='config/business-seed.json',
+            ),
             FixtureRepository(),
         )
 

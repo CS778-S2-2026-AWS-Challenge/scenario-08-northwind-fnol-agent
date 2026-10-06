@@ -59,7 +59,7 @@ def test_model_turn_after_the_budget_gets_the_same_next_step_as_with_budget_left
     spent = Journey(client, 'motor', 'budget-v8-spent')
     for _ in range(9):
         spent.send(STILL_HELPING)
-    session = repository.get_session(spent.claim_id, spent.session_id, 'cus_demo')
+    session = repository.get_session(spent.claim_id, spent.session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
     assert session.question_turn_count >= session.question_budget
     after_budget = spent.send(FULL_ACCOUNT)
@@ -72,6 +72,6 @@ def test_model_turn_after_the_budget_gets_the_same_next_step_as_with_budget_left
     assert after_budget['decision']['customer_next_step']['status'] != 'question_budget_reached'
     assert after_budget['agent_message']['content']['text'] == FOLLOW_UP
     assert _outcome(spent, after_budget) == _outcome(baseline, with_budget_left)
-    stored = repository.get_session(spent.claim_id, spent.session_id, 'cus_demo')
+    stored = repository.get_session(spent.claim_id, spent.session_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.post_session_follow_up_required is False

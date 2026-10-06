@@ -35,9 +35,10 @@ support for the target tool identifiers.
 The current deterministic message path may execute a bounded legacy `policy_history`
 proposal for policy or claim-history lookup. Runtime validates the claim scope and
 allow-listed purpose before calling the adapter, persists only the mapped retrieval
-record, and reuses an existing record for the same claim-scoped reference. The model
-gateway path still rejects tool requests until model-tool capability is explicitly
-enabled and verified.
+record. Policy lookup may reuse an existing matching record; history always queries the
+repository and records the bounded result actually consulted. The model gateway uses the
+customer-scoped context reference offered on authenticated turns, with model-selected loading
+and the existing context budget. It does not need a keyword or an old Claim reference.
 
 ## Provider Boundary
 
@@ -86,13 +87,14 @@ limitation.
 
 ## Allow-listed Claim-History Facts
 
-The contract may map verified fields such as:
+The history projection contains the independent past-calendar-year lodged count, query window,
+and at most the requested number of lodged summaries. Each summary contains Claim ID/number,
+family, recorded incident date with its original precision, lodged date, bounded description and
+stated amount. Missing facts stay absent; there is no fabricated settlement outcome.
 
-- history reference;
-- incident type;
-- occurrence time;
-- status; and
-- recorded outcome.
+`map_history_provider_payload` is used by the retrieval service to persist that typed projection
+and its scoped request as consultation evidence. Old persisted `facts` records remain readable
+by staff retrieval and handoff consumers; new history responses do not expose `facts`.
 
 Provider-only risk scores, fraud labels, demographic attributes, internal notes,
 accounting fields, infrastructure identifiers, and unsupported conclusions are not

@@ -84,7 +84,7 @@ def test_agent_participant_commit_reads_replay_and_correction(
     }
     first = submit_message(client, auth_headers, claim_id, session_id, **arguments)
     assert first.status_code == 200, first.text
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None and stored.driver is not None and stored.policyholder is not None
     assert stored.driver.name == 'Synthetic Driver'
     assert stored.driver.identity_ref == 'identity-driver'
@@ -104,8 +104,8 @@ def test_agent_participant_commit_reads_replay_and_correction(
         assert view.json()['witnesses'][0]['witness_id'] == witness_id
     replay = submit_message(client, auth_headers, claim_id, session_id, **arguments)
     assert replay.status_code == 200, replay.text
-    assert repository.get_claim(claim_id, 'cus_demo') == stored
-    assert len(repository.list_agent_decisions(claim_id, 'cus_demo')) == 1
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == stored
+    assert len(repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
     agent.changes = _changes(**{'witness.name': 'Corrected Witness'})
     correction = submit_message(
@@ -119,7 +119,7 @@ def test_agent_participant_commit_reads_replay_and_correction(
         text='Correction: the witness name is Corrected Witness.',
     )
     assert correction.status_code == 200, correction.text
-    corrected = repository.get_claim(claim_id, 'cus_demo')
+    corrected = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert corrected is not None
     assert corrected.witnesses[0].witness_id == witness_id
     assert corrected.witnesses[0].name == 'Corrected Witness'
@@ -171,7 +171,7 @@ def test_unsettled_agent_participant_requires_confirmation(
         text='Correction: the driver may be Unsettled Driver.',
     )
     assert turn.status_code == 200, turn.text
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.driver is None
     assert stored.form['driver.name'].status is status
@@ -195,7 +195,7 @@ def test_unsettled_agent_participant_requires_confirmation(
             json={'field_codes': ['driver.name']},
         )
         assert confirmed.status_code == 200, confirmed.text
-        stored = repository.get_claim(claim_id, 'cus_demo')
+        stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert stored is not None and stored.driver is not None
         assert stored.driver.name == 'Unsettled Driver'
         for route, headers in [
@@ -237,7 +237,7 @@ def test_witness_no_then_yes_does_not_resurrect_old_contacts(
         )
         assert patched.status_code == 200, patched.text
         revision = patched.json()['revision']
-        stored = repository.get_claim(claim_id, 'cus_demo')
+        stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert stored is not None
         assert [witness.name for witness in stored.witnesses] == expected_names
 
@@ -252,7 +252,7 @@ def test_protected_agent_proposal_is_rejected_before_claim_or_decision_commit(
 ) -> None:
     created = create_claim(client, auth_headers).json()
     claim_id = created['claim']['claim_id']
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     secret = 'SYNTHETIC-PROTECTED-1234'
     app.state.agent_turn_provider = ParticipantAgent(_changes(**{code: secret}))
     turn = submit_message(
@@ -265,17 +265,19 @@ def test_protected_agent_proposal_is_rejected_before_claim_or_decision_commit(
     assert turn.status_code == 422, turn.text
     assert turn.json()['error']['code'] == 'PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE'
     assert secret not in turn.text
-    after = repository.get_claim(claim_id, 'cus_demo')
+    after = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert after is not None and before is not None
     # Inbound message acceptance precedes the model call; only that checkpoint survives.
     assert after.revision == before.revision + 1
     assert after.model_dump(exclude={'revision', 'updated_at'}) == before.model_dump(
         exclude={'revision', 'updated_at'}
     )
-    messages = repository.list_messages(claim_id, created['session']['session_id'], 'cus_demo')
+    messages = repository.list_messages(
+        claim_id, created['session']['session_id'], 'cus_8f41a2c90d7e463b'
+    )
     assert len(messages) == 1 and messages[0].actor.value == 'claimant'
     assert secret not in messages[0].model_dump_json()
-    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+    assert repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_agent_witness_uncertainty_preserves_identity_until_confirmed_absence(
@@ -301,7 +303,7 @@ def test_agent_witness_uncertainty_preserves_identity_until_confirmed_absence(
         },
     )
     assert initialized.status_code == 200, initialized.text
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     witness_id = stored.witnesses[0].witness_id
     for index, (code, value, status) in enumerate(
@@ -329,7 +331,7 @@ def test_agent_witness_uncertainty_preserves_identity_until_confirmed_absence(
             text=f'Correction: {code} is {value}.',
         )
         assert response.status_code == 200, response.text
-        stored = repository.get_claim(claim_id, 'cus_demo')
+        stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert stored is not None
         if index == 2:
             assert stored.witnesses == []
@@ -388,7 +390,7 @@ def test_witness_update_preserves_other_repeatable_records(
         },
     )
     assert corrected.status_code == 200, corrected.text
-    refreshed = repository.get_claim(claim_id, 'cus_demo')
+    refreshed = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert refreshed is not None
     assert [witness.name for witness in refreshed.witnesses] == [
         'Updated First Witness',
@@ -413,7 +415,7 @@ def test_form_cannot_store_other_party_policy_number(
 
     assert response.status_code == 422, response.text
     assert response.json()['error']['code'] == 'PROTECTED_DATA_REQUIRES_DEDICATED_ROUTE'
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert 'other_party.policy_number' not in stored.form
 
@@ -430,7 +432,7 @@ def test_protected_licence_long_value_and_same_mask_correction(
     values = ['甲' * 116 + '1234', '乙' * 116 + '1234']
     for index, value in enumerate(values):
         if index:
-            before = repository.get_claim(claim_id, 'cus_demo')
+            before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
             silent = client.patch(
                 f'/api/v1/claims/{claim_id}/form',
                 headers={**auth_headers, 'If-Match': str(revision)},
@@ -438,7 +440,7 @@ def test_protected_licence_long_value_and_same_mask_correction(
             )
             assert silent.status_code == 409, silent.text
             assert silent.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
-            assert repository.get_claim(claim_id, 'cus_demo') == before
+            assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == before
         response = client.patch(
             f'/api/v1/claims/{claim_id}/form',
             headers={**auth_headers, 'If-Match': str(revision)},
@@ -453,7 +455,7 @@ def test_protected_licence_long_value_and_same_mask_correction(
             },
         )
         assert response.status_code == 200, response.text
-        stored = repository.get_claim(claim_id, 'cus_demo')
+        stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert stored is not None and stored.driver is not None
         assert stored.driver.licence_number is not None
         assert app.state.protected_value_adapter.resolve(stored.driver.licence_number) == value
@@ -491,7 +493,7 @@ def test_licence_protection_failure_is_safe_and_does_not_mutate_claim(
     }[failure]
     created = create_claim(client, auth_headers).json()
     claim_id = created['claim']['claim_id']
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     response = client.patch(
         f'/api/v1/claims/{claim_id}/form',
         headers={**auth_headers, 'If-Match': '1'},
@@ -500,7 +502,7 @@ def test_licence_protection_failure_is_safe_and_does_not_mutate_claim(
     assert response.status_code == 503, response.text
     assert response.json()['error']['code'] == 'PROTECTED_DATA_UNAVAILABLE'
     assert secret not in response.text
-    assert repository.get_claim(claim_id, 'cus_demo') == before
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == before
 
 
 @pytest.mark.parametrize(
@@ -521,7 +523,7 @@ def test_invalid_participant_patch_fails_safely_before_commit(
 ) -> None:
     created = create_claim(client, auth_headers).json()
     claim_id = created['claim']['claim_id']
-    before = repository.get_claim(claim_id, 'cus_demo')
+    before = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     response = client.patch(
         f'/api/v1/claims/{claim_id}/form',
         headers={**auth_headers, 'If-Match': '1'},
@@ -530,4 +532,4 @@ def test_invalid_participant_patch_fails_safely_before_commit(
     assert response.status_code == 422, response.text
     assert response.json()['error']['code'] == 'VALIDATION_ERROR'
     assert value not in response.text
-    assert repository.get_claim(claim_id, 'cus_demo') == before
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == before

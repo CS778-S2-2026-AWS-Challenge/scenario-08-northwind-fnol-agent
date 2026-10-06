@@ -409,13 +409,22 @@ implemented, not as failures of the corpus.
    which signs in and promotes the claim before the first upload.
 2. **Staff credentials.** Most end-state fields are readable only through the Workbench routes. The
    runner needs a staff login with `workbench:read`.
-3. **Policies.** The dev-stack policy lookup knows two hard-coded references only
-   (`synthetic-policy-101`, `synthetic-policy-ambiguous`), and no route adds policies yet. The
-   development team will add a "seed policies" switch under `/api/v1/workbench/demo`; the runner
-   seeds `setup.policies_in_system` through it. The interface is to be announced.
+3. **Policies.** The shared business-seed contract in `config/business-seed.json` supplies
+   `policies_in_system` to the selected repository. The runner maps each pack's setup into this
+   manifest shape, supplying fixed customer and record identities. It uses
+   `load_business_seed` and `provision_business_policies` from
+   `backend.services.business_seed` with the same selected repository as the application.
+   The provisioner creates absent records only; repeated setup cannot reset user edits.
+   No unauthenticated HTTP seed endpoint is introduced. See
+   [Fixtures and Test Conventions](fixtures_convention.md) for the shared manifest contract.
+   The complete manifest supplies `version: "1"`, `primary_customer_id`, `customers`,
+   `policies_in_system`, `prior_submitted_claims`, and `demo_cases` (empty for corpus packs).
+   Customer entries include fixed IDs, reserved email, ordinary invented display name and the
+   development-only password input. The runner selects the manifest through
+   `Settings.business_seed_path`; identity, policy and Claim setup use that same selection.
 4. **Coverage state (decided by the maintainer, 2026-09-30).** `coverage_unclear` counts only a
    policy lookup that carries an uncertainty marker (for example `COVERAGE_SECTION_INCOMPLETE` on
-   `synthetic-policy-ambiguous`) or an Agent record that the loss may not be covered.
+   `NW-MTR-2026-20963`) or an Agent record that the loss may not be covered.
    `claim_state.coverage = review_required` on its own does not count, although the turn reducer
    (`backend/services/turn_reducer.py`, the `Coverage.REVIEW_REQUIRED` update) sets it for any cited
    policy record. Labels follow this rule. A pack plants the marker with
@@ -441,11 +450,20 @@ implemented, not as failures of the corpus.
    does not match the family requirement (`repair_quote`, `proof_of_ownership`), so main then
    reports those documents as not received.
    Assertions match Evidence by `original_filename`, not by kind.
-7. **Earlier claims.** No seed route creates submitted claims for an account. The runner creates
-   each earlier claim by driving the public API to creation.
+7. **Earlier claims.** `prior_submitted_claims` uses the same manifest and
+   `provision_business_claims` entry point. Each entry declares a fixed customer, Claim,
+   Session and claim number, plus family, incident date, submitted date and short description.
+   The provisioner creates a valid completed Claim and its Session atomically; existing
+   Claims are preserved. New Claims produced during a journey still use the public API.
 8. **History not checked.** The corpus does not plant `not_checked` history. On 2026-09-30 the
    maintainer proposed making it with a lookup-error switch; on 2026-10-01 he ruled that a lookup
    error is runtime logic, and that the corpus supplies valid materials, not system reactions.
+   Runtime captures `history_checks` in the creation operation without model involvement and
+   exposes accepted checks only in staff detail. The past-year count is independent of the
+   summary limit. Possible-duplicate checks compare a confirmed single incident day with owned
+   lodged records of the same family within three calendar days. A `clear` result means no
+   comparable recorded-day candidate was found; prior missing/range dates are not resolved or
+   invented. An unavailable query or missing current date remains `not_checked`.
    Simulating the error would stand in for real system behaviour with a fake state. An anonymous
    claimant cannot reach claim creation on main in any case (`docs/api.md`, evidence upload). How
    the product reports `not_checked` is tested by the product's own tests, not by these packs.

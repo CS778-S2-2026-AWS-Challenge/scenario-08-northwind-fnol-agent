@@ -44,7 +44,9 @@ from backend.repositories.protocols import IdempotencyRecord, PersistenceReposit
 from backend.services.branching import build_applied_branch_evaluation
 from backend.services.retrieval_review import persist_retrieval_record
 
-CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
+CANONICAL_SCENARIO_DIRECTORY = (
+    Path(__file__).resolve().parents[2] / 'tests' / 'fixtures' / 'scenarios'
+)
 SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
     {
         'business_path',
@@ -85,8 +87,8 @@ class LinkedMvpRecordBaseline(ContractModel):
         return self
 
 
-class ScenarioFixture(ContractModel):
-    scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
+class ClaimSeedGraph(ContractModel):
+    scenario_id: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=500)
     business_path: EvidenceBusinessPath | None = None
     claim: WorkingClaim
@@ -101,7 +103,7 @@ class ScenarioFixture(ContractModel):
     expected: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
-    def validate_record_links(self) -> 'ScenarioFixture':
+    def validate_record_links(self) -> 'ClaimSeedGraph':
         session_ids = {session.session_id for session in self.sessions}
         if len(session_ids) != len(self.sessions):
             raise ValueError('Scenario session identifiers must be unique.')
@@ -313,6 +315,12 @@ class ScenarioFixture(ContractModel):
                     'Linked MVP policy fact must reference the structured policy retrieval.'
                 )
         return self
+
+
+class ScenarioFixture(ClaimSeedGraph):
+    """Test-only regression graph with its acceptance scenario identifier."""
+
+    scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
 
 
 class FixtureVisibility(str, Enum):
@@ -630,7 +638,7 @@ def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
 
 def seed_scenario(
     repository: PersistenceRepository,
-    scenario: ScenarioFixture,
+    scenario: ClaimSeedGraph,
 ) -> None:
     active_session = next(
         session

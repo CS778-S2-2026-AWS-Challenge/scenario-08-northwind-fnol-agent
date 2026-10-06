@@ -1,0 +1,126 @@
+{
+  "version": "1",
+  "primary_customer_id": "cus_8f41a2c90d7e463b",
+  "customers": [
+    {"customer_id": "cus_8f41a2c90d7e463b", "email": "maya.chen@example.invalid", "display_name": "Maya Chen", "synthetic_password": "northwind-demo-one"},
+    {"customer_id": "cus_2b67e9d14a3c508f", "email": "oliver.reed@example.invalid", "display_name": "Oliver Reed", "synthetic_password": "northwind-demo-two"}
+  ],
+  "policies_in_system": [
+    {
+      "policy_number": "NW-MTR-2026-10482",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "motor",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 500,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "third_party_liability"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "NW-MTR-2026-20963",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "motor",
+      "effective_from": null,
+      "effective_to": null,
+      "excess_nzd": null,
+      "status": "active",
+      "coverage_sections": ["accidental_damage"],
+      "uncertainty": ["COVERAGE_SECTION_INCOMPLETE"]
+    },
+    {
+      "policy_number": "NW-MTR-204518",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "motor",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 500,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "third_party_liability", "alternative_transport"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "NW-MTR-204519",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "motor",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 500,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "third_party_liability"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "NW-HOM-204518",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "home",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 750,
+      "status": "active",
+      "coverage_sections": ["building_damage", "emergency_repairs", "temporary_accommodation"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "NW-CON-204518",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "contents",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 400,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "theft", "temporary_storage"],
+      "uncertainty": []
+    }
+  ],
+  "demo_cases": [
+    {
+      "case_id": "case_0c73e82a", "customer_id": "cus_8f41a2c90d7e463b", "family": "motor",
+      "recorded_at": "2026-09-08T01:00:00Z",
+      "fields": {
+        "incident.description": {"value": "My parked car was struck outside the office.", "status": "confirmed"},
+        "incident.type": {"value": "collision", "status": "confirmed"},
+        "vehicle.registration": {"value": "NWM482", "status": "confirmed"},
+        "vehicle.damage_description": {"value": "The rear bumper appears dented.", "status": "proposed"},
+        "vehicle.drivable": {"value": null, "status": "missing"}
+      },
+      "messages": ["I need to report damage to my car.", "It was struck while parked outside the office.", "The rear bumper is dented.", "I have a photograph of the damage."],
+      "contents_descriptions": []
+    },
+    {
+      "case_id": "case_91fe42d0", "customer_id": "cus_8f41a2c90d7e463b", "family": "home",
+      "recorded_at": "2026-09-08T02:00:00Z",
+      "fields": {
+        "incident.description": {"value": "Water from a burst pipe damaged the kitchen floor.", "status": "confirmed"},
+        "incident.type": {"value": "water_damage", "status": "confirmed"},
+        "incident.cause": {"value": "A pipe appears to have burst.", "status": "proposed"},
+        "incident.location": {"value": null, "status": "missing"}
+      },
+      "messages": ["I need to report damage to my home.", "Water from a pipe damaged the kitchen floor.", "The water supply is now turned off.", "I have photographs of the floor."],
+      "contents_descriptions": []
+    },
+    {
+      "case_id": "case_53ab18e6", "customer_id": "cus_8f41a2c90d7e463b", "family": "contents",
+      "recorded_at": "2026-09-08T03:00:00Z",
+      "fields": {
+        "incident.description": {"value": "A shelf fell during a move and damaged my laptop and camera.", "status": "confirmed"},
+        "incident.type": {"value": "accidental_damage", "status": "confirmed"},
+        "incident.location": {"value": null, "status": "missing"}
+      },
+      "messages": ["I need to report damage to my belongings.", "A shelf fell during a move.", "My laptop and camera were damaged.", "I can provide photographs of both items."],
+      "contents_descriptions": ["Laptop with a cracked display", "Camera with a damaged lens"]
+    }
+  ],
+  "prior_submitted_claims": [
+    {
+      "claim_id": "clm_6d9231ab40e85fc7",
+      "session_id": "ses_4e8a39b12d60fc75",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "motor",
+      "incident_date": "2026-09-03",
+      "submitted_date": "2026-09-04",
+      "claim_number": "NW-2026-008417",
+      "incident_description": "A parked vehicle sustained damage to its rear passenger door."
+    }
+  ]
+}

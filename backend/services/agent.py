@@ -803,6 +803,8 @@ def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentPropo
         )
 
     if 'incident.occurred_at' not in claim.form:
+        policy_field = claim.form.get('policy.policy_number')
+        policy_reference = policy_field.value if policy_field is not None else None
         return AgentProposal(
             action=AgentAction.UPDATE,
             reason_codes=['POLICY_WORDING_REVIEW_NEEDED'],
@@ -835,13 +837,15 @@ def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentPropo
                 {
                     'tool': 'policy_history',
                     'operation': 'search_policy',
-                    'policy_reference': 'synthetic-policy-ambiguous',
+                    'policy_reference': policy_reference,
                     'question': (
                         'Can this rear-end collision report proceed under the applicable '
                         'collision-damage wording?'
                     ),
                 }
-            ],
+            ]
+            if isinstance(policy_reference, str) and policy_reference
+            else [],
             next_action_requirements=['provide:authorities.police_report_reference'],
         )
     return AgentProposal(

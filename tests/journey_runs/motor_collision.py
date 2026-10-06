@@ -461,6 +461,16 @@ def _drive_multi_turn(
     turns: list[AgentTurn] = []
     evidence: dict[str, str] = {}
     claim = f'/api/v1/claims/{journey.claim_id}'
+    policy = journey_input.get('policy')
+    if policy is not None:
+        journey.step(
+            'record the supplied policy reference',
+            'PATCH',
+            f'{claim}/form',
+            200,
+            'claimant',
+            {'updates': [{'field_code': 'policy.policy_number', 'value': policy['reference']}]},
+        )
 
     for index, turn in enumerate(journey_input.get('turns', []), start=1):
         if journey.stopped:

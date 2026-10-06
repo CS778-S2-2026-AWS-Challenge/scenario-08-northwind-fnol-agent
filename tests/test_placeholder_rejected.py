@@ -48,7 +48,7 @@ def test_placeholder_stays_missing_while_other_fact_is_saved(
     )
     journey = Journey(client, 'home', f'placeholder-{code}')
     result = journey.send('It happened last night.')
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert code not in claim.form
     # The model sent the claimant's words rather than a date; Runtime keeps the words
@@ -63,7 +63,7 @@ def test_placeholder_stays_missing_while_other_fact_is_saved(
     assert any(getattr(record, 'rejection', {}).get('value') == code for record in caplog.records)
     assert not any(
         item.kind == 'confirmation'
-        for item in repository.list_runtime_work_items(journey.claim_id, 'cus_demo')
+        for item in repository.list_runtime_work_items(journey.claim_id, 'cus_8f41a2c90d7e463b')
     )
 
 
@@ -89,10 +89,10 @@ def test_placeholder_cannot_overwrite_a_previously_recorded_address(
     )
     journey = Journey(client, 'home', 'placeholder-preserve')
     journey.send('The address is 12 Example Street.')
-    before = repository.get_claim(journey.claim_id, 'cus_demo')
+    before = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert before is not None
     journey.send('It happened last night.')
-    after = repository.get_claim(journey.claim_id, 'cus_demo')
+    after = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert after is not None
     assert after.form['property.address'] == before.form['property.address']
     assert after.form['incident.occurred_at'].value == 'last night'
@@ -125,7 +125,7 @@ def test_registered_unknown_medical_attention_enum_is_not_a_placeholder(
     journey = Journey(client, 'motor', 'placeholder-enum-control')
     journey.send('It happened on Queen St, and the road felt unsafe at the time.')
     journey.send('I do not know whether they have received medical attention.')
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.form['injury.medical_attention'].value == 'unknown'
     assert claim.form['injury.medical_attention'].status.value == 'confirmed'

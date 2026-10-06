@@ -124,7 +124,9 @@ def _seed_confirmed_facts(
             status=FormStatus.CONFIRMED,
             needed_for=NeededFor.CURRENT_ACTION,
             updated_at=datetime.now(UTC),
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'
+            ),
         )
         for code, value in {'claim.product_family': family, **facts}.items()
     }
@@ -185,13 +187,19 @@ def test_policy_advice_turn_persists_staff_only_signal_and_existing_decision(
     agent = GuidanceAgent(kind, clause)
     provider.agent = agent
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository, provider
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+        provider,
     )
     with TestClient(app) as client:
         journey = Journey(client, family, f'judgment-{family}')
         _seed_confirmed_facts(repository, journey, family, facts)
         result = journey.send('Does my policy cover this incident?')
-        signals = repository.list_review_signals(journey.claim_id, 'cus_demo')
+        signals = repository.list_review_signals(journey.claim_id, 'cus_8f41a2c90d7e463b')
         signal = next(item for item in signals if item.code == 'POLICY_JUDGMENT_PROPOSAL')
         assert signal.judgment_point_kind == kind
         assert signal.source_refs == [
@@ -213,7 +221,9 @@ def test_policy_advice_turn_persists_staff_only_signal_and_existing_decision(
             text='Does my policy cover this incident?',
         )
         assert replay.status_code == 200, replay.text
-        assert len(repository.list_review_signals(journey.claim_id, 'cus_demo')) == len(signals)
+        assert len(repository.list_review_signals(journey.claim_id, 'cus_8f41a2c90d7e463b')) == len(
+            signals
+        )
         assert len(agent.gateway.requests) == 2
 
         endpoint = f'/api/v1/workbench/claims/{journey.claim_id}/signals'
@@ -267,7 +277,7 @@ def test_policy_advice_turn_persists_staff_only_signal_and_existing_decision(
         assert after.claim_state.workflow_state == before.claim_state.workflow_state
         assert after.external_claim == before.external_claim
         assert after.form == before.form
-        assert repository.list_review_signals(journey.claim_id, 'cus_demo') == signals
+        assert repository.list_review_signals(journey.claim_id, 'cus_8f41a2c90d7e463b') == signals
         assert len(repository.list_signal_decisions(journey.claim_id)) == 1
         assert (
             repository.list_signal_decisions(journey.claim_id)[0].decision.value == decision_value
@@ -304,7 +314,13 @@ def test_invalid_policy_advice_does_not_persist_or_break_claimant_turn(
         request_handoff=failure == 'same_turn_handoff',
     )
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository, provider
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+        provider,
     )
     with TestClient(app) as client:
         journey = Journey(client, 'motor', f'rejected-{failure}')
@@ -315,10 +331,10 @@ def test_invalid_policy_advice_does_not_persist_or_break_claimant_turn(
         result = journey.send('Does my policy cover this incident?')
         assert not any(
             signal.code == 'POLICY_JUDGMENT_PROPOSAL'
-            for signal in repository.list_review_signals(journey.claim_id, 'cus_demo')
+            for signal in repository.list_review_signals(journey.claim_id, 'cus_8f41a2c90d7e463b')
         )
         records = repository.get_runtime_turn_for_trigger(
-            journey.claim_id, result['claimant_message']['message_id'], 'cus_demo'
+            journey.claim_id, result['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
         )
         assert records is not None
         assert records.proposal.policy_judgment_rejections == [
@@ -326,7 +342,7 @@ def test_invalid_policy_advice_does_not_persist_or_break_claimant_turn(
         ]
         assert records.proposal.policy_judgment_signal_refs == []
         if failure == 'same_turn_handoff':
-            assert repository.list_handoffs(journey.claim_id, 'cus_demo')
+            assert repository.list_handoffs(journey.claim_id, 'cus_8f41a2c90d7e463b')
         for claimant_projection in (result, journey.view()):
             assert reason not in str(claimant_projection)
             assert 'Internal advisory assessment' not in str(claimant_projection)
@@ -339,7 +355,13 @@ def test_active_support_handoff_suppresses_policy_advice_model_turn() -> None:
     agent = GuidanceAgent('liability_split', 'MTR-COV-02')
     provider.agent = agent
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER), repository, provider
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
+        repository,
+        provider,
     )
     with TestClient(app) as client:
         journey = Journey(client, 'motor', 'judgment-handoff')
@@ -360,4 +382,4 @@ def test_active_support_handoff_suppresses_policy_advice_model_turn() -> None:
         journey.revision = stored.revision
         journey.send('Does my policy cover this incident?', expect_agent_message=False)
         assert agent.gateway.requests == []
-        assert repository.list_review_signals(journey.claim_id, 'cus_demo') == []
+        assert repository.list_review_signals(journey.claim_id, 'cus_8f41a2c90d7e463b') == []

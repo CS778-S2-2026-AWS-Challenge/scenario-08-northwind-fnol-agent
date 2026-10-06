@@ -10,6 +10,10 @@ class DuplicateEmailConflict(RepositoryConflict):
 
 
 class IdentityRepository(Protocol):
+    def ensure_seed_account(
+        self, customer_id: str, email: str, password: str, display_name: str
+    ) -> CustomerAccountRecord: ...
+
     def list_accounts(self) -> list[CustomerAccountRecord]: ...
 
     def authenticate(self, email: str, password: str) -> CustomerAccountRecord | None: ...

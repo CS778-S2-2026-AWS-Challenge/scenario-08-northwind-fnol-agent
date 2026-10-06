@@ -128,7 +128,7 @@ def _start_created_motor_claim(
         needed_for=NeededFor.CURRENT_ACTION,
         confidence=1.0,
         updated_at=timestamp,
-        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'),
     )
     updated = claim.model_copy(
         update={
@@ -268,7 +268,7 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
     assert len(stored.external_service_consents) == 1
     consent = stored.external_service_consents[0]
     assert consent.granted_by.actor_type is ActorType.CLAIMANT
-    assert consent.granted_by.actor_id == 'cus_demo'
+    assert consent.granted_by.actor_id == 'cus_8f41a2c90d7e463b'
     assert set(consent.permitted_fields) == {
         'claim_id',
         'external_claim_id',
@@ -287,7 +287,7 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
     consent_event = consent_events[0]
     assert consent_event.event_type is AuditEventType.CONSENT_GRANTED
     assert consent_event.actor.actor_type is ActorType.CLAIMANT
-    assert consent_event.actor.actor_id == 'cus_demo'
+    assert consent_event.actor.actor_id == 'cus_8f41a2c90d7e463b'
     assert consent_event.actor.auth_source == 'developer:synthetic_claimant'
     assert consent_event.consent_ref == consent.consent_ref
     assert consent_event.consent_state == 'granted'
@@ -339,7 +339,7 @@ def test_claimant_consent_failure_leaves_claim_and_retry_state_unchanged() -> No
     assert repository.list_audit_events_internal(audit_subject) == []
     assert (
         repository.find_idempotency(
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
             f'/api/v1/claims/{claim_id}/assessor-routing/consent',
             'consent-atomic-failure',
         )
@@ -475,7 +475,7 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
     assert 'northwind_authority_ref' not in str(body)
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
-    decisions = repository.list_agent_decisions(claim_id, 'cus_demo')
+    decisions = repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
     assert decisions[-1].reason_codes == ['ASSESSOR_RULE_AUTHORISED']
     assert decisions[-1].resulting_revision == consent['revision']
     request = repository.list_external_task_requests_internal(claim_id)[0]
@@ -510,17 +510,17 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
         if {resource.value for resource in event.resources} == {'external_tasks'}
     )
     assert request_event.operation_correlation == request.operation_id
-    repository.save_external_task_request(request, 'cus_demo')
+    repository.save_external_task_request(request, 'cus_8f41a2c90d7e463b')
     assert repository.replay_realtime_events(None, limit=100) == events_before_retry
     with pytest.raises(IdempotencyConflict):
         repository.save_external_task_request(
             request.model_copy(update={'purpose': 'Changed after the send.'}),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
     with pytest.raises(IdempotencyConflict):
         repository.save_external_task_request(
             request.model_copy(update={'request_id': 'erq_second_request'}),
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
     with pytest.raises(KeyError):
         repository.save_external_task_request(request, 'cus_another_customer')
@@ -627,7 +627,7 @@ def test_claimant_route_maps_atomic_preparation_conflict() -> None:
     assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
     assert not any(
         decision.reason_codes == ['ASSESSOR_RULE_AUTHORISED']
-        for decision in repository.list_agent_decisions(claim_id, 'cus_demo')
+        for decision in repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
     )
 
 
@@ -651,7 +651,7 @@ def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request
         )
         after_failure = repository.get_claim_internal(claim_id)
         failure_projection = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json()
-        decisions_after_failure = repository.list_agent_decisions(claim_id, 'cus_demo')
+        decisions_after_failure = repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
         routing_decision = next(
             decision
             for decision in decisions_after_failure
@@ -677,20 +677,20 @@ def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request
         repository.save_assessor_routing_preparation(
             prepared_operation,
             routing_decision,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         with pytest.raises(IdempotencyConflict):
             repository.save_assessor_routing_preparation(
                 prepared_operation,
                 routing_decision.model_copy(update={'customer_response': 'Changed response.'}),
-                'cus_demo',
+                'cus_8f41a2c90d7e463b',
             )
         repository._assessor_routing_operations[routing_operation.operation_id] = routing_operation
         retried = client.post(
             f'/api/v1/claims/{claim_id}/assessor-routing',
             headers=route_headers,
         )
-        decisions_after_retry = repository.list_agent_decisions(claim_id, 'cus_demo')
+        decisions_after_retry = repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
 
     assert timed_out.status_code == 503
     assert timed_out.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
@@ -746,7 +746,7 @@ def test_claimant_retry_restores_authoritative_success_when_response_save_fails(
             headers=headers,
         )
         after_failure = repository.get_claim_internal(claim_id)
-        decisions_after_failure = repository.list_agent_decisions(claim_id, 'cus_demo')
+        decisions_after_failure = repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
         restored = client.post(
             f'/api/v1/claims/{claim_id}/assessor-routing',
             headers=headers,
@@ -759,7 +759,9 @@ def test_claimant_retry_restores_authoritative_success_when_response_save_fails(
     assert restored.status_code == 200
     assert restored.json()['revision'] == after_failure.revision
     assert restored.json()['action']['status'] == 'assigned'
-    assert repository.list_agent_decisions(claim_id, 'cus_demo') == decisions_after_failure
+    assert (
+        repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b') == decisions_after_failure
+    )
 
 
 def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_conflict() -> None:

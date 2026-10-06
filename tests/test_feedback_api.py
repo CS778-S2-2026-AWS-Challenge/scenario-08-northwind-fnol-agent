@@ -27,7 +27,11 @@ def _headers(actor: str, key: str | None = None) -> dict[str, str]:
 def _client(repository: FeedbackRepository | None = None) -> TestClient:
     return TestClient(
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             feedback_repository=repository,
         )
     )

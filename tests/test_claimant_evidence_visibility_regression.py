@@ -8,11 +8,7 @@ from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
 SCENARIO_PATH = (
-    Path(__file__).parents[1]
-    / 'backend'
-    / 'demo_data'
-    / 'scenarios'
-    / 'AT-06-pending-evidence.json'
+    Path(__file__).parents[1] / 'tests' / 'fixtures' / 'scenarios' / 'AT-06-pending-evidence.json'
 )
 
 
@@ -20,7 +16,11 @@ def test_claimant_evidence_projection_excludes_internal_records_and_aggregate_co
     scenario = load_scenario(SCENARIO_PATH)
     repository = FixtureRepository()
     seed_scenario(repository, scenario)
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     client = TestClient(create_app(settings, repository))
     claimant_auth = {'Authorization': 'Bearer synthetic-claimant'}
 

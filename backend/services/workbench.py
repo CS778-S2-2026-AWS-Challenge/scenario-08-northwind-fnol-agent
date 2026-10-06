@@ -8,6 +8,11 @@ from typing import Any, Literal, TypeVar
 from backend.core.auth import Principal, require_staff_capability
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
+from backend.domain.claim_creation import (
+    ClaimCreationOperationStatus,
+    ClaimHistoryChecks,
+    claim_creation_operation_id,
+)
 from backend.domain.claim_ownership import claim_acceptance_eligible, completed_fnol
 from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_service_registry import (
@@ -2087,6 +2092,22 @@ TRIAGE_AMOUNT_THRESHOLD: ContextVar[float] = ContextVar(
 )
 
 
+def _lodging_history_checks(
+    repository: PersistenceRepository, claim: WorkingClaim
+) -> ClaimHistoryChecks | None:
+    if claim.terminal_disposition is None:
+        return None
+    for reference in claim.terminal_disposition.source_refs:
+        if not reference.startswith('dec_'):
+            continue
+        operation = repository.get_claim_creation_operation(
+            claim_creation_operation_id(claim.claim_id, reference)
+        )
+        if operation is not None and operation.status is ClaimCreationOperationStatus.ACCEPTED:
+            return operation.history_checks
+    return None
+
+
 def _claim_triage(
     repository: PersistenceRepository,
     claim: WorkingClaim,
@@ -2114,6 +2135,7 @@ def _claim_triage(
         requirements=evaluation.requirements,
         registry=registry,
         amount_threshold=TRIAGE_AMOUNT_THRESHOLD.get(),
+        history_checks=_lodging_history_checks(repository, claim),
         interpreted_kinds=interpreted_evidence_kinds(
             messages, repository.list_staff_actions(claim.claim_id)
         ),
@@ -2355,6 +2377,7 @@ def _build_projection(
     policyholder, driver, witnesses = project_claim_participants(claim)
     return WorkbenchClaimDetail(
         **base,
+        history_checks=_lodging_history_checks(repository, claim),
         active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
         claim_decision=_claim_decision(repository, claim),

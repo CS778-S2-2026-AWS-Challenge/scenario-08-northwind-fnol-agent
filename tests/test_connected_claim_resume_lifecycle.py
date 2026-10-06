@@ -8,10 +8,10 @@ from backend.repositories.fixture import FixtureRepository
 
 
 def _pause_active_session(repository: FixtureRepository, claim_id: str) -> int:
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.active_session_id is not None
-    session = repository.get_session(claim_id, claim.active_session_id, 'cus_demo')
+    session = repository.get_session(claim_id, claim.active_session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
 
     repository.save_session(session.model_copy(update={'status': SessionStatus.PAUSED}))
@@ -172,15 +172,15 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert continuation.json()['decision'] is None
     assert continuation.json()['agent_message'] is None
 
-    before_resume = repository.get_claim(claim_id, 'cus_demo')
-    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    before_resume = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert before_resume is not None
     assert handoff is not None
     assert before_resume.revision == turn_revision + 4
     assert before_resume.active_session_id == first_session_id
     assert handoff.status is HandoffStatus.IN_PROGRESS
     assert handoff.assigned_to == 'stf_demo'
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
 
     assert _pause_active_session(repository, claim_id) == turn_revision + 5
     resume_headers = {**auth_headers, 'Idempotency-Key': 'issue-257-resume'}
@@ -200,9 +200,9 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert resumed_session_id != first_session_id
     assert replay.json()['session_id'] == resumed_session_id
 
-    after_resume = repository.get_claim(claim_id, 'cus_demo')
-    resumed_session = repository.get_session(claim_id, resumed_session_id, 'cus_demo')
-    preserved_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    after_resume = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    resumed_session = repository.get_session(claim_id, resumed_session_id, 'cus_8f41a2c90d7e463b')
+    preserved_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert after_resume is not None
     assert resumed_session is not None
     assert preserved_handoff is not None
@@ -211,9 +211,11 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert resumed_session.context_revision == turn_revision + 5
     assert preserved_handoff.status is HandoffStatus.IN_PROGRESS
     assert preserved_handoff.assigned_to == 'stf_demo'
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
 
-    messages_before_stale = repository.list_messages(claim_id, resumed_session_id, 'cus_demo')
+    messages_before_stale = repository.list_messages(
+        claim_id, resumed_session_id, 'cus_8f41a2c90d7e463b'
+    )
     stale_staff_reply = client.post(
         f'/api/v1/workbench/claims/{claim_id}/messages',
         headers={
@@ -225,8 +227,10 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     )
     assert stale_staff_reply.status_code == 409
     assert stale_staff_reply.json()['error']['code'] == 'REVISION_CONFLICT'
-    assert repository.get_claim(claim_id, 'cus_demo') == after_resume
-    messages_after_stale = repository.list_messages(claim_id, resumed_session_id, 'cus_demo')
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == after_resume
+    messages_after_stale = repository.list_messages(
+        claim_id, resumed_session_id, 'cus_8f41a2c90d7e463b'
+    )
     assert messages_after_stale == messages_before_stale
 
     resumed_turn = client.post(
@@ -248,9 +252,9 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert resumed_turn.json()['agent_message'] is None
     resumed_message_id = resumed_turn.json()['claimant_message']['message_id']
 
-    final_claim = repository.get_claim(claim_id, 'cus_demo')
-    sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
-    final_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    final_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    sessions = repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    final_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_8f41a2c90d7e463b')
     assert final_claim is not None
     assert final_handoff is not None
     assert final_claim.revision == turn_revision + 7
@@ -258,11 +262,11 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert final_claim.active_session_id == resumed_session_id
     assert final_handoff.status is HandoffStatus.IN_PROGRESS
     assert final_handoff.assigned_to == 'stf_demo'
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
     assert sum(session.status is SessionStatus.ACTIVE for session in sessions) == 1
     assert all(session.context_revision <= final_claim.revision for session in sessions)
 
-    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')
     applied_evaluations = [item for item in evaluations if item.status.value == 'applied']
     assert applied_evaluations
     assert all(item.selected_family == product_family for item in applied_evaluations)
