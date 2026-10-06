@@ -1,0 +1,62 @@
+{
+  "_note": "Plain-language labels the claimant simulator sees for each material, as a claimant would describe what they hold. Keyed by case_id and the material id from provenance.json. Hand-written; never derived from evidence_kind (#1222).",
+  "CTL-M-002": {
+    "photo-wheel": "Photo of my front left wheel and the bumper corner",
+    "receipt-wheels": "Receipt for the new wheels and tyres",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-013": {
+    "photo-rear-corner": "Photo of the damaged rear corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-019": {
+    "photo-door": "Photo of the scraped front left door",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-034": {
+    "photo-bonnet": "Photo of the damaged front of my car",
+    "photo-slip": "Photo of the slip that came down on the car",
+    "repair-quote": "Repair quote for my car",
+    "tow-job-sheet": "The tow truck driver's job sheet",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-044": {
+    "photo-tailgate": "Photo of the dented tailgate and the spoiler",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-H-006": {
+    "photo-slider": "Photo of the ranch slider that was forced",
+    "attendance-note": "The glazier's note from the emergency call-out",
+    "glazier-quote": "The glazier's quote for a new door",
+    "police-record": "The police confirmation with my event number",
+    "policy-schedule": "My home insurance policy schedule"
+  },
+  "CTL-H-012": {
+    "photo-heat-pump": "Photo of the heat pump unit under the branch",
+    "heat-pump-quote": "Repair quote for the heat pump",
+    "receipt-reprint": "A reprint of the heat pump invoice from the shop",
+    "policy-schedule": "My home insurance policy schedule"
+  },
+  "CTL-H-029": {
+    "photo-wall": "Photo of the lounge wall where the electrician cut in",
+    "attendance-note": "The electrician's job note",
+    "repair-quote": "The builder's quote to fix the wall",
+    "policy-schedule": "My home insurance policy schedule"
+  },
+  "CTL-C-003": {
+    "photo-rug": "Photo of the stained rug",
+    "receipt-rug": "Receipt for the rug",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-020": {
+    "photo-desk": "Photo of the water-damaged desk",
+    "photo-computer": "Photo of the computer that was standing in the water",
+    "receipt-computer": "Receipt for the computer",
+    "receipt-desk": "Receipt for the desk",
+    "policy-schedule": "My contents insurance policy schedule"
+  }
+}
