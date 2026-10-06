@@ -67,11 +67,8 @@ from backend.services.agent import (
 )
 from backend.services.context_budget import build_request_budget
 from backend.services.context_planner import ContextBudgetExceeded
-from backend.services.context_resolver import resolver_for_turn
-from backend.services.isolated_context_executor import (
-    _validation_path,
-    execute_isolated_context_plan,
-)
+from backend.services.context_resolver import ContextResultBudgetExceeded, resolver_for_turn
+from backend.services.isolated_context_executor import execute_isolated_context_plan
 from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_request_planner import (
@@ -99,6 +96,7 @@ from backend.services.turn_proposal_validation import (
     truthful_reply,
     validate_turn_proposal,
 )
+from backend.services.validation_diagnostic import validation_path
 
 logger = logging.getLogger(__name__)
 
@@ -431,7 +429,7 @@ class GatewayAgent:
         repair_outcome: RepairOutcome | None = None,
         field_contract_violations: list[dict[str, str]] | None = None,
         authorized_policy_sources: list[dict[str, object]] | None = None,
-        diagnostic_stage: str | None = None,
+        diagnostic_stage: str = 'initial',
     ) -> AgentProposal:
         if response.structured_output is None:
             logger.warning(
@@ -448,11 +446,7 @@ class GatewayAgent:
             )
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
-                diagnostic_code=(
-                    'consistency_recall_output_missing'
-                    if diagnostic_stage == 'consistency_recall'
-                    else None
-                ),
+                diagnostic_code=f'{diagnostic_stage}_output_missing',
             )
         raw_output = dict(response.structured_output)
         try:
@@ -485,12 +479,8 @@ class GatewayAgent:
             )
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
-                diagnostic_code=(
-                    'consistency_recall_output_schema_validation'
-                    if diagnostic_stage == 'consistency_recall'
-                    else None
-                ),
-                diagnostic_path=_validation_path(error.errors()) if diagnostic_stage else None,
+                diagnostic_code=f'{diagnostic_stage}_output_schema_validation',
+                diagnostic_path=validation_path(error.errors()),
             ) from None
 
         if isinstance(parsed, V8TurnProposal):
@@ -950,6 +940,7 @@ class GatewayAgent:
         context_sizes = _model_context_size_metrics(context, context_json)
         recall_started = False
         recall_response_received = False
+        response_stage = 'initial'
         try:
             request = self._v7_request(
                 plan,
@@ -998,8 +989,18 @@ class GatewayAgent:
                         max_tokens,
                         clause_ids=cast(Sequence[str], tool_call.arguments.get('clause_ids', [])),
                     )
-                except (KeyError, TypeError, ValueError) as error:
-                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from error
+                except ContextResultBudgetExceeded:
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                        diagnostic_code='context_result_budget_exceeded',
+                        diagnostic_path='context.resolve.max_tokens',
+                    ) from None
+                except (KeyError, TypeError, ValueError):
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                        diagnostic_code='context_resolution_invalid',
+                        diagnostic_path='context.resolve.arguments',
+                    ) from None
                 continuation_tool_output = {
                     'ref': resolved.ref,
                     'selector': resolved.selector,
@@ -1079,6 +1080,7 @@ class GatewayAgent:
                     observations,
                     exchange_completion,
                 )
+                response_stage = 'continuation'
                 invocations.append(
                     _runtime_invocation_trace(2, response, observations[-1].latency_ms)
                 )
@@ -1114,6 +1116,7 @@ class GatewayAgent:
                     tool_output=tool_output,
                     started_at=started_at,
                     request_budgets=request_budgets,
+                    diagnostic_stage=response_stage,
                 )
                 validated_turn = result.validated_turn
                 review = (
@@ -1231,6 +1234,12 @@ class GatewayAgent:
                         raise ModelGatewayError(
                             ModelGatewayErrorCode.MALFORMED_RESPONSE,
                             diagnostic_code='consistency_recall_truthfulness',
+                            diagnostic_path=(
+                                'reply.'
+                                + second_review.inconsistencies[0].kind
+                                if second_review.inconsistencies
+                                else 'reply'
+                            ),
                         )
             except TurnFieldContractViolation as contract_error:
                 if plan.schema_id == 'claimant.turn.v1':
@@ -1416,6 +1425,7 @@ class GatewayAgent:
                         repair_attempted=True,
                         repair_outcome='corrected',
                         field_contract_violations=violations,
+                        diagnostic_stage='field_contract_repair',
                     )
                 except TurnFieldContractViolation:
                     logger.info(
@@ -1431,6 +1441,9 @@ class GatewayAgent:
                     )
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
         except ModelGatewayError as error:
+            if error.diagnostic_code is not None and error.diagnostic_code.startswith('proposal_'):
+                stage = 'consistency_recall' if recall_started else response_stage
+                error.diagnostic_code = f'{stage}_{error.diagnostic_code}'
             if recall_started and error.diagnostic_code is None:
                 if recall_response_received:
                     error.diagnostic_code = 'consistency_recall_proposal_validation'
@@ -1438,6 +1451,11 @@ class GatewayAgent:
                     error.diagnostic_code = 'consistency_recall_provider_output_invalid'
                 else:
                     error.diagnostic_code = 'consistency_recall_gateway_failure'
+            elif (
+                error.diagnostic_code is None
+                and error.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+            ):
+                error.diagnostic_code = f'{response_stage}_response_validation'
             self._record_observations(observations, context_sizes, error)
             raise
         self._record_observations(observations, context_sizes)

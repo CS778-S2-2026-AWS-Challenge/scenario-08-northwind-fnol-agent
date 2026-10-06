@@ -81,7 +81,11 @@ def http(
             return result
     except HTTPError as error:
         # Never include response bodies, request headers or credentials in errors.
-        raise RuntimeError(f'{method} {path}: HTTP {error.code}') from None
+        try:
+            code = json.load(error).get('error', {}).get('code')
+        except (ValueError, AttributeError):
+            code = None
+        raise RuntimeError(f'{method} {path}: HTTP {error.code}, code={code}') from None
 
 
 def arguments() -> argparse.Namespace:

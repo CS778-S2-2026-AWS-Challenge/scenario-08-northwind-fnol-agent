@@ -62,8 +62,11 @@ from backend.domain.prompt_pack import (
 from backend.services.agent import AgentEvidenceReference, AgentTurnContext
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
-from backend.services.context_resolver import TurnContextResolver, resolver_for_turn
-from backend.services.isolated_context_executor import _validation_path
+from backend.services.context_resolver import (
+    ContextResultBudgetExceeded,
+    TurnContextResolver,
+    resolver_for_turn,
+)
 from backend.services.model_agent import GatewayAgent
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import (
@@ -87,6 +90,7 @@ from backend.services.runtime_agent_policy import (
 )
 from backend.services.runtime_configuration import RuntimeConfigurationSnapshot
 from backend.services.turn_router import route_turn
+from backend.services.validation_diagnostic import validation_path
 
 
 def _claim(*, incident_type: str | None = 'motor') -> WorkingClaim:
@@ -900,13 +904,44 @@ def test_policy_resolver_passes_selection_and_bounded_limit_without_truncation(
     loader.assert_called_once_with(1200, selected)
     assert result.content == {'approved_guidance': {'chunks': [{'text': full_clause}]}}
     assert not result.truncated
-    with pytest.raises(ValueError, match='exceeds'):
+    with pytest.raises(ContextResultBudgetExceeded, match='exceeds'):
         resolver_for_turn(context, plan.context_plan).resolve(
             reference.ref,
             'matching_facts_and_guidance',
             10,
             selected,
         )
+
+
+def test_policy_result_budget_failure_identifies_tool_limit() -> None:
+    context = replace(
+        _context('Will my policy pay for a rental car?'),
+        knowledge_context_loader=lambda _limit, _ids: {'chunks': [{'text': 'clause ' * 300}]},
+    )
+    plan = plan_model_turn(context)
+    assert plan is not None
+    reference = next(
+        ref for ref in plan.context_plan.references if ref.resource_type == 'policy_version'
+    )
+    response = ModelResponse(
+        tool_calls=[
+            ModelToolCall(
+                call_id='call_policy',
+                name='context.resolve',
+                arguments={
+                    'ref': reference.ref,
+                    'selector': 'matching_facts_and_guidance',
+                    'max_tokens': 10,
+                    'clause_ids': ['MTR-BEN-03'],
+                },
+            )
+        ],
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(_RecordingGateway([response])).propose_turn(context)
+    assert error.value.diagnostic_code == 'context_result_budget_exceeded'
+    assert error.value.diagnostic_path == 'context.resolve.max_tokens'
 
 
 @pytest.mark.parametrize(
@@ -1075,6 +1110,43 @@ def test_v7_lookup_allows_an_answer_without_context_continuation() -> None:
     )
     assert gateway.requests[0].required_tool_name is None
     assert len(gateway.requests) == 1
+
+
+@pytest.mark.parametrize('stage', ['initial', 'continuation'])
+def test_v7_lookup_schema_failure_identifies_stage_and_field(stage: str) -> None:
+    invalid = ModelResponse(
+        structured_output={'reply': []},
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+    responses = [invalid]
+    if stage == 'continuation':
+        responses.insert(
+            0,
+            ModelResponse(
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_history',
+                        name='context.resolve',
+                        arguments={
+                            'ref': 'ctxref:ses_v7:conversation.older',
+                            'selector': 'page',
+                            'max_tokens': 120,
+                        },
+                    )
+                ],
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+        )
+    gateway = _RecordingGateway(responses)
+
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(gateway).propose_turn(
+            _context('What is the status of my claim?', conversation_messages=_messages(6))
+        )
+
+    assert error.value.diagnostic_code == f'{stage}_output_schema_validation'
+    assert error.value.diagnostic_path == 'reply'
+    assert len(gateway.requests) == (2 if stage == 'continuation' else 1)
 
 
 def test_v7_lookup_rejects_a_recursive_tool_call() -> None:
@@ -1273,7 +1345,7 @@ def test_v7_isolated_review_rejects_an_unscoped_source_reference() -> None:
 def test_validation_path_is_bounded_for_untrusted_error_shapes(
     errors: list[object], expected: str | None
 ) -> None:
-    assert _validation_path(errors) == expected
+    assert validation_path(errors) == expected
 
 
 @pytest.mark.parametrize(

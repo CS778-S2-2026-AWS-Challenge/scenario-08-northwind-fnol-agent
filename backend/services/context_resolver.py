@@ -11,6 +11,10 @@ from backend.services.agent import AgentTurnContext
 from backend.services.prompt_composer import estimate_tokens
 
 
+class ContextResultBudgetExceeded(ValueError):
+    """A complete structured result cannot fit the requested reference budget."""
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedContextChunk:
     ref: str
@@ -78,7 +82,7 @@ class TurnContextResolver:
             estimated_tokens = estimate_tokens(json.dumps(value, separators=(',', ':')))
             truncated = estimated_tokens > bounded_limit
             if truncated:
-                raise ValueError(
+                raise ContextResultBudgetExceeded(
                     'Structured Context Reference content exceeds its bounded result: '
                     f'{estimated_tokens} > {bounded_limit} tokens.'
                 )

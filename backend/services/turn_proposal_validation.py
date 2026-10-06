@@ -283,7 +283,11 @@ def parse_turn_proposal(raw: dict[str, object]) -> tuple[V8TurnProposal, list[di
             'agent_turn_envelope_blank_reply',
             extra={'envelope_keys': sorted(raw.keys())},
         )
-        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+            diagnostic_code='proposal_blank_reply',
+            diagnostic_path='reply',
+        )
     raw_question = prepared.get('next_question')
     if raw_question is not None:
         try:
@@ -504,7 +508,11 @@ def validate_turn_proposal(
 
     if not proposal.reply.strip():
         logger.warning('validate_turn_proposal_blank_reply')
-        raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+            diagnostic_code='proposal_blank_reply',
+            diagnostic_path='reply',
+        )
     rejected: list[dict[str, str]] = []
 
     def reject(part: str, value: str, reason: str) -> None:
@@ -644,7 +652,11 @@ def validate_turn_proposal(
         if change.source_evidence_id is not None:
             attached = evidence_by_id.get(change.source_evidence_id)
             if attached is None:
-                raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+                raise ModelGatewayError(
+                    ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                    diagnostic_code='proposal_invalid_evidence_ref',
+                    diagnostic_path='field_changes.source_evidence_id',
+                )
             source = (
                 FormSource.IMAGE
                 if attached.media_type.startswith('image/')

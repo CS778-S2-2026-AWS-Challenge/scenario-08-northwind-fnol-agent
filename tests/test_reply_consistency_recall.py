@@ -128,7 +128,25 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
     )
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.failure_diagnostic.code == 'consistency_recall_truthfulness'
-    assert trace.failure_diagnostic.path is None
+    assert trace.failure_diagnostic.path == 'reply.names_rejected_service'
+
+
+def test_initial_schema_failure_persists_safe_field_path(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    provider = _provider({**HONEST_REWRITE, 'reply': []})
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'initial-schema-diagnostic')
+    turn = journey.send('Water is dripping through the ceiling.', expect_agent_message=False)
+
+    assert turn['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+    )
+    assert trace is not None and trace.failure_diagnostic is not None
+    assert trace.failure_diagnostic.code == 'initial_output_schema_validation'
+    assert trace.failure_diagnostic.path == 'reply'
+    assert 'Water is dripping' not in trace.model_dump_json()
 
 
 @pytest.mark.parametrize(
@@ -156,8 +174,8 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
         (
             {**HONEST_REWRITE, 'reply': '   '},
             ModelCompletionStatus.COMPLETE,
-            'consistency_recall_proposal_validation',
-            None,
+            'consistency_recall_proposal_blank_reply',
+            'reply',
         ),
     ],
 )
