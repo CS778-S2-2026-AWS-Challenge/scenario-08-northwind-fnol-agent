@@ -95,17 +95,30 @@ The runner fills the payout form, the contact choice and the agreement checkboxe
 It logs in, adds the pack's phone to the profile so SMS can be chosen, and attaches files one at a
 time. It presses Send only after every file shows Ready.
 
+Uploads follow "Evidence kinds and the upload path" in the corpus standard:
+
+- The screen lists the upload spots the claim offers for requested documents: the to-do bar, the
+  "Still to do" list, a requested file under a reply, and the Documents cards.
+- When the claimant sends a material the claim asks for, it names the matching spot. The runner
+  uploads through that item's own input, so the file carries the kind the interface sends for that
+  item.
+- Other files go through the chat.
+- The runner never copies `evidence_kind` from the pack. Each run records which path every file
+  took (`upload_paths`).
+
 ## Recovery and stuck
 
 A person's recoveries are allowed once each. A run that used one ends as `lodged_after_retry`,
 never `lodged_first_time`. The recoveries are:
 
 - pressing "Retry message" or "Retry response";
+- answering a question once more when the agent asks it again (the same question sentences);
 - after about nine seconds with nothing to act on, typing "OK.".
 
 A pack is `stuck` when any of these happens:
 
 - a second failure follows a recovery;
+- the agent asks the same question a third time;
 - after the nudge, there is still nothing to act on;
 - the claimant reaches 30 messages;
 - a file never shows Ready;
@@ -125,14 +138,23 @@ A pack is `stuck` when any of these happens:
   the allowed list.
 - **Review signals:** a review signal and its fraud flag; `not_implemented` while main writes only
   retrieval-uncertainty signals.
-- **Facts:** expected facts against the confirmed value in the staff field list, with incident time
-  compared by New Zealand calendar day.
+- **Facts:** expected facts against the confirmed value in the staff field list. Incident time is
+  compared by New Zealand calendar day, read from every stored form: a date, a date with a part of
+  day such as `2026-09-11 night`, or a clock time.
 - **Assertions:** the pack's assertions and the corpus-wide `global_assertions.json`. A `forbidden`
   assertion passes when its condition does not hold. Rubric-only text assertions are left for a
   person.
 
 Capabilities main does not implement are reported as `not_implemented` and kept out of the pass
 and fail counts.
+
+A pack that has a Claim needs every end-state read:
+
+- from the claimant: the Claim, its evidence and its messages;
+- from the staff sign-in: the Claim, its fields, handoffs, signals and evidence.
+
+If any read is missing or not 200, the pack is reported as evidence incomplete and kept out of
+every count.
 
 ## Evidence and limits
 
