@@ -7,7 +7,7 @@ export const PRIVATE_MODEL_PROFILE_ID = 'qwen-local'
 
 export const MODEL_PRODUCTS = [
   {
-    id: 'openrouter-gpt4o-mini',
+    id: 'openrouter-gpt-4o',
     label: 'Northwind Assist (Default)',
     description: 'Fast. Reads your photos and documents.',
   },

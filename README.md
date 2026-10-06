@@ -134,7 +134,9 @@ Fetching and parsing the bundle is a config-layer integration point
 3. ingests the approved knowledge corpus into that MinIO so retrieval is real, not the fixture
    stub;
 4. runs `scripts/migrate_record_shapes.py --apply`, which brings records stored by earlier
-   versions to the current shapes once (later runs see its marker and exit at once). If it
+   versions to the current shapes once (later runs see its marker and exit at once), and
+   renames the model profile `openrouter-gpt4o-mini` in stored records to `openrouter-gpt-4o`,
+   the model it has always called (`openai/gpt-4o`), under its own marker. If it
    refuses because an unfinished claim creation still covers old evidence, or cannot reach
    MongoDB, the launcher stops and prints the script's report instead of starting the backend;
 5. starts the backend on `DATA_RUNTIME_PROFILE=local_mvp` with the `model_gateway` runtime
@@ -226,8 +228,8 @@ $env:NORTHWIND_MONGODB_COLLECTION = 'northwind_records'
 $env:NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
 $env:AGENT_RUNTIME_PROFILE = 'model_gateway'
 $env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
-$env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
-$env:PDF_MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$env:MODEL_PROFILE_ID = 'openrouter-gpt-4o'
+$env:PDF_MODEL_PROFILE_ID = 'openrouter-gpt-4o'
 $env:MODEL_TIMEOUT_SECONDS = '30'
 $env:TURN_TIME_LIMIT_SECONDS = '40'
 $env:REPLY_JUDGE_MODEL = 'anthropic/claude-haiku-4.5'

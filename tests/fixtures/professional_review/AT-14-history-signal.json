@@ -30,6 +30,7 @@
       "session_id": "ses_fixture_at14",
       "claim_id": "clm_fixture_at14",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "Relevant history was retrieved and transferred for professional review.",
       "context_revision": 4,

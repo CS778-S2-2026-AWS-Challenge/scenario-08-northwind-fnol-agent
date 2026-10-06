@@ -288,9 +288,9 @@ $backendEnv.NORTHWIND_IDENTITY_MODE = 'normal'
 $backendEnv.NORTHWIND_CONTROL_PLANE_DB_PATH = $controlPlaneDb
 $backendEnv.AGENT_RUNTIME_PROFILE = 'model_gateway'
 $backendEnv.MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
-$backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$backendEnv.MODEL_PROFILE_ID = 'openrouter-gpt-4o'
 # PDF evidence is read by the governed OpenRouter GPT-4o profile.
-$backendEnv.PDF_MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$backendEnv.PDF_MODEL_PROFILE_ID = 'openrouter-gpt-4o'
 # A turn makes up to three model calls (reply, one continuation after a lookup,
 # and one rewrite if the reply contradicts the record); a hung provider must not
 # leave the claimant waiting minutes. Typical calls take 3-6 seconds. No further

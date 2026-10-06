@@ -30,6 +30,7 @@
       "session_id": "ses_fixture_at16",
       "claim_id": "clm_fixture_at16",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "A required retrieval provider is unavailable and the limitation is recorded.",
       "context_revision": 2,

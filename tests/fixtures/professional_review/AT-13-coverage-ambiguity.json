@@ -30,6 +30,7 @@
       "session_id": "ses_fixture_at13",
       "claim_id": "clm_fixture_at13",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "Coverage wording is ambiguous and queued for professional review.",
       "context_revision": 3,

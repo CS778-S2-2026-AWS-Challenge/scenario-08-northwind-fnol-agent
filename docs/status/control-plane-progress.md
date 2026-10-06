@@ -28,7 +28,7 @@ browser evidence.
   approval for high-impact publication, publication, withdrawal, supersession,
   rollback, idempotency, and configuration audit events.
 - Model configurations use `configuration_key=profile_id` and can publish one catalog
-  containing `openrouter-gpt4o-mini` as primary claimant profile, and
+  containing `openrouter-gpt-4o` as primary claimant profile, and
   `bedrock-nova2-lite` as an explicitly unavailable multimodal Bedrock profile pending AWS account
   verification. The catalogue also publishes `google-gemini35-flash-lite` as a selectable native
   Gemini profile after live structured-image and function-continuation verification. Publication

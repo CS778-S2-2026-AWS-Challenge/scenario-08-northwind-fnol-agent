@@ -236,6 +236,7 @@
       "session_id": "ses_fixture_at02",
       "claim_id": "clm_fixture_at02",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "The claimant confirmed water damage to the ground floor after heavy rain; the cause of ingress is disputed.",
       "unresolved_questions": [

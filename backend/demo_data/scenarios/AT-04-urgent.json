@@ -80,6 +80,7 @@
       "session_id": "ses_fixture_at04",
       "claim_id": "clm_fixture_at04",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "A motorway collision with a trapped, injured passenger; urgent support requested.",
       "unresolved_questions": ["confirm:vehicle.drivable"],

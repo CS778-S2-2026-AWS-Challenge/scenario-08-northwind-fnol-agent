@@ -32,7 +32,7 @@ def _binding(
     prompt_version: str = 'northwind-fnol-claimant-v8',
 ) -> ModelRuntimeBinding:
     is_qwen = profile_id == 'qwen-local'
-    is_openrouter = profile_id == 'openrouter-gpt4o-mini'
+    is_openrouter = profile_id == 'openrouter-gpt-4o'
     is_bedrock = profile_id == 'bedrock-nova2-lite'
     is_google = profile_id == 'google-gemini35-flash-lite'
     return ModelRuntimeBinding(
@@ -53,7 +53,7 @@ def _binding(
             else (
                 'gemini-3.5-flash-lite'
                 if is_google
-                else ('qwen3.8-27b' if is_qwen else 'openai/gpt-4o-mini')
+                else ('qwen3.8-27b' if is_qwen else 'openai/gpt-4o')
             )
         ),
         base_url=(
@@ -87,7 +87,7 @@ def _binding(
 def _settings() -> Settings:
     bindings = (
         _binding('qwen-local'),
-        _binding('openrouter-gpt4o-mini'),
+        _binding('openrouter-gpt-4o'),
         _binding('bedrock-nova2-lite'),
         _binding('google-gemini35-flash-lite'),
     )
@@ -96,7 +96,7 @@ def _settings() -> Settings:
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter='openai_compatible',
-        model_profile_id='openrouter-gpt4o-mini',
+        model_profile_id='openrouter-gpt-4o',
         model_provider='openrouter',
         model_base_url=bindings[0].base_url,
         model_identifier=bindings[0].model_identifier,
@@ -125,7 +125,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'agent_rule',
         'feature',
         'model:qwen-local',
-        'model:openrouter-gpt4o-mini',
+        'model:openrouter-gpt-4o',
         'model:bedrock-nova2-lite',
         'model:google-gemini35-flash-lite',
     }
@@ -157,7 +157,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     }
     assert set(policy.tool_policy.provider_capabilities) == {
         'qwen-local',
-        'openrouter-gpt4o-mini',
+        'openrouter-gpt-4o',
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
     }
@@ -166,7 +166,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         for record in configurations.list_configurations('model')
     } == {
         'qwen-local': 180.0,
-        'openrouter-gpt4o-mini': 180.0,
+        'openrouter-gpt-4o': 180.0,
         'bedrock-nova2-lite': 180.0,
         'google-gemini35-flash-lite': 180.0,
     }
@@ -180,7 +180,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     openrouter = next(
         record
         for record in configurations.list_configurations('model')
-        if record.values['profile_id'] == 'openrouter-gpt4o-mini'
+        if record.values['profile_id'] == 'openrouter-gpt-4o'
     )
     assert openrouter.values['document_input'] is True
     qwen = next(
@@ -250,12 +250,12 @@ def test_fresh_v8_release_publishes_atomic_prompt_schema_and_default_model() -> 
         'claimant.deep-review.v1',
     }
     assert 'claimant.turn.v1' in policy.tool_policy.schema_registry
-    assert settings.model_profile_id == 'openrouter-gpt4o-mini'
-    model_ref = release.configuration_refs['model:openrouter-gpt4o-mini']
+    assert settings.model_profile_id == 'openrouter-gpt-4o'
+    model_ref = release.configuration_refs['model:openrouter-gpt-4o']
     model = configurations.get(model_ref.configuration_id, model_ref.revision)
     assert model is not None
     assert model.values['prompt_version'] == 'northwind-fnol-claimant-v8'
-    assert model.values['model_identifier'] == 'openai/gpt-4o-mini'
+    assert model.values['model_identifier'] == 'openai/gpt-4o'
     # Governance labels must track the actual published prompt generation, not a
     # suffix baked in when this composer only ever served v7 releases.
     assert policy.tool_policy.policy_version == 'northwind-fnol-agent-tools-v8'
@@ -339,7 +339,7 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
     assert policy is not None
     assert set(policy.tool_policy.provider_capabilities) == {
         'qwen-local',
-        'openrouter-gpt4o-mini',
+        'openrouter-gpt-4o',
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
     }
@@ -393,7 +393,7 @@ def test_initial_release_rejects_missing_or_mixed_model_catalogues() -> None:
         base,
         model_runtime_bindings=tuple(
             binding.model_copy(update={'prompt_version': 'northwind-fnol-claimant-v6'})
-            if binding.profile_id == 'openrouter-gpt4o-mini'
+            if binding.profile_id == 'openrouter-gpt-4o'
             else binding
             for binding in base.model_runtime_bindings
         ),
@@ -682,14 +682,14 @@ def test_capabilities_expose_the_repository_published_model_catalogue(
     assert response.status_code == 200
     model_ids = [item['id'] for item in response.json()['models']]
     assert model_ids == [
-        'openrouter-gpt4o-mini',
+        'openrouter-gpt-4o',
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
         'qwen-local',
     ]
-    assert response.json()['default_model_profile_id'] == 'openrouter-gpt4o-mini'
+    assert response.json()['default_model_profile_id'] == 'openrouter-gpt-4o'
     openrouter = next(
-        item for item in response.json()['models'] if item['id'] == 'openrouter-gpt4o-mini'
+        item for item in response.json()['models'] if item['id'] == 'openrouter-gpt-4o'
     )
     assert openrouter['document_input'] is True
     bedrock = next(item for item in response.json()['models'] if item['id'] == 'bedrock-nova2-lite')

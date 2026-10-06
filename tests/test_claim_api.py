@@ -3244,6 +3244,7 @@ def test_claim_collection_filters_ownership_and_paginates_updated_claims(
         session_id='ses_other',
         claim_id=other_claim.claim_id,
         customer_id=other_claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=other_claim.created_at,
         last_active_at=other_claim.created_at,
     )
@@ -3325,6 +3326,7 @@ def test_claim_remains_readable_across_multiple_persisted_sessions(
         session_id='ses_second',
         claim_id=claim_id,
         customer_id='cus_demo',
+        model_profile_id='openrouter-gpt-4o',
         context_revision=claim.revision,
         started_at=first_session.started_at + timedelta(seconds=1),
         last_active_at=first_session.last_active_at + timedelta(seconds=1),

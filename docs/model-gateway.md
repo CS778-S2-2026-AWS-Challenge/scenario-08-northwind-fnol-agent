@@ -261,14 +261,14 @@ The published claimant profiles use this adapter contract:
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
 | `qwen-local` | `qwen3.8-27b` through the environment-owned Qwen endpoint | selectable through `MODEL_PROFILE_ID` | structured output (`json_object`) and tools |
-| `openrouter-gpt4o-mini` | `openai/gpt-4o` through OpenRouter | the profile `start-dev.ps1` and `.env.example` select | structured output, tools, image input, and PDF document input |
+| `openrouter-gpt-4o` | `openai/gpt-4o` through OpenRouter | the profile `start-dev.ps1` and `.env.example` select | structured output, tools, image input, and PDF document input |
 | `bedrock-nova2-lite` | `global.amazon.nova-2-lite-v1:0` through Bedrock Sydney | published but unavailable until AWS account verification completes | structured output and image input |
 | `google-gemini35-flash-lite` | `gemini-3.5-flash-lite` through Google AI Studio | selectable | structured output, tools, image input, and PDF document input |
 
 The Google profile publishes `reasoning_mode=disabled`. For Gemini 3 models the native adapter
 translates that setting to `generationConfig.thinkingConfig.thinkingLevel=minimal`; it does
 not send the OpenAI-compatible `chat_template_kwargs` field.  The default
-`openrouter-gpt4o-mini` profile is a non-reasoning model and therefore carries no
+`openrouter-gpt-4o` profile is a non-reasoning model and therefore carries no
 reasoning control parameter.  These are transport details of the published binding,
 not a second Runtime decision.
 
@@ -307,7 +307,7 @@ After the existing development secret injection, repeat the bounded probe with s
 ```powershell
 $env:AGENT_RUNTIME_PROFILE = 'model_gateway'
 $env:MODEL_RUNTIME_BINDINGS_PATH = 'config/model-runtime-bindings.json'
-$env:MODEL_PROFILE_ID = 'openrouter-gpt4o-mini'
+$env:MODEL_PROFILE_ID = 'openrouter-gpt-4o'
 py -3.12 -m scripts.verify_model_gateway_live `
   --pdf backend/demo_data/materials/contents/contents-purchase-receipt.pdf
 ```
@@ -333,7 +333,7 @@ allow-list. Private endpoints are represented by environment-variable references
 inside the deployment process. The backend ships a reviewed initial Runtime Release that registers
 and publishes the complete Agent policy plus every binding in this allow-list. A Control Plane
 scope with no Release Set history installs that initial Release during application composition, so
-`qwen-local`, `openrouter-gpt4o-mini`, and `google-gemini35-flash-lite` are available, while
+`qwen-local`, `openrouter-gpt-4o`, and `google-gemini35-flash-lite` are available, while
 `bedrock-nova2-lite` is published with its explicit evaluation status through the capabilities
 APIs on a clean deployment. The initializer installs a release for a never-initialised scope. It
 also replaces a stale active release only when that release was created by the repository

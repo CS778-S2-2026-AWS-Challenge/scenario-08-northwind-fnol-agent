@@ -96,6 +96,7 @@ def _repository() -> FixtureRepository:
         session_id='ses_staff_tool',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         summary='The claimant corrected the address.',
         started_at=timestamp,
         last_active_at=timestamp,
@@ -197,6 +198,7 @@ def _seed_bounded_search(repository: PersistenceRepository) -> None:
                 session_id=session_id,
                 claim_id=claim_id,
                 customer_id=customer_id,
+                model_profile_id='openrouter-gpt-4o',
                 started_at=timestamp,
                 last_active_at=timestamp,
             ),
@@ -835,6 +837,7 @@ def test_fixture_session_search_stops_before_unrelated_session_messages() -> Non
         session_id='ses_newest_match',
         claim_id='clm_staff_tool',
         customer_id='cus_staff_tool',
+        model_profile_id='openrouter-gpt-4o',
         started_at=timestamp,
         last_active_at=timestamp,
     )
@@ -905,6 +908,7 @@ def test_session_search_filters_before_limit_with_repository_parity(
         session_id='ses_older_match',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=timestamp,
         last_active_at=timestamp,
     )
@@ -912,6 +916,7 @@ def test_session_search_filters_before_limit_with_repository_parity(
         session_id='ses_newer_non_match',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=timestamp + timedelta(hours=1),
         last_active_at=timestamp + timedelta(hours=1),
     )
@@ -950,6 +955,7 @@ def test_session_search_fails_closed_above_examined_cap() -> None:
                 session_id=f'ses_unmatched_{ordinal:03}',
                 claim_id='clm_staff_tool',
                 customer_id='cus_staff_tool',
+                model_profile_id='openrouter-gpt-4o',
                 started_at=timestamp + timedelta(minutes=ordinal),
                 last_active_at=timestamp + timedelta(minutes=ordinal),
             )
@@ -1022,6 +1028,7 @@ def test_mongodb_session_message_search_fails_closed_above_examined_cap(
         session_id=claim.active_session_id,
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=timestamp,
         last_active_at=timestamp,
     )
@@ -1080,6 +1087,7 @@ def test_mongodb_session_search_stops_message_reads_after_small_limit(
             session_id=session_id,
             claim_id=claim.claim_id,
             customer_id=claim.customer_id,
+            model_profile_id='openrouter-gpt-4o',
             started_at=timestamp + timedelta(hours=offset),
             last_active_at=timestamp + timedelta(hours=offset),
         )

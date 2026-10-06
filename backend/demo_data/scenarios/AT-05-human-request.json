@@ -70,6 +70,7 @@
       "session_id": "ses_fixture_at05",
       "claim_id": "clm_fixture_at05",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "The claimant confirmed a synthetic parked-car incident, then asked to speak with a person.",
       "unresolved_questions": ["confirm:incident.location"],

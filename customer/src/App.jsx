@@ -473,6 +473,9 @@ function App() {
   const evidenceHasLocalMutation = useRef(false)
   const evidenceClaimId = useRef(null)
   const evidenceUploadControllers = useRef(new Map())
+  // Each upload advances the claim revision, so uploads run one at a time and
+  // each starts from the revision the previous one left.
+  const evidenceUploadQueue = useRef(Promise.resolve())
   const evidencePreviewFiles = useRef(new Map())
   const attachmentsRef = useRef(attachments)
   const cancelledAttachmentIds = useRef(new Set())
@@ -1910,10 +1913,38 @@ function App() {
       return { succeeded: true }
     }
 
-    return uploadAttachment(file, attempt, claim, {
-      existingAttachment: Boolean(existingAttempt),
-      checkExistingEvidence: Boolean(existingAttempt),
+    if (!existingAttempt) {
+      setAttachments((current) => [
+        ...current,
+        {
+          id: attempt.localId,
+          name: file.name,
+          previewFile: file,
+          status: 'uploading',
+          statusLabel: 'Waiting to upload…',
+        },
+      ])
+    }
+    const activeClaim = claim
+    const queued = evidenceUploadQueue.current.then(() => {
+      if (cancelledAttachmentIds.current.has(attempt.localId)) {
+        return { succeeded: false, aborted: true }
+      }
+      return uploadAttachment(
+        file,
+        attempt,
+        {
+          ...activeClaim,
+          revision: Math.max(activeClaim.revision, latestEvidenceRevision.current),
+        },
+        {
+          existingAttachment: true,
+          checkExistingEvidence: Boolean(existingAttempt),
+        },
+      )
     })
+    evidenceUploadQueue.current = queued.catch(() => undefined)
+    return queued
   }
 
   function removeComposerAttachment(attachment) {

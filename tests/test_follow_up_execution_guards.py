@@ -84,6 +84,7 @@ def _snapshot() -> Snapshot:
         session_id='ses_guard',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         status=SessionStatus.PAUSED,
         context_revision=1,
         started_at=INTERRUPTED_AT,

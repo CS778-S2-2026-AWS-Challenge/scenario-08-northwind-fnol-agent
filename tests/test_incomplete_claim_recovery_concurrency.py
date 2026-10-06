@@ -52,6 +52,7 @@ def test_fixture_pause_and_evidence_from_same_revision_commit_exactly_one_bundle
         session_id='ses_pause_evidence_race',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         status=SessionStatus.ACTIVE,
         context_revision=claim.revision,
         started_at=now,

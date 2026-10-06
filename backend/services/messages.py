@@ -931,18 +931,30 @@ def _build_contents_item_changes(
     authority_outcome: AuthorityOutcome,
     branch_evaluation: BranchEvaluationResult,
     evidence_media_types: dict[str, str] | None = None,
+    turn_product_family: str | None = None,
 ) -> list[ContentsItem]:
     if not proposal.contents_item_changes or authority_outcome is not AuthorityOutcome.AUTHORISED:
         return []
-    contents_available = branch_evaluation.selected_family == 'contents' or (
-        'family.contents' in branch_evaluation.candidate_branches
+    # The branch evaluation was taken before this message, so a family the
+    # Agent records in this same turn counts too. Items proposed outside the
+    # contents branch are left out of this turn rather than failing it: the
+    # claimant's words stay in the conversation and the Agent records them
+    # once the family is contents.
+    contents_available = (
+        turn_product_family == 'contents'
+        or branch_evaluation.selected_family == 'contents'
+        or 'family.contents' in branch_evaluation.candidate_branches
     )
     if not contents_available:
-        raise ApiError(
-            status_code=409,
-            code='INVALID_FIELD_BRANCH',
-            message='The Agent proposed a contents item outside the contents claim branch.',
+        logger.warning(
+            'contents_items_outside_branch',
+            extra={
+                'claim_id': claim.claim_id,
+                'item_count': len(proposal.contents_item_changes),
+                'selected_family': branch_evaluation.selected_family,
+            },
         )
+        return []
     existing_by_id = {item.item_id: item for item in claim.contents_items}
     existing_by_description = {
         item.description.strip().casefold(): item for item in claim.contents_items

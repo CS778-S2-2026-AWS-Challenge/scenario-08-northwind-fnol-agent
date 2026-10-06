@@ -155,6 +155,7 @@
       "session_id": "ses_fixture_at16",
       "claim_id": "clm_fixture_at16",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "Contents loss with one confirmed item, one inferred item, and unresolved cause/location.",
       "unresolved_questions": ["confirm:incident.location", "resolve:incident.cause"],

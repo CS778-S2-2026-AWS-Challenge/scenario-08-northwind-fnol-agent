@@ -1139,17 +1139,14 @@ class InvariantGuardedAgent:
 
 
 def detect_safety_interrupt(context: AgentTurnContext) -> SafetyInterrupt | None:
+    """An explicit request for a person, accessibility or distress support.
+
+    Whether someone is in danger right now is not read from words here: an
+    injury described after the event is a fact to record, not an emergency,
+    and only the turn model can tell the two apart (``urgent_safety``
+    escalation).
+    """
     text = context.message_text or ''
-    if _contains_unnegated_signal(
-        text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS
-    ) or _contains_unnegated_signal(text, DANGER_PATTERNS, DANGER_NEGATION_PATTERNS):
-        return SafetyInterrupt(
-            'urgent_safety',
-            'EXPLICIT_SAFETY_SIGNAL',
-            'urgent',
-            'Your safety comes first. Move to a safer place if you can do so safely, '
-            'and contact local emergency services yourself if immediate help is needed.',
-        )
     support = support_need_for_intent(detect_support_intent(text))
     if support is None:
         return None

@@ -67,7 +67,7 @@ def test_runtime_snapshot_selects_each_keyed_model_profile() -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
     records: dict[str, ConfigurationRecord] = {}
-    for profile_id in ('qwen-local', 'openrouter-gpt4o-mini'):
+    for profile_id in ('qwen-local', 'openrouter-gpt-4o'):
         record = ConfigurationRecord(
             configuration_id=f'cfg_{profile_id}',
             domain='model',
@@ -109,7 +109,7 @@ def test_runtime_snapshot_selects_each_keyed_model_profile() -> None:
     assert default_model is not None
     assert default_model.values['profile_id'] == 'qwen-local'
     assert snapshot.model('qwen-local') == records['qwen-local']
-    assert snapshot.model('openrouter-gpt4o-mini') == records['openrouter-gpt4o-mini']
+    assert snapshot.model('openrouter-gpt-4o') == records['openrouter-gpt-4o']
 
 
 def _knowledge(

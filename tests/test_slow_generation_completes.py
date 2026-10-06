@@ -35,7 +35,7 @@ def test_legitimate_generation_near_configured_timeout_commits_facts(
         )
     ]
     configuration = ModelRuntimeConfiguration.model_validate(
-        repository_release_values(bindings)['model:openrouter-gpt4o-mini']
+        repository_release_values(bindings)['model:openrouter-gpt-4o']
     )
     timeout = (
         Settings().model_timeout_seconds

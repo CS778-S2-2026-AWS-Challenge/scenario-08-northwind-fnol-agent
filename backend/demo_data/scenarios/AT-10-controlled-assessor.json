@@ -81,6 +81,7 @@
       "session_id": "ses_fixture_at10",
       "claim_id": "clm_fixture_at10",
       "customer_id": "cus_demo",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "The motor claim was created successfully with one damage image received and is queued for assessor assignment.",
       "unresolved_questions": [],

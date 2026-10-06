@@ -41,6 +41,7 @@ def _claim(repository: FixtureRepository, suffix: str) -> WorkingClaim:
             session_id=f'ses_{suffix}',
             claim_id=claim.claim_id,
             customer_id=claim.customer_id,
+            model_profile_id='openrouter-gpt-4o',
             started_at=FIXED_TIME,
             last_active_at=FIXED_TIME,
         ),

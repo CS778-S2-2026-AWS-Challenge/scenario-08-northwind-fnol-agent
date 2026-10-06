@@ -111,7 +111,7 @@ handoff, consent and audit records remain authoritative for their own data.
 
 ## Provider profiles
 
-The claimant default is `openrouter-gpt4o-mini` (`openai/gpt-4o`). Gemini
+The claimant default is `openrouter-gpt-4o` (`openai/gpt-4o`). Gemini
 remains available for comparison and applicable multimodal checks. Qwen is a
 local optional profile and is excluded from live provider evidence when offline.
 The default profile is non-reasoning and receives no reasoning parameter.

@@ -39,7 +39,7 @@ from backend.services.pdf_processing import (
 )
 
 # The governed OpenRouter GPT-4o profile these tests configure for PDF reading.
-PDF_PROFILE = 'openrouter-gpt4o-mini'
+PDF_PROFILE = 'openrouter-gpt-4o'
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 PDF = b'%PDF-1.4\nNorthwind simulated police reference NZP-1042\n%%EOF\n'
