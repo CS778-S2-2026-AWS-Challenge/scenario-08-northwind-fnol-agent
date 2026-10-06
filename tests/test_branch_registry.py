@@ -274,6 +274,7 @@ def test_contents_items_round_trip_through_fixture_and_mongo_repositories(
         session_id='ses_branch',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,
     )
@@ -677,6 +678,7 @@ def test_repository_history_reconciles_branch_corrections_for_both_profiles(
         session_id='ses_branch',
         claim_id=base.claim_id,
         customer_id=base.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,
     )
@@ -918,6 +920,7 @@ def test_evaluation_payload_is_immutable_in_both_repositories(repository_kind: s
         session_id='ses_branch',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,
     )
@@ -956,6 +959,7 @@ def test_standalone_repository_rejects_applied_evaluation(
         session_id='ses_branch',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,
     )
@@ -979,6 +983,7 @@ def test_mongodb_agent_turn_persists_evaluation_with_resulting_claim_atomically(
         session_id='ses_branch',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,
     )
@@ -1063,6 +1068,7 @@ def test_evaluation_identity_conflict_cannot_partially_advance_claim(
         session_id='ses_branch',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,
     )

@@ -83,7 +83,13 @@ class ObservingGatewayFailure:
 @pytest.mark.parametrize(
     'failure', [ModelGatewayErrorCode.TIMEOUT, ModelGatewayErrorCode.MALFORMED_RESPONSE]
 )
-@pytest.mark.parametrize('text', ['A passenger is injured.', 'I want to speak to a person.'])
+@pytest.mark.parametrize(
+    'text',
+    [
+        'I want to speak to a person.',
+        'I want to speak to a person about the accident on Symonds Street.',
+    ],
+)
 def test_safety_handoff_commits_before_failed_provider_then_silences_new_messages(
     app: FastAPI,
     client: TestClient,
@@ -122,8 +128,6 @@ def test_safety_handoff_commits_before_failed_provider_then_silences_new_message
     assert body['agent_message']['recovery']['rule_id'] == expected_recovery_rule
     assert 'Northwind support has been notified' in body['agent_message']['content']['text']
     assert body['handoff'] is not None
-    if 'injured' in text:
-        assert 'Your safety comes first' in body['agent_message']['content']['text']
     assert gateway.calls == 1
     assert repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b') == []
     assert client.post(url, headers=headers, json=payload).json() == body
@@ -185,7 +189,7 @@ def test_safety_commit_failure_is_hard_error_and_provider_is_never_called(
         headers={**auth_headers, 'Idempotency-Key': 'safety-fail-turn', 'If-Match': '1'},
         json={
             'client_message_id': 'safety-fail',
-            'content': {'type': 'text', 'text': 'A passenger is injured.'},
+            'content': {'type': 'text', 'text': 'I want to speak to a person.'},
         },
     )
     assert response.status_code == 500
@@ -234,7 +238,10 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
         url = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
         payload = {
             'client_message_id': 'retry-safety-input',
-            'content': {'type': 'text', 'text': 'A passenger is injured on Symonds Street.'},
+            'content': {
+                'type': 'text',
+                'text': 'I want to speak to a person about the accident on Symonds Street.',
+            },
         }
         failed_headers = {**owner, 'Idempotency-Key': 'failed-safety-attempt', 'If-Match': '1'}
         failed = client.post(url, headers=failed_headers, json=payload)

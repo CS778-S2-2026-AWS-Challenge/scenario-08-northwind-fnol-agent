@@ -53,6 +53,7 @@ def make_claim() -> tuple[WorkingClaim, SessionRecord]:
         session_id='ses_fixture',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=timestamp,
         last_active_at=timestamp,
     )

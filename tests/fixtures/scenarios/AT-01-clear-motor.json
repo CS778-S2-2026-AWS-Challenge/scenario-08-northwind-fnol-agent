@@ -50,6 +50,7 @@
       "session_id": "ses_fixture_at01",
       "claim_id": "clm_fixture_at01",
       "customer_id": "cus_8f41a2c90d7e463b",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "A low-speed parked vehicle incident with the material facts confirmed.",
       "unresolved_questions": [],

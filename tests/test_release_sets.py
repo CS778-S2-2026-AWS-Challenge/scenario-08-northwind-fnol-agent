@@ -170,7 +170,7 @@ def test_release_set_accepts_keyed_model_profiles_and_rejects_profile_mismatch()
         )
 
     qwen = model_record('qwen-local')
-    gpt = model_record('openrouter-gpt4o-mini')
+    gpt = model_record('openrouter-gpt-4o')
     configurations.create(qwen)
     configurations.create(gpt)
     refs = {
@@ -178,7 +178,7 @@ def test_release_set_accepts_keyed_model_profiles_and_rejects_profile_mismatch()
             configuration_id=qwen.configuration_id,
             revision=qwen.revision,
         ),
-        'model:openrouter-gpt4o-mini': ConfigurationReference(
+        'model:openrouter-gpt-4o': ConfigurationReference(
             configuration_id=gpt.configuration_id,
             revision=gpt.revision,
         ),
@@ -207,7 +207,7 @@ def test_release_set_accepts_keyed_model_profiles_and_rejects_profile_mismatch()
                 environment='test',
                 runtime_profile='fixture',
                 configuration_refs={
-                    'model:openrouter-gpt4o-mini': ConfigurationReference(
+                    'model:openrouter-gpt-4o': ConfigurationReference(
                         configuration_id=qwen.configuration_id,
                         revision=qwen.revision,
                     )

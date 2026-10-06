@@ -645,6 +645,7 @@ def reduce_turn(
         _grounding_source_refs(proposal.tool_results),
         {item.evidence_id: item.media_type for item in turn_evidence},
     )
+    turn_family_field = form_changes.get('claim.product_family')
     contents_item_changes = _build_contents_item_changes(
         claim,
         proposal,
@@ -653,6 +654,7 @@ def reduce_turn(
         authority.outcome,
         branch_evaluation,
         {item.evidence_id: item.media_type for item in turn_evidence},
+        str(turn_family_field.value) if turn_family_field is not None else None,
     )
     projected_confirmation_form = {**claim.form, **form_changes}
     projected_confirmation_contents = _apply_contents_item_changes(

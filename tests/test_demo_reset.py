@@ -56,7 +56,7 @@ def _populate_demo(
         },
         json={
             'client_message_id': 'reset-demo-handoff',
-            'content': {'type': 'text', 'text': 'A passenger is injured.'},
+            'content': {'type': 'text', 'text': 'I want to speak to a person.'},
         },
     )
     assert handoff.status_code == 200
@@ -152,7 +152,7 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
         assert first.json()['cleared']['sessions'] == 1
         assert first.json()['cleared']['evidence'] == 1
         assert first.json()['cleared']['handoffs'] == 1
-        # Claim creation, message, safety action, upload intent, and completion.
+        # Claim creation, message, support handoff, upload intent, and completion.
         assert first.json()['cleared']['idempotency_records'] == 5
         assert first.json()['cleared']['mock_claim_results'] == 1
         assert first.json()['cleared']['mock_assessor_results'] == 1

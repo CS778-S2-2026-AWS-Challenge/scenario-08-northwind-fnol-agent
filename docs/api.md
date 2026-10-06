@@ -1576,7 +1576,7 @@ active Release Set; runtime readiness means this process has the required endpoi
 credential. Health remains `null` until a controlled provider check records a result and opening
 the page never invokes a paid provider. The frontend uses the default when creating a Session,
 while a message may select another published and runtime-ready profile in the same conversation.
-The repository initial catalogue publishes `qwen-local`, `openrouter-gpt4o-mini`,
+The repository initial catalogue publishes `qwen-local`, `openrouter-gpt-4o`,
 `google-gemini35-flash-lite`, and the explicitly unavailable `bedrock-nova2-lite`; the deployment
 selects its default with the required `MODEL_PROFILE_ID`.
 
@@ -2745,7 +2745,7 @@ Completion does not extract or confirm Claim fields. Both persistence profiles u
 PDF completion returns `202 processing` after the final object identity, byte length, checksum,
 current material generation, ownership and media type are durable. On a persistent
 `model_gateway` runtime, the shared Evidence worker dispatches the current protected object
-through the published `openrouter-gpt4o-mini` binding (`openai/gpt-4o`) with the
+through the published `openrouter-gpt-4o` binding (`openai/gpt-4o`) with the
 `evidence_processing` purpose and `northwind-evidence-pdf-v1` prompt contract. The model receives
 only the current PDF and currently unoccupied, registered field contracts. A successful response
 enters the existing processing-completion boundary and creates source-linked `proposed` facts;

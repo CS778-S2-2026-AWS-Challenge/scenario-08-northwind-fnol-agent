@@ -4,7 +4,7 @@ Usage:
   python -m tests.corpus.tools.model_check CORPUS_DIR [CASE_ID ...]
 
 The system under test reads claimant photos with openai/gpt-4o through OpenRouter
-(config/model-runtime-bindings.json, profile openrouter-gpt4o-mini). This script sends each image,
+(config/model-runtime-bindings.json, profile openrouter-gpt-4o). This script sends each image,
 with the facts it is meant to show, to the same model and records its answers as `model_check` in
 the pack's review.json. It shows whether the system's model can see what the pack assumes, and it
 points the human reviewer at anything worth a closer look. It does not replace the human sign-off.

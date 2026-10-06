@@ -75,6 +75,7 @@ def _seed_follow_up(
         session_id=session_id,
         claim_id=claim_id,
         customer_id=customer_id,
+        model_profile_id='openrouter-gpt-4o',
         status=SessionStatus.ACTIVE,
         context_revision=1,
         started_at=created_at,

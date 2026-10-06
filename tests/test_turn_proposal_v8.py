@@ -21,7 +21,11 @@ from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import load_fragment_contents, load_prompt_manifest
 from backend.services.request_profile_registry import registered_request_profiles
 from backend.services.turn_field_contract import compile_turn_field_contract
-from backend.services.turn_proposal_validation import parse_turn_proposal, validate_turn_proposal
+from backend.services.turn_proposal_validation import (
+    claimant_report_supports_value,
+    parse_turn_proposal,
+    validate_turn_proposal,
+)
 from backend.services.turn_router import route_turn
 from tests.test_agent_context_runtime_v7 import _context, _RecordingGateway
 
@@ -456,3 +460,22 @@ def test_only_a_fact_the_claimant_stated_is_recorded_as_theirs() -> None:
     assert by_code['incident.location'].status is FormStatus.CONFIRMED
     assert by_code['incident.description'].source is FormSource.INFERENCE
     assert by_code['incident.description'].status is FormStatus.PROPOSED
+
+
+@pytest.mark.parametrize(
+    ('quote', 'value'),
+    [
+        ("the doctor said it's whiplash", True),
+        ('my passenger is bleeding', True),
+        ('nobody was hurt', False),
+    ],
+)
+def test_injury_quotes_count_as_the_claimants_words_without_a_word_list(
+    quote: str, value: bool
+) -> None:
+    message = f"Rear-ended on Thursday; {quote}, and I've got a quote for the bumper."
+
+    assert claimant_report_supports_value('incident.injury_or_danger', value, quote, message)
+    assert not claimant_report_supports_value(
+        'incident.injury_or_danger', value, 'words the claimant never wrote', message
+    )

@@ -897,6 +897,7 @@ def _repository_claim() -> tuple[WorkingClaim, SessionRecord]:
         session_id=claim.active_session_id,
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         status=SessionStatus.ACTIVE,
         started_at=timestamp,
         last_active_at=timestamp,

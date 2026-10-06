@@ -1278,7 +1278,7 @@ def test_model_validation_accepts_each_deployment_bound_profile() -> None:
             tools=True,
         ),
         ModelRuntimeBinding(
-            profile_id='openrouter-gpt4o-mini',
+            profile_id='openrouter-gpt-4o',
             protocol='openai_compatible',
             provider='openrouter',
             model_identifier='openai/gpt-4o-mini',
@@ -1334,7 +1334,7 @@ def test_model_validation_accepts_each_deployment_bound_profile() -> None:
 
 def test_admin_api_validates_a_secondary_deployment_bound_model_without_a_secret() -> None:
     binding = ModelRuntimeBinding(
-        profile_id='openrouter-gpt4o-mini',
+        profile_id='openrouter-gpt-4o',
         protocol='openai_compatible',
         provider='openrouter',
         model_identifier='openai/gpt-4o-mini',

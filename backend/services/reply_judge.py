@@ -30,7 +30,7 @@ from backend.domain.model_gateway import (
 logger = logging.getLogger(__name__)
 
 REPLY_REVIEW_PURPOSE = 'reply_review'
-REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v2'
+REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v3'
 # Longest a review call may take; it runs after the turn's own model calls.
 REPLY_JUDGE_TIMEOUT_SECONDS = 20.0
 
@@ -42,6 +42,7 @@ PROBLEM_KINDS = (
     'claims_escalation_without_one',
     'promises_answer_without_question',
     'claims_documents_block_lodging',
+    'claims_report_already_sent',
 )
 
 JUDGE_INSTRUCTION = """You check one reply from Northwind's claims assistant against the ledger of \
@@ -62,6 +63,10 @@ something for the claimant, and that thing is not one of questions_passed_on.
 - claims_documents_block_lodging: the reply says a photo, quote or other document is needed \
 before the claim can be lodged or submitted. Documents never block lodging; asking for one, or \
 saying it helps, is fine.
+- claims_report_already_sent: the reply says the report or claim has already been submitted, \
+sent, logged or lodged, or that the claims team already has it or is reviewing it. Nothing \
+reaches the claims team until the claimant submits the report themselves. Saying the claims \
+team will handle something after the claimant submits is fine.
 
 Return {"problems": []} when the reply is fine. Each detail quotes the words at fault."""
 

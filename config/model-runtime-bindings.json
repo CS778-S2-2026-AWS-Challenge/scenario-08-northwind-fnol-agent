@@ -17,7 +17,7 @@
     "reasoning_mode": "disabled"
   },
   {
-    "profile_id": "openrouter-gpt4o-mini",
+    "profile_id": "openrouter-gpt-4o",
     "protocol": "openai_compatible",
     "provider": "openrouter",
     "model_identifier": "openai/gpt-4o",

@@ -542,7 +542,7 @@ describe('claimant intake projection', () => {
           document_input: false,
         },
         {
-          id: 'openrouter-gpt4o-mini',
+          id: 'openrouter-gpt-4o',
           label: 'openai/gpt-4o',
           availability: 'available',
           image_input: true,
@@ -637,7 +637,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     await waitFor(() => expect(api.createClaim).toHaveBeenCalledWith(
-      expect.objectContaining({ modelProfileId: 'openrouter-gpt4o-mini' }),
+      expect.objectContaining({ modelProfileId: 'openrouter-gpt-4o' }),
     ))
   })
 
@@ -998,8 +998,8 @@ describe('claimant intake projection', () => {
     const user = userEvent.setup()
     api.getRuntimeCapabilities.mockRejectedValueOnce(new api.ApiRequestError('Sign in again.'))
       .mockResolvedValueOnce({
-        default_model_profile_id: 'openrouter-gpt4o-mini',
-        models: [{ id: 'openrouter-gpt4o-mini', label: 'openai/gpt-4o-mini', availability: 'available' }],
+        default_model_profile_id: 'openrouter-gpt-4o',
+        models: [{ id: 'openrouter-gpt-4o', label: 'openai/gpt-4o', availability: 'available' }],
       })
     api.loginClaimant.mockResolvedValue({ access_token: 'claimant-token' })
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -1014,7 +1014,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByLabelText('Password'), 'Synthetic-QA-Password!')
     await user.click(screen.getAllByRole('button', { name: 'Log in' }).at(-1))
     expect(await screen.findByRole('button', { name: 'Model' })).toHaveTextContent('Northwind Assist')
-    expect(screen.queryByText('openai/gpt-4o-mini')).not.toBeInTheDocument()
+    expect(screen.queryByText('openai/gpt-4o')).not.toBeInTheDocument()
     expect(api.getRuntimeCapabilities).toHaveBeenCalledTimes(2)
   })
 
@@ -5410,6 +5410,68 @@ describe('claimant intake projection', () => {
     expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
   })
 
+  it('uploads files chosen in quick succession one after another from the latest revision', async () => {
+    const user = userEvent.setup()
+    let requestSequence = 0
+    api.requestId.mockImplementation((prefix) => `${prefix}-${++requestSequence}`)
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.listClaims.mockResolvedValue({ items: [], page: { next_cursor: null } })
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    let releaseFirstUpload
+    const firstUpload = new Promise((resolve) => { releaseFirstUpload = resolve })
+    api.requestEvidenceUpload
+      .mockImplementationOnce(() => firstUpload)
+      .mockResolvedValueOnce({
+        evidence_id: 'evd_quote',
+        revision: 5,
+        upload: { method: 'PUT', url: '/upload-target', headers: {} },
+      })
+    api.uploadEvidenceContent.mockResolvedValue(undefined)
+    const completedEvidence = (evidenceId, filename, mediaType) => ({
+      evidence_id: evidenceId,
+      claim_id: initialClaim.claim_id,
+      kind: 'other_document',
+      status: 'received',
+      file_status: 'ready',
+      original_filename: filename,
+      media_type: mediaType,
+      size_bytes: 5,
+      source: 'claimant',
+      created_at: '2026-09-14T01:05:00Z',
+      updated_at: '2026-09-14T01:06:00Z',
+    })
+    api.completeEvidenceUpload
+      .mockResolvedValueOnce({ revision: 4, evidence: completedEvidence('evd_photo', 'rear.jpg', 'image/jpeg') })
+      .mockResolvedValueOnce({ revision: 6, evidence: completedEvidence('evd_quote', 'quote.pdf', 'application/pdf') })
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'Someone ran into the back of my car.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+    const fileInput = document.querySelector('input[type="file"]')
+    await user.upload(fileInput, new File(['image'], 'rear.jpg', { type: 'image/jpeg' }))
+    await user.upload(fileInput, new File(['quote'], 'quote.pdf', { type: 'application/pdf' }))
+
+    expect(screen.getByText('quote.pdf')).toBeInTheDocument()
+    expect(api.requestEvidenceUpload).toHaveBeenCalledTimes(1)
+
+    releaseFirstUpload({
+      evidence_id: 'evd_photo',
+      revision: 3,
+      upload: { method: 'PUT', url: '/upload-target', headers: {} },
+    })
+
+    await waitFor(() => expect(api.requestEvidenceUpload).toHaveBeenCalledTimes(2))
+    expect(api.requestEvidenceUpload.mock.calls[1][0]).toMatchObject({ revision: 4 })
+    await waitFor(() => expect(api.completeEvidenceUpload).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: 'Remove rear.jpg' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove quote.pdf' })).toBeInTheDocument()
+  })
+
   it('opens account Evidence history directly without creating an empty Claim', async () => {
     api.hasClaimantAccessToken.mockReturnValue(true)
     api.getAuthenticatedAccount.mockResolvedValue({
@@ -5586,7 +5648,7 @@ describe('claimant intake projection', () => {
       revision: 4,
       text: '',
       evidenceRefs: ['evd_file_only'],
-      modelProfileId: 'openrouter-gpt4o-mini',
+      modelProfileId: 'openrouter-gpt-4o',
     })))
     await waitFor(() => expect(document.querySelector('.composer-attachments')).not.toBeInTheDocument())
     const attachmentBubble = (await screen.findByText('file-only-damage.jpg')).closest('.user-bubble')
@@ -5720,7 +5782,7 @@ describe('claimant intake projection', () => {
           document_input: false,
         },
         {
-          id: 'openrouter-gpt4o-mini',
+          id: 'openrouter-gpt-4o',
           label: 'openai/gpt-4o',
           availability: 'available',
           image_input: true,
@@ -5796,7 +5858,7 @@ describe('claimant intake projection', () => {
     await user.click(screen.getByRole('button', { name: 'Retry message' }))
     await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(3))
     const changedModelAttempt = api.submitClaimMessage.mock.calls[2][0]
-    expect(changedModelAttempt.modelProfileId).toBe('openrouter-gpt4o-mini')
+    expect(changedModelAttempt.modelProfileId).toBe('openrouter-gpt-4o')
     expect(changedModelAttempt.idempotencyKey).not.toBe(firstAttempt.idempotencyKey)
     expect(changedModelAttempt.clientMessageId).not.toBe(firstAttempt.clientMessageId)
   })

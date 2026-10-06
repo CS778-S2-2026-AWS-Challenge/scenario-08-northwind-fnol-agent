@@ -101,12 +101,9 @@ def test_fixture_journeys_expose_no_runtime_text_or_field_codes(
     registered = set(build_default_registry().field_codes) | set(INTAKE_REQUIREMENTS)
     templates = {item.prompt for item in INTAKE_REQUIREMENTS.values()}
     for index, text in enumerate(scripts):
-        # An active handoff (opened by the motor script's third turn) silences
-        # the model entirely: these two messages are only recorded, with no
-        # agent_message, so there is no reply text to check here.
-        turn = journey.send(text, expect_agent_message=not (family == 'motor' and index in {3, 4}))
-        if turn['agent_message'] is None:
-            continue
+        # A past injury stays a fact; every scripted turn continues through
+        # the model, including the later motor injury and towing details.
+        turn = journey.send(text)
         reply = turn['agent_message']['content']['text']
         for phrase in RETIRED_RUNTIME_PHRASES:
             assert phrase not in reply, (index, phrase, reply)

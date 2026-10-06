@@ -73,7 +73,7 @@ def _settings(profile: AgentRuntimeProfile) -> Settings:
         object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE,
         agent_runtime_profile=profile,
         model_base_url='https://openrouter.invalid/v1',
-        model_profile_id='openrouter-gpt4o-mini',
+        model_profile_id='openrouter-gpt-4o',
         model_provider='openrouter',
         model_identifier='openai/gpt-4o',
         model_supports_document_input=True,

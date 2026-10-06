@@ -51,6 +51,7 @@ def _seed_claim(
         session_id='ses_execution',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=timestamp,
         last_active_at=timestamp,
     )

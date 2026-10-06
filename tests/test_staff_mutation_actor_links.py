@@ -44,6 +44,7 @@ def _repository() -> tuple[FixtureRepository, WorkingClaim]:
         session_id='ses_staff_actor',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,
     )
@@ -177,6 +178,7 @@ def test_staff_projection_changes_publish_independent_refresh_boundaries(adapter
             session_id=claim.active_session_id or '',
             claim_id=claim.claim_id,
             customer_id=claim.customer_id,
+            model_profile_id='openrouter-gpt-4o',
             started_at=FIXED_TIME,
             last_active_at=FIXED_TIME,
         ),

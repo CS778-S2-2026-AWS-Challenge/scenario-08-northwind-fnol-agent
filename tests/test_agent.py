@@ -103,19 +103,17 @@ def test_home_risk_parser_does_not_invert_negated_safety_conditions(
 
 
 @pytest.mark.parametrize(
-    ('message_text', 'urgent'),
+    'message_text',
     [
-        ('No one is injured and nobody is in immediate danger.', False),
-        ('None of us are in immediate danger.', False),
-        ('Nobody was in continuing danger.', False),
-        ('Nobody is hurt, but we are still in immediate danger.', True),
-        ('We are in immediate danger.', True),
+        "I've had a sore neck ever since; the doctor said it's whiplash.",
+        'I was injured last week and I am resting at home now.',
+        'We are in immediate danger.',
+        'My passenger is bleeding.',
     ],
 )
-def test_safety_interrupt_treats_negated_danger_subjects_as_negated(
-    message_text: str,
-    urgent: bool,
-) -> None:
+def test_safety_interrupt_leaves_injury_and_danger_to_the_turn_model(message_text: str) -> None:
+    # Whether danger is happening now is the turn model's judgement (urgent_safety
+    # escalation); an injury described after the event is a fact, not an emergency.
     interrupt = detect_safety_interrupt(
         AgentTurnContext(
             claim=make_claim(),
@@ -126,7 +124,7 @@ def test_safety_interrupt_treats_negated_danger_subjects_as_negated(
         )
     )
 
-    assert (interrupt is not None and interrupt.kind == 'urgent_safety') is urgent
+    assert interrupt is None
 
 
 @pytest.mark.parametrize(
