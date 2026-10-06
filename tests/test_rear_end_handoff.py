@@ -316,7 +316,7 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
     assert claimant_view['customer_next_step']['status'] == 'staff_update'
     assert claimant_view['customer_next_step']['summary'] == resolved['customer_update']['summary']
 
-    stored = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.claim_state.evidence.value == 'pending'
     assert stored.claim_state.customer_support.value == 'human_requested'

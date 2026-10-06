@@ -195,7 +195,7 @@ COMMON: list[tuple[str, Mutation, str]] = [
     ),
     (
         'session-for-other-customer',
-        lambda s: _with(s, 'session', customer_id='cus_other'),
+        lambda s: _with(s, 'session', customer_id='cus_2b67e9d14a3c508f'),
         'source Session',
     ),
     (

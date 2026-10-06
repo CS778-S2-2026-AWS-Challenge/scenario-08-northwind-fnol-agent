@@ -32,7 +32,6 @@ def _capabilities(message: str) -> list[str]:
         ('emergency', r'\b(?:emergency|immediate danger|ambulance|fire service)\b'),
         ('police', r'\bpolice\b'),
         ('policy-search', r'\b(?:policy|cover(?:age|ed)?|excess)\b'),
-        ('claim-history', r'\b(?:previous claims?|prior claims?|claim history)\b'),
     ):
         if re.search(pattern, message, re.IGNORECASE):
             capabilities.append(capability)
@@ -68,7 +67,7 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
     family_resolution = resolution.status
 
     capabilities = _capabilities(message)
-    if {'policy-search', 'claim-history'} & set(capabilities):
+    if 'policy-search' in capabilities:
         task = TurnTask.STATUS_QUESTION
     elif _EVIDENCE_HISTORY.search(message):
         task = TurnTask.EVIDENCE_HISTORY
@@ -89,8 +88,6 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         intents.add('external')
     if 'policy-search' in capabilities:
         intents.add('policy_lookup')
-    if 'claim-history' in capabilities:
-        intents.add('history_lookup')
     if _CORRECTION.search(message):
         intents.add('correction')
     if _CONFIRMATION.search(message):
@@ -103,6 +100,14 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
         intents.add('creation')
     if _STATUS.search(message):
         intents.add('status')
+    # Availability is independent of the claimant's intent. Offering this read-only
+    # reference must not turn an ordinary intake or correction into a status question.
+    if (
+        context.claim_history_context_loader is not None
+        and context.claim.customer_id
+        and not context.claim.customer_id.startswith('anonymous:')
+    ):
+        capabilities.append('claim-history')
     return TurnRoute(
         product_family=family,
         family_resolution=family_resolution,

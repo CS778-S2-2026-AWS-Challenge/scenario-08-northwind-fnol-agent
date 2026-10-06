@@ -4,7 +4,7 @@
   "business_path": "handoff",
   "claim": {
     "claim_id": "clm_fixture_at05",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 3,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -28,7 +28,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-13T10:05:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.location": {
         "value": null,
@@ -69,8 +69,7 @@
     {
       "session_id": "ses_fixture_at05",
       "claim_id": "clm_fixture_at05",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "The claimant confirmed a synthetic parked-car incident, then asked to speak with a person.",
       "unresolved_questions": ["confirm:incident.location"],
@@ -154,7 +153,7 @@
             "needed_for": "current_action",
             "confidence": 1.0,
             "updated_at": "2026-08-13T10:05:00Z",
-            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+            "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
           },
           "incident.location": {
             "value": null,

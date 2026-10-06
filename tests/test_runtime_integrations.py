@@ -137,7 +137,11 @@ def test_disabled_integration_blocks_the_real_internal_route() -> None:
         )
     )
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         configuration_repository=configurations,
         release_set_repository=releases,
     )
@@ -185,7 +189,11 @@ def test_source_mismatch_refuses_runtime_composition() -> None:
 
     with pytest.raises(RuntimeProfileConfigurationError):
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             configuration_repository=configurations,
             release_set_repository=releases,
         )

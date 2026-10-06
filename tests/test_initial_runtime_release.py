@@ -92,6 +92,7 @@ def _settings() -> Settings:
         _binding('google-gemini35-flash-lite'),
     )
     return Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,

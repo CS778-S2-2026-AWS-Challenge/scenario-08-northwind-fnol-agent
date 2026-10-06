@@ -60,7 +60,7 @@ def test_pause_missing_session_fails_without_follow_up(
     )
 
     assert response.status_code == 404
-    assert repository.list_follow_ups(claim_id, 'cus_demo') == []
+    assert repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b') == []
 
 
 def test_pause_rejects_a_session_that_is_already_paused(
@@ -102,7 +102,7 @@ def test_pause_rejects_an_idempotency_key_with_a_conflicting_record(
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'
     repository.save_idempotency(
         IdempotencyRecord(
-            actor_id='cus_demo',
+            actor_id='cus_8f41a2c90d7e463b',
             route=route,
             key='p17-edge-conflict-key',
             request_fingerprint='different-fingerprint',

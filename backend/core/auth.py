@@ -41,18 +41,27 @@ ADMIN_SCOPES = frozenset({'admin:read', 'admin:write'})
 INTEGRATION_SCOPES = frozenset({'tools:invoke'})
 
 
-def _synthetic_profiles(settings: Settings) -> tuple[_SyntheticProfile, ...]:
-    return (
-        _SyntheticProfile(
-            token=settings.synthetic_claimant_token,
-            principal=Principal(
-                subject='cus_demo',
-                actor_type='claimant',
-                scopes=CLAIMANT_SCOPES,
-                auth_source='developer:synthetic_claimant',
-                synthetic=True,
+def _synthetic_profiles(
+    settings: Settings, primary_customer_id: str | None
+) -> tuple[_SyntheticProfile, ...]:
+    claimant_profiles = (
+        ()
+        if primary_customer_id is None
+        else (
+            _SyntheticProfile(
+                token=settings.synthetic_claimant_token,
+                principal=Principal(
+                    subject=primary_customer_id,
+                    actor_type='claimant',
+                    scopes=CLAIMANT_SCOPES,
+                    auth_source='developer:synthetic_claimant',
+                    synthetic=True,
+                ),
             ),
-        ),
+        )
+    )
+    return (
+        *claimant_profiles,
         _SyntheticProfile(
             token=settings.synthetic_staff_token,
             principal=Principal(
@@ -185,7 +194,9 @@ def _resolve_principal(
             )
 
     if settings.identity_mode is IdentityMode.DEVELOPER:
-        for profile in _synthetic_profiles(settings):
+        business_seed = request.app.state.business_seed
+        primary_customer_id = business_seed.primary_customer_id if business_seed else None
+        for profile in _synthetic_profiles(settings, primary_customer_id):
             if principal is None and profile.token == token:
                 principal = profile.principal
                 break

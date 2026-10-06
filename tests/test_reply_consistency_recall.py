@@ -92,7 +92,7 @@ def test_inconsistent_reply_is_sent_back_once_and_the_rewrite_is_shown(
     assert (
         turn['agent_message']['content']['text'] == 'Water still dripping, noted. Is anyone hurt?'
     )
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.form['property.ongoing_risk'].value == 'active_leak'
 
 
@@ -122,9 +122,12 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
     assert body['agent_message'] is None
     assert body['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     # No spliced or stripped reply reached the claimant; the message is kept.
-    assert len(repository.list_messages(journey.claim_id, journey.session_id, 'cus_demo')) == 1
+    assert (
+        len(repository.list_messages(journey.claim_id, journey.session_id, 'cus_8f41a2c90d7e463b'))
+        == 1
+    )
     trace = repository.find_runtime_trace_for_trigger(
-        journey.claim_id, body['claimant_message']['message_id'], 'cus_demo'
+        journey.claim_id, body['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.failure_diagnostic.code == 'consistency_recall_truthfulness'
@@ -183,7 +186,7 @@ def test_rejected_rewrite_records_its_check_without_model_content(
     assert turn['agent_message'] is None
     assert turn['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     trace = repository.find_runtime_trace_for_trigger(
-        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.failure_diagnostic.code == diagnostic_code
@@ -225,7 +228,7 @@ def test_recall_gateway_rejection_keeps_its_error_and_records_stage(
 
     assert turn['recovery']['rule_id'] == recovery_rule
     trace = repository.find_runtime_trace_for_trigger(
-        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.reason_codes == [error_code.value]
@@ -282,7 +285,7 @@ def test_real_gateway_malformed_recall_output_has_distinct_diagnostic(
     assert calls == 2, turn['recovery']
     assert turn['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
     trace = repository.find_runtime_trace_for_trigger(
-        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.reason_codes == ['malformed_response']
@@ -355,7 +358,7 @@ def test_a_rewrite_that_drops_the_recorded_facts_keeps_them(
     turn = journey.send('The water is still dripping through the ceiling.')
 
     assert turn['agent_message']['content']['text'] == HONEST_REWRITE['reply']
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.form['property.ongoing_risk'].value == 'active_leak'
 
 
@@ -464,7 +467,7 @@ def test_a_recall_after_a_tool_continuation_is_saved_with_three_calls(
     assert len(agent.gateway.requests) == 3
     assert turn['agent_message']['content']['text'] == passed_on['reply']
     trace = repository.find_runtime_trace_for_trigger(
-        journey.claim_id, turn['claimant_message']['message_id'], 'cus_demo'
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert trace is not None
     assert [call.ordinal for call in trace.invocations] == [1, 2, 3]

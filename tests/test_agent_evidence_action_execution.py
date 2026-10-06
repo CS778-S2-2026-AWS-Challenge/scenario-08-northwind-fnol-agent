@@ -200,7 +200,7 @@ def test_confirmation_and_claimant_scope_fail_closed(
         case 'confirmation':
             confirmation = replace(confirmation, confirmation_ref='message:other')
         case 'claimant':
-            confirmation = replace(confirmation, claimant_id='cus_other')
+            confirmation = replace(confirmation, claimant_id='cus_2b67e9d14a3c508f')
     result = execute_confirmed_evidence_action(
         _repository(),
         _command(),

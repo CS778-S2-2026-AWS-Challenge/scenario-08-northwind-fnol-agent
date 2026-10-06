@@ -39,7 +39,11 @@ from backend.services.external_service_entry import MismatchedServiceAdapterErro
 from tests.issue_928_support import prepare_claim_submission
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    business_seed_path='config/business-seed.json',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 JOURNEY_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
 
 
@@ -279,7 +283,7 @@ def test_success_is_claimant_safe_and_replays_without_a_second_assignment(
     assert tasks[0].updated_at == same_instant + timedelta(microseconds=1)
     decisions = [
         decision
-        for decision in repository.list_agent_decisions(claim_id, 'cus_demo')
+        for decision in repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
         if decision.reason_codes == ['ASSESSOR_RULE_AUTHORISED']
     ]
     assert len(decisions) == 1
@@ -365,7 +369,7 @@ def test_transient_failure_preserves_progress_then_retries_with_the_same_operati
     assert stored.revision == consent_revision + 1
     decisions = [
         decision
-        for decision in repository.list_agent_decisions(claim_id, 'cus_demo')
+        for decision in repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
         if decision.reason_codes == ['ASSESSOR_RULE_AUTHORISED']
     ]
     assert len(decisions) == 1
@@ -1653,7 +1657,7 @@ def test_the_claimant_is_not_shown_the_assessment_itself() -> None:
         claimant = _claimant_view(client, claim_id)
         evidence = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=AUTH).json()
 
-    stored = repository.list_evidence(claim_id, 'cus_demo')
+    stored = repository.list_evidence(claim_id, 'cus_8f41a2c90d7e463b')
     assert [record.kind for record in stored] == ['assessment_report']
     assert stored[0].source is EvidenceSource.EXTERNAL_SYSTEM
     assert evidence['items'] == []

@@ -88,7 +88,7 @@ def test_first_turn_toolbox_is_visible_but_only_accepted_family_unlocks_service(
     services = _prompt_services(provider)
     assert 0 < len(services) <= 8
     assert RECOVERY in {item['service_identity'] for item in services}
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     saved = claim.form['claim.product_family']
     supported = quotation in message
@@ -162,7 +162,7 @@ def test_granted_generic_offer_does_not_become_retry_when_task_storage_is_unavai
     assert len(tasks_before) == 1
     assert tasks_before[0].service_identity == RECOVERY
     requests_before = repository.list_external_task_requests_internal(claim_id)
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.external_service_consents[-1].status.value == 'granted'
 
@@ -184,7 +184,7 @@ def test_granted_generic_offer_does_not_become_retry_when_task_storage_is_unavai
     result = response.json()
     assert result['claimant_message']['content']['text'] == 'The bumper is dented.'
     assert result['agent_message'] is not None and result['recovery'] is None
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.form['vehicle.damage_description'].value == 'Dented bumper'
     history = client.get(
@@ -234,7 +234,7 @@ def test_existing_open_handoff_silences_new_messages_without_a_second_model_call
     )
     assert first.status_code == 200, first.text
     assert first.json()['handoff'] is not None
-    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
     second = submit_message(
         client,
         CLAIMANT,
@@ -249,9 +249,9 @@ def test_existing_open_handoff_silences_new_messages_without_a_second_model_call
     assert second.json()['agent_message'] is None
     assert second.json()['decision'] is None
     assert len(provider.gateway.requests) == 1
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.incident_type is None
-    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
 
 def test_conflicting_family_assertion_cannot_unlock_services_for_the_disputed_family(
@@ -284,7 +284,7 @@ def test_conflicting_family_assertion_cannot_unlock_services_for_the_disputed_fa
         text='My home ceiling is leaking.',
     )
     assert first.status_code == 200, first.text
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.incident_type == 'home'
     assert claim.form['claim.product_family'].status is FormStatus.CONFIRMED
@@ -302,7 +302,7 @@ def test_conflicting_family_assertion_cannot_unlock_services_for_the_disputed_fa
     assert second.json()['agent_message'] is not None
     assert second.json()['agent_message']['message_actions'] == []
     assert RECOVERY in {item['service_identity'] for item in _prompt_services(provider, 1)}
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.incident_type == 'home'
     assert claim.form['claim.product_family'].status is FormStatus.DISPUTED
@@ -341,7 +341,7 @@ def test_external_task_lookup_cannot_break_chat_or_duplicate_existing_work(
         monkeypatch.setattr(repository, 'list_external_tasks_internal', unavailable)
     else:
         task = _task(service_identity=RECOVERY).model_copy(update={'claim_id': claim_id})
-        repository.save_external_task(task, 'cus_demo')
+        repository.save_external_task(task, 'cus_8f41a2c90d7e463b')
     response = submit_message(
         client,
         CLAIMANT,
@@ -359,7 +359,7 @@ def test_external_task_lookup_cannot_break_chat_or_duplicate_existing_work(
     assert result['agent_message']['message_actions'] == []
     assert len(provider.gateway.requests) == 1
     assert RECOVERY not in {item['service_identity'] for item in _prompt_services(provider)}
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.incident_type == 'motor'
     assert claim.form['claim.product_family'].status is FormStatus.CONFIRMED
     if task_state == 'unavailable':

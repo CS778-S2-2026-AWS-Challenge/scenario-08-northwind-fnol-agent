@@ -75,7 +75,11 @@ def app(
     agent_turn_provider: AgentTurnProvider,
 ) -> FastAPI:
     return create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+            business_seed_path='config/business-seed.json',
+        ),
         repository,
         agent_turn_provider,
     )

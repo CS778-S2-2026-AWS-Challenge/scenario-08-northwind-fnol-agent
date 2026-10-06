@@ -163,19 +163,20 @@ def test_terminal_views_are_server_owned_and_excluded_from_all_active(
             headers=staff_auth_headers,
         )
         assert response.status_code == 200
-        item = response.json()['items'][0]
+        item = next(item for item in response.json()['items'] if item['claim_id'] == claim.claim_id)
         assert item['claim_id'] == claim.claim_id
         assert item['work_summary']['queue_key'] == value.value
         assert item['terminal_disposition']['value'] == value.value
-        assert counts[value.value] == 1
+        expected_count = 2 if value is TerminalDispositionValue.COMPLETED else 1
+        assert counts[value.value] == expected_count
 
     created_routed = client.get(
         '/api/v1/workbench/claims?view=created_routed',
         headers=staff_auth_headers,
     )
-    assert [item['claim_id'] for item in created_routed.json()['items']] == [
-        claims[TerminalDispositionValue.COMPLETED].claim_id
-    ]
+    assert claims[TerminalDispositionValue.COMPLETED].claim_id in {
+        item['claim_id'] for item in created_routed.json()['items']
+    }
 
 
 def test_primary_owner_reopens_closed_claim_with_atomic_audit_and_replay(

@@ -445,6 +445,10 @@ def test_api_requires_empty_body_and_discovers_unassigned_completed_claims(
     repository: FixtureRepository,
     staff_auth_headers: dict[str, str],
 ) -> None:
+    existing = client.get(
+        '/api/v1/workbench/claims?ownership=unassigned', headers=staff_auth_headers
+    )
+    existing_ids = {item['claim_id'] for item in existing.json()['items']}
     claim = _claim(repository)
     other = _claim(repository, 'clm_other_accept')
     headers = {**staff_auth_headers, 'If-Match': '1', 'Idempotency-Key': 'api-accept'}
@@ -462,10 +466,20 @@ def test_api_requires_empty_body_and_discovers_unassigned_completed_claims(
         headers=staff_auth_headers,
         params={'ownership': 'unassigned', 'limit': 1, 'cursor': cursor},
     )
-    assert {queue.json()['items'][0]['claim_id'], second_page.json()['items'][0]['claim_id']} == {
-        claim.claim_id,
-        other.claim_id,
-    }
+    discovered = [queue.json()['items'][0]['claim_id']]
+    while True:
+        assert second_page.status_code == 200
+        discovered.extend(item['claim_id'] for item in second_page.json()['items'])
+        cursor = second_page.json()['page']['next_cursor']
+        if cursor is None:
+            break
+        second_page = client.get(
+            '/api/v1/workbench/claims',
+            headers=staff_auth_headers,
+            params={'ownership': 'unassigned', 'limit': 1, 'cursor': cursor},
+        )
+    assert len(discovered) == len(set(discovered))
+    assert set(discovered) == existing_ids | {claim.claim_id, other.claim_id}
     _presence(repository)
     assert client.post(route, headers=headers).status_code == 422
     assert (
@@ -478,6 +492,8 @@ def test_api_requires_empty_body_and_discovers_unassigned_completed_claims(
     queue_after = client.get(
         '/api/v1/workbench/claims?ownership=unassigned', headers=staff_auth_headers
     )
-    assert [item['claim_id'] for item in queue_after.json()['items']] == [other.claim_id]
+    assert {item['claim_id'] for item in queue_after.json()['items']} == existing_ids | {
+        other.claim_id
+    }
     default_queue = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
     assert default_queue.json()['items'] == []  # Existing default excludes the completed queue.

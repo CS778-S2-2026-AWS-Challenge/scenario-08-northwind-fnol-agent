@@ -3,7 +3,7 @@
   "description": "Synthetic motor field-state example for the Week 6 validation prototype.",
   "claim": {
     "claim_id": "clm_fixture_at14",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 1,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -27,7 +27,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T01:01:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.description": {
         "value": "The insured car was damaged while parked outside the office.",
@@ -37,7 +37,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T01:02:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.type": {
         "value": "collision",
@@ -47,7 +47,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T01:02:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "vehicle.registration": {
         "value": "NWF-014",
@@ -57,7 +57,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T01:03:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "vehicle.damage_description": {
         "value": "The rear bumper appears dented.",
@@ -131,8 +131,7 @@
     {
       "session_id": "ses_fixture_at14",
       "claim_id": "clm_fixture_at14",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "Motor field-state example with one inferred and one disputed fact.",
       "unresolved_questions": ["confirm:vehicle.drivable", "resolve:incident.cause"],

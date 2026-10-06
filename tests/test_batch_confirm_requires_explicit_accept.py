@@ -48,7 +48,7 @@ def test_scoped_yes_confirms_only_the_field_it_answers(
     )
     journey = waiting_home(app, client, raw)
     turn = journey.send('Yes we can still live here')
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     # The answer settles the one fact it speaks to; the model's confirms_batch
     # flag does not turn a field-specific answer into acceptance of the summary.
@@ -70,7 +70,7 @@ def test_plain_accept_confirms_displayed_batch_even_when_model_boolean_is_false(
     journey = waiting_home(app, client, envelope(confirms=False))
     turn = journey.send(message)
     assert turn['dynamic_form']['requirements']['ready'] is True
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and claim.form['loss.description'].status.value == 'confirmed'
 
 

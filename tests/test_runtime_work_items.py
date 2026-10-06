@@ -99,7 +99,11 @@ def test_runtime_work_items_reconcile_latest_subject_and_completed_fact() -> Non
 def test_runtime_work_item_endpoint_is_staff_only_and_projects_current_claim_state() -> None:
     repository = FixtureRepository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository=repository,
         agent_turn_provider=ControlledAgent(),
     )

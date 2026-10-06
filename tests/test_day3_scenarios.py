@@ -20,7 +20,7 @@ from backend.repositories.protocols import RevisionConflict
 from backend.repositories.scenario_loader import load_scenario, load_scenarios, seed_scenario
 from scripts.run_scenarios import run_scenarios
 
-SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'tests' / 'fixtures' / 'scenarios'
 REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
@@ -32,7 +32,11 @@ def scenario(name: str) -> tuple[FixtureRepository, str, str]:
 
 
 def client_for(repository: FixtureRepository) -> TestClient:
-    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    settings = Settings(
+        business_seed_path='config/business-seed.json',
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+    )
     return TestClient(create_app(settings, repository))
 
 
@@ -53,11 +57,11 @@ def client_for(repository: FixtureRepository) -> TestClient:
 def test_scenario_files_validate_and_seed(scenario_id: str) -> None:
     repository, claim_id, _ = scenario(scenario_id)
 
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
 
     assert claim is not None
     assert claim.claim_id == claim_id
-    assert repository.get_active_session(claim_id, 'cus_demo') is not None
+    assert repository.get_active_session(claim_id, 'cus_8f41a2c90d7e463b') is not None
 
 
 def test_scenario_runner_reports_repeatable_fixture_counts() -> None:
@@ -170,7 +174,7 @@ def test_pending_evidence_is_a_cross_workflow_staff_view_with_responsibility_con
 
 def test_pending_evidence_does_not_close_or_block_the_claim() -> None:
     repository, claim_id, _ = scenario('AT-06-pending-evidence')
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
 
     assert claim is not None
     assert claim.claim_state.workflow_state is WorkflowState.READY_FOR_NEXT
@@ -220,8 +224,8 @@ def test_ten_day_resume_restores_bounded_context_without_internal_notes() -> Non
     repository = FixtureRepository()
     seed_scenario(repository, loaded)
 
-    claim = repository.get_claim(loaded.claim.claim_id, 'cus_demo')
-    sessions = repository.list_sessions_for_claim(loaded.claim.claim_id, 'cus_demo')
+    claim = repository.get_claim(loaded.claim.claim_id, 'cus_8f41a2c90d7e463b')
+    sessions = repository.list_sessions_for_claim(loaded.claim.claim_id, 'cus_8f41a2c90d7e463b')
     active = next(item for item in sessions if item.status.value == 'active')
     historical = next(item for item in sessions if item.session_id != active.session_id)
 
@@ -271,7 +275,7 @@ def test_older_revision_cannot_overwrite_newer_claim_state() -> None:
     loaded = load_scenario(SCENARIO_DIRECTORY / 'AT-08-resume.json')
     repository = FixtureRepository()
     seed_scenario(repository, loaded)
-    claim = repository.get_claim(loaded.claim.claim_id, 'cus_demo')
+    claim = repository.get_claim(loaded.claim.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
 
     newer = claim.model_copy(update={'revision': claim.revision + 1, 'route': 'newer_state'})
@@ -282,7 +286,7 @@ def test_older_revision_cannot_overwrite_newer_claim_state() -> None:
         repository.save_claim(stale, expected_revision=claim.revision)
 
     assert conflict.value.current_revision == newer.revision
-    stored = repository.get_claim(claim.claim_id, 'cus_demo')
+    stored = repository.get_claim(claim.claim_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.revision == newer.revision
     assert stored.route == 'newer_state'
@@ -336,7 +340,7 @@ def test_claimant_and_staff_projections_share_state_without_leaking_internal_sig
                 ]
             },
         )
-        workbench_state = repository.get_claim(claim_id, 'cus_demo')
+        workbench_state = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert workbench_state is not None
         assert workbench_state.form['incident.location'].value == 'Synthetic Street, Auckland'
 
@@ -461,7 +465,7 @@ def test_loader_rejects_broken_record_links(
     if mutation == 'duplicate_session':
         payload['sessions'].append(payload['sessions'][0])
     elif mutation == 'wrong_customer':
-        payload['sessions'][0]['customer_id'] = 'cus_other'
+        payload['sessions'][0]['customer_id'] = 'cus_2b67e9d14a3c508f'
     elif mutation == 'wrong_evidence_claim':
         payload['evidence'][0]['claim_id'] = 'clm_other'
     elif mutation == 'wrong_message_session':
@@ -483,5 +487,5 @@ def test_fixture_directory_contains_only_valid_synthetic_scenarios() -> None:
     loaded = load_scenarios(SCENARIO_DIRECTORY)
 
     assert loaded
-    assert all(item.claim.customer_id == 'cus_demo' for item in loaded)
+    assert all(item.claim.customer_id == 'cus_8f41a2c90d7e463b' for item in loaded)
     assert all('fixture' in item.claim.claim_id for item in loaded)

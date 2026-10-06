@@ -9,7 +9,7 @@ document details below the repository boundary.
 import os
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from threading import Event
 from typing import Any, NoReturn, TypeVar, cast
 
@@ -31,6 +31,11 @@ from backend.domain.claim_creation import (
     ClaimCreationOperationStatus,
     assert_claim_creation_operation_transition,
     evidence_snapshot_fingerprint,
+)
+from backend.domain.claim_history import (
+    LodgedClaimHistory,
+    history_summary_from_facts,
+    history_window_start,
 )
 from backend.domain.evidence import (
     assert_material_history_is_append_only,
@@ -159,6 +164,7 @@ from backend.domain.retrieval import (
     RetrievalKind,
     RetrievalRecord,
     ReviewSignalRecord,
+    SeededPolicyRecord,
 )
 from backend.domain.runtime import (
     ActionEnvelopeRecord,
@@ -575,6 +581,17 @@ class MongoDBRepository:
                 'record_type': 'follow_up',
                 'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
             },
+        )
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('customer_id', 1),
+                ('terminal_disposition.value', 1),
+                ('terminal_disposition.recorded_at', -1),
+                ('claim_id', -1),
+            ],
+            name='claim_customer_lodged_history',
+            partialFilterExpression={'record_type': 'claim'},
         )
         self._collection.create_index(
             [('record_type', 1), ('terminal_disposition.recorded_at', 1), ('claim_id', 1)],
@@ -4333,6 +4350,260 @@ class MongoDBRepository:
         )
 
         return [claim for claim in claims if not self._claim_access_closed(claim.claim_id)]
+
+    def get_seed_policy(self, customer_id: str, policy_number: str) -> SeededPolicyRecord | None:
+        identity = f'{len(customer_id)}:{customer_id}{policy_number}'
+        return self._get('customer_policy', identity, SeededPolicyRecord, customer_id=customer_id)
+
+    def ensure_seed_policy(self, policy: SeededPolicyRecord) -> None:
+        identity = f'{len(policy.customer_id)}:{policy.customer_id}{policy.facts.policy_reference}'
+        document = policy.model_dump(mode='json')
+        document.update(
+            {
+                '_id': self._record_id('customer_policy', identity),
+                'record_type': 'customer_policy',
+            }
+        )
+        try:
+            self._collection.update_one(
+                {'_id': document['_id']},
+                {'$setOnInsert': document},
+                upsert=True,
+            )
+        except DuplicateKeyError:
+            # Concurrent insert-only seed runs have the same owner/reference identity.
+            if self.get_seed_policy(policy.customer_id, policy.facts.policy_reference) is None:
+                raise
+
+    def find_duplicate_lodged_claim_ids(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        product_family: str,
+        incident_date: date,
+        as_of: datetime,
+    ) -> list[str]:
+        incident_field = {
+            '$getField': {'field': {'$literal': 'incident.occurred_at'}, 'input': '$form'}
+        }
+        pipeline: list[dict[str, Any]] = [
+            {
+                '$match': {
+                    'record_type': 'claim',
+                    'customer_id': customer_id,
+                    'claim_id': {'$ne': current_claim_id},
+                    'incident_type': product_family,
+                    'terminal_disposition.value': 'completed',
+                    'terminal_disposition.reason_code': 'CLAIM_CREATED',
+                    'external_claim.creation_status': 'created',
+                    'external_claim.external_claim_id': {'$type': 'string', '$nin': ['', None]},
+                }
+            },
+            {
+                '$set': {
+                    'incident_value': {
+                        '$let': {
+                            'vars': {'field': incident_field},
+                            'in': '$$field.value',
+                        }
+                    },
+                    'lodged_instant': {
+                        '$dateFromString': {
+                            'dateString': '$terminal_disposition.recorded_at',
+                            'onError': None,
+                            'onNull': None,
+                        }
+                    },
+                }
+            },
+            {
+                '$set': {
+                    'incident_day': {
+                        '$cond': [
+                            {'$eq': [{'$type': '$incident_value'}, 'string']},
+                            {'$substrCP': ['$incident_value', 0, 10]},
+                            {
+                                '$cond': [
+                                    {
+                                        '$in': [
+                                            '$incident_value.precision',
+                                            ['range', 'unknown', 'approximate'],
+                                        ]
+                                    },
+                                    None,
+                                    '$incident_value.date',
+                                ]
+                            },
+                        ]
+                    }
+                }
+            },
+            {
+                '$set': {
+                    'incident_instant': {
+                        '$dateFromString': {
+                            'dateString': '$incident_day',
+                            'format': '%Y-%m-%d',
+                            'onError': None,
+                            'onNull': None,
+                        }
+                    }
+                }
+            },
+            {
+                '$match': {
+                    'lodged_instant': {'$ne': None, '$lte': as_of},
+                    'incident_instant': {
+                        '$gte': datetime.combine(
+                            incident_date - timedelta(days=3), datetime.min.time(), UTC
+                        ),
+                        '$lt': datetime.combine(
+                            incident_date + timedelta(days=4), datetime.min.time(), UTC
+                        ),
+                    },
+                }
+            },
+            {
+                '$lookup': {
+                    'from': self._collection.name,
+                    'localField': 'claim_id',
+                    'foreignField': 'claim_id',
+                    'pipeline': [{'$match': {'record_type': 'retention_operation'}}, {'$limit': 1}],
+                    'as': 'access_closure',
+                }
+            },
+            {'$match': {'access_closure': {'$eq': []}}},
+            {'$sort': {'claim_id': 1}},
+            {'$limit': 50},
+            {'$project': {'_id': 0, 'claim_id': 1}},
+        ]
+        return [
+            str(item['claim_id']) for item in self._collection.aggregate(pipeline, maxTimeMS=5000)
+        ]
+
+    def query_lodged_claim_history(
+        self,
+        customer_id: str,
+        current_claim_id: str,
+        *,
+        limit: int,
+        as_of: datetime,
+        history_reference: str | None = None,
+    ) -> LodgedClaimHistory:
+        if not 1 <= limit <= 50:
+            raise ValueError('History limit must be between 1 and 50.')
+        window_start = history_window_start(as_of)
+        recent: list[dict[str, Any]] = []
+        if history_reference is not None:
+            recent.append(
+                {
+                    '$match': {
+                        '$or': [
+                            {'claim_id': history_reference},
+                            {'external_claim.external_claim_id': history_reference},
+                            {'external_claim.claim_number': history_reference},
+                        ]
+                    }
+                }
+            )
+        recent.extend(
+            [
+                {'$sort': {'lodged_instant': -1, 'claim_id': -1}},
+                {'$limit': limit},
+                {
+                    '$project': {
+                        '_id': 0,
+                        'claim_id': 1,
+                        'claim_number': '$external_claim.claim_number',
+                        'product_family': '$incident_type',
+                        'lodged_at': '$terminal_disposition.recorded_at',
+                        'facts': {
+                            '$filter': {
+                                'input': {'$objectToArray': '$form'},
+                                'as': 'fact',
+                                'cond': {
+                                    '$in': [
+                                        '$$fact.k',
+                                        [
+                                            'incident.occurred_at',
+                                            'incident.description',
+                                            'loss.estimated_amount',
+                                        ],
+                                    ]
+                                },
+                            }
+                        },
+                    }
+                },
+            ]
+        )
+        pipeline: list[dict[str, Any]] = [
+            {
+                '$match': {
+                    'record_type': 'claim',
+                    'customer_id': customer_id,
+                    'claim_id': {'$ne': current_claim_id},
+                    'terminal_disposition.value': 'completed',
+                    'terminal_disposition.reason_code': 'CLAIM_CREATED',
+                    'external_claim.creation_status': 'created',
+                    'external_claim.external_claim_id': {'$type': 'string', '$nin': ['', None]},
+                }
+            },
+            # JSON timestamps may retain different offsets. Compare actual instants,
+            # never lexicographic strings, while the leading match uses the index.
+            {
+                '$set': {
+                    'lodged_instant': {
+                        '$dateFromString': {
+                            'dateString': '$terminal_disposition.recorded_at',
+                        }
+                    }
+                }
+            },
+            {'$match': {'lodged_instant': {'$lte': as_of}}},
+            {
+                '$lookup': {
+                    'from': self._collection.name,
+                    'localField': 'claim_id',
+                    'foreignField': 'claim_id',
+                    'pipeline': [
+                        {'$match': {'record_type': 'retention_operation'}},
+                        {'$limit': 1},
+                        {'$project': {'_id': 1}},
+                    ],
+                    'as': 'access_closure',
+                }
+            },
+            {'$match': {'access_closure': {'$eq': []}}},
+            {
+                '$facet': {
+                    'count': [
+                        {'$match': {'lodged_instant': {'$gte': window_start}}},
+                        {'$count': 'value'},
+                    ],
+                    'claims': recent,
+                }
+            },
+        ]
+        result = next(iter(self._collection.aggregate(pipeline, maxTimeMS=5000)), {})
+        counts = result.get('count', [])
+        summaries = [
+            history_summary_from_facts(
+                claim_id=row['claim_id'],
+                claim_number=row.get('claim_number'),
+                product_family=row.get('product_family'),
+                lodged_at=datetime.fromisoformat(row['lodged_at'].replace('Z', '+00:00')),
+                facts={fact['k']: fact['v']['value'] for fact in row['facts']},
+            )
+            for row in result.get('claims', [])
+        ]
+        return LodgedClaimHistory(
+            count_past_12_months=counts[0]['value'] if counts else 0,
+            claims=summaries,
+            as_of=as_of,
+            window_start=window_start,
+        )
 
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')

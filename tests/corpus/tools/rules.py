@@ -28,7 +28,7 @@ TRIAGE_REASONS = {
         'Another party is involved and liability is unconfirmed or disputed',
     ),
     # Maintainer, 2026-09-30: only a lookup uncertainty marker (for example
-    # COVERAGE_SECTION_INCOMPLETE on synthetic-policy-ambiguous) or an Agent record that the loss
+    # COVERAGE_SECTION_INCOMPLETE on NW-MTR-2026-20963) or an Agent record that the loss
     # may not be covered counts;
     # claim_state.coverage = review_required on its own does not.
     'coverage_unclear': (

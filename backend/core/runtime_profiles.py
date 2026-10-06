@@ -19,7 +19,12 @@ from backend.adapters.knowledge_object_store import (
     S3CompatibleKnowledgeObjectStore,
 )
 from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
-from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHistoryAdapter
+from backend.adapters.policy_history import (
+    MockPolicyHistoryAdapter,
+    PolicyHistoryAdapter,
+    RepositoryClaimHistoryAdapter,
+    RepositoryPolicyAdapter,
+)
 from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
@@ -69,8 +74,8 @@ _PROFILE_CAPABILITIES: Mapping[DataRuntimeProfile, Mapping[str, RuntimeCapabilit
                 {
                     'persistence': RuntimeCapabilityStatus.VERIFIED,
                     'evidence_storage': RuntimeCapabilityStatus.VERIFIED,
-                    'policy': RuntimeCapabilityStatus.USING_FIXTURE,
-                    'claim_history': RuntimeCapabilityStatus.USING_FIXTURE,
+                    'policy': RuntimeCapabilityStatus.VERIFIED,
+                    'claim_history': RuntimeCapabilityStatus.VERIFIED,
                     'knowledge_documents': RuntimeCapabilityStatus.VERIFIED,
                     'knowledge_retrieval': RuntimeCapabilityStatus.VERIFIED,
                 }
@@ -128,6 +133,13 @@ class DataRuntimeBundle:
     policy_history: PolicyHistoryAdapter
     knowledge_documents: KnowledgeDocumentStore
     knowledge_retrieval: KnowledgeRetriever
+    claim_history: PolicyHistoryAdapter
+
+    def __post_init__(self) -> None:
+        if self.claim_history is None:
+            raise RuntimeProfileConfigurationError(
+                'The claim_history data source is required; no policy adapter fallback is allowed.'
+            )
 
     def readiness_checks(self) -> dict[str, str]:
         repository_status = getattr(self.repository, 'connection_status', None)
@@ -137,7 +149,7 @@ class DataRuntimeBundle:
             ),
             'evidence_storage': self.evidence_storage.connection_status(),
             'policy': self.policy_history.connection_status(),
-            'claim_history': self.policy_history.connection_status(),
+            'claim_history': self.claim_history.connection_status(),
             'knowledge_documents': self.knowledge_documents.connection_status(),
             'knowledge_retrieval': self.knowledge_retrieval.connection_status(),
         }
@@ -242,11 +254,13 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             )
         else:
             evidence_storage = MockEvidenceStorage()
+        fixture_repository = FixtureRepository()
         bundle = DataRuntimeBundle(
             profile=DataRuntimeProfile.FIXTURE,
-            repository=FixtureRepository(),
+            repository=fixture_repository,
             evidence_storage=evidence_storage,
-            policy_history=MockPolicyHistoryAdapter(),
+            policy_history=MockPolicyHistoryAdapter(fixture_repository),
+            claim_history=RepositoryClaimHistoryAdapter(fixture_repository),
             knowledge_documents=knowledge_documents,
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
         )
@@ -277,7 +291,8 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             profile=DataRuntimeProfile.LOCAL_MVP,
             repository=repository,
             evidence_storage=evidence_storage,
-            policy_history=MockPolicyHistoryAdapter(),
+            policy_history=RepositoryPolicyAdapter(repository),
+            claim_history=RepositoryClaimHistoryAdapter(repository),
             knowledge_documents=knowledge_retrieval,
             knowledge_retrieval=knowledge_retrieval,
         )

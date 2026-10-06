@@ -11,13 +11,14 @@ from typing import Any
 
 import mongomock
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.adapters.staff_identity import FixtureStaffIdentityRepository
-from backend.app import create_app
+from backend.app import create_app as _create_app
 from backend.core.config import IdentityMode, Settings
 from backend.core.errors import ApiError
 from backend.domain.identity import CustomerAccountRecord
@@ -32,6 +33,7 @@ from backend.repositories.protocols import (
     ValidationSeedGraph,
 )
 from backend.repositories.scenario_loader import load_scenario
+from backend.services.business_seed import load_business_seed
 from backend.services.demo_seed import (
     VALIDATION_SEED_ROUTE,
     _ensure_demo_claimant,
@@ -44,12 +46,20 @@ STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 SEED_PATH = '/api/v1/workbench/demo/seed-validation'
 SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+BUSINESS_SEED = load_business_seed(Path('config/business-seed.json'))
+
+
+def create_app(*args: Any, **kwargs: Any) -> FastAPI:
+    app = _create_app(*args, **kwargs)
+    # Select the real manifest explicitly while keeping this transaction test's queue empty.
+    app.state.business_seed = BUSINESS_SEED
+    return app
 
 
 def _validation_graph(repository: PersistenceRepository, key: str = 'graph') -> ValidationSeedGraph:
     scenario = _validation_scenario(
-        load_scenario(Path('backend/demo_data/scenarios/AT-14-field-states-motor.json')),
-        customer_id='cus_demo',
+        load_scenario(Path('tests/fixtures/scenarios/AT-14-field-states-motor.json')),
+        customer_id='cus_8f41a2c90d7e463b',
         staff_id='stf_demo',
     )
     presence, expected_presence_revision = _validation_presence(repository, 'stf_demo')
@@ -84,11 +94,7 @@ def test_validation_seed_creates_three_cross_role_graphs() -> None:
 
         assert response.status_code == 200
         body = response.json()
-        assert body['scenario_ids'] == [
-            'AT-14-field-states-motor',
-            'AT-15-field-states-home',
-            'AT-16-field-states-contents',
-        ]
+        assert body['scenario_ids'] == [case.case_id for case in BUSINESS_SEED.demo_cases]
         assert len(body['claim_ids']) == 3
         assert client.get('/api/v1/staff/me', headers=STAFF_AUTH).status_code == 200
 
@@ -270,7 +276,7 @@ def test_validation_seed_provisions_claimant_for_normal_sqlite_identity() -> Non
             claimant_response = client.post(
                 '/api/v1/auth/sessions',
                 json={
-                    'email': 'claimant.one@example.invalid',
+                    'email': 'maya.chen@example.invalid',
                     'password': 'northwind-demo-one',
                 },
             )
@@ -415,7 +421,7 @@ def test_fixture_validation_seed_same_key_race_returns_one_persisted_result() ->
     replay = next(result for result in results if result is not None)
     assert replay.response_payload == persisted.response_payload
     assert all(
-        repository.get_claim(claim_id, 'cus_demo') is not None
+        repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') is not None
         for claim_id in (persisted.response_payload or {}).get('claim_ids', [])
     )
 
@@ -424,7 +430,7 @@ def test_fixture_validation_seed_same_key_race_returns_one_persisted_result() ->
     'field_update',
     [
         {'claim_id': 'clm_other'},
-        {'customer_id': 'cus_other'},
+        {'customer_id': 'cus_2b67e9d14a3c508f'},
         {'status': 'closed'},
         {'context_revision': 2},
     ],
@@ -573,7 +579,7 @@ def test_mongodb_validation_seed_repository_guards_replay_conflict_and_graph_sha
     'field_update',
     [
         {'claim_id': 'clm_other'},
-        {'customer_id': 'cus_other'},
+        {'customer_id': 'cus_2b67e9d14a3c508f'},
         {'status': 'closed'},
         {'context_revision': 2},
     ],
@@ -602,15 +608,15 @@ class _RacingIdentityRepository(FixtureIdentityRepository):
 
 
 def test_validation_seed_handles_claimant_provision_race_and_unavailable_account() -> None:
-    racing_identity = _RacingIdentityRepository()
-    racing_identity._accounts.pop('cus_demo')
-    account = _ensure_demo_claimant(racing_identity)
-    assert account.email == 'claimant.one@example.invalid'
+    racing_identity = _RacingIdentityRepository(BUSINESS_SEED)
+    racing_identity._accounts.pop('cus_8f41a2c90d7e463b')
+    account = _ensure_demo_claimant(racing_identity, BUSINESS_SEED)
+    assert account.email == 'maya.chen@example.invalid'
 
-    unavailable_identity = FixtureIdentityRepository()
-    unavailable_identity._accounts['cus_demo'].active = False
+    unavailable_identity = FixtureIdentityRepository(BUSINESS_SEED)
+    unavailable_identity._accounts['cus_8f41a2c90d7e463b'].active = False
     with pytest.raises(ApiError) as error:
-        _ensure_demo_claimant(unavailable_identity)
+        _ensure_demo_claimant(unavailable_identity, BUSINESS_SEED)
     assert error.value.code == 'DEMO_CLAIMANT_UNAVAILABLE'
 
 
@@ -633,6 +639,7 @@ def test_validation_seed_maps_existing_idempotency_conflict() -> None:
             FixtureStaffIdentityRepository(),
             'stf_demo',
             'existing',
+            seed=BUSINESS_SEED,
         )
     assert error.value.code == 'IDEMPOTENCY_CONFLICT'
 
@@ -684,6 +691,7 @@ def test_validation_seed_reconciles_presence_race_to_committed_response() -> Non
     assert response.json() == persisted.response_payload
 
 
+@pytest.mark.integration
 def test_validation_seed_same_key_race_real_mongodb_replica_set() -> None:
     """Verify the first-seed transaction race against a real MongoDB primary."""
     uri = os.environ.get(
@@ -705,7 +713,7 @@ def test_validation_seed_same_key_race_real_mongodb_replica_set() -> None:
         repository = MongoDBRepository(client, database_name)
         identity = FixtureIdentityRepository()
         staff_identity = FixtureStaffIdentityRepository()
-        _ensure_demo_claimant(identity)
+        _ensure_demo_claimant(identity, BUSINESS_SEED)
         barrier = Barrier(2)
 
         def seed() -> dict[str, Any]:
@@ -716,6 +724,7 @@ def test_validation_seed_same_key_race_real_mongodb_replica_set() -> None:
                 staff_identity,
                 'stf_demo',
                 'real-same-key-race',
+                seed=BUSINESS_SEED,
             ).model_dump(mode='json')
 
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -730,7 +739,7 @@ def test_validation_seed_same_key_race_real_mongodb_replica_set() -> None:
         returned_claim_ids = set(responses[0]['claim_ids'])
         assert len(returned_claim_ids) == 3
         assert all(
-            repository.get_claim(claim_id, 'cus_demo') is not None
+            repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') is not None
             for claim_id in returned_claim_ids
         )
 
@@ -805,6 +814,7 @@ def test_validation_seed_maps_repository_conflicts(failure: Exception, code: str
             FixtureStaffIdentityRepository(),
             'stf_demo',
             f'failure-{code}',
+            seed=BUSINESS_SEED,
         )
     assert error.value.code == code
 
@@ -816,7 +826,7 @@ def test_validation_source_scenarios_remain_unchanged() -> None:
         'AT-16-field-states-contents',
     )
     for scenario_id in scenario_ids:
-        scenario = load_scenario(Path('backend/demo_data/scenarios') / f'{scenario_id}.json')
-        assert scenario.claim.customer_id == 'cus_demo'
+        scenario = load_scenario(Path('tests/fixtures/scenarios') / f'{scenario_id}.json')
+        assert scenario.claim.customer_id == 'cus_8f41a2c90d7e463b'
         assert scenario.claim.assignee_id is None
         assert scenario.evidence == []

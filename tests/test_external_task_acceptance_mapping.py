@@ -55,7 +55,11 @@ from tests.issue_928_support import prepare_claim_submission
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+DEVELOPER_SETTINGS = Settings(
+    business_seed_path='config/business-seed.json',
+    environment='test',
+    identity_mode=IdentityMode.DEVELOPER,
+)
 JOURNEY_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
 
 
@@ -347,7 +351,7 @@ def test_an_attempt_that_may_have_arrived_is_unresolved_rather_than_retryable() 
         item
         for item in repository.list_runtime_work_items(
             claim_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         if item.subject_ref == f'external-task:{task.task_id}'
     ]
@@ -604,7 +608,7 @@ def test_a_permitted_retry_keeps_the_original_operation_whatever_key_it_carries(
     assert _operation_statuses(repository, claim_id) == [AssessorRoutingOperationStatus.ACCEPTED]
     routing_decisions = [
         decision
-        for decision in repository.list_agent_decisions(claim_id, 'cus_demo')
+        for decision in repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b')
         if 'ASSESSOR_RULE_AUTHORISED' in decision.reason_codes
     ]
     assert len(routing_decisions) == 1
@@ -650,7 +654,7 @@ def test_reconciliation_settles_the_existing_identity_without_another_route() ->
         # The unknown outcome opened one staff recovery obligation that blocks a resend.
         open_items = [
             item
-            for item in repository.list_runtime_work_items(claim_id, 'cus_demo')
+            for item in repository.list_runtime_work_items(claim_id, 'cus_8f41a2c90d7e463b')
             if item.subject_ref == f'external-task:{task_before.task_id}'
         ]
         assert [(item.status, item.blocks_action) for item in open_items] == [
@@ -706,7 +710,7 @@ def test_reconciliation_settles_the_existing_identity_without_another_route() ->
         item
         for item in repository.list_runtime_work_items(
             claim_id,
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         if item.subject_ref == f'external-task:{task_after.task_id}'
     ]
@@ -817,7 +821,7 @@ def test_inconclusive_reconciliation_preserves_unknown_and_resend_refusal() -> N
     # An inconclusive check leaves the staff recovery obligation open and blocking.
     recovery_items = [
         item
-        for item in repository.list_runtime_work_items(claim_id, 'cus_demo')
+        for item in repository.list_runtime_work_items(claim_id, 'cus_8f41a2c90d7e463b')
         if item.subject_ref == f'external-task:{task.task_id}'
     ]
     assert [(item.status, item.blocks_action) for item in recovery_items] == [

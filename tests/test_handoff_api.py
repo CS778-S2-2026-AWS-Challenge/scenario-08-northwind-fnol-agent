@@ -77,8 +77,8 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
     assert 'reason_codes' not in turn['handoff']  # type: ignore[operator]
     assert 'packet' not in turn['handoff']  # type: ignore[operator]
 
-    handoffs = repository.list_handoffs(str(claim['claim_id']), 'cus_demo')
-    stored_claim = repository.get_claim(str(claim['claim_id']), 'cus_demo')
+    handoffs = repository.list_handoffs(str(claim['claim_id']), 'cus_8f41a2c90d7e463b')
+    stored_claim = repository.get_claim(str(claim['claim_id']), 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
     assert stored_claim.form['incident.injury_or_danger'].value is True
     assert len(handoffs) == 1
@@ -256,7 +256,7 @@ def test_explicit_human_request_preserves_confirmed_context(
     assert turn['decision']['action'] == 'HANDOFF'  # type: ignore[index]
     assert turn['handoff']['support_need'] == 'human_requested'  # type: ignore[index]
     assert 'priority' not in turn['handoff']  # type: ignore[operator]
-    handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
+    handoff = repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')[0]
     assert handoff.priority.value == 'standard'
     assert handoff.applied_rule == 'prototype_immediate_transfer'
     assert handoff.packet.incident_summary == (
@@ -265,7 +265,7 @@ def test_explicit_human_request_preserves_confirmed_context(
     assert handoff.packet.form_snapshot['incident.description'].status.value == 'confirmed'
     assert handoff.packet.low_confidence_items == []
     assert handoff.requested_action.startswith('Contact the claimant')
-    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')[-1]
     support_branch = next(
         item for item in evaluation.branch_results if item.branch_id == 'human_support'
     )
@@ -289,11 +289,11 @@ def test_explicit_human_request_preserves_confirmed_context(
         claim_id,
         session_id,
         continued['claimant_message']['message_id'],  # type: ignore[index]
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert stored_continued is not None
     assert stored_continued.visibility.value == 'shared'
-    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
 
 @pytest.mark.parametrize(
@@ -341,11 +341,11 @@ def test_accessibility_and_distress_create_high_priority_source_linked_handoff(
     assert turn['decision']['action'] == 'HANDOFF'  # type: ignore[index]
     assert turn['handoff']['support_need'] == expected_need  # type: ignore[index]
     assert 'priority' not in turn['handoff']  # type: ignore[operator]
-    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    handoffs = repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(handoffs) == 1
     assert handoffs[0].priority.value == 'high'
     assert handoffs[0].trigger.value == expected_reason
-    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')[-1]
     support_branch = next(
         item for item in evaluation.branch_results if item.branch_id == 'human_support'
     )
@@ -393,12 +393,12 @@ def test_support_endpoint_is_revision_protected_idempotent_and_claimant_safe(
     assert response.json()['revision'] == 2
     assert response.json()['primary_action']['action_code'] == ('claimant.continue_conversation')
     assert response.json()['primary_action']['claim_revision'] == response.json()['revision']
-    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')[-1]
     assert evaluation.recomputation_reason == 'handoff_created'
     assert evaluation.resulting_claim_revision == 2
     assert replay.json() == response.json()
     assert duplicate.json() == response.json()
-    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
     assert conflicting_key.status_code == 409
     assert conflicting_key.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
     assert stale.status_code == 409

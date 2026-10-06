@@ -120,7 +120,7 @@ def _proposal(
 def test_history_tool_is_bounded_to_authenticated_claimant_records() -> None:
     repository = FixtureRepository()
     target = _claim()
-    other = _claim('clm_other', 'cus_other')
+    other = _claim('clm_other', 'cus_2b67e9d14a3c508f')
     repository._claims[target.claim_id] = target
     repository._claims[other.claim_id] = other
     repository.save_evidence(_evidence('evd_ready', target.claim_id), target.customer_id)
@@ -294,7 +294,7 @@ def test_reuse_and_remove_fail_closed_for_ineligible_paths() -> None:
 def test_evidence_proposals_reject_invalid_identity_source_and_scope() -> None:
     repository = FixtureRepository()
     target = _claim()
-    other = _claim('clm_other', 'cus_other')
+    other = _claim('clm_other', 'cus_2b67e9d14a3c508f')
     repository._claims[target.claim_id] = target
     repository._claims[other.claim_id] = other
     repository.save_evidence(_evidence('evd_ready', target.claim_id), target.customer_id)

@@ -701,6 +701,9 @@ def create_message(
             repository=repository_for(request),
             agent=agent_for(request),
             policy_history_adapter=policy_history_adapter_for(request),
+            claim_history_adapter=cast(
+                PolicyHistoryAdapter, request.app.state.claim_history_adapter
+            ),
             principal=principal,
             claim_id=claim_id,
             session_id=session_id,

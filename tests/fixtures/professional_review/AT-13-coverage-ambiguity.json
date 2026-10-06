@@ -3,7 +3,7 @@
   "description": "Policy wording is available but requires professional interpretation before the claim can proceed.",
   "claim": {
     "claim_id": "clm_fixture_at13",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 3,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -29,8 +29,7 @@
     {
       "session_id": "ses_fixture_at13",
       "claim_id": "clm_fixture_at13",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "Coverage wording is ambiguous and queued for professional review.",
       "context_revision": 3,

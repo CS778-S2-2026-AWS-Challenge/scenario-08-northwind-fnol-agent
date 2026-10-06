@@ -30,9 +30,9 @@ class ObservingGatewayFailure:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         self.calls += 1
-        current = self.repository.get_claim(context.claim.claim_id, 'cus_demo')
+        current = self.repository.get_claim(context.claim.claim_id, 'cus_8f41a2c90d7e463b')
         assert current is not None
-        assert len(self.repository.list_handoffs(current.claim_id, 'cus_demo')) == 1
+        assert len(self.repository.list_handoffs(current.claim_id, 'cus_8f41a2c90d7e463b')) == 1
         assert current.revision == context.claim.revision
         if self.fail:
             assert current.form == {}
@@ -129,7 +129,7 @@ def test_safety_handoff_commits_before_failed_provider_then_silences_new_message
     assert 'Northwind support has been notified' in body['agent_message']['content']['text']
     assert body['handoff'] is not None
     assert gateway.calls == 1
-    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+    assert repository.list_agent_decisions(claim_id, 'cus_8f41a2c90d7e463b') == []
     assert client.post(url, headers=headers, json=payload).json() == body
     assert gateway.calls == 1
     history = client.get(url, headers=auth_headers).json()['items']
@@ -156,13 +156,13 @@ def test_safety_handoff_commits_before_failed_provider_then_silences_new_message
     assert followup_body['agent_message'] is None
     assert followup_body['decision'] is None
     assert followup_body['form_changes'] == []
-    current = repository.get_claim(claim_id, 'cus_demo')
+    current = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert current is not None and 'incident.location' not in current.form
-    assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
     assert gateway.calls == 1
     assert all(
         item.actor in {ActorType.CLAIMANT, ActorType.AGENT}
-        for item in repository.list_messages(claim_id, session_id, 'cus_demo')
+        for item in repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     )
 
 
@@ -195,7 +195,7 @@ def test_safety_commit_failure_is_hard_error_and_provider_is_never_called(
     assert response.status_code == 500
     assert response.json()['error']['code'] == 'SAFETY_HANDOFF_PERSISTENCE_FAILED'
     assert gateway.calls == 0
-    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
+    messages = repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert len(messages) == 1 and messages[0].recovery_rule_id is None
 
 
@@ -219,7 +219,11 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
         monkeypatch.setattr(repository, 'watch_realtime_events', lambda *_args: iter(()))
     gateway = ObservingGatewayFailure(repository, ModelGatewayErrorCode.TIMEOUT)
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository=repository,
         agent_turn_provider=gateway,
     )
@@ -246,7 +250,7 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
         failed_trace = repository.find_runtime_trace_for_trigger(
             claim_id,
             failed.json()['claimant_message']['message_id'],
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
         )
         assert failed_trace is not None
         assert failed_trace.status == 'failed'
@@ -263,7 +267,7 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
         assert body['agent_message']['recovery'] is None
         assert 'Symonds Street' in body['agent_message']['content']['text']
         assert gateway.calls == 2
-        assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+        assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1
         replayed_failure = client.post(url, headers=failed_headers, json=payload).json()
         assert replayed_failure == {
             **failed.json(),
@@ -310,8 +314,10 @@ def test_explicit_retry_after_safety_notice_returns_real_reply_and_keeps_origina
             'current_claim': later_snapshot,
             'current_claim_revision': later_snapshot['revision'],
         }
-        saved = repository.find_idempotency('cus_demo', url, 'retry-safety-attempt')
+        saved = repository.find_idempotency('cus_8f41a2c90d7e463b', url, 'retry-safety-attempt')
         assert saved is not None and saved.response_payload == body
         with pytest.raises(IdempotencyConflict):
-            repository.freeze_message_response(replace(saved, actor_id='cus_other'), body)
+            repository.freeze_message_response(
+                replace(saved, actor_id='cus_2b67e9d14a3c508f'), body
+            )
         assert repository.freeze_message_response(saved, later.json()) == body

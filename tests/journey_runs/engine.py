@@ -80,7 +80,11 @@ def journey_settings() -> Settings:
         allowed = ', '.join(item.value for item in AgentRuntimeProfile)
         raise ValueError(f'{PROFILE_ENV} must be exactly one of: {allowed}.') from error
     if profile is AgentRuntimeProfile.CONTROLLED:
-        return Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+        return Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
     configured = Settings.from_environment()
     return replace(
         configured,
@@ -168,8 +172,8 @@ class Journey:
         headers = dict(PRINCIPALS[actor])
         if method == 'POST':
             headers['Idempotency-Key'] = re.sub(r'[^a-z0-9]+', '-', name.lower())
-            if self.claim_id:
-                headers['If-Match'] = str(self.revision())
+        if method in {'POST', 'PATCH'} and self.claim_id:
+            headers['If-Match'] = str(self.revision())
         response = self.client.request(method, path, headers=headers, json=body)
         invalid_payload = None
         try:

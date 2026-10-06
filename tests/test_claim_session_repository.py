@@ -24,7 +24,7 @@ FIXED_TIME = datetime(2026, 8, 18, 0, 0, tzinfo=UTC)
 def make_paused_claim() -> tuple[WorkingClaim, SessionRecord]:
     claim = WorkingClaim(
         claim_id='clm_resume_fixture',
-        customer_id='cus_demo',
+        customer_id='cus_8f41a2c90d7e463b',
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
         active_session_id=None,
@@ -93,8 +93,8 @@ def pause_created_claim(
     claim_id: str,
     session_id: str,
 ) -> tuple[WorkingClaim, SessionRecord]:
-    claim = repository.get_claim(claim_id, 'cus_demo')
-    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert session is not None
 
@@ -210,7 +210,7 @@ def test_session_mutation_rejects_invalid_guards_without_partial_writes(
         repository.create_claim(claim, paused_session)
 
     if case == 'mismatched_link':
-        resumed_session = resumed_session.model_copy(update={'customer_id': 'cus_other'})
+        resumed_session = resumed_session.model_copy(update={'customer_id': 'cus_2b67e9d14a3c508f'})
     elif case == 'duplicate_session':
         repository.save_session(resumed_session)
     elif case == 'existing_active_session':
@@ -279,12 +279,12 @@ def test_start_session_reads_saved_claim_in_new_session(
     assert resumed.json()['resume']['summary'] == 'Saved API resume context.'
     assert resumed.json()['resume']['pending_items'] == ['Police report pending.']
 
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert stored_claim is not None
-    assert repository.claim_count == 1
+    assert repository.claim_count == 2
     assert stored_claim.revision == paused_claim.revision + 1
     assert stored_claim.active_session_id == resumed_session_id
-    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_8f41a2c90d7e463b')[-1]
     assert evaluation.recomputation_reason == 'session_resumed'
     assert evaluation.resulting_claim_revision == stored_claim.revision
     assert evaluation.session_id == resumed_session_id
@@ -297,7 +297,7 @@ def test_start_session_reads_saved_claim_in_new_session(
     assert read_session.json()['session_id'] == resumed_session_id
     assert (
         repository.find_idempotency(
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
             f'/api/v1/claims/{claim_id}/sessions',
             'resume-saved-claim',
         )
@@ -352,16 +352,16 @@ def test_start_new_session_replaces_active_session_inside_atomic_mutation(
     new_session_id = started.json()['session_id']
     assert new_session_id != original_session_id
 
-    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     old_session = repository.get_session(
         claim_id,
         original_session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     new_session = repository.get_session(
         claim_id,
         new_session_id,
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
 
     assert stored_claim is not None
@@ -404,7 +404,7 @@ def test_resume_keeps_persisted_model_profile_for_a_fresh_client(
     resumed_session = repository.get_session(
         claim_id,
         resumed.json()['session_id'],
-        'cus_demo',
+        'cus_8f41a2c90d7e463b',
     )
     assert resumed_session is not None
     assert resumed_session.model_profile_id == 'openrouter-gpt-4o'
@@ -436,7 +436,7 @@ def test_resume_rejects_explicit_model_profile_conflict(
 
     assert resumed.status_code == 409
     assert resumed.json()['error']['code'] == 'MODEL_PROFILE_CONFLICT'
-    assert len(repository.list_sessions_for_claim(claim_id, 'cus_demo')) == 1
+    assert len(repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')) == 1
 
 
 def test_start_session_surfaces_repository_revision_conflict(
@@ -485,11 +485,11 @@ def test_start_session_surfaces_repository_revision_conflict(
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'REVISION_CONFLICT'
     assert response.json()['error']['current_revision'] == paused_claim.revision + 7
-    assert repository.get_claim(claim_id, 'cus_demo') == paused_claim
-    assert len(repository.list_sessions_for_claim(claim_id, 'cus_demo')) == 1
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == paused_claim
+    assert len(repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b')) == 1
     assert (
         repository.find_idempotency(
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
             f'/api/v1/claims/{claim_id}/sessions',
             'resume-conflict',
         )
@@ -542,11 +542,11 @@ def test_start_session_surfaces_repository_idempotency_conflict_without_partial_
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
-    assert repository.get_claim(claim_id, 'cus_demo') == paused_claim
-    assert repository.list_sessions_for_claim(claim_id, 'cus_demo') == [paused_session]
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == paused_claim
+    assert repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b') == [paused_session]
     assert (
         repository.find_idempotency(
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
             f'/api/v1/claims/{claim_id}/sessions',
             'resume-idempotency-conflict',
         )

@@ -3,7 +3,7 @@
   "description": "Synthetic completed staff-action lifecycle with claimant-safe write-back.",
   "claim": {
     "claim_id": "clm_fixture_at13",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 10,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -27,7 +27,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-12T03:10:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       }
     },
     "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
@@ -48,8 +48,7 @@
     {
       "session_id": "ses_fixture_at13",
       "claim_id": "clm_fixture_at13",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "Parked vehicle damage reviewed by a claims professional.",
       "unresolved_questions": [],

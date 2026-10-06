@@ -6,6 +6,7 @@ from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import Field
 
+from backend.domain.claim_creation import ClaimHistoryChecks
 from backend.domain.external_service_registry import (
     ExternalCapabilityProvenance,
     ExternalLifecycleStatus,
@@ -542,6 +543,7 @@ class WorkbenchClaimFilterMetadata(ContractModel):
 
 
 class WorkbenchClaimDetail(WorkbenchClaimListItem):
+    history_checks: ClaimHistoryChecks | None = None
     integration_summary: WorkbenchClaimDetailIntegrationSummary
     active_session_id: str | None = None
     claim_state: ClaimState

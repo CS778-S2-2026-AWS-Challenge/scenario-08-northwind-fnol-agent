@@ -19,7 +19,7 @@ through `GET /health/ready`; it never reports credentials, endpoints, or physica
 | --- | --- | --- |
 | `deploy/runtime/fixture.env.example` | Ready | Complete deterministic fixture bundle |
 | `deploy/runtime/local-minio.env.example` | Ready when packaged MinIO is healthy | Fixture data with the explicit verified MinIO evidence adapter |
-| `deploy/runtime/local-mvp.env.example` | Ready when local MongoDB, MinIO, and the governed indexes are healthy | MongoDB persistence, MinIO evidence/knowledge, explicitly synthetic policy/history, and developer-only synthetic identity |
+| `deploy/runtime/local-mvp.env.example` | Ready when local MongoDB, MinIO, and the governed indexes are healthy | MongoDB persistence and Claim history, synthetic customer policies persisted in MongoDB, MinIO evidence/knowledge, and persistent identity |
 | `deploy/runtime/mongodb.env.example` | Refused | Connection primitives exist, but the complete MongoDB bundle is not verified |
 | `deploy/runtime/cloudflare.env.example` | Refused | Provider services and bindings remain unconfirmed |
 | `deploy/runtime/aws.env.example` | Refused | Private S3-to-CloudFront static delivery is verified, but the complete AWS data-runtime profile, runtime identity, and Backend service connections remain unimplemented |
@@ -147,9 +147,19 @@ MongoDB and MinIO continue to use their separate durable volumes.
 ## Verification boundary
 
 The `local_mvp` profile is a bounded development composition, not promotion of the provider-specific
-`mongodb` profile. Policy and claim-history lookups remain labelled `using_fixture`, and the Agent
-remains controlled until its separately owned model proposal contract is delivered. AWS,
-Cloudflare, and the complete MongoDB provider profile remain unavailable rather than speculative.
+`mongodb` profile. Policy and claim-history readiness report the selected MongoDB repository
+connection (`verified`); this describes connectivity, not production policy authority. Policy
+results remain labelled `synthetic_customer_policy`. Claim history projects submitted Claims from
+the selected repository, including user-created Claims and versioned synthetic seed Claims.
+Every environment-based startup loads the manifest selected by `NORTHWIND_BUSINESS_SEED_PATH`
+(packaged default `config/business-seed.json`) and inserts missing identities,
+policy records, and submitted Claims without resetting existing records. The fixture profile
+uses the same manifest and repository-query adapters in memory. Missing or invalid selected seed
+data refuses startup. AWS, Cloudflare, and the complete MongoDB provider profile remain unavailable.
+Directly constructed settings select `business_seed_path` explicitly; an empty path supplies no
+seed. Identity, policy and demo-case components consume the same parsed object. Existing SQLite
+identity collisions never reassign ownership; the preservation and fresh-namespace procedure is
+in the repository README under "Business seed and existing local identities".
 
 ## GitHub Actions self-hosted runner
 

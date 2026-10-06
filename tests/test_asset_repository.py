@@ -221,7 +221,7 @@ def test_fixture_asset_repository_enforces_owner_and_compare_and_set() -> None:
         _asset_audit(asset, 'aud_fixture_create', idempotency_key='create-1'),
     )
 
-    assert repository.get_asset(asset.asset_id, 'cus_other') is None
+    assert repository.get_asset(asset.asset_id, 'cus_2b67e9d14a3c508f') is None
     assert repository.list_assets('cus_owner') == ([asset], False)
 
     updated = asset.model_copy(update={'revision': 2, 'display_name': 'Updated'})
@@ -560,7 +560,7 @@ def test_mongodb_asset_selection_is_atomic_and_snapshot_is_immutable() -> None:
     assert stored == [snapshot]
     assert has_more is False
     assert stored[0].details == VehicleAssetDetails(registration='SYN123')
-    assert repository.get_asset(asset.asset_id, 'cus_other') is None
+    assert repository.get_asset(asset.asset_id, 'cus_2b67e9d14a3c508f') is None
     asset_events = repository.list_audit_events_internal(
         AuditSubject(subject_type=AuditSubjectType.ASSET, subject_id=asset.asset_id)
     )

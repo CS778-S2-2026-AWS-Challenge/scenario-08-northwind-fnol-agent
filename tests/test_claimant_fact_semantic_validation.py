@@ -52,7 +52,7 @@ def test_temporal_non_answer_is_recorded_as_unavailable_not_as_a_confirmed_time(
         text='I do not know when.',
     )
     assert response.status_code == 200, response.text
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     # "I do not know when" is not a time. It is the claimant telling us they
     # cannot supply one yet: recorded as unavailable, never as a confirmed
@@ -96,7 +96,7 @@ def test_family_mismatched_field_is_not_confirmed_through_full_turn(
         text='My car was rear-ended at 1 Queen Street.',
     )
     assert response.status_code == 200, response.text
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     assert claim.incident_type == 'motor'
     assert claim.form['vehicle.damage_description'].status is FormStatus.CONFIRMED

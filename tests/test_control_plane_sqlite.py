@@ -259,6 +259,7 @@ def test_sqlite_operation_repository_survives_reopen(tmp_path: Path) -> None:
 
 def test_normal_app_uses_durable_control_plane_repositories(tmp_path: Path) -> None:
     settings = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.NORMAL,
         identity_db_path=str(tmp_path / 'customers.sqlite3'),

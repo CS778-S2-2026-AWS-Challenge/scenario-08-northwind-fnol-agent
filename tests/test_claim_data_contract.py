@@ -184,7 +184,7 @@ def test_motor_other_driver_rejects_blank_text_without_any_mutation(
     assert repository._motor_other_drivers == before_children
     assert repository._idempotency == before_idempotency
     assert repository.replay_realtime_events(None, limit=1000) == before_events
-    assert repository.find_idempotency('cus_demo', route, idempotency_key) is None
+    assert repository.find_idempotency('cus_8f41a2c90d7e463b', route, idempotency_key) is None
 
 
 @pytest.mark.parametrize(
@@ -206,7 +206,7 @@ def test_motor_other_driver_accepts_non_policy_detail_without_protection(
     )
     response = create_motor_other_driver(
         repository,
-        Principal(subject='cus_demo', actor_type='claimant'),
+        Principal(subject='cus_8f41a2c90d7e463b', actor_type='claimant'),
         claim['claim_id'],
         CreateMotorOtherDriverRequest.model_validate({field: value}),
         'motor-other-driver-non-policy-create',
@@ -248,7 +248,7 @@ def test_motor_other_driver_api_accepts_partial_non_policy_detail(
 
     assert response.status_code == 201, response.text
     assert response.json()['participant'][field] == value
-    stored = repository.get_motor_other_driver(claim['claim_id'], 'cus_demo')
+    stored = repository.get_motor_other_driver(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert getattr(stored, field) == value
 
@@ -279,7 +279,7 @@ def test_motor_other_driver_policy_protection_fails_before_any_mutation(
     with pytest.raises(ApiError) as caught:
         create_motor_other_driver(
             repository,
-            Principal(subject='cus_demo', actor_type='claimant'),
+            Principal(subject='cus_8f41a2c90d7e463b', actor_type='claimant'),
             claim['claim_id'],
             CreateMotorOtherDriverRequest(policy_number='SYNTHETIC-POLICY-123'),
             'motor-policy-failure',
@@ -323,7 +323,7 @@ def test_motor_other_driver_policy_is_encrypted_and_role_safe(
     assert created.status_code == 201, created.text
     replay = client.post(route, headers=headers, json={'policy_number': policy_number})
     assert replay.json() == created.json()
-    stored = repository.get_motor_other_driver(claim['claim_id'], 'cus_demo')
+    stored = repository.get_motor_other_driver(claim['claim_id'], 'cus_8f41a2c90d7e463b')
     assert stored is not None and stored.policy_number is not None
     assert stored.policy_number != policy_number
     assert protected_value_adapter_for('test').resolve(stored.policy_number) == policy_number
@@ -460,7 +460,7 @@ def _contents_item(timestamp: datetime) -> ContentsItem:
         status=FormStatus.PROPOSED,
         needed_for=NeededFor.CURRENT_ACTION,
         updated_at=timestamp,
-        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'),
     )
 
 
@@ -474,7 +474,9 @@ def test_confirmed_contents_item_rejects_unknown_required_facts() -> None:
             status=FormStatus.CONFIRMED,
             needed_for=NeededFor.CURRENT_ACTION,
             updated_at=timestamp,
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT, actor_id='cus_8f41a2c90d7e463b'
+            ),
         )
 
 
@@ -502,7 +504,7 @@ def test_contents_asset_upload_and_evidence_association_public_journey(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     caplog.set_level(logging.INFO, logger='backend.api.claims')
-    owner = _login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    owner = _login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     asset_response = client.post(
         '/api/v1/account/assets',
         headers={**owner, 'Idempotency-Key': 'contents-public-asset'},
@@ -751,7 +753,7 @@ def test_contents_evidence_link_rejects_cross_claim_and_stale_revision(
         expected_revision=target_claim.revision,
     )
     foreign = _evidence(source['claim_id'], 'evd_contents_other_claim', timestamp)
-    repository.save_evidence(foreign, 'cus_demo')
+    repository.save_evidence(foreign, 'cus_8f41a2c90d7e463b')
     route = (
         f'/api/v1/claims/{target["claim_id"]}/contents-items/{item.item_id}/evidence-associations'
     )
@@ -779,7 +781,12 @@ def test_contents_evidence_link_rejects_cross_claim_and_stale_revision(
     assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
     assert cross_claim.status_code == 404
     assert cross_claim.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
-    assert repository.list_contents_item_evidence_associations(target['claim_id'], 'cus_demo') == []
+    assert (
+        repository.list_contents_item_evidence_associations(
+            target['claim_id'], 'cus_8f41a2c90d7e463b'
+        )
+        == []
+    )
 
 
 def test_contents_evidence_association_list_uses_stable_item_scoped_pages(

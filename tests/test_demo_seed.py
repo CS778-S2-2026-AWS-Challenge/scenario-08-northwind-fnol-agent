@@ -1,6 +1,13 @@
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.app import create_app
+from backend.adapters.identity import FixtureIdentityRepository
+from backend.app import create_app as _create_app
 from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import (
@@ -9,7 +16,9 @@ from backend.repositories.scenario_loader import (
     load_evidence_path_fixtures,
     load_mvp_journey_scenarios,
     load_scenario,
+    seed_scenario,
 )
+from backend.services.business_seed import load_business_seed
 from backend.services.professional_reviews import (
     PROFESSIONAL_REVIEW_NEXT_STEP_STATUS,
     PROFESSIONAL_REVIEW_RESPONSIBLE_PARTY,
@@ -27,26 +36,79 @@ PATH_FIXTURE = (
 DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
-def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> None:
+def create_app(*args: Any, **kwargs: Any) -> FastAPI:
+    kwargs.setdefault(
+        'identity_repository',
+        FixtureIdentityRepository(load_business_seed(Path('config/business-seed.json'))),
+    )
+    app = _create_app(*args, **kwargs)
+    if app.state.business_seed is None:
+        app.state.business_seed = load_business_seed(Path('config/business-seed.json'))
+    return app
+
+
+@pytest.mark.parametrize('endpoint', ['seed-scenarios', 'seed-validation'])
+def test_demo_routes_use_only_the_configured_business_seed(tmp_path: Path, endpoint: str) -> None:
+    seed = load_business_seed(Path('config/business-seed.json'))
+    seed.prior_submitted_claims = []
+    seed.demo_cases = seed.demo_cases[:1]
+    case = seed.demo_cases[0]
+    case.case_id = 'case_a934dc28'
+    case.fields['incident.description'].value = 'The side mirror was damaged in a car park.'
+    selected_path = tmp_path / 'business.json'
+    selected_path.write_text(seed.model_dump_json(), encoding='utf-8')
+    settings = replace(DEVELOPER_SETTINGS, business_seed_path=str(selected_path))
+    repository = FixtureRepository()
+    with TestClient(create_app(settings, repository)) as client:
+        response = client.post(
+            f'/api/v1/workbench/demo/{endpoint}',
+            headers={**STAFF_AUTH, 'Idempotency-Key': 'selected-manifest'},
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()['scenario_ids'] == [case.case_id]
+    claims = repository.list_claims_internal()
+    assert len(claims) == 1
+    assert claims[0].customer_id == case.customer_id
+    assert claims[0].form['incident.description'].value == case.fields['incident.description'].value
+    assert claims[0].claim_id.startswith('clm_')
+    assert 'fixture' not in claims[0].claim_id
+
+
+@pytest.mark.parametrize('endpoint', ['seed-scenarios', 'seed-validation'])
+@pytest.mark.parametrize('configured', [False, True])
+def test_demo_seed_requires_an_explicit_business_seed(endpoint: str, configured: bool) -> None:
+    repository = FixtureRepository()
+    app = _create_app(DEVELOPER_SETTINGS, repository)
+    if configured:
+        seed = load_business_seed(Path('config/business-seed.json'))
+        seed.demo_cases = []
+        app.state.business_seed = seed
+    with TestClient(app) as client:
+        response = client.post(
+            f'/api/v1/workbench/demo/{endpoint}',
+            headers={**STAFF_AUTH, 'Idempotency-Key': 'missing-cases'},
+        )
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'DEMO_CLAIMANT_UNAVAILABLE'
+    assert ('no demo cases' if configured else 'business_seed_path') in response.json()['error'][
+        'message'
+    ]
+    assert repository.list_claims_internal() == []
+
+
+def test_regression_graphs_project_all_mvp_paths_and_created_routed_queue() -> None:
     scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json')
     linked = scenario.linked_records
     assert linked is not None
 
-    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
-        seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
-        assert seeded.status_code == 200
-        body = seeded.json()
-        assert body['status'] == 'seeded'
-        assert body['scenario_ids'] == [
-            'AT-01-clear-motor',
-            'AT-06-pending-evidence',
-            'AT-04-urgent',
-            'AT-02-coverage-ambiguity',
-            'AT-05-human-request',
-            'AT-10-controlled-assessor',
-        ]
-        assert len(body['claim_ids']) == 6
-
+    repository = FixtureRepository()
+    scenarios = [
+        *load_mvp_journey_scenarios(),
+        load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-10-controlled-assessor.json'),
+    ]
+    for graph in scenarios:
+        seed_scenario(repository, graph)
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         pending = client.get('/api/v1/workbench/claims?view=awaiting_evidence', headers=STAFF_AUTH)
         assert pending.status_code == 200
         pending_items = pending.json()['items']
@@ -61,7 +123,7 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
         listing = client.get('/api/v1/workbench/claims', headers=STAFF_AUTH)
         assert listing.status_code == 200
         items = {item['claim_id']: item for item in listing.json()['items']}
-        active_claim_ids = set(body['claim_ids']) - {'clm_fixture_at10'}
+        active_claim_ids = {graph.claim.claim_id for graph in scenarios} - {'clm_fixture_at10'}
         assert active_claim_ids <= set(items)
         assert 'clm_fixture_at10' not in items
         priorities = {
@@ -168,10 +230,10 @@ def test_seeded_mvp_paths_use_canonical_records_and_role_safe_evidence() -> None
         entry.scenario_id: entry for entry in load_evidence_path_fixtures(PATH_FIXTURE).entries
     }
 
-    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
-        seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
-        assert seeded.status_code == 200
-
+    repository = FixtureRepository()
+    for scenario in scenarios:
+        seed_scenario(repository, scenario)
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         for scenario in scenarios:
             claim_id = scenario.claim.claim_id
             staff = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
@@ -211,7 +273,9 @@ def test_seed_scenarios_rejects_non_staff_credentials() -> None:
 
 
 def test_seed_scenarios_does_not_change_a_nonempty_queue() -> None:
-    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
+    app = create_app(DEVELOPER_SETTINGS, FixtureRepository())
+    app.state.business_seed = load_business_seed(Path('config/business-seed.json'))
+    with TestClient(app) as client:
         assert (
             client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH).status_code
             == 200
@@ -233,10 +297,11 @@ def test_at02_next_step_matches_the_runtime_professional_review_contract() -> No
 
 
 def test_claimant_reads_seeded_professional_review_without_an_internal_handoff() -> None:
-    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
-        seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
-        assert seeded.status_code == 200
-
+    repository = FixtureRepository()
+    seed_scenario(
+        repository, load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json')
+    )
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.get('/api/v1/claims/clm_fixture_at02', headers=CLAIMANT_AUTH)
 
     assert response.status_code == 200

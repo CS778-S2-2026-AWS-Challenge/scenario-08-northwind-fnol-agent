@@ -15,9 +15,9 @@ Evidence record, does not define filenames, extensions, or a directory layout, a
 how a material class or condition maps onto a persisted backend field. Those are P8.2, P8.3, and the
 contract work named in section 9.
 
-**Status.** Specification only. Nothing described here exists yet. No asset has been produced, no
-loader reads a material directory, and `backend/services/demo_seed.py` currently reads
-`backend/demo_data/scenarios/` alone.
+**Status.** This specification describes required coverage, not completed journey evidence.
+Runtime seed cases come from the selected business-seed manifest; material assets use their
+separate catalogue. Legacy AT snapshots are test-only data under `tests/fixtures/scenarios/`.
 
 **Authority.** This document is normative for *what a demonstration must be able to show*. It is not
 normative for backend field names, enum values, scenario identifiers, or storage layout; where it

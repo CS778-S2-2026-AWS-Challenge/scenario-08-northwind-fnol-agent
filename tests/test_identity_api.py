@@ -11,6 +11,7 @@ from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRecord
 from backend.repositories.identity import DuplicateEmailConflict
 from backend.repositories.protocols import RevisionConflict
+from backend.services.business_seed import BUSINESS_SEED_PATH, load_business_seed
 
 
 def login(client: TestClient, email: str, password: str) -> dict[str, object]:
@@ -20,7 +21,7 @@ def login(client: TestClient, email: str, password: str) -> dict[str, object]:
 
 
 def test_login_account_update_and_logout_are_server_authenticated(client: TestClient) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     headers = {'Authorization': f'Bearer {session["access_token"]}'}
 
     current = client.get('/api/v1/auth/session', headers=headers)
@@ -45,7 +46,7 @@ def test_login_account_update_and_logout_are_server_authenticated(client: TestCl
     after_logout = client.get('/api/v1/account', headers=headers)
 
     assert current.status_code == 200
-    assert current.json()['customer_id'] == 'cus_demo'
+    assert current.json()['customer_id'] == 'cus_8f41a2c90d7e463b'
     assert account.json()['development_identity'] is True
     assert account.json()['profile']['email'].endswith('.invalid')
     assert profile.json()['profile']['display_name'] == 'Updated Demo Claimant'
@@ -61,7 +62,7 @@ def test_login_account_update_and_logout_are_server_authenticated(client: TestCl
 def test_login_rejects_invalid_credentials_without_revealing_account(client: TestClient) -> None:
     response = client.post(
         '/api/v1/auth/sessions',
-        json={'email': 'claimant.one@example.invalid', 'password': 'wrong-password'},
+        json={'email': 'maya.chen@example.invalid', 'password': 'wrong-password'},
     )
 
     assert response.status_code == 401
@@ -88,7 +89,7 @@ def test_registration_creates_authenticated_account_and_rejects_duplicate_email(
 
 
 def test_claim_capabilities_are_available_to_authenticated_claimants(client: TestClient) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     response = client.get(
         '/api/v1/claims/capabilities',
         headers={'Authorization': f'Bearer {session["access_token"]}'},
@@ -103,6 +104,7 @@ def test_claim_capabilities_exposes_configured_model_profile() -> None:
     settings = Settings(
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
+        business_seed_path=str(BUSINESS_SEED_PATH),
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_profile_id='openrouter-gpt-4o',
         model_provider='openrouter',
@@ -113,7 +115,7 @@ def test_claim_capabilities_exposes_configured_model_profile() -> None:
         model_supports_tools=True,
     )
     with TestClient(create_app(settings)) as client:
-        session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         response = client.get(
             '/api/v1/claims/capabilities',
             headers={'Authorization': f'Bearer {session["access_token"]}'},
@@ -153,8 +155,8 @@ def test_fixed_compatibility_token_cannot_bypass_account_session_lifecycle(
 
 
 def test_authenticated_claimant_cannot_select_another_customer_identity(client: TestClient) -> None:
-    first = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-    second = login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    first = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
+    second = login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
     first_headers = {
         'Authorization': f'Bearer {first["access_token"]}',
         'Idempotency-Key': 'first-claimant-claim',
@@ -167,7 +169,7 @@ def test_authenticated_claimant_cannot_select_another_customer_identity(client: 
         json={
             'channel': 'web_agent',
             'locale': 'en-NZ',
-            'customer_id': 'cus_other',
+            'customer_id': 'cus_2b67e9d14a3c508f',
         },
     )
     assert created.status_code == 422
@@ -188,7 +190,7 @@ def test_expired_session_is_not_authenticated() -> None:
     identities.save_session(
         ClaimantAuthSessionRecord(
             token_hash='expired-token-hash',
-            customer_id='cus_demo',
+            customer_id='cus_8f41a2c90d7e463b',
             created_at=datetime.now(UTC) - timedelta(hours=2),
             expires_at=datetime.now(UTC) - timedelta(hours=1),
         )
@@ -197,26 +199,52 @@ def test_expired_session_is_not_authenticated() -> None:
     assert identities.get_session('expired-token-hash') is None
 
 
-def test_synthetic_login_fails_closed_outside_development_and_test() -> None:
-    with TestClient(create_app(Settings(environment='production'))) as production_client:
+def test_production_identity_does_not_implicitly_load_synthetic_accounts(tmp_path: Path) -> None:
+    app = create_app(
+        Settings(
+            environment='production',
+            identity_db_path=str(tmp_path / 'production-identities.sqlite'),
+            business_seed_path='',
+        )
+    )
+    assert app.state.identity_repository.list_accounts() == []
+    with TestClient(app) as production_client:
         response = production_client.post(
             '/api/v1/auth/sessions',
-            json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+            json={'email': 'maya.chen@example.invalid', 'password': 'northwind-demo-one'},
+        )
+        bearer_response = production_client.get(
+            '/api/v1/claims', headers={'Authorization': 'Bearer synthetic-claimant'}
         )
 
     assert response.status_code == 401
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+    assert bearer_response.status_code == 401
 
 
-def test_synthetic_login_requires_explicit_developer_identity_mode() -> None:
-    with TestClient(create_app(Settings(environment='development'))) as normal_mode_client:
+def test_normal_identity_requires_persisted_account_and_rejects_developer_token(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        Settings(
+            environment='development',
+            identity_db_path=str(tmp_path / 'normal-identities.sqlite'),
+            business_seed_path='',
+        )
+    )
+    assert app.state.identity_repository.list_accounts() == []
+    with TestClient(app) as normal_mode_client:
         response = normal_mode_client.post(
             '/api/v1/auth/sessions',
-            json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+            json={'email': 'maya.chen@example.invalid', 'password': 'northwind-demo-one'},
+        )
+        bearer_response = normal_mode_client.get(
+            '/api/v1/claims', headers={'Authorization': 'Bearer synthetic-claimant'}
         )
 
     assert response.status_code == 401
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+    assert bearer_response.status_code == 401
 
 
 @pytest.mark.parametrize('repository_kind', ['fixture', 'sqlite'])
@@ -224,20 +252,20 @@ def test_profile_rejects_blank_normalized_text_without_advancing_revision(
     repository_kind: str, tmp_path: Path
 ) -> None:
     identity_repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'profile.sqlite'))
     )
     if repository_kind == 'sqlite':
         identity_repository.create_account(
-            'claimant.one@example.invalid', 'northwind-demo-one', 'Demo Claimant One'
+            'maya.chen@example.invalid', 'northwind-demo-one', 'Maya Chen'
         )
     app = create_app(
         Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         identity_repository=identity_repository,
     )
     with TestClient(app) as client:
-        session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
         headers = {'Authorization': f'Bearer {session["access_token"]}'}
         before = client.get('/api/v1/account', headers=headers).json()
         responses = [
@@ -258,14 +286,14 @@ def test_profile_rejects_blank_normalized_text_without_advancing_revision(
 
 
 def test_profile_rejects_an_email_owned_by_another_claimant(client: TestClient) -> None:
-    login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
-    second = login(client, 'claimant.two@example.invalid', 'northwind-demo-two')
+    login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
+    second = login(client, 'oliver.reed@example.invalid', 'northwind-demo-two')
     authorization = {'Authorization': f'Bearer {second["access_token"]}'}
     revision = client.get('/api/v1/account', headers=authorization).json()['revision']
     response = client.patch(
         '/api/v1/account/profile',
         headers={**authorization, 'If-Match': str(revision)},
-        json={'email': 'claimant.one@example.invalid'},
+        json={'email': 'maya.chen@example.invalid'},
     )
 
     assert response.status_code == 409
@@ -273,7 +301,7 @@ def test_profile_rejects_an_email_owned_by_another_claimant(client: TestClient) 
     account = client.get(
         '/api/v1/account', headers={'Authorization': f'Bearer {second["access_token"]}'}
     )
-    assert account.json()['profile']['email'] == 'claimant.two@example.invalid'
+    assert account.json()['profile']['email'] == 'oliver.reed@example.invalid'
 
 
 @pytest.mark.parametrize(
@@ -288,7 +316,7 @@ def test_profile_rejects_an_email_owned_by_another_claimant(client: TestClient) 
 def test_profile_rejects_unsupported_email_shapes_without_advancing_revision(
     client: TestClient, email: str
 ) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     headers = {'Authorization': f'Bearer {session["access_token"]}'}
     before = client.get('/api/v1/account', headers=headers).json()
 
@@ -301,18 +329,18 @@ def test_profile_rejects_unsupported_email_shapes_without_advancing_revision(
 
 
 def test_profile_accepts_unchanged_email_after_normalization(client: TestClient) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     headers = {'Authorization': f'Bearer {session["access_token"]}'}
     before = client.get('/api/v1/account', headers=headers).json()
 
     response = client.patch(
         '/api/v1/account/profile',
         headers={**headers, 'If-Match': str(before['revision'])},
-        json={'email': ' CLAIMANT.ONE@EXAMPLE.INVALID '},
+        json={'email': ' MAYA.CHEN@EXAMPLE.INVALID '},
     )
 
     assert response.status_code == 200
-    assert response.json()['profile']['email'] == 'claimant.one@example.invalid'
+    assert response.json()['profile']['email'] == 'maya.chen@example.invalid'
     assert response.json()['revision'] == before['revision'] + 1
 
 
@@ -321,13 +349,13 @@ def test_profile_maps_repository_duplicate_email_conflict_to_resource_conflict()
         def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
             raise DuplicateEmailConflict('reserved@example.invalid')
 
-    repository = ConflictingIdentityRepository()
+    repository = ConflictingIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
     app = create_app(
         Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         identity_repository=repository,
     )
     with TestClient(app) as test_client:
-        session = login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        session = login(test_client, 'maya.chen@example.invalid', 'northwind-demo-one')
         authorization = {'Authorization': f'Bearer {session["access_token"]}'}
         revision = test_client.get('/api/v1/account', headers=authorization).json()['revision']
         response = test_client.patch(
@@ -341,7 +369,7 @@ def test_profile_maps_repository_duplicate_email_conflict_to_resource_conflict()
 
 
 def test_preferences_update_uses_the_projected_account_revision(client: TestClient) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     authorization = {'Authorization': f'Bearer {session["access_token"]}'}
     before = client.get('/api/v1/account', headers=authorization).json()
 
@@ -359,7 +387,7 @@ def test_preferences_update_uses_the_projected_account_revision(client: TestClie
 def test_claim_auto_fill_preferences_default_off_and_require_current_revision(
     client: TestClient,
 ) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     authorization = {'Authorization': f'Bearer {session["access_token"]}'}
     before = client.get('/api/v1/account', headers=authorization).json()
     expected_default = {
@@ -410,13 +438,13 @@ def test_claim_auto_fill_preferences_map_repository_revision_race() -> None:
         def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
             raise RevisionConflict(expected_revision + 1)
 
-    repository = ConflictingIdentityRepository()
+    repository = ConflictingIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
     app = create_app(
         Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         identity_repository=repository,
     )
     with TestClient(app) as test_client:
-        session = login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        session = login(test_client, 'maya.chen@example.invalid', 'northwind-demo-one')
         authorization = {'Authorization': f'Bearer {session["access_token"]}'}
         before = test_client.get('/api/v1/account', headers=authorization).json()
         response = test_client.patch(
@@ -435,7 +463,7 @@ def test_claim_auto_fill_preferences_map_repository_revision_race() -> None:
 def test_preferences_rejects_a_stale_revision_without_changing_the_account(
     client: TestClient,
 ) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     authorization = {'Authorization': f'Bearer {session["access_token"]}'}
     before = client.get('/api/v1/account', headers=authorization).json()
 
@@ -458,13 +486,13 @@ def test_preferences_maps_repository_revision_conflict_without_changing_the_acco
         def save_account(self, account: CustomerAccountRecord, expected_revision: int) -> None:
             raise RevisionConflict(expected_revision + 1)
 
-    repository = ConflictingIdentityRepository()
+    repository = ConflictingIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
     app = create_app(
         Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         identity_repository=repository,
     )
     with TestClient(app) as test_client:
-        session = login(test_client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        session = login(test_client, 'maya.chen@example.invalid', 'northwind-demo-one')
         authorization = {'Authorization': f'Bearer {session["access_token"]}'}
         before = test_client.get('/api/v1/account', headers=authorization).json()
         response = test_client.patch(
@@ -482,7 +510,7 @@ def test_preferences_maps_repository_revision_conflict_without_changing_the_acco
 
 
 def test_profile_and_preference_changes_require_the_edited_revision(client: TestClient) -> None:
-    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    session = login(client, 'maya.chen@example.invalid', 'northwind-demo-one')
     headers = {'Authorization': f'Bearer {session["access_token"]}'}
 
     profile = client.patch('/api/v1/account/profile', headers=headers, json={'phone': '021 111'})

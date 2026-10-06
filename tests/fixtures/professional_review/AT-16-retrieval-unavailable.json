@@ -3,7 +3,7 @@
   "description": "A required provider is temporarily unavailable, so no retrieval evidence exists and the claim moves to professional review carrying the limitation.",
   "claim": {
     "claim_id": "clm_fixture_at16",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 2,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -29,8 +29,7 @@
     {
       "session_id": "ses_fixture_at16",
       "claim_id": "clm_fixture_at16",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "A required retrieval provider is unavailable and the limitation is recorded.",
       "context_revision": 2,

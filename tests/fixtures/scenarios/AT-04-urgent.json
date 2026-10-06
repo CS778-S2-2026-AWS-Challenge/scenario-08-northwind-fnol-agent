@@ -4,7 +4,7 @@
   "business_path": "urgent",
   "claim": {
     "claim_id": "clm_fixture_at04",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 3,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -28,7 +28,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-13T09:00:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.location": {
         "value": "Northern Motorway, near Exit 12.",
@@ -38,7 +38,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-13T09:00:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "vehicle.drivable": {
         "value": null,
@@ -79,8 +79,7 @@
     {
       "session_id": "ses_fixture_at04",
       "claim_id": "clm_fixture_at04",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "A motorway collision with a trapped, injured passenger; urgent support requested.",
       "unresolved_questions": ["confirm:vehicle.drivable"],
@@ -155,7 +154,7 @@
             "needed_for": "current_action",
             "confidence": 1.0,
             "updated_at": "2026-08-13T09:00:00Z",
-            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+            "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
           },
           "incident.location": {
             "value": "Northern Motorway, near Exit 12.",
@@ -165,7 +164,7 @@
             "needed_for": "current_action",
             "confidence": 1.0,
             "updated_at": "2026-08-13T09:00:00Z",
-            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+            "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
           },
           "vehicle.drivable": {
             "value": null,

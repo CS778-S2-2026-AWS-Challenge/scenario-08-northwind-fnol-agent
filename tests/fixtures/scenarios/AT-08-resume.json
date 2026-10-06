@@ -3,7 +3,7 @@
   "description": "Synthetic claim resumed in a second interaction session ten days after confirmed facts and a future-evidence promise were saved.",
   "claim": {
     "claim_id": "clm_fixture_at08",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 7,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -27,7 +27,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-02T02:15:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.location": {
         "value": "Newmarket, Auckland",
@@ -37,7 +37,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-02T02:15:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       }
     },
     "evidence_summary": {"received": 0, "pending": 1, "needs_attention": 0},
@@ -58,8 +58,7 @@
     {
       "session_id": "ses_fixture_at08_original",
       "claim_id": "clm_fixture_at08",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "paused",
       "summary": "Rear-end collision in Newmarket; incident and location are confirmed.",
       "unresolved_questions": ["How should Northwind request the police report when it is ready?"],
@@ -73,8 +72,7 @@
     {
       "session_id": "ses_fixture_at08_resume",
       "claim_id": "clm_fixture_at08",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "Rear-end collision in Newmarket; incident and location are confirmed.",
       "unresolved_questions": ["How should Northwind request the police report when it is ready?"],

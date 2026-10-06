@@ -21,11 +21,96 @@ from backend.domain.identity import ClaimantAuthSessionRecord, CustomerAccountRe
 from backend.domain.staff_identity import StaffAuthSessionRecord
 from backend.repositories.identity import DuplicateEmailConflict
 from backend.repositories.protocols import RevisionConflict
+from backend.services.business_seed import (
+    BUSINESS_SEED_PATH,
+    load_business_seed,
+    provision_business_identities,
+)
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'sqlite'])
+def test_business_seed_identity_preserves_existing_profile(adapter: str, tmp_path: Path) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if adapter == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'claimant.sqlite'))
+    )
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    customer = seed.customers[0]
+    first = repository.ensure_seed_account(
+        customer.customer_id, customer.email, customer.synthetic_password, customer.display_name
+    )
+    changed = replace(
+        first,
+        phone='021 555 0150',
+        email='edited-seed@example.invalid',
+        revision=first.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    repository.save_account(changed, first.revision)
+    again = repository.ensure_seed_account(
+        customer.customer_id, customer.email, 'different-seed-value', customer.display_name
+    )
+    assert again.revision == changed.revision
+    assert again.phone == '021 555 0150'
+    assert again.email == changed.email
+    assert repository.authenticate(changed.email, customer.synthetic_password) is not None
+    assert repository.authenticate(changed.email, 'different-seed-value') is None
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'sqlite'])
+@pytest.mark.parametrize('existing_seed_id', [False, True])
+def test_business_seed_identity_rejects_email_owned_by_another_customer(
+    adapter: str, existing_seed_id: bool, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if adapter == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'claimant.sqlite'))
+    )
+    existing = repository.create_account('already@example.invalid', 'secret', 'Existing')
+    assert existing is not None
+    if existing_seed_id:
+        repository.ensure_seed_account(
+            'cus_seed_conflict', 'original@example.invalid', 'seed-only', 'Seeded'
+        )
+    with pytest.raises(ValueError, match='email belongs to another customer'):
+        repository.ensure_seed_account(
+            'cus_seed_conflict', 'already@example.invalid', 'seed-only', 'Seeded'
+        )
+
+
+@pytest.mark.parametrize('adapter', ['fixture', 'sqlite'])
+def test_seed_preflight_preserves_legacy_account_and_session_on_email_collision(
+    adapter: str, tmp_path: Path
+) -> None:
+    repository = (
+        FixtureIdentityRepository()
+        if adapter == 'fixture'
+        else SQLiteIdentityRepository(str(tmp_path / 'existing-identity.sqlite'))
+    )
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    customer = seed.customers[-1]
+    existing = repository.create_account(customer.email, 'previous-password', 'Existing account')
+    assert existing is not None
+    session = ClaimantAuthSessionRecord(
+        token_hash='legacy-session-token-hash',
+        customer_id=existing.customer_id,
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+    )
+    repository.save_session(session)
+    with pytest.raises(ValueError, match='fresh NORTHWIND_IDENTITY_DB_PATH'):
+        provision_business_identities(repository, seed)
+    assert repository.list_accounts() == [existing]
+    assert repository.get_session(session.token_hash) == session
+    assert repository.authenticate(customer.email, 'previous-password') == existing
+    assert repository.authenticate(customer.email, customer.synthetic_password) is None
 
 
 def test_fixture_claimant_identity_covers_account_and_session_lifecycle() -> None:
-    repository = FixtureIdentityRepository()
-    account = repository.authenticate(' CLAIMANT.ONE@EXAMPLE.INVALID ', 'northwind-demo-one')
+    repository = FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
+    account = repository.authenticate(' MAYA.CHEN@EXAMPLE.INVALID ', 'northwind-demo-one')
     assert account is not None
     assert repository.authenticate(account.email, 'wrong-password') is None
     assert repository.get_account(account.customer_id) is not None
@@ -362,7 +447,7 @@ def test_claimant_identity_save_separates_profile_invariants_from_revision_confl
     repository_kind: str, tmp_path: Path
 ) -> None:
     repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'profile-boundary.sqlite'))
     )
@@ -397,7 +482,7 @@ def test_claimant_identity_save_rejects_duplicate_email_without_partial_write(
     repository_kind: str, tmp_path: Path
 ) -> None:
     repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'duplicate-email.sqlite'))
     )
@@ -426,7 +511,7 @@ def test_claimant_identity_save_prioritises_revision_conflict_over_duplicate_ema
     repository_kind: str, tmp_path: Path
 ) -> None:
     repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'stale-email.sqlite'))
     )
@@ -456,7 +541,7 @@ def test_claimant_identity_save_serialises_competing_email_updates(
     repository_kind: str, tmp_path: Path
 ) -> None:
     repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'racing-email.sqlite'))
     )
@@ -498,12 +583,12 @@ def test_claimant_identity_revision_guard_blocks_concurrent_account_write(
     repository_kind: str, tmp_path: Path
 ) -> None:
     repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'revision-guard.sqlite'))
     )
     account = (
-        repository.get_account('cus_demo')
+        repository.get_account('cus_8f41a2c90d7e463b')
         if repository_kind == 'fixture'
         else repository.create_account('guard@example.invalid', 'secret', 'Guarded')
     )
@@ -554,12 +639,12 @@ def test_claimant_identity_revision_guard_rejects_prior_profile_write(
     repository_kind: str, tmp_path: Path
 ) -> None:
     repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'revision-guard-stale.sqlite'))
     )
     account = (
-        repository.get_account('cus_demo')
+        repository.get_account('cus_8f41a2c90d7e463b')
         if repository_kind == 'fixture'
         else repository.create_account('stale-guard@example.invalid', 'secret', 'Guarded')
     )
@@ -586,12 +671,12 @@ def test_claimant_identity_revision_guard_releases_after_exception(
     repository_kind: str, tmp_path: Path
 ) -> None:
     repository = (
-        FixtureIdentityRepository()
+        FixtureIdentityRepository(load_business_seed(BUSINESS_SEED_PATH))
         if repository_kind == 'fixture'
         else SQLiteIdentityRepository(str(tmp_path / 'revision-guard-release.sqlite'))
     )
     account = (
-        repository.get_account('cus_demo')
+        repository.get_account('cus_8f41a2c90d7e463b')
         if repository_kind == 'fixture'
         else repository.create_account('release-guard@example.invalid', 'secret', 'Guarded')
     )

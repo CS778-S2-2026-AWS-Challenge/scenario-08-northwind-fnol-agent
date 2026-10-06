@@ -59,7 +59,13 @@ def _identity_app(settings: Settings) -> FastAPI:
 
 
 def test_developer_profile_metadata_is_server_derived_and_audit_capable() -> None:
-    app = _identity_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+    app = _identity_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
+    )
 
     with TestClient(app) as client:
         response = client.get(
@@ -74,7 +80,7 @@ def test_developer_profile_metadata_is_server_derived_and_audit_capable() -> Non
 
     assert response.status_code == 200
     assert response.json() == {
-        'subject': 'cus_demo',
+        'subject': 'cus_8f41a2c90d7e463b',
         'actor_type': 'claimant',
         'scopes': ['claim:read:self', 'claim:write:self'],
         'auth_source': 'developer:synthetic_claimant',
@@ -83,13 +89,19 @@ def test_developer_profile_metadata_is_server_derived_and_audit_capable() -> Non
 
 
 def test_opaque_claimant_session_retains_server_verified_scope_metadata() -> None:
-    app = _identity_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+    app = _identity_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
+    )
 
     with TestClient(app) as client:
         login_response = client.post(
             '/api/v1/auth/sessions',
             json={
-                'email': 'claimant.one@example.invalid',
+                'email': 'maya.chen@example.invalid',
                 'password': 'northwind-demo-one',
             },
         )
@@ -102,7 +114,7 @@ def test_opaque_claimant_session_retains_server_verified_scope_metadata() -> Non
     assert login_response.status_code == 201
     assert response.status_code == 200
     assert response.json() == {
-        'subject': 'cus_demo',
+        'subject': 'cus_8f41a2c90d7e463b',
         'actor_type': 'claimant',
         'scopes': ['claim:read:self', 'claim:write:self'],
         'auth_source': 'developer:claimant_session',
@@ -111,13 +123,19 @@ def test_opaque_claimant_session_retains_server_verified_scope_metadata() -> Non
 
 
 def test_opaque_claimant_session_is_forbidden_at_staff_boundary() -> None:
-    app = _identity_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+    app = _identity_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
+    )
 
     with TestClient(app) as client:
         login_response = client.post(
             '/api/v1/auth/sessions',
             json={
-                'email': 'claimant.one@example.invalid',
+                'email': 'maya.chen@example.invalid',
                 'password': 'northwind-demo-one',
             },
         )
@@ -132,13 +150,19 @@ def test_opaque_claimant_session_is_forbidden_at_staff_boundary() -> None:
 
 
 def test_all_registered_developer_profiles_have_fixed_audit_metadata() -> None:
-    app = _identity_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+    app = _identity_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
+    )
     cases = (
         (
             '/__identity_test/claimant',
             'synthetic-claimant',
             {
-                'subject': 'cus_demo',
+                'subject': 'cus_8f41a2c90d7e463b',
                 'actor_type': 'claimant',
                 'scopes': ['claim:read:self', 'claim:write:self'],
                 'auth_source': 'developer:synthetic_claimant',
@@ -188,7 +212,13 @@ def test_all_registered_developer_profiles_have_fixed_audit_metadata() -> None:
 
 
 def test_administrator_profile_is_distinct_without_creating_an_admin_api() -> None:
-    app = _identity_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+    app = _identity_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
+    )
 
     with TestClient(app) as client:
         administrator = client.get(
@@ -220,7 +250,9 @@ def test_administrator_profile_is_distinct_without_creating_an_admin_api() -> No
 
 
 def test_normal_mode_does_not_accept_repository_synthetic_profiles() -> None:
-    app = _identity_app(Settings(environment='development'))
+    app = _identity_app(
+        Settings(business_seed_path='config/business-seed.json', environment='development')
+    )
     cases = (
         ('/__identity_test/claimant', 'synthetic-claimant'),
         ('/__identity_test/staff', 'synthetic-staff'),
@@ -237,7 +269,9 @@ def test_normal_mode_does_not_accept_repository_synthetic_profiles() -> None:
 
 
 def test_client_supplied_developer_flags_cannot_enable_synthetic_identity() -> None:
-    app = _identity_app(Settings(environment='development'))
+    app = _identity_app(
+        Settings(business_seed_path='config/business-seed.json', environment='development')
+    )
 
     with TestClient(app) as client:
         response = client.get(
@@ -254,7 +288,13 @@ def test_client_supplied_developer_flags_cannot_enable_synthetic_identity() -> N
 
 
 def test_no_synthetic_agent_service_profile_is_registered() -> None:
-    app = _identity_app(Settings(environment='test', identity_mode=IdentityMode.DEVELOPER))
+    app = _identity_app(
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
+    )
 
     with TestClient(app) as client:
         response = client.get(

@@ -24,7 +24,7 @@ class CheckpointAgent:
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         self.calls += 1
         messages = self.repository.list_messages(
-            context.claim.claim_id, context.session_id, 'cus_demo'
+            context.claim.claim_id, context.session_id, 'cus_8f41a2c90d7e463b'
         )
         assert any(item.message_id == context.trigger_message_id for item in messages)
         if self.fail:
@@ -87,12 +87,14 @@ def test_provider_failure_is_saved_before_call_and_explicit_retry_reuses_inbound
     assert retry.json()['claim_revision'] == 3
     inbound = [
         item
-        for item in repository.list_messages(claim_id, session_id, 'cus_demo')
+        for item in repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
         if item.actor is ActorType.CLAIMANT
     ]
     assert len(inbound) == 1
     assert inbound[0].message_id == body['claimant_message']['message_id']
-    checkpoint = repository.find_message_checkpoint(claim_id, inbound[0].message_id, 'cus_demo')
+    checkpoint = repository.find_message_checkpoint(
+        claim_id, inbound[0].message_id, 'cus_8f41a2c90d7e463b'
+    )
     assert checkpoint is not None
     assert checkpoint.revision_before_message == 1
     assert agent.calls == 2
@@ -129,7 +131,7 @@ def test_provider_result_cannot_overwrite_concurrent_mutation(
     claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']
 
     def concurrent_update(context: AgentTurnContext) -> None:
-        current = repository.get_claim(claim_id, 'cus_demo')
+        current = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
         assert current is not None
         repository.save_claim(
             current.model_copy(update={'revision': current.revision + 1}),
@@ -150,7 +152,7 @@ def test_provider_result_cannot_overwrite_concurrent_mutation(
     assert len(recovery_calls) == 1
     assert recovery_calls[0]['expected_revision'] == 2
     assert recovery_calls[0]['current_revision'] == 3
-    assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 1
+    assert len(repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')) == 1
     replay = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={**auth_headers, 'Idempotency-Key': 'concurrent-turn', 'If-Match': '1'},
@@ -176,7 +178,7 @@ def test_provider_result_cannot_overwrite_concurrent_mutation(
         len(
             [
                 item
-                for item in repository.list_messages(claim_id, session_id, 'cus_demo')
+                for item in repository.list_messages(claim_id, session_id, 'cus_8f41a2c90d7e463b')
                 if item.actor is ActorType.CLAIMANT
             ]
         )
@@ -206,7 +208,7 @@ def test_retry_does_not_revive_confirmation_after_an_intervening_mutation(
         json={},
     ).json()
     claim_id, session_id = created['claim']['claim_id'], created['session']['session_id']
-    claim = repository.get_claim(claim_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None
     timestamp = datetime.now(UTC)
     fields = {
@@ -266,7 +268,7 @@ def test_retry_does_not_revive_confirmation_after_an_intervening_mutation(
         json=payload,
     )
     assert first.status_code == 200, first.text
-    current = repository.get_claim(claim_id, 'cus_demo')
+    current = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert current is not None
     repository.save_claim(current.model_copy(update={'revision': 4}), expected_revision=3)
     agent.fail = False
@@ -276,7 +278,7 @@ def test_retry_does_not_revive_confirmation_after_an_intervening_mutation(
         json=payload,
     )
     assert retry.status_code == 200, retry.text
-    resumed = repository.get_claim(claim_id, 'cus_demo')
+    resumed = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
     assert resumed is not None
     assert resumed.form['incident.location'].status is FormStatus.PROPOSED
 
@@ -332,7 +334,7 @@ def test_confirmation_failure_retry_uses_original_checkpoint_without_duplicate_i
     assert failed.json()['agent_message'] is None
     assert failed.json()['claim_revision'] == original_revision + 1
     saved = repository.find_message_checkpoint(
-        journey.claim_id, failed.json()['claimant_message']['message_id'], 'cus_demo'
+        journey.claim_id, failed.json()['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
     )
     assert saved is not None and saved.revision_before_message == original_revision
     assert saved.confirmation_checkpoint is not None
@@ -347,7 +349,7 @@ def test_confirmation_failure_retry_uses_original_checkpoint_without_duplicate_i
     )
     assert retry.status_code == 200, retry.text
     assert retry.json()['dynamic_form']['requirements']['ready'] is True
-    claim = repository.get_claim(journey.claim_id, 'cus_demo')
+    claim = repository.get_claim(journey.claim_id, 'cus_8f41a2c90d7e463b')
     assert claim is not None and all(
         field.status.value == 'confirmed' for field in claim.form.values()
     )
@@ -356,7 +358,7 @@ def test_confirmation_failure_retry_uses_original_checkpoint_without_duplicate_i
             [
                 message
                 for message in repository.list_messages(
-                    journey.claim_id, journey.session_id, 'cus_demo'
+                    journey.claim_id, journey.session_id, 'cus_8f41a2c90d7e463b'
                 )
                 if message.client_message_id == 'confirm-same-inbound'
             ]

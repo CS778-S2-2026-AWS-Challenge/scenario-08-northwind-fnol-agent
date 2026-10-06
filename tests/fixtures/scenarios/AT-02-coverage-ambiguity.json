@@ -4,7 +4,7 @@
   "business_path": "professional_review",
   "claim": {
     "claim_id": "clm_fixture_at02",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 4,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -32,7 +32,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         }
       },
       "incident.cause": {
@@ -93,7 +93,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "exact"
       },
@@ -109,7 +109,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "exact"
       },
@@ -125,7 +125,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "approximate"
       },
@@ -141,7 +141,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "exact"
       },
@@ -157,7 +157,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "exact"
       },
@@ -176,7 +176,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "exact"
       },
@@ -192,7 +192,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "exact"
       },
@@ -208,7 +208,7 @@
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
           "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_id": "cus_8f41a2c90d7e463b"
         },
         "precision": "exact"
       }
@@ -235,8 +235,7 @@
     {
       "session_id": "ses_fixture_at02",
       "claim_id": "clm_fixture_at02",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "The claimant confirmed water damage to the ground floor after heavy rain; the cause of ingress is disputed.",
       "unresolved_questions": [
@@ -513,7 +512,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             }
           },
           "incident.cause": {
@@ -574,7 +573,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "exact"
           },
@@ -590,7 +589,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "exact"
           },
@@ -606,7 +605,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "approximate"
           },
@@ -622,7 +621,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "exact"
           },
@@ -638,7 +637,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "exact"
           },
@@ -657,7 +656,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "exact"
           },
@@ -673,7 +672,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "exact"
           },
@@ -689,7 +688,7 @@
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
               "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_id": "cus_8f41a2c90d7e463b"
             },
             "precision": "exact"
           }
@@ -731,7 +730,7 @@
     }
   ],
   "linked_records": {
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "claim_id": "clm_fixture_at02",
     "policy_retrieval_id": "ret_fixture_at02_policy",
     "claim_history_retrieval_id": "ret_fixture_at02_history",

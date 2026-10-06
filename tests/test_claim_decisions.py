@@ -39,7 +39,7 @@ from backend.services.staff_actions import decide_claim
 def _created_claim(
     claim_id: str = 'clm_decision',
     *,
-    customer_id: str = 'cus_demo',
+    customer_id: str = 'cus_8f41a2c90d7e463b',
     owner_id: str = 'stf_demo',
     workflow_state: WorkflowState = WorkflowState.CREATED,
 ) -> tuple[WorkingClaim, SessionRecord]:
@@ -101,7 +101,7 @@ def _store_created_claim(
     repository: PersistenceRepository,
     claim_id: str = 'clm_decision',
     *,
-    customer_id: str = 'cus_demo',
+    customer_id: str = 'cus_8f41a2c90d7e463b',
     owner_id: str = 'stf_demo',
     workflow_state: WorkflowState = WorkflowState.CREATED,
 ) -> WorkingClaim:

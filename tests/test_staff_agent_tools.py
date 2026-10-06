@@ -734,7 +734,11 @@ def test_dispatch_rejects_handler_fields_outside_registered_output_schema() -> N
 def test_synthetic_credentials_enforce_staff_tool_role_boundary() -> None:
     repository = _repository()
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository,
         ControlledAgent(),
     )

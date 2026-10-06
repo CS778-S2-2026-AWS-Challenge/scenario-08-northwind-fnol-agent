@@ -55,7 +55,11 @@ def test_replay_refreshes_current_state_without_reexecuting_any_turn_effect(
         spies.append(spy)
     gateway = ObservingGatewayFailure(repository, ModelGatewayErrorCode.TIMEOUT)
     app = create_app(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        ),
         repository=repository,
         agent_turn_provider=gateway,
     )
@@ -90,11 +94,13 @@ def test_replay_refreshes_current_state_without_reexecuting_any_turn_effect(
         assert response.status_code == 200, response.text
         success = response.json()
         assert success['agent_message']['recovery'] is None
-        old_failure = repository.find_idempotency('cus_demo', url, 'zz-original-failed')
-        old_success = repository.find_idempotency('cus_demo', url, 'aa-successful-retry')
+        old_failure = repository.find_idempotency('cus_8f41a2c90d7e463b', url, 'zz-original-failed')
+        old_success = repository.find_idempotency(
+            'cus_8f41a2c90d7e463b', url, 'aa-successful-retry'
+        )
         assert old_failure is not None and old_success is not None
         original_checkpoint = repository.find_message_checkpoint(
-            claim_id, failed['claimant_message']['message_id'], 'cus_demo'
+            claim_id, failed['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
         )
         assert original_checkpoint is not None and original_checkpoint.revision_before_message == 1
         changed = client.patch(
@@ -128,6 +134,12 @@ def test_replay_refreshes_current_state_without_reexecuting_any_turn_effect(
             assert replayed['current_claim']['form']['incident.location']['value'] == 'Queen Street'
         assert gateway.calls == model_calls
         assert [spy.call_count for spy in spies] == counts
-        assert repository.find_idempotency('cus_demo', url, 'zz-original-failed') == old_failure
-        assert repository.find_idempotency('cus_demo', url, 'aa-successful-retry') == old_success
-        assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+        assert (
+            repository.find_idempotency('cus_8f41a2c90d7e463b', url, 'zz-original-failed')
+            == old_failure
+        )
+        assert (
+            repository.find_idempotency('cus_8f41a2c90d7e463b', url, 'aa-successful-retry')
+            == old_success
+        )
+        assert len(repository.list_handoffs(claim_id, 'cus_8f41a2c90d7e463b')) == 1

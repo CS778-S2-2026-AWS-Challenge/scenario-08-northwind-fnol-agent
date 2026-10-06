@@ -67,7 +67,11 @@ def test_review_reasons_are_visible_to_staff_but_not_claimants() -> None:
         repository = FixtureRepository()
         seed_scenario(repository, scenario)
         app = create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             repository,
         )
         session_id = scenario.claim.active_session_id

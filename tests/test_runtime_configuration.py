@@ -409,6 +409,7 @@ def test_release_set_model_is_authoritative_over_bootstrap_settings() -> None:
     resolver = _resolver(configurations, releases)
     gateway = ConfigurationBackedModelGateway(
         Settings(
+            business_seed_path='config/business-seed.json',
             environment='test',
             model_protocol_adapter='openai_compatible',
             model_base_url='https://bootstrap.example/v1',
@@ -458,12 +459,17 @@ def test_published_data_profile_controls_object_storage_selection() -> None:
         )
     )
     bootstrap = Settings(
+        business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE,
     )
     bundle = build_data_runtime_bundle(
-        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+        Settings(
+            business_seed_path='config/business-seed.json',
+            environment='test',
+            identity_mode=IdentityMode.DEVELOPER,
+        )
     )
 
     app = create_app(
@@ -510,7 +516,11 @@ def test_published_data_profile_must_match_process_runtime_profile() -> None:
 
     with pytest.raises(RuntimeProfileConfigurationError):
         create_app(
-            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            Settings(
+                business_seed_path='config/business-seed.json',
+                environment='test',
+                identity_mode=IdentityMode.DEVELOPER,
+            ),
             configuration_repository=configurations,
             release_set_repository=releases,
         )

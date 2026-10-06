@@ -73,7 +73,7 @@ def test_pause_resume_resolves_follow_up_and_resumed_session_can_pause_again(
         },
     )
     assert first_pause.status_code == 200
-    first_follow_up = repository.list_follow_ups(claim_id, 'cus_demo')[0]
+    first_follow_up = repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')[0]
     assert first_follow_up.status is FollowUpStatus.PENDING
     assert first_follow_up.purpose == 'resume_incomplete_claim'
     assert first_follow_up.channel is PreferredChannel.IN_APP
@@ -89,7 +89,7 @@ def test_pause_resume_resolves_follow_up_and_resumed_session_can_pause_again(
     assert resumed.status_code == 201
     resumed_session_id = str(resumed.json()['session_id'])
 
-    after_resume = repository.list_follow_ups(claim_id, 'cus_demo')
+    after_resume = repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(after_resume) == 1
     assert after_resume[0].status is FollowUpStatus.RESOLVED
     assert after_resume[0].outcome == 'claimant_resumed'
@@ -111,7 +111,7 @@ def test_pause_resume_resolves_follow_up_and_resumed_session_can_pause_again(
         },
     )
     assert second_pause.status_code == 200
-    all_follow_ups = repository.list_follow_ups(claim_id, 'cus_demo')
+    all_follow_ups = repository.list_follow_ups(claim_id, 'cus_8f41a2c90d7e463b')
     assert len(all_follow_ups) == 2
     open_follow_ups = [
         item

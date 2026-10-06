@@ -3,7 +3,7 @@
   "description": "Synthetic contents field-state example for the Week 6 validation prototype.",
   "claim": {
     "claim_id": "clm_fixture_at16",
-    "customer_id": "cus_demo",
+    "customer_id": "cus_8f41a2c90d7e463b",
     "revision": 1,
     "channel": "web_agent",
     "locale": "en-NZ",
@@ -27,7 +27,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T03:01:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.description": {
         "value": "A laptop and camera were damaged when a shelf fell during a move.",
@@ -37,7 +37,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T03:02:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "incident.type": {
         "value": "other",
@@ -47,7 +47,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T03:02:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       "loss.description": {
         "value": "Household electronics and a camera were damaged.",
@@ -117,7 +117,7 @@
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-09-08T03:03:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_8f41a2c90d7e463b"}
       },
       {
         "item_id": "contents_at16_camera",
@@ -154,8 +154,7 @@
     {
       "session_id": "ses_fixture_at16",
       "claim_id": "clm_fixture_at16",
-      "customer_id": "cus_demo",
-      "model_profile_id": "openrouter-gpt-4o",
+      "customer_id": "cus_8f41a2c90d7e463b",
       "status": "active",
       "summary": "Contents loss with one confirmed item, one inferred item, and unresolved cause/location.",
       "unresolved_questions": ["confirm:incident.location", "resolve:incident.cause"],

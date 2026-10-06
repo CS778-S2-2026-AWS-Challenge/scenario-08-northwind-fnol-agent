@@ -3,10 +3,22 @@ from fastapi import APIRouter, Depends, Header, Request
 from backend.core.auth import Principal, require_workbench_write
 from backend.core.errors import ApiError
 from backend.domain.models import DemoResetResponse, DemoSeedResponse
+from backend.services.business_seed import BusinessSeed
 from backend.services.demo_reset import reset_demo_components
 from backend.services.demo_seed import seed_validation_scenarios, seed_workbench_demo_scenarios
 
 router = APIRouter(prefix='/api/v1/workbench/demo', tags=['workbench-demo'])
+
+
+def _business_seed(request: Request) -> BusinessSeed:
+    seed = request.app.state.business_seed
+    if not isinstance(seed, BusinessSeed):
+        raise ApiError(
+            status_code=409,
+            code='DEMO_CLAIMANT_UNAVAILABLE',
+            message='Configure business_seed_path before loading demo data.',
+        )
+    return seed
 
 
 def require_local_demo(request: Request) -> None:
@@ -43,7 +55,9 @@ def seed_scenarios(
     _principal: Principal = Depends(require_workbench_write),
 ) -> DemoSeedResponse:
     require_local_demo(request)
-    result = seed_workbench_demo_scenarios(request.app.state.claim_repository)
+    result = seed_workbench_demo_scenarios(
+        request.app.state.claim_repository, _business_seed(request)
+    )
     return DemoSeedResponse(
         status='seeded',
         scenario_ids=list(result.scenario_ids),
@@ -64,5 +78,6 @@ def seed_validation(
         request.app.state.staff_identity_repository,
         principal.subject,
         idempotency_key,
+        seed=_business_seed(request),
         evidence_storage=request.app.state.evidence_storage,
     )

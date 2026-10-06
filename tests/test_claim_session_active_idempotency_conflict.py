@@ -20,8 +20,8 @@ def test_start_session_maps_active_session_idempotency_conflict_without_writes(
     claim_id = created.json()['claim']['claim_id']
     session_id = created.json()['session']['session_id']
 
-    before_claim = repository.get_claim(claim_id, 'cus_demo')
-    before_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    before_claim = repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b')
+    before_session = repository.get_session(claim_id, session_id, 'cus_8f41a2c90d7e463b')
     assert before_claim is not None
     assert before_session is not None
 
@@ -38,11 +38,11 @@ def test_start_session_maps_active_session_idempotency_conflict_without_writes(
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
-    assert repository.get_claim(claim_id, 'cus_demo') == before_claim
-    assert repository.list_sessions_for_claim(claim_id, 'cus_demo') == [before_session]
+    assert repository.get_claim(claim_id, 'cus_8f41a2c90d7e463b') == before_claim
+    assert repository.list_sessions_for_claim(claim_id, 'cus_8f41a2c90d7e463b') == [before_session]
     assert (
         repository.find_idempotency(
-            'cus_demo',
+            'cus_8f41a2c90d7e463b',
             f'/api/v1/claims/{claim_id}/sessions',
             'active-session-conflict',
         )
