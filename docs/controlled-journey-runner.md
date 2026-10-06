@@ -21,7 +21,10 @@ history, so a second run on the same data would count the first run's Claims as 
 4. `node tests/corpus/runner/runner.cjs seed CTL-M-002 CTL-H-006 …` writes every pack of the run
    as one manifest in the shared business-seed shape (`config/business-seed.json`, #1221). It then
    provisions the manifest through `load_business_seed` and the `provision_business_*` functions,
-   which insert absent records only.
+   which insert absent records only. It uses the backend's MongoDB settings and claimant identity
+   file, so the records land where the running backend reads them. The corpus standard describes
+   selecting the manifest through `Settings.business_seed_path`, but that setting is fixed to
+   `config/business-seed.json`, so the runner provisions after startup with the same functions.
 5. `node tests/corpus/runner/runner.cjs run CTL-M-002 CTL-H-006 …` runs the packs one after another.
 6. `node tests/corpus/runner/score.cjs <run folder>` scores the run.
 
@@ -138,9 +141,14 @@ A pack is `stuck` when any of these happens:
   triage reason (`document_outstanding`, `fact_unresolved`, `policy_not_verified`,
   `amount_unknown`).
 - **Triage:** the class, and whether the reasons include every required reason and nothing outside
-  the allowed list.
-- **Review signals:** a review signal and its fraud flag; `not_implemented` while main writes only
-  retrieval-uncertainty signals.
+  the allowed list. A pack that never lodged is `not_lodged`: nothing was triaged.
+- **Review signals:** a review signal and its fraud flag, with false positives and false negatives
+  counted apart; `not_implemented` while main writes only retrieval-uncertainty signals, and
+  `not_lodged` for a pack that never lodged. Innocent controls are reported on their own, and are
+  judged `flagged` or `not_flagged` only once a review signal is written; until then they carry
+  the review's result.
+- **Staff side:** each item of the staff to-answer list, with its kind (`question` or
+  `contact_request`), the Agent's proposed answer and basis, or the claimant's contact preference.
 - **Facts:** expected facts against the confirmed value in the staff field list. Incident time is
   compared by New Zealand calendar day, read from every stored form: a date, a date with a part of
   day such as `2026-09-11 night`, or a clock time.
@@ -148,8 +156,8 @@ A pack is `stuck` when any of these happens:
   assertion passes when its condition does not hold. Rubric-only text assertions are left for a
   person.
 
-Capabilities main does not implement are reported as `not_implemented` and kept out of the pass
-and fail counts.
+Capabilities main does not implement are reported as `not_implemented`, and packs that never
+lodged as `not_lodged`. Both are kept out of the pass and fail counts.
 
 A pack that has a Claim needs every end-state read:
 
@@ -163,7 +171,8 @@ every count.
 
 Run records stay outside the repository:
 
-- screenshots of every turn;
+- screenshots of every turn, taken by the runner itself (#1222 named the capture function of #1218,
+  which was not merged);
 - the claimant prompts and replies;
 - the network log (authentication bodies are not recorded; tokens and passwords are masked);
 - the claimant and staff end states.
@@ -173,4 +182,8 @@ A summary table goes on the issue or PR.
 Not yet covered:
 
 - packs whose `claimant_session` is `anonymous_then_sign_in` (recorded as `runner_not_implemented`);
-- material labels for packs beyond the ten reference packs.
+- material labels for packs beyond the ten reference packs;
+- a material available only later. The claimant is told to say it will have it later, but the
+  runner does not hold the file back, and every material in corpus v1 is `available_from: start`;
+- cost per pack. Standard `start-dev` does not keep the backend log, which is where model token
+  counts are written, and the reply review's use is not logged.

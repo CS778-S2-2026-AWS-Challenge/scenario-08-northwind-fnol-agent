@@ -205,10 +205,13 @@ function scorePack(packDir, casesDir) {
       }
     : { result: 'not_implemented' }
   // A pack that expects no Claim (`triage.applies: false`) has no triage to score; a Claim that
-  // formed anyway fails the pack's own assertions instead.
+  // formed anyway fails the pack's own assertions instead. A pack that never lodged has nothing
+  // triaged either, which says nothing about whether main implements triage.
   const triage = oracle.triage.applies === false
     ? { result: 'not_applicable', expected: null, actual: severity || null }
-    : !severity || severity === 'unassessed'
+    : !lodged
+      ? { result: 'not_lodged', expected: oracle.triage.expected_class, actual: severity || null }
+      : !severity || severity === 'unassessed'
       ? { result: 'not_implemented', expected: oracle.triage.expected_class, actual: severity || null }
       : { result: severity === oracle.triage.expected_class ? 'pass' : 'fail', expected: oracle.triage.expected_class, actual: severity, reasons }
   const signalCodes = ((sources['staff:signals'] || {}).items || sources['staff:signals'] || []).map?.((item) => item.code) || []
@@ -221,8 +224,13 @@ function scorePack(packDir, casesDir) {
         false_positive: oracle.review_indicators.expected_fraud_signal === 'none' && claimState.fraud_signal === 'review_required',
         false_negative: oracle.review_indicators.expected_fraud_signal === 'review_required' && claimState.fraud_signal !== 'review_required',
       }
-    : { result: 'not_implemented', expected: oracle.review_indicators.expected_fraud_signal, signal_codes: signalCodes }
-  const innocentControls = (oracle.design.innocent_controls || []).map((control) => ({ control, flagged: reviewWritten && claimState.fraud_signal === 'review_required' }))
+    : { result: lodged ? 'not_implemented' : 'not_lodged', expected: oracle.review_indicators.expected_fraud_signal, signal_codes: signalCodes }
+  // An innocent control is only judged when a review signal was written; otherwise it carries the
+  // review's own result, never a "not flagged" that would read as a pass.
+  const innocentControls = (oracle.design.innocent_controls || []).map((control) => ({
+    control,
+    result: reviewWritten ? (claimState.fraud_signal === 'review_required' ? 'flagged' : 'not_flagged') : review.result,
+  }))
 
   // Facts: the confirmed value of every expected fact; optional facts must match when present.
   // The staff field list (`items: [{code, field}]`) holds the full form; the claimant's form is the
@@ -247,8 +255,19 @@ function scorePack(packDir, casesDir) {
     return { id: assertion.id, kind: assertion.kind, judge: assertion.judge, bind_at_rc1: Boolean(assertion.bind_at_rc1), ...judged }
   })
 
-  // Staff side: what the claimant's questions look like in the staff to-answer list.
-  const staffOpenItems = (staffClaim.open_items || []).map((item) => ({ owner: item.owner, state: item.state, subject: item.subject, claimant_wording: item.claimant_wording || null }))
+  // Staff side: how the claimant's questions and contact requests appear in the staff to-answer
+  // list (docs/api.md, the waiting-list answer route): each item's kind, and the Agent's proposed
+  // answer and basis, or the claimant's contact preference.
+  const staffOpenItems = (staffClaim.open_items || []).map((item) => ({
+    kind: item.kind || null,
+    owner: item.owner,
+    state: item.state,
+    subject: item.subject,
+    claimant_wording: item.claimant_wording || null,
+    proposed_answer: item.proposed_answer || null,
+    basis: item.basis || null,
+    contact_preference: item.contact_preference || null,
+  }))
 
   return { case_id: run.case_id, scenario_category: oracle.scenario_category, evidence, journey, triage, review, innocent_controls: innocentControls, facts: factResults, optional_facts: optionalResults, incident_time: incidentTime, assertions, staff_open_items: staffOpenItems }
 }
@@ -273,13 +292,17 @@ function summarise(allScores) {
   }
   const lodgedFirst = count((s) => s.journey.outcome === 'lodged_first_time')
   const lodgedRetry = count((s) => s.journey.outcome === 'lodged_after_retry')
-  const scoredTriage = scores.filter((s) => !['not_implemented', 'not_applicable'].includes(s.triage.result))
+  const scoredTriage = scores.filter((s) => ['pass', 'fail'].includes(s.triage.result))
   const reasonsPass = scoredTriage.filter((s) => s.triage.reasons && s.triage.reasons.result === 'pass').length
+  const scoredReview = scores.filter((s) => ['pass', 'fail'].includes(s.review.result))
+  const controls = scores.flatMap((s) => s.innocent_controls || [])
+  const controlCount = (result) => controls.filter((c) => c.result === result).length
   return [
     `Evidence incomplete (kept out of every count): ${incomplete.length}${incomplete.length ? ` (${incomplete.map((s) => s.case_id).join(', ')})` : ''}.`,
     `Packs: ${scores.length}. Lodged first time: ${lodgedFirst}. Lodged after a retry: ${lodgedRetry}. Stuck: ${count((s) => s.journey.outcome === 'stuck')}. Not run: ${count((s) => s.journey.outcome === 'runner_not_implemented')}.`,
     `Completed without follow-up (lodged, nothing owed by the claimant, no missing-information triage reason): ${count((s) => s.journey.completed_without_follow_up)}/${scores.length}. Within the effort target (under 5 minutes and under 10 questions): ${count((s) => s.journey.effort_within_target)}/${scores.length}.`,
-    `Triage scored: ${scoredTriage.length} (class pass ${scoredTriage.filter((s) => s.triage.result === 'pass').length}, reasons pass ${reasonsPass}); not implemented: ${count((s) => s.triage.result === 'not_implemented')}; not applicable (no Claim expected): ${count((s) => s.triage.result === 'not_applicable')}. Review signals not implemented: ${count((s) => s.review.result === 'not_implemented')}.`,
+    `Triage scored: ${scoredTriage.length} (class pass ${scoredTriage.filter((s) => s.triage.result === 'pass').length}, reasons pass ${reasonsPass}); not implemented: ${count((s) => s.triage.result === 'not_implemented')}; not applicable (no Claim expected): ${count((s) => s.triage.result === 'not_applicable')}; not lodged: ${count((s) => s.triage.result === 'not_lodged')}.`,
+    `Review signals scored: ${scoredReview.length} (false positives ${scoredReview.filter((s) => s.review.false_positive).length}, false negatives ${scoredReview.filter((s) => s.review.false_negative).length}); not implemented: ${count((s) => s.review.result === 'not_implemented')}; not lodged: ${count((s) => s.review.result === 'not_lodged')}. Innocent controls: ${controls.length} (flagged ${controlCount('flagged')}, not flagged ${controlCount('not_flagged')}, not implemented ${controlCount('not_implemented')}, not lodged ${controlCount('not_lodged')}).`,
     '',
     ...lines,
   ].join('\n')
