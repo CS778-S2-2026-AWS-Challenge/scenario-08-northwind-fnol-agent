@@ -454,12 +454,18 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 }
 .entry-intro { max-width: var(--claimant-entry-copy-measure); margin: var(--space-6) auto var(--space-8); color: var(--color-text-secondary); font-size: var(--font-size-section); font-weight: var(--font-weight-regular); line-height: var(--line-height-body); }
 .claim-starter h1, .claim-starter h2 { color: var(--color-text-primary); font-size: var(--font-size-page); font-weight: var(--font-weight-semibold); }
+.entry-claim-stack {
+  display: grid;
+  width: min(100%, clamp(var(--claimant-entry-composer-min-measure), var(--claimant-entry-composer-fluid-measure), var(--claimant-entry-content-measure)));
+  gap: var(--space-3);
+  margin-inline: auto;
+}
 .entry-page .claim-starter {
   display: flex;
-  width: min(100%, clamp(var(--claimant-entry-composer-min-measure), var(--claimant-entry-composer-fluid-measure), var(--claimant-entry-content-measure)));
+  width: 100%;
   min-height: var(--claimant-entry-composer-min-height);
   flex-direction: column;
-  margin-inline: auto;
+  margin-inline: 0;
   padding: var(--space-6);
   border: var(--border-component);
   border-radius: var(--radius-xl);
