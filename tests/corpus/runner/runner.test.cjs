@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -190,4 +190,40 @@ test('a named upload spot missing from the screen stops the file, signed in or b
     await assert.rejects(selectClaimantFile({ getByText: () => assert.fail('the gate is never reached') }, 'receipt.pdf', absent, async () => { signIns += 1 }), /not on the screen/)
     assert.equal(signIns, 0)
   })
+})
+
+test('a refused confirmation is one retry, and a second refusal by either side ends the pack', () => {
+  const ALERT = 'One or more fields cannot be confirmed.'
+  // CTL-M-009 and CTL-M-032: refused once, then lodged. Nothing may read as stuck afterwards.
+  const recovered = { retries: 0, outcome: null, stuck: null }
+  assert.equal(recordConfirmationRefusal(recovered, 'runner', ALERT, 't1'), false)
+  assert.equal(recovered.retries, 1)
+  assert.deepEqual(recovered.retry_kinds, [`confirmation refused: ${ALERT}`])
+  assert.equal(recovered.stuck, null)
+  assert.equal(recovered.outcome, null)
+  // The pilot CTL-M-001: the claimant model pressed "All correct" and was refused, then the fixed
+  // rule was refused too. Both count, so the second refusal ends the pack.
+  const twice = { retries: 0, outcome: null, stuck: null }
+  assert.equal(recordConfirmationRefusal(twice, 'claimant', ALERT, 't1'), false)
+  assert.equal(recordConfirmationRefusal(twice, 'runner', ALERT, 't2'), true)
+  assert.equal(twice.outcome, 'stuck')
+  assert.deepEqual(twice.stuck, { step: 'review', reason: `confirmation refused 2 times: ${ALERT}` })
+  assert.deepEqual(twice.confirmation_refusals.map((refusal) => refusal.by), ['claimant', 'runner'])
+  assert.equal(twice.retries, 1)
+})
+
+test('a payout form shown again selects the saved account only when none is selected', () => {
+  assert.equal(payoutDestinationToSelect([{ checked: false, disabled: false }]), 0, 'CTL-C-013: the saved account listed but not selected')
+  assert.equal(payoutDestinationToSelect([{ checked: true, disabled: false }, { checked: false, disabled: false }]), -1)
+  assert.equal(payoutDestinationToSelect([{ checked: false, disabled: true }, { checked: false, disabled: false }]), 1)
+  assert.equal(payoutDestinationToSelect([]), -1)
+})
+
+test('a file the product cannot process is recorded and does not stop the message', () => {
+  const usable = [{ material: { id: 'photo-watch', file: 'photo-watch.jpg' } }, { material: { id: 'receipt-watch', file: 'receipt-watch.pdf' } }]
+  const sentVia = [{ material: 'photo-watch', via: 'chat' }, { material: 'receipt-watch', via: 'Still to send: Receipt' }]
+  const { failed, paths } = markProcessingFailed(usable, sentVia, ['photo-watch.jpg'])
+  assert.deepEqual(failed, ['photo-watch'])
+  assert.deepEqual(paths, [{ material: 'photo-watch', via: 'chat', processing: 'failed' }, { material: 'receipt-watch', via: 'Still to send: Receipt' }])
+  assert.deepEqual(markProcessingFailed(usable, sentVia, []), { failed: [], paths: sentVia })
 })

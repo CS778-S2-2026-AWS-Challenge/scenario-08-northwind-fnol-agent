@@ -36,6 +36,8 @@ const { buildClaimantPrompt, claimantKnownText, claimantFromEnvironment } = requ
 const { buildBusinessSeed, packKey, seedAccount } = require('./corpus_seed.cjs')
 
 const MAX_CLAIMANT_MESSAGES = 30
+// Buttons that confirm the collected details (the review card's "All correct", a reply's "Looks right").
+const CONFIRMATION_PRESS = /^(All correct|Looks right)$/
 const MEDIA = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.pdf': 'application/pdf' }
 const LABELS = require('./material-labels.json')
 
@@ -118,6 +120,36 @@ function trackQuestions(asked, reply) {
     if (times >= 3) third.push(question)
   }
   return { repeated, third }
+}
+
+// Records one confirmation the product refused (`by` is `claimant` or `runner`). The first refusal
+// is the pack's one recovery for it and counts as a retry; a second refusal, by either, ends the
+// pack as stuck. Returns true when the pack has to stop.
+function recordConfirmationRefusal(record, by, alert, at = new Date().toISOString()) {
+  record.confirmation_refusals = [...(record.confirmation_refusals || []), { by, alert, at }]
+  if (record.confirmation_refusals.length >= 2) {
+    record.outcome = 'stuck'
+    record.stuck = { step: 'review', reason: `confirmation refused ${record.confirmation_refusals.length} times: ${alert}` }
+    return true
+  }
+  record.retries += 1
+  record.retry_kinds = [...(record.retry_kinds || []), `confirmation refused: ${alert}`]
+  return false
+}
+
+// Which saved payout account to select when the form shows none selected: the first one that can
+// be chosen, or -1 when one is already selected or none can be.
+function payoutDestinationToSelect(options) {
+  if (options.some((option) => option.checked)) return -1
+  return options.findIndex((option) => !option.disabled)
+}
+
+// The materials of one message whose file the tray shows as "Processing failed", and the upload
+// paths with those files marked.
+function markProcessingFailed(usable, sentVia, failedNames) {
+  const failed = usable.filter((entry) => failedNames.includes(entry.material.file)).map((entry) => entry.material.id)
+  const paths = sentVia.map((entry) => (failed.includes(entry.material) ? { ...entry, processing: 'failed' } : entry))
+  return { failed, paths }
 }
 
 // Which upload input a material goes through: the requested item's own spot when the claimant
@@ -405,6 +437,13 @@ async function runPack(browser, caseId, claimant, outRoot) {
       await shot('signed-in')
       operation = during
     }
+    // A confirmation the product refuses shows an error under the composer. Presses of a
+    // confirmation button by the claimant model and by the fixed rule count together. Returns true
+    // when the pack has to stop.
+    const confirmationRefused = async (by) => {
+      const alert = await page.locator('form.workspace-composer .backend-status[role=alert]').first().textContent({ timeout: 500 }).catch(() => null)
+      return alert ? recordConfirmationRefusal(record, by, alert) : false
+    }
 
     // The first message, as written.
     await page.getByPlaceholder('Tell us what happened…').fill(view.initial_message)
@@ -453,10 +492,18 @@ async function runPack(browser, caseId, claimant, outRoot) {
           }, null, { timeout: 90000 }).then(() => true, () => false)
           if (!ready) return `file never showed Ready: ${(await trayLabels()).join('; ')}`
         }
-        const failed = await page.locator('form.workspace-composer .composer-file-copy small', { hasText: 'Processing failed' }).count()
-        if (failed) return `${failed} file(s) showed Processing failed`
+        // A file the product cannot process shows "Processing failed" in the tray. That is the
+        // product's answer about the file, not a stalled journey: a person sends the message
+        // anyway and the run records which files failed.
+        const failedNames = await page.locator('form.workspace-composer .composer-file-copy')
+          .evaluateAll((nodes) => nodes.filter((node) => (node.querySelector('small')?.textContent || '').trim() === 'Processing failed').map((node) => (node.querySelector('strong')?.textContent || '').trim()))
+        const { failed, paths } = markProcessingFailed(usable, sentVia, failedNames)
+        if (failedNames.length) {
+          record.processing_failed = [...(record.processing_failed || []), ...failed]
+          log('claimant.jsonl', { at: new Date().toISOString(), processing_failed: failed, shown: failedNames, reason: 'the product could not process the file; the message is sent anyway' })
+        }
         record.uploads.push(...usable.map((entry) => entry.material.id))
-        record.upload_paths.push(...sentVia)
+        record.upload_paths.push(...paths)
         if (!text) text = 'Here you go.'
       }
       await page.locator('#workspace-incident-input').fill(text)
@@ -580,6 +627,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
           record.presses.push(reply.press)
           transcript.push({ who: 'claimant', text: `(pressed "${reply.press}")` })
           await page.waitForTimeout(2500)
+          if (CONFIRMATION_PRESS.test(reply.press) && await confirmationRefused('claimant')) break
           // Pressing is the whole action for this turn: a person who presses "Review and agree"
           // does not also type in the chat, and a chat message would reopen the claim summary.
           if (text || files.length) log('claimant.jsonl', { at: new Date().toISOString(), not_sent_with_press: { message: text, upload: files.map((entry) => entry.material.id) } })
@@ -600,12 +648,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
         stalls = 0
         await allCorrect.click()
         await page.waitForTimeout(2500)
-        const alert = await page.locator('form.workspace-composer [role=alert]').first().textContent({ timeout: 500 }).catch(() => null)
-        if (alert) {
-          if (record.stuck?.step === 'review') { record.outcome = 'stuck'; record.stuck.reason = `confirmation rejected twice: ${alert}`; break }
-          record.retries += 1
-          record.stuck = { step: 'review', reason: alert }
-        }
+        if (await confirmationRefused('runner')) break
         continue
       }
       if (await page.locator('#payout-bank-name').isVisible().catch(() => false)) {
@@ -627,6 +670,20 @@ async function runPack(browser, caseId, claimant, outRoot) {
         const pick = options.find((o) => o.value === wanted && !o.disabled) || options.find((o) => o.value === 'email' && !o.disabled)
         if (pick) await page.locator(`input[name=contact_preference][value="${pick.value}"]`).check()
         record.contact_preference = pick ? pick.value : null
+        // The form can come back with the payout account saved earlier listed but not selected; a
+        // person picks it again. If "Continue to agreement" is still disabled after that, the pack
+        // stops with that reason instead of waiting on a button that cannot be pressed.
+        const destinations = page.locator('input[name=payout_destination]')
+        const select = payoutDestinationToSelect(await destinations.evaluateAll((nodes) => nodes.map((node) => ({ checked: node.checked, disabled: node.disabled }))))
+        if (select >= 0) {
+          await destinations.nth(select).check()
+          record.payout_reselected = (record.payout_reselected || 0) + 1
+        }
+        if (!(await continueButton.isEnabled())) {
+          record.outcome = 'stuck'
+          record.stuck = { step: 'payout', reason: '"Continue to agreement" stayed disabled after choosing the payout account and contact method' }
+          break
+        }
         await continueButton.click()
         await page.waitForTimeout(2500)
         continue
@@ -752,4 +809,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed }

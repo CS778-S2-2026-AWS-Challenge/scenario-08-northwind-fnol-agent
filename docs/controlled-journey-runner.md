@@ -121,8 +121,12 @@ nothing, and sends each file once. When it presses a button, it does nothing els
 The runner fills the payout form, the contact choice and the agreement checkboxes by fixed rules.
 It signs in at the pack's declared entry or visible login gate, adds the pack's phone to the profile
 so SMS can be chosen, and attaches files one at a time. It presses Send only after every file shows
-Ready. Login is a mechanical prerequisite and does not count as a recovery. `run.json` records
-the anonymous sign-in trigger, original Claim, conversation session and whether promotion succeeded.
+Ready or "Processing failed". A file the product cannot process is the product's answer, not a
+stall: the message is still sent, and `run.json` lists the file under `processing_failed`. When the
+payout form comes back with the saved account listed but not selected, the runner selects it again
+(`payout_reselected`). Login is a mechanical prerequisite and does not count as a recovery.
+`run.json` records the anonymous sign-in trigger, original Claim, conversation session and whether
+promotion succeeded.
 
 Uploads follow "Evidence kinds and the upload path" in the corpus standard:
 
@@ -144,6 +148,9 @@ never `lodged_first_time`. The recoveries are:
 - pressing "Retry message" or "Retry response";
 - answering a question once more when the agent asks it again. Each question sentence is tracked
   on its own, whatever else the reply asks with it, so each repeated question counts as one retry;
+- confirming once more after the product refuses a confirmation ("All correct" or "Looks right").
+  Refusals after a press by the claimant model and by the fixed rule count together, and
+  `run.json` lists each one under `confirmation_refusals`;
 - after about nine seconds with nothing to act on, typing "OK.".
 
 A pack is `stuck` when any of these happens:
@@ -152,7 +159,9 @@ A pack is `stuck` when any of these happens:
 - the agent asks the same question a third time;
 - after the nudge, there is still nothing to act on;
 - the claimant reaches 30 messages;
-- a file never shows Ready;
+- a file shows neither Ready nor "Processing failed";
+- a confirmation is refused a second time;
+- "Continue to agreement" stays disabled after the payout account and contact method are chosen;
 - the claimant names an upload spot that is not on the screen;
 - a wait times out.
 
