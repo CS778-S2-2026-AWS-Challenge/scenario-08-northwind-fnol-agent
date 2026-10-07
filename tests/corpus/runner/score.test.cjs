@@ -14,7 +14,7 @@ function writeJson(file, value) {
 }
 
 // One synthetic pack and one run of it. `lodged` switches between a lodged and a stuck run.
-function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText], severity = 'fast_track', fraudSignal = 'none', innocentControls = [], staffOpenItems = [], expectedFraud = 'none', signals = [], condition = undefined, provenance = [], processingFailed = undefined } = {}) {
+function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText], severity = 'fast_track', fraudSignal = 'none', innocentControls = [], staffOpenItems = [], expectedFraud = 'none', signals = [], condition = undefined, additionalConditions = undefined, provenance = [], processingFailed = undefined } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corpus-score-'))
   const casesDir = path.join(root, 'tests', 'corpus', 'controlled', 'v1', 'cases')
   writeJson(path.join(root, 'tests', 'corpus', 'tools', 'global_assertions.json'), {
@@ -28,6 +28,7 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
     family: 'motor',
     scenario_category: 'M1',
     ...(condition ? { condition } : {}),
+    ...(additionalConditions ? { additional_conditions: additionalConditions } : {}),
     design: { innocent_controls: innocentControls },
     triage: { expected_class: 'fast_track', required_reasons: [], allowed_reasons: [] },
     review_indicators: { expected_fraud_signal: expectedFraud },
@@ -225,6 +226,9 @@ test('files the product could not process are reported, and a valid one among th
   assert.deepEqual(validScore.journey.unexpected_processing_failed, ['photo-front'])
   const summary = summarise([plantedScore, validScore])
   assert.match(summary, /Files the product could not process: 3 in 2 packs; not made broken by the corpus: 1 \(CTL-M-900: photo-front\)\./)
+  // A condition listed among the pack's additional conditions counts the same.
+  const additional = syntheticRun({ additionalConditions: ['corrupt_file'], provenance, processingFailed: ['quote-corrupt'] })
+  assert.deepEqual(scorePack(additional.runDir, additional.casesDir).journey.unexpected_processing_failed, [])
   // No failed file, and no provenance on disk: nothing reported.
   const clean = syntheticRun()
   assert.deepEqual(scorePack(clean.runDir, clean.casesDir).journey.unexpected_processing_failed, [])

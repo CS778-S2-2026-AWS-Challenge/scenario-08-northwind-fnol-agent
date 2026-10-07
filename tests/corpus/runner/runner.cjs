@@ -171,13 +171,25 @@ function payoutDestinationToSelect(options) {
 
 // The materials of one message whose file the tray shows as "Processing failed". The product
 // leaves such a file out of the message, so it is not sent: its upload path is marked
-// `processing: failed, sent: false`, and only the other files count as sent. `failedNames` may hold
-// files failed in earlier messages, which stay in the tray; only this message's files count.
-function markProcessingFailed(usable, sentVia, failedNames) {
-  const failed = usable.filter((entry) => failedNames.includes(entry.material.file)).map((entry) => entry.material.id)
+// `processing: failed, sent: false`, and only the other files count as sent. A file that failed in
+// an earlier message stays in the tray under the same name, so a file of this message failed only
+// when the tray holds more failed entries of its name after the uploads than before them
+// (`failedBefore`, `failedAfter`: the names of the tray's failed entries, with repeats).
+function markProcessingFailed(usable, sentVia, failedBefore, failedAfter) {
+  const count = (names, name) => names.filter((item) => item === name).length
+  const failed = usable.filter((entry) => count(failedAfter, entry.material.file) > count(failedBefore, entry.material.file)).map((entry) => entry.material.id)
   const paths = sentVia.map((entry) => (failed.includes(entry.material) ? { ...entry, processing: 'failed', sent: false } : entry))
   const sent = usable.map((entry) => entry.material.id).filter((id) => !failed.includes(id))
   return { failed, sent, paths }
+}
+
+// Sending a file again after the product could not process it is a person's recovery: each such
+// file of a message counts as one retry.
+function recordFileRetries(record, materials) {
+  for (const material of materials.filter((id) => (record.processing_failed || []).includes(id))) {
+    record.retries += 1
+    record.retry_kinds = [...(record.retry_kinds || []), `file sent again after processing failed: ${material}`]
+  }
 }
 
 // Whether a material may be handed over: not already sent, and not failed twice already. A file
@@ -558,6 +570,10 @@ async function runPack(browser, caseId, claimant, outRoot) {
         // is not there yet. A file sent through a requested item's own upload also lands in
         // the tray, carrying that item's kind, and goes with the message.
         const trayLabels = () => page.locator('form.workspace-composer .composer-file-copy').evaluateAll((nodes) => nodes.map((node) => `${node.querySelector('strong')?.textContent?.trim()}: ${node.querySelector('small')?.textContent?.trim()}`))
+        const failedInTray = () => page.locator('form.workspace-composer .composer-file-copy')
+          .evaluateAll((nodes) => nodes.filter((node) => (node.querySelector('small')?.textContent || '').trim() === 'Processing failed').map((node) => (node.querySelector('strong')?.textContent || '').trim()))
+        const failedBefore = await failedInTray()
+        recordFileRetries(record, usable.map((entry) => entry.material.id))
         for (const { material, spot } of usable) {
           const resolveInput = async () => {
             let index
@@ -585,9 +601,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
         // product's answer about the file, not a stalled journey: a person sends the message
         // anyway. The product leaves that file out of the message, so the run records it as not
         // sent, and the claimant's transcript says so.
-        const failedNames = await page.locator('form.workspace-composer .composer-file-copy')
-          .evaluateAll((nodes) => nodes.filter((node) => (node.querySelector('small')?.textContent || '').trim() === 'Processing failed').map((node) => (node.querySelector('strong')?.textContent || '').trim()))
-        const marked = markProcessingFailed(usable, sentVia, failedNames)
+        const marked = markProcessingFailed(usable, sentVia, failedBefore, await failedInTray())
         failedNow = marked.failed
         if (failedNow.length) {
           record.processing_failed = [...(record.processing_failed || []), ...failedNow]
@@ -595,7 +609,9 @@ async function runPack(browser, caseId, claimant, outRoot) {
         }
         record.uploads.push(...marked.sent)
         record.upload_paths.push(...marked.paths)
-        if (!text) text = 'Here you go.'
+        // With no words of its own, the message says what happened to the files: the agent
+        // receives no file the product could not process.
+        if (!text) text = marked.sent.length ? 'Here you go.' : 'I tried to send the file, but it could not be processed.'
       }
       await page.locator('#workspace-incident-input').fill(text)
       // The pause a person takes between typing and pressing Enter.
@@ -752,12 +768,11 @@ async function runPack(browser, caseId, claimant, outRoot) {
         await page.waitForTimeout(1000)
         if (!(await page.locator('#payout-bank-name').isVisible().catch(() => false))) continue
         if (await page.locator('.payout-contact-panel .payout-contact-status', { hasText: 'Loading saved payout accounts' }).isVisible().catch(() => false)) continue
-        // A form back with an error after a save is the product refusing it: one retry, then
-        // stuck. A form back without one (another account asked for) is filled again, a few
-        // times at most.
-        const saveError = ((await page.locator('.payout-contact-panel .backend-status[role=alert]').first().textContent({ timeout: 500 }).catch(() => null)) || '').trim()
-        if (record.payout_account_saves && saveError && recordRefusal(record, 'payout', 'runner', saveError)) break
+        // A form shown again (another account asked for, or a save refused) is filled again, a
+        // few times at most.
         if ((record.payout_account_saves || 0) >= 4) { record.outcome = 'stuck'; record.stuck = { step: 'payout', reason: 'the new payout account form came back after four saves' }; break }
+        const panelError = async () => ((await page.locator('.payout-contact-panel .backend-status[role=alert]').allTextContents().catch(() => [])).map((item) => item.trim()).filter(Boolean))
+        const errorsBefore = await panelError()
         record.payout_account_saves = (record.payout_account_saves || 0) + 1
         await page.fill('#payout-bank-name', 'Northwind Test Bank')
         await page.fill('#payout-account-holder-name', String(facts['policyholder.name'] || 'Corpus Claimant'))
@@ -765,6 +780,10 @@ async function runPack(browser, caseId, claimant, outRoot) {
         await page.fill('#payout-account-number', `12-3456-${String(crypto.randomInt(1e6, 9e6))}-00`)
         await page.getByRole('button', { name: 'Save payout account' }).click()
         await page.waitForTimeout(2000)
+        // An error that appears with this save, and was not there before it (a failed load shows
+        // its own), is the product refusing the save: one retry, then stuck.
+        const saveError = (await panelError()).find((item) => !errorsBefore.includes(item))
+        if (saveError && await page.locator('#payout-bank-name').isVisible().catch(() => false) && recordRefusal(record, 'payout', 'runner', saveError)) break
         continue
       }
       const continueButton = page.getByRole('button', { name: 'Continue to agreement' })
@@ -896,4 +915,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, payoutStep }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutStep }

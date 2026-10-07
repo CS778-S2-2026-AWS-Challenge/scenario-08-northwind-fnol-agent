@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, payoutStep } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutStep } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -230,15 +230,25 @@ test('a payout form shown again selects the saved account only when none is sele
 test('a file the product cannot process is recorded as not sent, and may be tried once more', () => {
   const usable = [{ material: { id: 'photo-watch', file: 'photo-watch.jpg' } }, { material: { id: 'receipt-watch', file: 'receipt-watch.pdf' } }]
   const sentVia = [{ material: 'photo-watch', via: 'chat' }, { material: 'receipt-watch', via: 'Still to send: Receipt' }]
-  // A file failed in an earlier message stays in the tray; only this message's files count.
-  const marked = markProcessingFailed(usable, sentVia, ['photo-watch.jpg', 'quote-old.pdf'])
+  // The photo fails in this message; a quote failed earlier and is still in the tray.
+  const marked = markProcessingFailed(usable, sentVia, ['quote-old.pdf'], ['quote-old.pdf', 'photo-watch.jpg'])
   assert.deepEqual(marked.failed, ['photo-watch'])
   assert.deepEqual(marked.sent, ['receipt-watch'])
   assert.deepEqual(marked.paths, [{ material: 'photo-watch', via: 'chat', processing: 'failed', sent: false }, { material: 'receipt-watch', via: 'Still to send: Receipt' }])
-  assert.deepEqual(markProcessingFailed(usable, sentVia, []), { failed: [], sent: ['photo-watch', 'receipt-watch'], paths: sentVia })
-  const record = { uploads: ['receipt-watch'], processing_failed: ['photo-watch'] }
+  assert.deepEqual(markProcessingFailed(usable, sentVia, [], []), { failed: [], sent: ['photo-watch', 'receipt-watch'], paths: sentVia })
+  // Tried once more: the old failed entry keeps the same name in the tray. A second try that works
+  // is sent; one that fails again is a new failed entry.
+  const again = [{ material: { id: 'photo-watch', file: 'photo-watch.jpg' } }]
+  const againVia = [{ material: 'photo-watch', via: 'chat' }]
+  assert.deepEqual(markProcessingFailed(again, againVia, ['photo-watch.jpg'], ['photo-watch.jpg']).sent, ['photo-watch'])
+  assert.deepEqual(markProcessingFailed(again, againVia, ['photo-watch.jpg'], ['photo-watch.jpg', 'photo-watch.jpg']).failed, ['photo-watch'])
+  // Sending it again is a recovery; handing it over a third time is not allowed.
+  const record = { retries: 0, uploads: ['receipt-watch'], processing_failed: ['photo-watch'] }
   assert.equal(mayHandOver(record, 'receipt-watch'), false, 'sent once already')
   assert.equal(mayHandOver(record, 'photo-watch'), true, 'failed once: one more try')
+  recordFileRetries(record, ['photo-watch', 'repair-quote'])
+  assert.equal(record.retries, 1)
+  assert.deepEqual(record.retry_kinds, ['file sent again after processing failed: photo-watch'])
   record.processing_failed.push('photo-watch')
   assert.equal(mayHandOver(record, 'photo-watch'), false, 'failed twice: not sent again')
   assert.equal(mayHandOver(record, 'repair-quote'), true)

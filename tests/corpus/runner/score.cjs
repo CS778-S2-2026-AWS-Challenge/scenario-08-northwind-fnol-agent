@@ -121,17 +121,17 @@ function globalAssertions(casesDir, family) {
   return readJson(file).assertions.map((assertion) => (assertion.value === '{pack.family}' ? { ...assertion, value: family } : assertion))
 }
 
-// Files the product could not process (`processing_failed` in run.json). A `corrupt_file` or
-// `unsupported_format` pack carries one material made for that condition (provenance transform
+// Files the product could not process (`processing_failed` in run.json). A pack whose condition
+// (or additional condition) is `corrupt_file` or `unsupported_format` carries one material made for that condition (provenance transform
 // `truncate` or `to_tiff`), and that file failing is expected. Any other failed file is a valid
 // file the product or its extraction could not handle, reported as unexpected.
 const PLANTED_TRANSFORM = { corrupt_file: 'truncate', unsupported_format: 'to_tiff' }
 
 function processingFailures(casesDir, run, oracle) {
   const failed = run.processing_failed || []
-  const transform = PLANTED_TRANSFORM[oracle.condition]
+  const transforms = [oracle.condition, ...(oracle.additional_conditions || [])].map((condition) => PLANTED_TRANSFORM[condition]).filter(Boolean)
   const provenance = readJson(path.join(casesDir, run.case_id, 'provenance.json'), { materials: [] })
-  const planted = transform ? provenance.materials.filter((entry) => entry.inputs?.transform === transform).map((entry) => entry.id) : []
+  const planted = provenance.materials.filter((entry) => transforms.includes(entry.inputs?.transform)).map((entry) => entry.id)
   return { processing_failed: failed, unexpected_processing_failed: [...new Set(failed.filter((id) => !planted.includes(id)))] }
 }
 

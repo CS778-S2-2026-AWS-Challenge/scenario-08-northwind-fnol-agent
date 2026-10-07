@@ -129,8 +129,10 @@ file out of the message, so the message goes without it:
 - `run.json` lists the file under `processing_failed`, and its upload path is marked
   `processing: failed, sent: false`;
 - the claimant's transcript says it could not be processed;
-- the claimant may try that file once more, as a person would. After a second failure it is not
-  sent again.
+- the claimant may try that file once more, as a person would, and that counts as a recovery.
+  After a second failure it is not sent again;
+- a message whose files all failed, with no words of the claimant's own, says the file could not be
+  processed.
 
 On the payout form, the runner reads the panel afresh until it can act:
 
@@ -167,12 +169,13 @@ never `lodged_first_time`. The recoveries are:
 - answering a question once more when the agent asks it again. Each question sentence is tracked
   on its own, whatever else the reply asks with it, so each repeated question counts as one retry;
 - confirming once more after the product refuses a confirmation ("All correct" or "Looks right").
-  The runner waits for the product's answer to the press, however slow. Refusals after a press by
-  the claimant model and by the fixed rule count together, and `run.json` lists each one under
-  `confirmation_refusals`;
+  The runner waits up to about 20 seconds for the product's answer to the press. Refusals after a
+  press by the claimant model and by the fixed rule count together, and `run.json` lists each one
+  under `confirmation_refusals`;
 - pressing "Continue to agreement", or saving a new payout account, once more after the payout
   panel shows an error for the last attempt (a failed save, a conflict). These refusals are counted
   apart from confirmations, under `payout_refusals`;
+- sending a file again after the product could not process it;
 - after about nine seconds with nothing to act on, typing "OK.".
 
 A pack is `stuck` when any of these happens:
