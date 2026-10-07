@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutSaveError, payoutStep } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutSaveError, payoutStep } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -230,18 +230,18 @@ test('a payout form shown again selects the saved account only when none is sele
 test('a file the product cannot process is recorded as not sent, and may be tried once more', () => {
   const usable = [{ material: { id: 'photo-watch', file: 'photo-watch.jpg' } }, { material: { id: 'receipt-watch', file: 'receipt-watch.pdf' } }]
   const sentVia = [{ material: 'photo-watch', via: 'chat' }, { material: 'receipt-watch', via: 'Still to send: Receipt' }]
-  // The photo fails in this message; a quote failed earlier and is still in the tray.
-  const marked = markProcessingFailed(usable, sentVia, ['quote-old.pdf'], ['quote-old.pdf', 'photo-watch.jpg'])
+  // The photo fails in this message; a quote failed earlier stays in the tray but was not touched.
+  const marked = markProcessingFailed(usable, sentVia, [{ name: 'photo-watch.jpg', label: 'Processing failed' }, { name: 'receipt-watch.pdf', label: 'Ready' }])
   assert.deepEqual(marked.failed, ['photo-watch'])
   assert.deepEqual(marked.sent, ['receipt-watch'])
   assert.deepEqual(marked.paths, [{ material: 'photo-watch', via: 'chat', processing: 'failed', sent: false }, { material: 'receipt-watch', via: 'Still to send: Receipt' }])
-  assert.deepEqual(markProcessingFailed(usable, sentVia, [], []), { failed: [], sent: ['photo-watch', 'receipt-watch'], paths: sentVia })
-  // Tried once more: the old failed entry keeps the same name in the tray. A second try that works
-  // is sent; one that fails again is a new failed entry.
-  const again = [{ material: { id: 'photo-watch', file: 'photo-watch.jpg' } }]
-  const againVia = [{ material: 'photo-watch', via: 'chat' }]
-  assert.deepEqual(markProcessingFailed(again, againVia, ['photo-watch.jpg'], ['photo-watch.jpg']).sent, ['photo-watch'])
-  assert.deepEqual(markProcessingFailed(again, againVia, ['photo-watch.jpg'], ['photo-watch.jpg', 'photo-watch.jpg']).failed, ['photo-watch'])
+  assert.deepEqual(markProcessingFailed(usable, sentVia, [{ name: 'photo-watch.jpg', label: 'Ready' }, { name: 'receipt-watch.pdf', label: 'Ready' }]), { failed: [], sent: ['photo-watch', 'receipt-watch'], paths: sentVia })
+  // Tried once more. Through the chat, a new entry is added next to the old failed one; through a
+  // requested item's own upload (CTL-M-012), the old entry is reused. Only touched entries count.
+  const again = [{ material: { id: 'quote-corrupt', file: 'quote-corrupt.pdf' } }]
+  const againVia = [{ material: 'quote-corrupt', via: 'Supporting document' }]
+  assert.deepEqual(markProcessingFailed(again, againVia, [{ name: 'quote-corrupt.pdf', label: 'Ready' }]).sent, ['quote-corrupt'], 'a second try that works')
+  assert.deepEqual(markProcessingFailed(again, againVia, [{ name: 'quote-corrupt.pdf', label: 'Processing failed' }]).failed, ['quote-corrupt'], 'the reused entry failed again')
   // Sending it again is a recovery; handing it over a third time is not allowed.
   const record = { retries: 0, uploads: ['receipt-watch'], processing_failed: ['photo-watch'] }
   assert.equal(mayHandOver(record, 'receipt-watch'), false, 'sent once already')
@@ -456,4 +456,43 @@ test('a payout save is judged after "Saving…" ends, from the form\'s own error
   // A slow save refused with the same text as before: it is read once "Saving…" is gone.
   assert.equal(await payoutSaveError(savePage([{ saving: true }, { saving: true }, { saving: true }, { saving: false, error: REFUSED }]), { timeoutMs: 60000 }), REFUSED)
   assert.equal(await payoutSaveError(savePage([{ saving: true }, { saving: false }])), null)
+})
+
+// The tray in a real browser: an entry left from an earlier message, an entry reused by a file sent
+// again through a requested item (its label goes back through "Processing"), and a new entry.
+test('in a real browser, only tray entries the uploads add or reuse are judged', async (t) => {
+  let chromium
+  try {
+    ({ chromium } = require('playwright'))
+  } catch {
+    t.skip('Playwright is not installed here; set NODE_PATH to a folder with playwright')
+    return
+  }
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.setContent(`
+      <form class="workspace-composer"><ul id="tray">
+        <li><span class="composer-file-copy"><strong>old-photo.jpg</strong><small>Processing failed</small></span></li>
+        <li><span class="composer-file-copy" id="quote"><strong>quote-corrupt.pdf</strong><small>Processing failed</small></span></li>
+      </ul></form>`)
+    const touched = await watchTray(page)
+    await page.evaluate(async () => {
+      const pause = () => new Promise((resolve) => setTimeout(resolve, 100))
+      const label = document.querySelector('#quote small')
+      label.textContent = 'Processing'
+      await pause()
+      label.textContent = 'Processing failed'
+      document.querySelector('#tray').insertAdjacentHTML('beforeend', '<li><span class="composer-file-copy"><strong>photo-new.jpg</strong><small>Ready</small></span></li>')
+      await pause()
+    })
+    const entries = await touched()
+    assert.deepEqual(entries.map((entry) => `${entry.name}: ${entry.label}`).sort(), ['photo-new.jpg: Ready', 'quote-corrupt.pdf: Processing failed'])
+    const usable = [{ material: { id: 'quote-corrupt', file: 'quote-corrupt.pdf' } }, { material: { id: 'photo-new', file: 'photo-new.jpg' } }]
+    const result = markProcessingFailed(usable, [{ material: 'quote-corrupt', via: 'Supporting document' }, { material: 'photo-new', via: 'chat' }], entries)
+    assert.deepEqual(result.failed, ['quote-corrupt'])
+    assert.deepEqual(result.sent, ['photo-new'])
+  } finally {
+    await browser.close()
+  }
 })

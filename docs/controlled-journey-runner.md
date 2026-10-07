@@ -127,7 +127,8 @@ A file the product cannot process is the product's answer, not a stall. The prod
 file out of the message, so the message goes without it:
 
 - `run.json` lists the file under `processing_failed`, and its upload path is marked
-  `processing: failed, sent: false`;
+  `processing: failed, sent: false`. Only the tray entries the message's uploads add or reuse are
+  read, so a file failed earlier and still in the tray does not count again;
 - the claimant's transcript says it could not be processed;
 - the claimant may try that file once more, as a person would, and that counts as a recovery.
   After a second failure it is not sent again;

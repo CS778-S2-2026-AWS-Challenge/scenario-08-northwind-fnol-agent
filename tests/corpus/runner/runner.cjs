@@ -175,16 +175,49 @@ function payoutDestinationToSelect(options) {
 
 // The materials of one message whose file the tray shows as "Processing failed". The product
 // leaves such a file out of the message, so it is not sent: its upload path is marked
-// `processing: failed, sent: false`, and only the other files count as sent. A file that failed in
-// an earlier message stays in the tray under the same name, so a file of this message failed only
-// when the tray holds more failed entries of its name after the uploads than before them
-// (`failedBefore`, `failedAfter`: the names of the tray's failed entries, with repeats).
-function markProcessingFailed(usable, sentVia, failedBefore, failedAfter) {
-  const count = (names, name) => names.filter((item) => item === name).length
-  const failed = usable.filter((entry) => count(failedAfter, entry.material.file) > count(failedBefore, entry.material.file)).map((entry) => entry.material.id)
+// `processing: failed, sent: false`, and only the other files count as sent. `touched` lists the
+// tray entries this message's uploads added or changed (`watchTray`), with their final labels.
+// Entries left from earlier messages are not in it, and a file sent again through a requested
+// item's own upload, which reuses the earlier entry, is. A file failed when every entry of its name
+// that the uploads touched shows "Processing failed".
+function markProcessingFailed(usable, sentVia, touched) {
+  const failed = usable.filter((entry) => {
+    const mine = touched.filter((item) => item.name === entry.material.file)
+    return mine.length > 0 && mine.every((item) => item.label === 'Processing failed')
+  }).map((entry) => entry.material.id)
   const paths = sentVia.map((entry) => (failed.includes(entry.material) ? { ...entry, processing: 'failed', sent: false } : entry))
   const sent = usable.map((entry) => entry.material.id).filter((id) => !failed.includes(id))
   return { failed, sent, paths }
+}
+
+// Watches the composer's file tray, in the page, while one message's files upload. Every file
+// entry the uploads add, or change in place (a file sent again through a requested item's own
+// upload reuses that item's entry), is recorded; entries left from earlier messages are not.
+// Returns a function that stops watching and gives those entries' names and final labels.
+async function watchTray(page) {
+  await page.evaluate(() => {
+    window.__corpusTrayObserver?.disconnect()
+    const touched = new Set()
+    const own = (node) => (node && (node.nodeType === 1 ? node : node.parentElement))?.closest?.('.composer-file-copy')
+    const added = (node) => (node.nodeType !== 1 ? [] : node.matches('.composer-file-copy') ? [node] : [...node.querySelectorAll('.composer-file-copy')])
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        const entry = own(mutation.target)
+        if (entry) touched.add(entry)
+        if (mutation.type === 'childList') mutation.addedNodes.forEach((node) => added(node).forEach((copy) => touched.add(copy)))
+      }
+    })
+    observer.observe(document.querySelector('form.workspace-composer') || document.body, { subtree: true, childList: true, characterData: true })
+    window.__corpusTrayObserver = observer
+    window.__corpusTrayTouched = touched
+  })
+  return () => page.evaluate(() => {
+    window.__corpusTrayObserver?.disconnect()
+    return [...(window.__corpusTrayTouched || [])].filter((node) => node.isConnected).map((node) => ({
+      name: (node.querySelector('strong')?.textContent || '').trim(),
+      label: (node.querySelector('small')?.textContent || '').trim(),
+    }))
+  })
 }
 
 // Sending a file again after the product could not process it is a person's recovery: each such
@@ -584,9 +617,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
         // is not there yet. A file sent through a requested item's own upload also lands in
         // the tray, carrying that item's kind, and goes with the message.
         const trayLabels = () => page.locator('form.workspace-composer .composer-file-copy').evaluateAll((nodes) => nodes.map((node) => `${node.querySelector('strong')?.textContent?.trim()}: ${node.querySelector('small')?.textContent?.trim()}`))
-        const failedInTray = () => page.locator('form.workspace-composer .composer-file-copy')
-          .evaluateAll((nodes) => nodes.filter((node) => (node.querySelector('small')?.textContent || '').trim() === 'Processing failed').map((node) => (node.querySelector('strong')?.textContent || '').trim()))
-        const failedBefore = await failedInTray()
+        const trayTouched = await watchTray(page)
         recordFileRetries(record, usable.map((entry) => entry.material.id))
         for (const { material, spot } of usable) {
           const resolveInput = async () => {
@@ -615,7 +646,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
         // product's answer about the file, not a stalled journey: a person sends the message
         // anyway. The product leaves that file out of the message, so the run records it as not
         // sent, and the claimant's transcript says so.
-        const marked = markProcessingFailed(usable, sentVia, failedBefore, await failedInTray())
+        const marked = markProcessingFailed(usable, sentVia, await trayTouched())
         failedNow = marked.failed
         if (failedNow.length) {
           record.processing_failed = [...(record.processing_failed || []), ...failedNow]
@@ -925,4 +956,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutSaveError, payoutStep }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutSaveError, payoutStep }
