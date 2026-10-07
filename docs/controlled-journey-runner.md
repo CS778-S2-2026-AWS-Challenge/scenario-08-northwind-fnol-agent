@@ -149,6 +149,27 @@ recovery.
 `run.json` records the anonymous sign-in trigger, original Claim, conversation session and whether
 promotion succeeded.
 
+After every press, by the claimant model or by a fixed rule, the runner waits for the request the
+press started, if any, before it does anything else, for up to 20 seconds. A request is running
+while the product shows it: the pressed button disabled, "Saving…" or "Submitting…" on the
+button, or the product's busy signal (the rail's "New chat" button disabled), which stays on when
+a panel is replaced mid-request. Then:
+
+- for the steps' presses, the runner reads the product's answer:
+  - confirming the details: "All correct", "Looks right" or the side panel's "Right"; an error
+    shows under the composer;
+  - the payout step: "Save payout account" and "Continue to agreement", pressed only by fixed
+    rules; an error shows on the contact form's own line;
+  - submitting the claim: "Submit claim" or "Retry claim submission"; an error shows in the
+    submission error card, or under the composer when the panel has been replaced.
+
+  No error means the product accepted the press. An error is a refusal (see below);
+- after any other press, such as a service card's "Agree and continue", the claimant reads the
+  result on the next screen;
+- a request still running after 20 seconds leaves what the product did unknown. The runner stops
+  the pack at that step (`confirmation`, `payout`, `agreement`, or `press` for any other press)
+  rather than guess, and presses nothing more.
+
 Uploads follow "Evidence kinds and the upload path" in the corpus standard:
 
 - The screen lists the upload spots the claim offers for requested documents: the to-do bar, the
@@ -169,14 +190,15 @@ never `lodged_first_time`. The recoveries are:
 - pressing "Retry message" or "Retry response";
 - answering a question once more when the agent asks it again. Each question sentence is tracked
   on its own, whatever else the reply asks with it, so each repeated question counts as one retry;
-- confirming once more after the product refuses a confirmation ("All correct" or "Looks right").
-  The runner waits up to about 20 seconds for the product's answer to the press. Refusals after a
-  press by the claimant model and by the fixed rule count together, and `run.json` lists each one
-  under `confirmation_refusals`;
+- confirming once more after the product refuses a confirmation ("All correct", "Looks right" or
+  "Right").
+  Refusals after a press by the claimant model and by the fixed rule count together, and
+  `run.json` lists each one under `confirmation_refusals`;
 - pressing "Continue to agreement", or saving a new payout account, once more after the payout
-  form's own error line shows an error for that attempt (a failed save, a conflict). The runner
-  reads it once "Saving…" has gone. These refusals are counted apart from confirmations, under
-  `payout_refusals`;
+  form's own error line shows an error for that attempt (a failed save, a conflict). These refusals
+  are counted apart from confirmations, under `payout_refusals`;
+- submitting the claim once more after the product refuses the submission. These refusals are
+  counted on their own too, under `agreement_refusals`;
 - sending a file again after the product could not process it;
 - after about nine seconds with nothing to act on, typing "OK.".
 
@@ -187,8 +209,11 @@ A pack is `stuck` when any of these happens:
 - after the nudge, there is still nothing to act on;
 - the claimant reaches 30 messages;
 - a file shows neither Ready nor "Processing failed";
-- a confirmation is refused a second time (step `confirmation`), or the payout step is (step
-  `payout`);
+- a confirmation is refused a second time (step `confirmation`), the payout step is (step
+  `payout`), or the claim submission is (step `agreement`);
+- a press's request is still running after 20 seconds, at that press's step (`press` for a press
+  outside the steps). The reason reads
+  `no answer to "<button>" within 20 s`;
 - the saved payout accounts are still loading after 30 seconds, "Continue to agreement" stays
   disabled for 30 seconds with the payout account and contact method chosen, or the new payout
   account form comes back after four saves;
@@ -243,8 +268,8 @@ every count.
 
 Run records stay outside the repository:
 
-- screenshots of every turn, taken by the runner itself (#1222 named the capture function of #1218,
-  which was not merged);
+- screenshots of every turn and, for a stuck pack, of the screen it stopped on, taken by the runner
+  itself (#1222 named the capture function of #1218, which was not merged);
 - the claimant prompts and replies;
 - the network log (authentication bodies are not recorded; tokens and passwords are masked);
 - the claimant and staff end states.

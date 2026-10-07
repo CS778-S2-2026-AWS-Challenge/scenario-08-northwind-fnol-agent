@@ -40,8 +40,19 @@ const MAX_CLAIMANT_MESSAGES = 30
 // agreement". Each attempt clears it when it starts. A failed load of the saved accounts shows its
 // error elsewhere in the panel.
 const PAYOUT_FORM_ERROR = '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]'
-// Buttons that confirm the collected details (the review card's "All correct", a reply's "Looks right").
-const CONFIRMATION_PRESS = /^(All correct|Looks right)$/
+// Presses of the claimant model that belong to a step: confirming the collected details (the
+// review card's "All correct", a reply's "Looks right", the side panel's "Right") and submitting
+// the claim. Any other press (a service card, a navigation button) is `press`. The payout panel's
+// buttons sit in its forms and are left to fixed rules.
+const STEP_PRESSES = [
+  { press: /^(All correct|Looks right|Right)$/, action: 'confirmation' },
+  { press: /^(Submit claim|Retry claim submission)$/, action: 'agreement' },
+]
+// The composer's error line, where the product shows the error of most requests (`showError`).
+const COMPOSER_ERROR = 'form.workspace-composer .backend-status[role=alert]'
+// The rail's "New chat" button. The product disables it whenever a request runs (`isBusy`),
+// whichever panel is on the screen; its label reads "Saving..." while a session is paused.
+const APP_BUSY = '.intake-history .history-actions button[aria-label="New chat"], .intake-history .history-actions button[aria-label="Saving..."]'
 const MEDIA = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.pdf': 'application/pdf' }
 const LABELS = require('./material-labels.json')
 
@@ -127,10 +138,12 @@ function trackQuestions(asked, reply) {
 }
 
 // Actions a person tries once more when the product refuses them, each with its own count:
-// confirming the details ("All correct", "Looks right") and saving the payout step.
+// confirming the details ("All correct", "Looks right"), saving the payout step and submitting
+// the claim.
 const REFUSABLE = {
   confirmation: { field: 'confirmation_refusals', step: 'confirmation', what: 'confirmation' },
   payout: { field: 'payout_refusals', step: 'payout', what: 'payout step' },
+  agreement: { field: 'agreement_refusals', step: 'agreement', what: 'claim submission' },
 }
 
 // Records one refusal shown by the product (`by` is `claimant` or `runner`). The first refusal of
@@ -149,21 +162,87 @@ function recordRefusal(record, action, by, alert, at = new Date().toISOString())
   return false
 }
 
-// After a press of a confirmation button: waits until the product has answered, then returns the
-// error it showed under the composer, or null. The product clears that error when the request
-// starts and keeps the button disabled while it runs, so the answer is in once the error shows,
-// or once the button is enabled again or gone. A slow refusal is not missed.
-async function confirmationOutcome(page, pressed, { timeoutMs = 20000, pollMs = 250 } = {}) {
-  const errorLine = page.locator('form.workspace-composer .backend-status[role=alert]').first()
-  const readError = async () => ((await errorLine.textContent({ timeout: pollMs }).catch(() => null)) || '').trim() || null
+// For each kind of press: the step a pack stops at when the product never answers it, how the
+// step itself shows that its request is still running, and the error lines where the product shows
+// a refusal of that request. Each request clears these lines when it starts.
+// - confirmation: the pressed button stays disabled while the request runs, then is enabled again
+//   or gone; the error is under the composer.
+// - payout: the panel's buttons show "Saving…" whenever the product is busy, so during a save or
+//   "Continue to agreement"; the error is the contact form's own line.
+// - agreement: the submit button shows "Submitting…"; the error is the submission error card, or
+//   the composer's line when the panel has been replaced.
+// - press: any other press. Its result is the claimant's to read on the next screen, so no error is
+//   read here; the runner only waits for the request, if the press started one.
+// A request also counts as running while the product's busy signal is on (`APP_BUSY`), so a panel
+// replaced while its request runs is not taken for an answer.
+const STEP_ANSWERS = {
+  confirmation: {
+    step: 'confirmation',
+    errorLines: [COMPOSER_ERROR],
+    running: async (page, pressed, pollMs) => (await pressed.count().catch(() => 0)) > 0 && !(await pressed.isEnabled({ timeout: pollMs }).catch(() => false)),
+  },
+  payout: {
+    step: 'payout',
+    errorLines: [PAYOUT_FORM_ERROR],
+    running: async (page) => (await page.getByRole('button', { name: 'Saving…' }).count().catch(() => 0)) > 0,
+  },
+  agreement: {
+    step: 'agreement',
+    errorLines: ['.agreement-submission-error[role=alert]', COMPOSER_ERROR],
+    running: async (page) => (await page.getByRole('button', { name: 'Submitting…' }).count().catch(() => 0)) > 0,
+  },
+  press: { step: 'press', errorLines: [], running: async () => false },
+}
+
+// Whether the product shows a request running: its "New chat" button disabled. False when the
+// rail is not on the screen.
+async function appBusy(page, pollMs) {
+  const button = page.locator(APP_BUSY).first()
+  return (await button.count().catch(() => 0)) > 0 && !(await button.isEnabled({ timeout: pollMs }).catch(() => true))
+}
+
+// After a press that asks the product to act (`action`, a key of STEP_ANSWERS): waits, by clock
+// time, until the product has answered. Returns `{ alert }`, the error it showed, or null when it
+// accepted; or `{ timedOut: true }` when the request is still running at the deadline. Then what
+// the product did is unknown, and the caller stops the pack at that step rather than guess.
+async function pressOutcome(page, action, pressed, { timeoutMs = 20000, pollMs = 250 } = {}) {
+  const { errorLines, running } = STEP_ANSWERS[action]
+  const readError = async () => {
+    for (const selector of errorLines) {
+      const text = ((await page.locator(selector).first().innerText({ timeout: pollMs }).catch(() => null)) || '').replace(/\s+/g, ' ').trim()
+      if (text) return text
+    }
+    return null
+  }
   const deadline = Date.now() + timeoutMs
+  await page.waitForTimeout(pollMs)
   for (;;) {
     const error = await readError()
-    if (error) return error
-    const settled = (await pressed.count().catch(() => 0)) === 0 || await pressed.isEnabled({ timeout: pollMs }).catch(() => false)
-    if (settled || Date.now() >= deadline) return readError()
+    if (error) return { alert: error }
+    if (!(await running(page, pressed, pollMs)) && !(await appBusy(page, pollMs))) return { alert: await readError() }
+    if (Date.now() >= deadline) return { timedOut: true, waitedMs: timeoutMs }
     await page.waitForTimeout(pollMs)
   }
+}
+
+// Records the product's answer to a press of `label` by `by` (`claimant` or `runner`): a refusal is
+// counted (`recordRefusal`), and no answer by the deadline ends the pack at the press's step.
+// Returns true when the pack has to stop.
+function recordAnswer(record, action, by, label, outcome) {
+  if (outcome.timedOut) {
+    record.outcome = 'stuck'
+    record.stuck = { step: STEP_ANSWERS[action].step, reason: `no answer to "${label}" within ${Math.round(outcome.waitedMs / 1000)} s` }
+    return true
+  }
+  return outcome.alert ? recordRefusal(record, action, by, outcome.alert) : false
+}
+
+// After the claimant model's press of `label` (the tagged button `pressed`): waits for the product's
+// answer as the press's kind requires (`STEP_PRESSES`) and records it. Returns true when the pack
+// has to stop.
+async function claimantPressAnswered(page, record, label, pressed, options) {
+  const action = (STEP_PRESSES.find((entry) => entry.press.test(label)) || { action: 'press' }).action
+  return recordAnswer(record, action, 'claimant', label, await pressOutcome(page, action, pressed, options))
 }
 
 // Which saved payout account to select when the form shows none selected: the first one that can
@@ -467,16 +546,6 @@ async function selectClaimantFile(page, file, resolveInput, signIn) {
   return again.via
 }
 
-// After "Save payout account": the save clears the form's own error line when it starts and shows
-// "Saving…" until it ends (up to `timeoutMs`). Once that is gone, an error on that line is this
-// save's refusal; a failed load shows its error elsewhere in the panel. Returns the error or null.
-async function payoutSaveError(page, { timeoutMs = 20000, pollMs = 500 } = {}) {
-  await page.waitForTimeout(pollMs)
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline && (await page.getByRole('button', { name: 'Saving…' }).count().catch(() => 0)) > 0) await page.waitForTimeout(pollMs)
-  return ((await page.locator(PAYOUT_FORM_ERROR).first().textContent({ timeout: pollMs }).catch(() => null)) || '').trim() || null
-}
-
 // The payout and contact step (fixed rules), read afresh on every poll until something is decided.
 // - While the panel loads the saved accounts ("Loading saved payout accounts…"), it lists none and
 //   keeps "Continue to agreement" disabled: the runner waits, up to `settleMs` of clock time.
@@ -485,14 +554,13 @@ async function payoutSaveError(page, { timeoutMs = 20000, pollMs = 500 } = {}) {
 // - If the panel is replaced, or the button shows "Saving…", the step returns `gone` and the main
 //   loop reads the screen again.
 // - Otherwise the runner picks the contact method and the saved account whenever none is selected
-//   (the panel can come back without them), and presses the button once it is enabled. An error
-//   shown beside an enabled button is the product refusing the last attempt (a failed save, a
-//   conflict): the first is one retry, a second ends the pack.
+//   (the panel can come back without them), and presses the button once it is enabled.
 // - A button still disabled `enableMs` after the panel loaded ends the pack as stuck.
-async function payoutStep(page, continueButton, facts, record, { settleMs = 30000, enableMs = 30000, pollMs = 500 } = {}) {
+// - After the press it waits for the product's answer (`pressOutcome`). A refusal (a failed save,
+//   a conflict) is the one retry, and a second ends the pack; no answer within `answerMs` ends it.
+async function payoutStep(page, continueButton, facts, record, { settleMs = 30000, enableMs = 30000, answerMs = 20000, pollMs = 500 } = {}) {
   const panel = page.locator('.payout-contact-panel')
   const loading = panel.locator('.payout-contact-status', { hasText: 'Loading saved payout accounts' })
-  const errorLine = page.locator(PAYOUT_FORM_ERROR).first()
   const started = Date.now()
   let loadedAt = null
   for (;;) {
@@ -520,14 +588,61 @@ async function payoutStep(page, continueButton, facts, record, { settleMs = 3000
     }
 
     if (await continueButton.isEnabled({ timeout: pollMs }).catch(() => false)) {
-      const error = ((await errorLine.textContent({ timeout: pollMs }).catch(() => null)) || '').trim()
-      if (error && recordRefusal(record, 'payout', 'runner', error)) return { done: 'stuck', reason: record.stuck.reason }
       await continueButton.click()
+      const answer = await pressOutcome(page, 'payout', continueButton, { timeoutMs: answerMs, pollMs })
+      if (recordAnswer(record, 'payout', 'runner', 'Continue to agreement', answer)) return { done: 'stuck', reason: record.stuck.reason }
       return { done: 'continued' }
     }
     if (Date.now() - loadedAt >= enableMs) return { done: 'stuck', reason: `"Continue to agreement" stayed disabled for ${Math.round(enableMs / 1000)} s with the payout account and contact method chosen` }
     await page.waitForTimeout(pollMs)
   }
+}
+
+// The payout panel's new-account form (fixed rule). Returns true when the pack has to stop.
+// - The panel shows the form for a moment before it starts loading the saved accounts; only a
+//   form still there a second later is filled.
+// - A form shown again (another account asked for, or a save refused) is filled again, four times
+//   at most.
+// - After "Save payout account" it waits for the product's answer (`pressOutcome`). A refusal
+//   leaves the form on the screen with the error: the one retry, and a second ends the pack. No
+//   answer within `answerMs` ends it too.
+async function payoutAccountForm(page, facts, record, { settleMs = 1000, answerMs = 20000, pollMs = 250 } = {}) {
+  const form = page.locator('#payout-bank-name')
+  await page.waitForTimeout(settleMs)
+  if (!(await form.isVisible().catch(() => false))) return false
+  if (await page.locator('.payout-contact-panel .payout-contact-status', { hasText: 'Loading saved payout accounts' }).isVisible().catch(() => false)) return false
+  if ((record.payout_account_saves || 0) >= 4) {
+    record.outcome = 'stuck'
+    record.stuck = { step: 'payout', reason: 'the new payout account form came back after four saves' }
+    return true
+  }
+  record.payout_account_saves = (record.payout_account_saves || 0) + 1
+  await page.fill('#payout-bank-name', 'Northwind Test Bank')
+  await page.fill('#payout-account-holder-name', String(facts['policyholder.name'] || 'Corpus Claimant'))
+  await page.fill('#payout-account-type', 'cheque')
+  await page.fill('#payout-account-number', `12-3456-${String(crypto.randomInt(1e6, 9e6))}-00`)
+  await page.getByRole('button', { name: 'Save payout account' }).click()
+  const saved = await pressOutcome(page, 'payout', null, { timeoutMs: answerMs, pollMs })
+  if (saved.alert && !(await form.isVisible().catch(() => false))) saved.alert = null
+  if (recordAnswer(record, 'payout', 'runner', 'Save payout account', saved)) return true
+  await page.waitForTimeout(1500)
+  return false
+}
+
+// The agreement step (fixed rule): ticks every confirmation box, presses the submit button and
+// waits for the product's answer. A refusal is the one retry, and a second ends the pack; no
+// answer within `answerMs` ends it too. Returns true when the pack has to stop.
+async function submitClaim(page, record, shot, { answerMs = 20000, pollMs = 250, settleMs = 5000 } = {}) {
+  const submit = page.locator('button.agreement-submit')
+  for (const box of await page.locator('.agreement-confirmation-option input[type=checkbox]').all()) {
+    if (!(await box.isChecked())) await box.check()
+  }
+  await shot('agreement')
+  const label = ((await submit.innerText().catch(() => '')) || '').trim() || 'Submit claim'
+  await submit.click()
+  if (recordAnswer(record, 'agreement', 'runner', label, await pressOutcome(page, 'agreement', submit, { timeoutMs: answerMs, pollMs }))) return true
+  await page.waitForTimeout(settleMs)
+  return false
 }
 
 // ---------- one pack ----------
@@ -591,13 +706,6 @@ async function runPack(browser, caseId, claimant, outRoot) {
       Object.assign(record.anonymous_sign_in, { succeeded: true, conversation_session_id: claim.conversation_session_id, finished_at: new Date().toISOString() })
       await shot('signed-in')
       operation = during
-    }
-    // A confirmation the product refuses shows an error under the composer. The runner waits for
-    // the product's answer to the press (`confirmationOutcome`). Presses of a confirmation button by
-    // the claimant model and by the fixed rule count together. Returns true when the pack stops.
-    const confirmationRefused = async (by, pressed) => {
-      const alert = await confirmationOutcome(page, pressed)
-      return alert ? recordRefusal(record, 'confirmation', by, alert) : false
     }
 
     // The first message, as written.
@@ -789,7 +897,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
           record.presses.push(reply.press)
           transcript.push({ who: 'claimant', text: `(pressed "${reply.press}")` })
           await page.waitForTimeout(2500)
-          if (CONFIRMATION_PRESS.test(reply.press) && await confirmationRefused('claimant', page.getByRole('button', { name: reply.press, exact: true }).first())) break
+          if (await claimantPressAnswered(page, record, reply.press, button)) break
           // Pressing is the whole action for this turn: a person who presses "Review and agree"
           // does not also type in the chat, and a chat message would reopen the claim summary.
           if (text || files.length) log('claimant.jsonl', { at: new Date().toISOString(), not_sent_with_press: { message: text, upload: files.map((entry) => entry.material.id) } })
@@ -811,28 +919,12 @@ async function runPack(browser, caseId, claimant, outRoot) {
         stalls = 0
         await allCorrect.click()
         await page.waitForTimeout(2500)
-        if (await confirmationRefused('runner', allCorrect)) break
+        if (recordAnswer(record, 'confirmation', 'runner', 'All correct', await pressOutcome(page, 'confirmation', allCorrect))) break
         continue
       }
       if (await page.locator('#payout-bank-name').isVisible().catch(() => false)) {
         stalls = 0
-        // The panel shows the new-account form for a moment before it starts loading the saved
-        // accounts; only a form still there a second later is filled.
-        await page.waitForTimeout(1000)
-        if (!(await page.locator('#payout-bank-name').isVisible().catch(() => false))) continue
-        if (await page.locator('.payout-contact-panel .payout-contact-status', { hasText: 'Loading saved payout accounts' }).isVisible().catch(() => false)) continue
-        // A form shown again (another account asked for, or a save refused) is filled again, a
-        // few times at most.
-        if ((record.payout_account_saves || 0) >= 4) { record.outcome = 'stuck'; record.stuck = { step: 'payout', reason: 'the new payout account form came back after four saves' }; break }
-        record.payout_account_saves = (record.payout_account_saves || 0) + 1
-        await page.fill('#payout-bank-name', 'Northwind Test Bank')
-        await page.fill('#payout-account-holder-name', String(facts['policyholder.name'] || 'Corpus Claimant'))
-        await page.fill('#payout-account-type', 'cheque')
-        await page.fill('#payout-account-number', `12-3456-${String(crypto.randomInt(1e6, 9e6))}-00`)
-        await page.getByRole('button', { name: 'Save payout account' }).click()
-        const saveError = await payoutSaveError(page)
-        if (saveError && await page.locator('#payout-bank-name').isVisible().catch(() => false) && recordRefusal(record, 'payout', 'runner', saveError)) break
-        await page.waitForTimeout(1500)
+        if (await payoutAccountForm(page, facts, record)) break
         continue
       }
       const continueButton = page.getByRole('button', { name: 'Continue to agreement' })
@@ -843,15 +935,9 @@ async function runPack(browser, caseId, claimant, outRoot) {
         if (step.done === 'continued') await page.waitForTimeout(2500)
         continue
       }
-      const submit = page.locator('button.agreement-submit')
-      if (await submit.isVisible().catch(() => false)) {
+      if (await page.locator('button.agreement-submit').isVisible().catch(() => false)) {
         stalls = 0
-        for (const box of await page.locator('.agreement-confirmation-option input[type=checkbox]').all()) {
-          if (!(await box.isChecked())) await box.check()
-        }
-        await shot('agreement')
-        await submit.click()
-        await page.waitForTimeout(5000)
+        if (await submitClaim(page, record, shot)) break
         continue
       }
 
@@ -871,6 +957,8 @@ async function runPack(browser, caseId, claimant, outRoot) {
     record.stuck = { step: operation, reason: error.message.split('\n')[0] }
     await shot('error').catch(() => {})
   } finally {
+    // A stuck pack keeps the screen it stopped on (an error has its own screenshot).
+    if (record.outcome === 'stuck' && record.steps.at(-1)?.name !== 'error') await shot('stuck').catch(() => {})
     // The claimant-side end state, read the way the app reads it, for the scorer.
     if (record.claim_id) {
       const endState = await page.evaluate(async (claimId) => {
@@ -964,4 +1052,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutSaveError, payoutStep }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm }

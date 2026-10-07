@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutSaveError, payoutStep } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -218,6 +218,32 @@ test('a refused action is one retry, and a second refusal of the same action end
   assert.equal(apart.retries, 2)
   assert.equal(recordRefusal(apart, 'payout', 'runner', 'Your report changed while this page was open.', 't3'), true)
   assert.equal(apart.stuck.step, 'payout')
+  // A refused claim submission is its own action: one retry, then stuck at the agreement step.
+  const SUBMIT = 'Northwind could not submit your claim.'
+  const submitted = { retries: 0, outcome: null, stuck: null }
+  assert.equal(recordRefusal(submitted, 'agreement', 'runner', SUBMIT, 't1'), false)
+  assert.equal(submitted.retries, 1)
+  assert.equal(recordRefusal(submitted, 'agreement', 'runner', SUBMIT, 't2'), true)
+  assert.deepEqual(submitted.stuck, { step: 'agreement', reason: `claim submission refused 2 times: ${SUBMIT}` })
+})
+
+test('a press with no answer by its deadline ends the pack at its step, without a retry', () => {
+  for (const [action, label, step] of [['confirmation', 'All correct', 'confirmation'], ['payout', 'Continue to agreement', 'payout'], ['payout', 'Save payout account', 'payout'], ['agreement', 'Submit claim', 'agreement']]) {
+    const record = { retries: 0, outcome: null, stuck: null }
+    assert.equal(recordAnswer(record, action, 'runner', label, { timedOut: true, waitedMs: 20000 }), true)
+    assert.equal(record.outcome, 'stuck')
+    assert.deepEqual(record.stuck, { step, reason: `no answer to "${label}" within 20 s` })
+    // The outcome is unknown: it is neither a refusal nor a recovery.
+    assert.equal(record.retries, 0)
+    assert.equal(record.confirmation_refusals || record.payout_refusals || record.agreement_refusals, undefined)
+  }
+  // An answer is recorded as before: a refusal counts, an acceptance changes nothing.
+  const answered = { retries: 0, outcome: null, stuck: null }
+  assert.equal(recordAnswer(answered, 'confirmation', 'claimant', 'Looks right', { alert: null }), false)
+  assert.deepEqual(answered, { retries: 0, outcome: null, stuck: null })
+  assert.equal(recordAnswer(answered, 'confirmation', 'claimant', 'Looks right', { alert: 'One or more fields cannot be confirmed.' }), false)
+  assert.equal(answered.retries, 1)
+  assert.equal(answered.confirmation_refusals[0].by, 'claimant')
 })
 
 test('a payout form shown again selects the saved account only when none is selected', () => {
@@ -254,6 +280,13 @@ test('a file the product cannot process is recorded as not sent, and may be trie
   assert.equal(mayHandOver(record, 'repair-quote'), true)
 })
 
+// The rail's "New chat" button, as the product renders it: present and disabled while a request
+// runs (`busy`), absent when `busy` is undefined (no rail on the screen).
+const APP_BUSY = '.intake-history .history-actions button[aria-label="New chat"], .intake-history .history-actions button[aria-label="Saving..."]'
+const busySignal = (busy) => ({ first: () => ({ count: async () => (busy() === undefined ? 0 : 1), isEnabled: async () => !busy() }) })
+// An error line: its text, or a read that times out when nothing is shown.
+const errorLine = (text) => ({ first: () => ({ innerText: async () => { const value = text(); if (value) return value; throw new Error('no error line') } }) })
+
 // A pressed confirmation button and the composer's error line, as the product renders them:
 // the button is disabled while the request runs, then enabled again or gone, and the error (if
 // any) appears when the answer arrives. `steps` lists the page state per poll.
@@ -261,22 +294,38 @@ function confirmationPage(steps) {
   let poll = 0
   const now = () => steps[Math.min(poll, steps.length - 1)]
   const page = {
-    waitForTimeout: async () => { poll += 1 },
-    locator: () => ({ first: () => ({ textContent: async () => { if (now().error) return now().error; throw new Error('no error line') } }) }),
+    waitForTimeout: async (ms) => { poll += 1; await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 5))) },
+    locator: (selector) => {
+      if (selector === APP_BUSY) return busySignal(() => now().busy)
+      assert.equal(selector, 'form.workspace-composer .backend-status[role=alert]')
+      return errorLine(() => now().error)
+    },
   }
   const pressed = { count: async () => (now().button === 'gone' ? 0 : 1), isEnabled: async () => now().button === 'enabled' }
   return { page, pressed }
 }
 
-test('a confirmation is judged on the product answer, however slow', async () => {
+test('a confirmation is judged on the product answer, however slow, and no answer is not a success', async () => {
   const REFUSAL = 'One or more fields cannot be confirmed.'
   // The refusal arrives three polls after the press, while the button is still disabled.
   const slow = confirmationPage([{ button: 'disabled' }, { button: 'disabled' }, { button: 'disabled' }, { button: 'enabled', error: REFUSAL }])
-  assert.equal(await confirmationOutcome(slow.page, slow.pressed, { timeoutMs: 60000 }), REFUSAL)
+  assert.deepEqual(await pressOutcome(slow.page, 'confirmation', slow.pressed, { timeoutMs: 60000 }), { alert: REFUSAL })
   const accepted = confirmationPage([{ button: 'disabled' }, { button: 'gone' }])
-  assert.equal(await confirmationOutcome(accepted.page, accepted.pressed, { timeoutMs: 60000 }), null)
+  assert.deepEqual(await pressOutcome(accepted.page, 'confirmation', accepted.pressed, { timeoutMs: 60000 }), { alert: null })
   const enabledAgain = confirmationPage([{ button: 'disabled' }, { button: 'enabled' }])
-  assert.equal(await confirmationOutcome(enabledAgain.page, enabledAgain.pressed, { timeoutMs: 60000 }), null)
+  assert.deepEqual(await pressOutcome(enabledAgain.page, 'confirmation', enabledAgain.pressed, { timeoutMs: 60000 }), { alert: null })
+  // The request never finishes: the button stays disabled and no error shows. At the deadline the
+  // outcome is unknown, so it is reported as such, not as an accepted confirmation.
+  const pending = confirmationPage([{ button: 'disabled' }])
+  const started = Date.now()
+  assert.deepEqual(await pressOutcome(pending.page, 'confirmation', pending.pressed, { timeoutMs: 60, pollMs: 5 }), { timedOut: true, waitedMs: 60 })
+  assert.ok(Date.now() - started >= 60)
+  // The card is replaced while the request still runs (a live refresh): the button is gone, but
+  // the product is still busy, so the runner waits for the answer.
+  const replaced = confirmationPage([{ button: 'gone', busy: true }, { button: 'gone', busy: true }, { button: 'gone', busy: false, error: REFUSAL }])
+  assert.deepEqual(await pressOutcome(replaced.page, 'confirmation', replaced.pressed, { timeoutMs: 60000 }), { alert: REFUSAL })
+  const stillBusy = confirmationPage([{ button: 'gone', busy: true }])
+  assert.deepEqual(await pressOutcome(stillBusy.page, 'confirmation', stillBusy.pressed, { timeoutMs: 60, pollMs: 5 }), { timedOut: true, waitedMs: 60 })
 })
 
 // A double of the payout and contact panel (customer/src/components/PayoutContactPanel.jsx):
@@ -284,8 +333,8 @@ test('a confirmation is judged on the product answer, however slow', async () =>
 // "Continue to agreement" disabled; the button enables once an account and a contact method are
 // selected. Each wait of the runner advances the load by one step, and real time passes so the
 // step's clock limits apply.
-function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, accounts = [{ checked: false, disabled: false }], neverEnables = false, gone = false, remountAfterWaits = null } = {}) {
-  const state = { loadingSteps, contact: null, clicks: 0, waits: 0, accounts: accounts.map((account) => ({ ...account })) }
+function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, accounts = [{ checked: false, disabled: false }], neverEnables = false, gone = false, remountAfterWaits = null, refusals = [], neverAnswers = false } = {}) {
+  const state = { loadingSteps, contact: null, clicks: 0, waits: 0, saving: false, accounts: accounts.map((account) => ({ ...account })) }
   const loaded = () => state.loadingSteps === 0
   const page = {
     waitForTimeout: async (ms) => {
@@ -303,7 +352,8 @@ function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, account
           },
         }
       }
-      if (selector === '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && state.error) return state.error; throw new Error('no alert') } }) }
+      if (selector === '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]') return errorLine(() => loaded() && state.error)
+      if (selector === APP_BUSY) return busySignal(() => undefined)
       if (selector === '#payout-bank-name') return { isVisible: async () => loaded() && bankForm }
       if (selector === 'input[name=contact_preference]') return { evaluateAll: async (fn) => fn(loaded() ? ['in_app', 'email'].map((value) => ({ value, disabled: false, checked: state.contact === value })) : []) }
       if (selector.startsWith('input[name=contact_preference][value=')) return { check: async () => { state.contact = selector.match(/value="([^"]+)"/)[1] } }
@@ -315,12 +365,20 @@ function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, account
       }
       return assert.fail(`unexpected locator ${selector} ${JSON.stringify(options)}`)
     },
+    getByRole: (role, { name }) => ({ count: async () => (name === 'Saving…' && state.saving ? 1 : 0) }),
   }
   state.error = error
+  // A press clears the error line; the request then runs for ever, or is answered with the next
+  // refusal in `refusals`, or accepted.
   const button = {
     count: async () => (gone ? 0 : 1),
-    isEnabled: async () => !neverEnables && loaded() && Boolean(state.contact) && state.accounts.some((account) => account.checked),
-    click: async () => { state.clicks += 1 },
+    isEnabled: async () => !neverEnables && !state.saving && loaded() && Boolean(state.contact) && state.accounts.some((account) => account.checked),
+    click: async () => {
+      state.clicks += 1
+      state.error = null
+      if (neverAnswers) state.saving = true
+      else state.error = refusals[state.clicks - 1] || null
+    },
   }
   return { page, button, state }
 }
@@ -362,15 +420,38 @@ test('the payout step chooses again after the panel is remounted, and retries a 
   const record = { retries: 0 }
   assert.deepEqual(await payoutStep(remounted.page, remounted.button, facts, record, PAYOUT_LIMITS), { done: 'continued' })
   assert.equal(record.payout_reselected, 2)
-  // An error beside an enabled button: the product refused the last attempt. One retry, then stuck.
-  const refused = payoutPanel({ error: 'Your report changed while this page was open.' })
+  // The product refuses the press and keeps the panel (its own revision check): read right after
+  // the press, one retry, then stuck.
+  const CONFLICT = 'The Claim changed before payout details could be saved. Reload and try again.'
+  const refused = payoutPanel({ refusals: [CONFLICT, CONFLICT] })
   const retried = { retries: 0, outcome: null, stuck: null }
   assert.deepEqual(await payoutStep(refused.page, refused.button, facts, retried, PAYOUT_LIMITS), { done: 'continued' })
   assert.equal(retried.retries, 1)
+  assert.deepEqual(retried.payout_refusals.map((refusal) => refusal.alert), [CONFLICT])
   const result = await payoutStep(refused.page, refused.button, facts, retried, PAYOUT_LIMITS)
   assert.equal(result.done, 'stuck')
-  assert.match(result.reason, /payout step refused 2 times: Your report changed/)
-  assert.equal(refused.state.clicks, 1)
+  assert.match(result.reason, /payout step refused 2 times: The Claim changed/)
+  assert.equal(refused.state.clicks, 2)
+  // An error still shown from an earlier attempt is not this press's answer: the press clears it.
+  const stale = payoutPanel({ error: CONFLICT })
+  const accepted = { retries: 0, outcome: null, stuck: null }
+  assert.deepEqual(await payoutStep(stale.page, stale.button, facts, accepted, PAYOUT_LIMITS), { done: 'continued' })
+  assert.equal(accepted.retries, 0)
+  assert.equal(accepted.payout_refusals, undefined)
+})
+
+test('a payout press that is never answered ends the pack at the payout step, by clock time', async () => {
+  // "Saving…" stays on: the outcome is unknown. The step stops there and presses nothing more.
+  const pending = payoutPanel({ neverAnswers: true })
+  const record = { retries: 0, outcome: null, stuck: null }
+  const started = Date.now()
+  const result = await payoutStep(pending.page, pending.button, { 'claimant.contact_preference': 'email' }, record, { ...PAYOUT_LIMITS, answerMs: 1000 })
+  assert.deepEqual(result, { done: 'stuck', reason: 'no answer to "Continue to agreement" within 1 s' })
+  assert.deepEqual(record.stuck, { step: 'payout', reason: result.reason })
+  assert.ok(Date.now() - started >= 1000)
+  assert.equal(pending.state.clicks, 1)
+  assert.equal(record.retries, 0)
+  assert.equal(record.payout_refusals, undefined)
 })
 
 test('the payout step stops on an endless load or a button that never enables, by clock time', async () => {
@@ -392,7 +473,7 @@ test('the payout step stops on an endless load or a button that never enables, b
 
 // The same loading-to-ready transition in a real browser, with the panel's markup and timing
 // rebuilt as a static page. Runs where Playwright can be loaded (NODE_PATH), as for the runner.
-test('in a real browser, the payout step waits through the loading panel and continues', async (t) => {
+test('in a real browser, the payout step waits through the loading panel and for the answer to its press', async (t) => {
   let chromium
   try {
     ({ chromium } = require('playwright'))
@@ -401,7 +482,9 @@ test('in a real browser, the payout step waits through the loading panel and con
     return
   }
   const browser = await chromium.launch()
-  try {
+  // The panel as the product renders it; a press shows "Saving…" until the answer, which here
+  // replaces the panel after `answerAfterMs`, or never comes.
+  const openPanel = async (answerAfterMs) => {
     const page = await browser.newPage()
     await page.setContent(`
       <section class="payout-contact-panel">
@@ -419,43 +502,248 @@ test('in a real browser, the payout step waits through the loading panel and con
           button.disabled = !(document.querySelector('input[name=payout_destination]:checked') && document.querySelector('input[name=contact_preference]:checked'))
         }
         document.addEventListener('change', update)
-        button.addEventListener('click', () => { document.body.dataset.continued = 'yes' })
+        button.addEventListener('click', () => {
+          button.textContent = 'Saving…'
+          button.disabled = true
+          if (${answerAfterMs} >= 0) setTimeout(() => { document.querySelector('.payout-contact-panel').remove(); document.body.dataset.continued = 'yes' }, ${answerAfterMs})
+        })
         setTimeout(() => {
           document.querySelector('.payout-contact-status').remove()
           document.querySelector('#accounts').innerHTML = '<label><input type="radio" name="payout_destination" value="pd_1"> cheque ****8300</label>'
         }, 1500)
       </script>`)
-    const button = page.getByRole('button', { name: 'Continue to agreement' })
-    const record = {}
-    const result = await payoutStep(page, button, { 'claimant.contact_preference': 'email' }, record, { settleMs: 10000, enableMs: 5000, pollMs: 250 })
+    return page
+  }
+  try {
+    const page = await openPanel(800)
+    const record = { retries: 0 }
+    const result = await payoutStep(page, page.getByRole('button', { name: 'Continue to agreement' }), { 'claimant.contact_preference': 'email' }, record, { settleMs: 10000, enableMs: 5000, answerMs: 5000, pollMs: 250 })
     assert.deepEqual(result, { done: 'continued' })
     assert.ok(record.payout_loading_waits > 0, 'the runner saw the panel loading')
     assert.equal(record.payout_reselected, 1)
-    assert.equal(await page.evaluate(() => document.body.dataset.continued), 'yes')
+    assert.equal(await page.evaluate(() => document.body.dataset.continued), 'yes', 'the step returned only after the product answered')
+    // "Saving…" never ends: stuck at the payout step once `answerMs` has passed.
+    const pending = await openPanel(-1)
+    const stuck = { retries: 0 }
+    const started = Date.now()
+    const stopped = await payoutStep(pending, pending.getByRole('button', { name: 'Continue to agreement' }), { 'claimant.contact_preference': 'email' }, stuck, { settleMs: 10000, enableMs: 5000, answerMs: 2000, pollMs: 250 })
+    assert.deepEqual(stopped, { done: 'stuck', reason: 'no answer to "Continue to agreement" within 2 s' })
+    assert.ok(Date.now() - started >= 2000)
+    assert.equal(stuck.retries, 0)
   } finally {
     await browser.close()
   }
 })
 
-test('a payout save is judged after "Saving…" ends, from the form\'s own error line', async () => {
-  // `steps`: per poll, whether "Saving…" shows and the form's error line. A failed load's error
-  // is elsewhere in the panel and never read here.
-  const savePage = (steps) => {
-    let poll = 0
-    const now = () => steps[Math.min(poll, steps.length - 1)]
-    return {
-      waitForTimeout: async () => { poll += 1 },
-      getByRole: (role, { name }) => ({ count: async () => (name === 'Saving…' && now().saving ? 1 : 0) }),
-      locator: (selector) => {
-        assert.equal(selector, '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]')
-        return { first: () => ({ textContent: async () => { if (now().error) return now().error; throw new Error('no error') } }) }
-      },
-    }
+// A page whose request shows `busyLabel` on its button while it runs, and an error on one of
+// `lines` when the product refuses. `steps` lists, per poll, whether the button shows it running,
+// whether the product is busy, and the text on each error line (`errors`, by selector).
+function requestPage(busyLabel, lines, steps) {
+  let poll = 0
+  const now = () => steps[Math.min(poll, steps.length - 1)]
+  return {
+    waitForTimeout: async (ms) => { poll += 1; await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 5))) },
+    getByRole: (role, { name }) => ({ count: async () => (name === busyLabel && now().running ? 1 : 0) }),
+    locator: (selector) => {
+      if (selector === APP_BUSY) return busySignal(() => now().busy)
+      assert.ok(lines.includes(selector), `unexpected locator ${selector}`)
+      return errorLine(() => (now().errors || {})[selector])
+    },
   }
+}
+const PAYOUT_LINE = '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]'
+const SUBMISSION_CARD = '.agreement-submission-error[role=alert]'
+const COMPOSER_LINE = 'form.workspace-composer .backend-status[role=alert]'
+
+test('a payout save is judged after "Saving…" ends, from the form\'s own error line, and never by a timeout', async () => {
+  // A failed load's error is elsewhere in the panel and never read here.
+  const savePage = (steps) => requestPage('Saving…', [PAYOUT_LINE], steps)
   const REFUSED = 'Payout and contact details could not be saved.'
   // A slow save refused with the same text as before: it is read once "Saving…" is gone.
-  assert.equal(await payoutSaveError(savePage([{ saving: true }, { saving: true }, { saving: true }, { saving: false, error: REFUSED }]), { timeoutMs: 60000 }), REFUSED)
-  assert.equal(await payoutSaveError(savePage([{ saving: true }, { saving: false }])), null)
+  assert.deepEqual(await pressOutcome(savePage([{ running: true }, { running: true }, { running: true }, { running: false, errors: { [PAYOUT_LINE]: REFUSED } }]), 'payout', null, { timeoutMs: 60000 }), { alert: REFUSED })
+  assert.deepEqual(await pressOutcome(savePage([{ running: true }, { running: false }]), 'payout'), { alert: null })
+  // "Saving…" never ends: the outcome is unknown at the deadline.
+  assert.deepEqual(await pressOutcome(savePage([{ running: true }]), 'payout', null, { timeoutMs: 60, pollMs: 5 }), { timedOut: true, waitedMs: 60 })
+})
+
+// The new-account form (customer/src/components/PayoutContactPanel.jsx): "Save payout account"
+// shows "Saving…" while the save runs; a refusal leaves the form with the error on the contact
+// form's line, an accepted save replaces the form. `answers` lists each save's answer: 'saved',
+// an error text, or 'never'.
+function accountForm(answers) {
+  const state = { saves: 0, saving: false, error: null, form: true, filled: [] }
+  const page = {
+    waitForTimeout: async (ms) => { await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 5))) },
+    fill: async (selector) => { state.filled.push(selector) },
+    getByRole: (role, { name }) => {
+      if (name === 'Save payout account') {
+        return {
+          click: async () => {
+            const answer = answers[state.saves]
+            state.saves += 1
+            state.error = null
+            if (answer === 'never') state.saving = true
+            else if (answer === 'saved') state.form = false
+            else state.error = answer
+          },
+        }
+      }
+      return { count: async () => (name === 'Saving…' && state.saving ? 1 : 0) }
+    },
+    locator: (selector) => {
+      if (selector === '#payout-bank-name') return { isVisible: async () => state.form }
+      if (selector === '.payout-contact-panel .payout-contact-status') return { isVisible: async () => false }
+      if (selector === PAYOUT_LINE) return errorLine(() => state.error)
+      if (selector === APP_BUSY) return busySignal(() => undefined)
+      return assert.fail(`unexpected locator ${selector}`)
+    },
+  }
+  return { page, state }
+}
+
+const FORM_LIMITS = { settleMs: 1, answerMs: 1000, pollMs: 5 }
+
+test('a new payout account save waits for its answer: accepted, refused once then stuck, or never answered', async () => {
+  const facts = { 'policyholder.name': 'Corpus Claimant' }
+  const accepted = accountForm(['saved'])
+  const record = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await payoutAccountForm(accepted.page, facts, record, FORM_LIMITS), false)
+  assert.deepEqual(record, { retries: 0, outcome: null, stuck: null, payout_account_saves: 1 })
+  // Refused twice, with the same text: one retry, then stuck at the payout step.
+  const REFUSED = 'The payout account could not be saved.'
+  const refused = accountForm([REFUSED, REFUSED])
+  const retried = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await payoutAccountForm(refused.page, facts, retried, FORM_LIMITS), false)
+  assert.equal(retried.retries, 1)
+  assert.equal(await payoutAccountForm(refused.page, facts, retried, FORM_LIMITS), true)
+  assert.deepEqual(retried.stuck, { step: 'payout', reason: `payout step refused 2 times: ${REFUSED}` })
+  // "Saving…" never ends: stuck at the payout step at the deadline, with nothing more pressed.
+  const pending = accountForm(['never'])
+  const stuck = { retries: 0, outcome: null, stuck: null }
+  const started = Date.now()
+  assert.equal(await payoutAccountForm(pending.page, facts, stuck, FORM_LIMITS), true)
+  assert.ok(Date.now() - started >= FORM_LIMITS.answerMs)
+  assert.equal(stuck.outcome, 'stuck')
+  assert.deepEqual(stuck.stuck, { step: 'payout', reason: 'no answer to "Save payout account" within 1 s' })
+  assert.equal(stuck.retries, 0)
+  assert.equal(pending.state.saves, 1)
+})
+
+test('a claim submission is judged after "Submitting…" ends, from the submission error, and never by a timeout', async () => {
+  const submitPage = (steps) => requestPage('Submitting…', [SUBMISSION_CARD, COMPOSER_LINE], steps)
+  // The card's heading and message (customer/src/claimSubmissionFeedback.js), read as one line.
+  const CARD = "Your claim wasn't accepted\nThe Claim changed before it could be submitted. Please check your details and try again."
+  const READ = "Your claim wasn't accepted The Claim changed before it could be submitted. Please check your details and try again."
+  assert.deepEqual(await pressOutcome(submitPage([{ running: true }, { running: true }, { running: false }]), 'agreement'), { alert: null })
+  assert.deepEqual(await pressOutcome(submitPage([{ running: true }, { running: false, errors: { [SUBMISSION_CARD]: CARD } }]), 'agreement'), { alert: READ })
+  // The read-back moved the claim on and the panel, with its card, is gone: the composer's line
+  // still carries the error, so the refusal is not taken for an acceptance.
+  const COMPOSER = "We're not sure your claim went through. Try again — it won't create a duplicate."
+  assert.deepEqual(await pressOutcome(submitPage([{ running: true, busy: true }, { running: false, busy: true }, { running: false, busy: false, errors: { [COMPOSER_LINE]: COMPOSER } }]), 'agreement', null, { timeoutMs: 60000 }), { alert: COMPOSER })
+  assert.deepEqual(await pressOutcome(submitPage([{ running: true }]), 'agreement', null, { timeoutMs: 60, pollMs: 5 }), { timedOut: true, waitedMs: 60 })
+})
+
+// The agreement panel (customer/src/components/AgreementConfirmationPanel.jsx): its confirmation
+// boxes, and a submit button that shows "Submitting…" until the answer. `answers` lists each
+// submission's answer: 'lodged', an error text for the card, or 'never'.
+function agreementPanel(answers) {
+  const state = { submissions: 0, running: false, error: null, boxes: [false, false], shots: [] }
+  const page = {
+    waitForTimeout: async (ms) => { await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 5))) },
+    getByRole: (role, { name }) => ({ count: async () => (name === 'Submitting…' && state.running ? 1 : 0) }),
+    locator: (selector) => {
+      if (selector === '.agreement-confirmation-option input[type=checkbox]') {
+        return { all: async () => state.boxes.map((checked, index) => ({ isChecked: async () => state.boxes[index], check: async () => { state.boxes[index] = true } })) }
+      }
+      if (selector === 'button.agreement-submit') {
+        return {
+          innerText: async () => (state.submissions && state.error ? 'Retry claim submission' : 'Submit claim'),
+          click: async () => {
+            assert.ok(state.boxes.every(Boolean), 'every confirmation box is ticked before the press')
+            const answer = answers[state.submissions]
+            state.submissions += 1
+            state.error = null
+            if (answer === 'never') state.running = true
+            else if (answer !== 'lodged') state.error = answer
+          },
+        }
+      }
+      if (selector === SUBMISSION_CARD) return errorLine(() => state.error)
+      if (selector === COMPOSER_LINE) return errorLine(() => null)
+      if (selector === APP_BUSY) return busySignal(() => state.running)
+      return assert.fail(`unexpected locator ${selector}`)
+    },
+  }
+  return { page, state, shot: async (name) => { state.shots.push(name) } }
+}
+
+test('the claim submission waits for its answer: lodged, refused once then stuck, or never answered', async () => {
+  const LIMITS = { answerMs: 1000, pollMs: 5, settleMs: 1 }
+  const lodged = agreementPanel(['lodged'])
+  const record = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await submitClaim(lodged.page, record, lodged.shot, LIMITS), false)
+  assert.deepEqual(record, { retries: 0, outcome: null, stuck: null })
+  assert.deepEqual(lodged.state.shots, ['agreement'])
+  const REFUSED = "Your claim wasn't accepted"
+  const refused = agreementPanel([REFUSED, REFUSED])
+  const retried = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await submitClaim(refused.page, retried, refused.shot, LIMITS), false)
+  assert.equal(retried.retries, 1)
+  assert.equal(await submitClaim(refused.page, retried, refused.shot, LIMITS), true)
+  assert.deepEqual(retried.stuck, { step: 'agreement', reason: `claim submission refused 2 times: ${REFUSED}` })
+  // "Submitting…" never ends: stuck at the agreement step, nothing pressed again.
+  const pending = agreementPanel(['never'])
+  const stuck = { retries: 0, outcome: null, stuck: null }
+  const started = Date.now()
+  assert.equal(await submitClaim(pending.page, stuck, pending.shot, LIMITS), true)
+  assert.ok(Date.now() - started >= LIMITS.answerMs)
+  assert.deepEqual(stuck.stuck, { step: 'agreement', reason: 'no answer to "Submit claim" within 1 s' })
+  assert.equal(stuck.retries, 0)
+  assert.equal(pending.state.submissions, 1)
+})
+
+test('a claimant press waits for the request it started: at its step for confirmations and submissions, as a press otherwise', async () => {
+  // `steps`: per poll, whether the pressed button is disabled, whether the product is busy, and the
+  // composer's error. The pressed button is the one the runner tagged for the claimant.
+  const pressPage = (steps) => {
+    let poll = 0
+    const now = () => steps[Math.min(poll, steps.length - 1)]
+    const page = {
+      waitForTimeout: async (ms) => { poll += 1; await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 5))) },
+      getByRole: (role, { name }) => ({ count: async () => (name === 'Submitting…' && now().running ? 1 : 0) }),
+      locator: (selector) => {
+        if (selector === APP_BUSY) return busySignal(() => now().busy)
+        if (selector === COMPOSER_LINE) return errorLine(() => now().error)
+        if (selector === SUBMISSION_CARD) return errorLine(() => null)
+        return assert.fail(`unexpected locator ${selector}`)
+      },
+    }
+    const pressed = { count: async () => 1, isEnabled: async () => !now().disabled }
+    return { page, pressed }
+  }
+  const LIMITS = { timeoutMs: 1000, pollMs: 5 }
+  // The side panel's "Right" confirms a detail: its refusal counts as a confirmation refusal.
+  const REFUSAL = 'One or more fields cannot be confirmed.'
+  const right = pressPage([{ disabled: true, busy: true }, { disabled: false, busy: false, error: REFUSAL }])
+  const confirmed = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await claimantPressAnswered(right.page, confirmed, 'Right', right.pressed, LIMITS), false)
+  assert.deepEqual(confirmed.confirmation_refusals.map((refusal) => [refusal.by, refusal.alert]), [['claimant', REFUSAL]])
+  // A submission the claimant pressed that is never answered: stuck at the agreement step.
+  const submit = pressPage([{ running: true, busy: true }])
+  const submitted = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await claimantPressAnswered(submit.page, submitted, 'Retry claim submission', submit.pressed, LIMITS), true)
+  assert.deepEqual(submitted.stuck, { step: 'agreement', reason: 'no answer to "Retry claim submission" within 1 s' })
+  // A service card's request that never ends: stuck at the press, not read as done.
+  const service = pressPage([{ disabled: true, busy: true }])
+  const agreed = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await claimantPressAnswered(service.page, agreed, 'Agree and continue', service.pressed, LIMITS), true)
+  assert.deepEqual(agreed.stuck, { step: 'press', reason: 'no answer to "Agree and continue" within 1 s' })
+  // A press that starts no request (navigation) is done at once, and its screen is the claimant's
+  // to read: an error shown there is not counted by the runner.
+  const navigation = pressPage([{ disabled: false, busy: false, error: 'Something the claimant reads.' }])
+  const moved = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await claimantPressAnswered(navigation.page, moved, 'Review and agree ›', navigation.pressed, LIMITS), false)
+  assert.deepEqual(moved, { retries: 0, outcome: null, stuck: null })
 })
 
 // The tray in a real browser: an entry left from an earlier message, an entry reused by a file sent
