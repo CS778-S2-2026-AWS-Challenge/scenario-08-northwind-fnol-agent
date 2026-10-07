@@ -36,6 +36,10 @@ const { buildClaimantPrompt, claimantKnownText, claimantFromEnvironment } = requ
 const { buildBusinessSeed, packKey, seedAccount } = require('./corpus_seed.cjs')
 
 const MAX_CLAIMANT_MESSAGES = 30
+// The payout panel's own error line, inside its contact form: a refused save or "Continue to
+// agreement". Each attempt clears it when it starts. A failed load of the saved accounts shows its
+// error elsewhere in the panel.
+const PAYOUT_FORM_ERROR = '.payout-contact-panel .payout-contact-section .backend-status[role=alert]'
 // Buttons that confirm the collected details (the review card's "All correct", a reply's "Looks right").
 const CONFIRMATION_PRESS = /^(All correct|Looks right)$/
 const MEDIA = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.pdf': 'application/pdf' }
@@ -422,6 +426,16 @@ async function selectClaimantFile(page, file, resolveInput, signIn) {
   return again.via
 }
 
+// After "Save payout account": the save clears the form's own error line when it starts and shows
+// "Saving…" until it ends (up to `timeoutMs`). Once that is gone, an error on that line is this
+// save's refusal; a failed load shows its error elsewhere in the panel. Returns the error or null.
+async function payoutSaveError(page, { timeoutMs = 20000, pollMs = 500 } = {}) {
+  await page.waitForTimeout(pollMs)
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline && (await page.getByRole('button', { name: 'Saving…' }).count().catch(() => 0)) > 0) await page.waitForTimeout(pollMs)
+  return ((await page.locator(PAYOUT_FORM_ERROR).first().textContent({ timeout: pollMs }).catch(() => null)) || '').trim() || null
+}
+
 // The payout and contact step (fixed rules), read afresh on every poll until something is decided.
 // - While the panel loads the saved accounts ("Loading saved payout accounts…"), it lists none and
 //   keeps "Continue to agreement" disabled: the runner waits, up to `settleMs` of clock time.
@@ -437,7 +451,7 @@ async function selectClaimantFile(page, file, resolveInput, signIn) {
 async function payoutStep(page, continueButton, facts, record, { settleMs = 30000, enableMs = 30000, pollMs = 500 } = {}) {
   const panel = page.locator('.payout-contact-panel')
   const loading = panel.locator('.payout-contact-status', { hasText: 'Loading saved payout accounts' })
-  const errorLine = panel.locator('.backend-status[role=alert]').first()
+  const errorLine = page.locator(PAYOUT_FORM_ERROR).first()
   const started = Date.now()
   let loadedAt = null
   for (;;) {
@@ -771,19 +785,15 @@ async function runPack(browser, caseId, claimant, outRoot) {
         // A form shown again (another account asked for, or a save refused) is filled again, a
         // few times at most.
         if ((record.payout_account_saves || 0) >= 4) { record.outcome = 'stuck'; record.stuck = { step: 'payout', reason: 'the new payout account form came back after four saves' }; break }
-        const panelError = async () => ((await page.locator('.payout-contact-panel .backend-status[role=alert]').allTextContents().catch(() => [])).map((item) => item.trim()).filter(Boolean))
-        const errorsBefore = await panelError()
         record.payout_account_saves = (record.payout_account_saves || 0) + 1
         await page.fill('#payout-bank-name', 'Northwind Test Bank')
         await page.fill('#payout-account-holder-name', String(facts['policyholder.name'] || 'Corpus Claimant'))
         await page.fill('#payout-account-type', 'cheque')
         await page.fill('#payout-account-number', `12-3456-${String(crypto.randomInt(1e6, 9e6))}-00`)
         await page.getByRole('button', { name: 'Save payout account' }).click()
-        await page.waitForTimeout(2000)
-        // An error that appears with this save, and was not there before it (a failed load shows
-        // its own), is the product refusing the save: one retry, then stuck.
-        const saveError = (await panelError()).find((item) => !errorsBefore.includes(item))
+        const saveError = await payoutSaveError(page)
         if (saveError && await page.locator('#payout-bank-name').isVisible().catch(() => false) && recordRefusal(record, 'payout', 'runner', saveError)) break
+        await page.waitForTimeout(1500)
         continue
       }
       const continueButton = page.getByRole('button', { name: 'Continue to agreement' })
@@ -915,4 +925,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutStep }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutSaveError, payoutStep }

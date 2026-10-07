@@ -173,8 +173,9 @@ never `lodged_first_time`. The recoveries are:
   press by the claimant model and by the fixed rule count together, and `run.json` lists each one
   under `confirmation_refusals`;
 - pressing "Continue to agreement", or saving a new payout account, once more after the payout
-  panel shows an error for the last attempt (a failed save, a conflict). These refusals are counted
-  apart from confirmations, under `payout_refusals`;
+  form's own error line shows an error for that attempt (a failed save, a conflict). The runner
+  reads it once "Saving…" has gone. These refusals are counted apart from confirmations, under
+  `payout_refusals`;
 - sending a file again after the product could not process it;
 - after about nine seconds with nothing to act on, typing "OK.".
 

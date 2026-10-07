@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutStep } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, recordFileRetries, payoutSaveError, payoutStep } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -299,11 +299,11 @@ function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, account
         return {
           locator: (inner, innerOptions = {}) => {
             if (inner === '.payout-contact-status' && /Loading saved payout accounts/.test(innerOptions.hasText)) return { isVisible: async () => !loaded() }
-            if (inner === '.backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && state.error) return state.error; throw new Error('no alert') } }) }
             return assert.fail(`unexpected panel locator ${inner}`)
           },
         }
       }
+      if (selector === '.payout-contact-panel .payout-contact-section .backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && state.error) return state.error; throw new Error('no alert') } }) }
       if (selector === '#payout-bank-name') return { isVisible: async () => loaded() && bankForm }
       if (selector === 'input[name=contact_preference]') return { evaluateAll: async (fn) => fn(loaded() ? ['in_app', 'email'].map((value) => ({ value, disabled: false, checked: state.contact === value })) : []) }
       if (selector.startsWith('input[name=contact_preference][value=')) return { check: async () => { state.contact = selector.match(/value="([^"]+)"/)[1] } }
@@ -435,4 +435,25 @@ test('in a real browser, the payout step waits through the loading panel and con
   } finally {
     await browser.close()
   }
+})
+
+test('a payout save is judged after "Saving…" ends, from the form\'s own error line', async () => {
+  // `steps`: per poll, whether "Saving…" shows and the form's error line. A failed load's error
+  // is elsewhere in the panel and never read here.
+  const savePage = (steps) => {
+    let poll = 0
+    const now = () => steps[Math.min(poll, steps.length - 1)]
+    return {
+      waitForTimeout: async () => { poll += 1 },
+      getByRole: (role, { name }) => ({ count: async () => (name === 'Saving…' && now().saving ? 1 : 0) }),
+      locator: (selector) => {
+        assert.equal(selector, '.payout-contact-panel .payout-contact-section .backend-status[role=alert]')
+        return { first: () => ({ textContent: async () => { if (now().error) return now().error; throw new Error('no error') } }) }
+      },
+    }
+  }
+  const REFUSED = 'Payout and contact details could not be saved.'
+  // A slow save refused with the same text as before: it is read once "Saving…" is gone.
+  assert.equal(await payoutSaveError(savePage([{ saving: true }, { saving: true }, { saving: true }, { saving: false, error: REFUSED }]), { timeoutMs: 60000 }), REFUSED)
+  assert.equal(await payoutSaveError(savePage([{ saving: true }, { saving: false }])), null)
 })
