@@ -397,7 +397,11 @@ async function screenTextOnly(page) {
     // Buttons the claimant could press: under the latest reply, then under earlier replies (a
     // person scrolls up when told to review "the summary above"), in the to-do bar and in the side
     // panel. Edit buttons and form controls (the fixed-rule forms) are left out. Each one is
-    // tagged so the runner can press exactly the button the claimant named.
+    // tagged so the runner can press exactly the button the claimant named. A disabled button is
+    // left out too, except a service card's "Agree…": the product keeps it disabled until the card's
+    // permission box is ticked, and a person ticks the box as part of agreeing.
+    const agreeAwaitingTick = (button) => /^Agree\b/.test((button.innerText || '').trim())
+      && Boolean(button.closest('.conversation-action-card')?.querySelector('.service-consent input[type=checkbox]:not(:checked):not(:disabled)'))
     const earlier = agents.slice(0, -1).reverse().map((node) => node.querySelector('.turn-attachments')).filter(Boolean)
     const scopes = [last && last.querySelector('.turn-attachments'), ...earlier, ...document.querySelectorAll('.open-items-bar, .intake-details-panel')].filter(Boolean)
     const pressable = []
@@ -406,7 +410,7 @@ async function screenTextOnly(page) {
     for (const scope of scopes) {
       const before = pressable.length
       for (const button of scope.querySelectorAll('button')) {
-        if (!visible(button) || button.disabled || button.closest('form')) continue
+        if (!visible(button) || (button.disabled && !agreeAwaitingTick(button)) || button.closest('form')) continue
         // Section toggles carry their whole summary as text; the first words name the button.
         const full = (button.innerText || button.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
         const label = full.length > 60 ? `${full.slice(0, 57)}…` : full
@@ -657,6 +661,15 @@ async function submitClaim(page, record, shot, { answerMs = 20000, pollMs = 250,
   return false
 }
 
+// Agreeing to a service card's permission request means ticking that card's permission box
+// first, as a person does; other cards' boxes are left alone.
+async function tickPermission(page, button) {
+  const card = page.locator('section.conversation-action-card').filter({ has: button })
+  for (const box of await card.locator('.service-consent input[type=checkbox]').all()) {
+    if (await box.isVisible() && !(await box.isChecked())) await box.check()
+  }
+}
+
 // ---------- one pack ----------
 
 async function runPack(browser, caseId, claimant, outRoot) {
@@ -895,12 +908,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
         if (index >= 0) {
           stalls = 0
           const button = page.locator(`[data-corpus-press="${index}"]`)
-          // Agreeing to a permission card means ticking its permission box first, as a person does.
-          if (/^Agree/.test(reply.press)) {
-            for (const box of await page.locator('.service-consent input[type=checkbox]').all()) {
-              if (await box.isVisible() && !(await box.isChecked())) await box.check()
-            }
-          }
+          if (/^Agree\b/.test(reply.press)) await tickPermission(page, button)
           // A button that cannot be pressed (covered, or gone after a re-render) is logged and the
           // claimant decides again from the next screen; it does not end the pack.
           const busyBefore = await appBusy(page)
@@ -1067,4 +1075,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm, screenTextOnly, tickPermission }

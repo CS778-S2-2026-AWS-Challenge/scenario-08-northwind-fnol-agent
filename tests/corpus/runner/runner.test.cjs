@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm, screenTextOnly, tickPermission } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -763,6 +763,61 @@ test('a claimant press waits for the request it started: at its step for confirm
   const moved = { retries: 0, outcome: null, stuck: null }
   assert.equal(await claimantPressAnswered(navigation.page, moved, 'Review and agree ›', navigation.pressed, LIMITS), false)
   assert.deepEqual(moved, { retries: 0, outcome: null, stuck: null })
+})
+
+// A service card's permission request in a real browser, with the markup of
+// customer/src/components/ExternalServiceAction.jsx: "Agree and continue" stays disabled until the
+// card's permission box is ticked. The claimant is offered it all the same; other disabled
+// buttons are not offered.
+test('in a real browser, a permission card offers "Agree…" before its box is ticked', async (t) => {
+  let chromium
+  try {
+    ({ chromium } = require('playwright'))
+  } catch {
+    t.skip('Playwright is not installed here; set NODE_PATH to a folder with playwright')
+    return
+  }
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.setContent(`
+      <aside class="intake-details-panel">
+        <section class="conversation-action-card">
+          <button class="conversation-action-trigger" type="button">Vehicle damage assessment · Permission needed</button>
+          <div class="conversation-action-details">
+            <p class="conversation-action-purpose">Request an external assessment of vehicle damage and repairability.</p>
+            <label class="service-consent"><input type="checkbox"> <span>I give Northwind permission to share only these details for this assessment request.</span></label>
+            <div class="service-decision-actions">
+              <button class="primary-button" type="button" disabled>Agree and continue</button>
+              <button class="secondary-button" type="button">Not now</button>
+            </div>
+          </div>
+        </section>
+        <section class="conversation-action-card">
+          <button class="conversation-action-trigger" type="button">Contents specialist assessment · Permission needed</button>
+          <div class="conversation-action-details">
+            <label class="service-consent"><input type="checkbox"> <span>I give Northwind permission.</span></label>
+          </div>
+        </section>
+        <button type="button" disabled>Request support</button>
+      </aside>
+      <script>
+        const box = document.querySelector('.service-consent input')
+        box.addEventListener('change', () => { document.querySelector('.service-decision-actions .primary-button').disabled = !box.checked })
+      </script>`)
+    const { pressable } = await screenTextOnly(page)
+    assert.ok(pressable.includes('Agree and continue'), 'the claimant is offered "Agree and continue"')
+    assert.ok(pressable.includes('Not now'))
+    assert.ok(!pressable.includes('Request support'), 'any other disabled button is not offered')
+    // Before the press the runner ticks that card's box, which enables the button.
+    const button = page.locator(`[data-corpus-press="${pressable.indexOf('Agree and continue')}"]`)
+    await tickPermission(page, button)
+    assert.equal(await button.isEnabled(), true)
+    const boxes = await page.locator('.service-consent input').evaluateAll((nodes) => nodes.map((node) => node.checked))
+    assert.deepEqual(boxes, [true, false], 'only the agreed card\'s permission is ticked')
+  } finally {
+    await browser.close()
+  }
 })
 
 // The tray in a real browser: an entry left from an earlier message, an entry reused by a file sent

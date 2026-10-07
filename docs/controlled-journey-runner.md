@@ -116,7 +116,9 @@ Each turn, the claimant model gets only what the screen shows:
 
 Network traffic is recorded for evidence but never given to it. The claimant model replies with a
 message, files to upload and at most one button to press. It answers only what is asked, invents
-nothing, and sends each file once. When it presses a button, it does nothing else that turn.
+nothing, and sends each file once. When it presses a button, it does nothing else that turn. A
+service card's "Agree…" is offered while the card's permission box is still unticked; pressing it
+ticks that box first, as a person does.
 
 The runner fills the payout form, the contact choice and the agreement checkboxes by fixed rules.
 It signs in at the pack's declared entry or visible login gate, adds the pack's phone to the profile
