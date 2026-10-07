@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm, screenTextOnly, tickPermission } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm, screenTextOnly, tickPermission, staffInvolvement, stopIfWithStaff, waitForTurn } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -815,6 +815,63 @@ test('in a real browser, a permission card offers "Agree…" before its box is t
     assert.equal(await button.isEnabled(), true)
     const boxes = await page.locator('.service-consent input').evaluateAll((nodes) => nodes.map((node) => node.checked))
     assert.deepEqual(boxes, [true, false], 'only the agreed card\'s permission is ticked')
+  } finally {
+    await browser.close()
+  }
+})
+
+test('a claim with staff is read from the title bar, but a failed submission there is not a handoff', async () => {
+  const titleBar = (statuses) => ({
+    locator: (selector) => {
+      assert.equal(selector, '.case-status.is-staff, .case-status.is-urgent')
+      return { all: async () => statuses.map((text) => ({ innerText: async () => text })) }
+    },
+  })
+  assert.equal(await staffInvolvement(titleBar(['Waiting for staff'])), 'Waiting for staff')
+  assert.equal(await staffInvolvement(titleBar(['Urgent support requested'])), 'Urgent support requested')
+  assert.equal(await staffInvolvement(titleBar(['Submission needs attention'])), null)
+  assert.equal(await staffInvolvement(titleBar([])), null)
+  // The pack stops there, at the handoff step, without a retry.
+  const handed = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await stopIfWithStaff(titleBar(['Urgent support requested']), handed), true)
+  assert.deepEqual(handed, { retries: 0, outcome: 'stuck', stuck: { step: 'handoff', reason: 'the claim is with Northwind staff: "Urgent support requested"' } })
+  const going = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await stopIfWithStaff(titleBar(['Submission needs attention']), going), false)
+  assert.deepEqual(going, { retries: 0, outcome: null, stuck: null })
+})
+
+// A handoff in a real browser, with the title bar of customer/src/components/CaseStatus.jsx: the
+// claimant's message gets no reply once the claim is with staff (CTL-C-001, CTL-M-015, CTL-M-030),
+// and the turn ends on the title bar instead of the 180 s turn limit.
+test('in a real browser, a turn ends when the claim is handed to staff without a reply', async (t) => {
+  let chromium
+  try {
+    ({ chromium } = require('playwright'))
+  } catch {
+    t.skip('Playwright is not installed here; set NODE_PATH to a folder with playwright')
+    return
+  }
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.setContent(`
+      <header><span class="case-status-wrap"><button class="case-status is-neutral" type="button"><span>Noted 7/7</span></button></span></header>
+      <article class="msg-agent"><div class="agent-text">Please send the receipt once more.</div></article>
+      <article class="msg-user"><p class="user-bubble-text">Ugh, fine, I'll send it again.</p></article>
+      <script>
+        setTimeout(() => {
+          const status = document.querySelector('.case-status')
+          status.className = 'case-status is-staff'
+          status.querySelector('span').textContent = 'Waiting for staff'
+        }, 500)
+      </script>`)
+    const started = Date.now()
+    await waitForTurn(page, 1, 5000)
+    assert.ok(Date.now() - started < 5000, 'the turn ended on the handoff, not on the limit')
+    assert.equal(await staffInvolvement(page), 'Waiting for staff')
+    // Without a handoff and without a reply, the turn still runs to its limit.
+    await page.setContent('<header><button class="case-status is-urgent" type="button"><span>Submission needs attention</span></button></header><article class="msg-agent"><div class="agent-text">Hello.</div></article>')
+    await assert.rejects(waitForTurn(page, 1, 800), /Timeout/)
   } finally {
     await browser.close()
   }

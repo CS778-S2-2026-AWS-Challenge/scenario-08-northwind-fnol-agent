@@ -434,21 +434,50 @@ async function screenTextOnly(page) {
   })
 }
 
-// A turn is over when the failed-message retry shows, or when a new reply with text is on the page
-// and the app is idle again: no "Preparing a response" row and the send button is not queueing.
+// The title bar shows a person's involvement (customer/src/caseStatus.js): "Waiting for staff",
+// "Urgent support requested" and the other staff states. "Submission needs attention" shares the
+// urgent look but is not a handoff.
+const STAFF_STATUS = '.case-status.is-staff, .case-status.is-urgent'
+const NOT_A_HANDOFF = 'Submission needs attention'
+
+// The title bar's text when the claim is with Northwind staff, or null. The agent does not take
+// the conversation on until staff act, and no staff act in a run.
+async function staffInvolvement(page) {
+  for (const status of await page.locator(STAFF_STATUS).all()) {
+    const text = ((await status.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()
+    if (text && text !== NOT_A_HANDOFF) return text
+  }
+  return null
+}
+
+// A claim handed to staff waits for them; no staff act in a run, so the journey goes no further.
+// #1222 has no outcome of its own for this: the pack ends as stuck, at step `handoff`. Returns
+// true when the pack has to stop.
+async function stopIfWithStaff(page, record) {
+  const withStaff = await staffInvolvement(page)
+  if (!withStaff) return false
+  record.outcome = 'stuck'
+  record.stuck = { step: 'handoff', reason: `the claim is with Northwind staff: "${withStaff}"` }
+  return true
+}
+
+// A turn is over when the failed-message retry shows, when the claim is handed to staff (the
+// agent may not reply then), or when a new reply with text is on the page and the app is idle
+// again: no "Preparing a response" row and the send button is not queueing.
 async function waitForTurn(page, previousCount, timeoutMs = 180000) {
-  await page.waitForFunction((count) => {
+  await page.waitForFunction(({ count, staffStatus, notAHandoff }) => {
     const buttons = [...document.querySelectorAll('button')].map((b) => b.textContent.trim())
     // A failed send shows "Retry message →" on the send button; a reply the app could not put
     // together shows "Retry response" under the claimant's message. Either ends the turn.
     // Only an enabled one counts: it stays on screen, disabled, while the app retries.
     const retryReady = [...document.querySelectorAll('button')].some((b) => !b.disabled && /^Retry message|^Retry response$/.test(b.textContent.trim()))
     if (retryReady) return true
+    if ([...document.querySelectorAll(staffStatus)].some((node) => { const text = node.innerText.replace(/\s+/g, ' ').trim(); return text && text !== notAHandoff })) return true
     const replies = document.querySelectorAll('article.msg-agent .agent-text').length
     const preparing = /Preparing a response/.test(document.body.innerText)
     const queueing = buttons.some((label) => label.startsWith('Send after reply'))
     return replies > count && !preparing && !queueing
-  }, previousCount, { timeout: timeoutMs })
+  }, { count: previousCount, staffStatus: STAFF_STATUS, notAHandoff: NOT_A_HANDOFF }, { timeout: timeoutMs })
   await page.waitForTimeout(800)
 }
 
@@ -835,6 +864,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
         record.outcome = record.retries ? 'lodged_after_retry' : 'lodged_first_time'
         break
       }
+      if (await stopIfWithStaff(page, record)) break
       // The payout card can require login even when the claimant has no files to send.
       const loginGate = page.getByRole('button', { name: 'Log in to continue', exact: true })
       if (!signedIn && await loginGate.isVisible().catch(() => false)) {
@@ -1075,4 +1105,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm, screenTextOnly, tickPermission }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm, screenTextOnly, tickPermission, staffInvolvement, stopIfWithStaff, waitForTurn }

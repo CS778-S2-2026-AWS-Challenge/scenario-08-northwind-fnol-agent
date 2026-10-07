@@ -215,6 +215,9 @@ A pack is `stuck` when any of these happens:
 - a file shows neither Ready nor "Processing failed";
 - a confirmation is refused a second time (step `confirmation`), the payout step is (step
   `payout`), or the claim submission is (step `agreement`);
+- the claim is with Northwind staff: the title bar shows "Waiting for staff", "Urgent support
+  requested" or another staff state (step `handoff`). The agent does not reply until staff act, and
+  no staff act in a run; #1222 has no outcome of its own for this;
 - a press's request is still running after 20 seconds, at that press's step (`press` for a press
   outside the steps). The reason reads
   `no answer to "<button>" within 20 s`, or says the product was already busy before the press;
