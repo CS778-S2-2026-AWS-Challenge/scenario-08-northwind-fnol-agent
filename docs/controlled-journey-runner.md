@@ -92,11 +92,12 @@ What the claimant model may see (`claimant_view.cjs`):
 - the facts;
 - the materials, under plain-language labels (`material-labels.json`, every pack of corpus v1).
 
-The labels say what the claimant holds, the way a claimant would name it. The ten reference packs
-were labelled by hand. The rest were drafted by the operator's local model from each file's content
-alone, without the file name, evidence kind, provenance, setup or oracle, and then reviewed one by
-one. Where a photo is unclear or a file is cut short on purpose, the label says what the claimant
-photographed or holds.
+The labels say what the claimant holds, the way a claimant would name it. None is written by
+hand. The ten reference packs were written one at a time with the contributor's AI assistant. The
+rest were drafted by the operator's local model from each file's content alone, without the file
+name, evidence kind, provenance, setup or oracle. Every label was then reviewed one by one. Where a
+photo is unclear or a file is cut short on purpose, the label says what the claimant photographed
+or holds.
 
 It never sees evidence kinds, generation prompts, materials marked `include: false`, `setup.json`,
 or `oracle/`. A leak check stops the run if any of those values reaches the prompt. It treats as

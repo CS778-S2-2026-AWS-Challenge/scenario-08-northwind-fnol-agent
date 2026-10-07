@@ -1,5 +1,5 @@
 {
-  "_note": "Plain-language labels the claimant simulator sees for each material, as a claimant would describe what they hold. Keyed by case_id and the material id from provenance.json. Written from each file as a claimant sees it: the ten reference packs by hand, the rest drafted by the operator's local model from the file content alone and reviewed one by one. Never derived from evidence_kind (#1222).",
+  "_note": "Plain-language labels the claimant simulator sees for each material, as a claimant would describe what they hold. Keyed by case_id and the material id from provenance.json. Every label is written from the file as a claimant sees it and reviewed one by one: the ten reference packs were written one at a time with the contributor's AI assistant; the rest were drafted by the operator's local model, which saw only the file content (never the file name, evidence_kind, provenance, setup or oracle). Never derived from evidence_kind (#1222).",
   "CTL-M-002": {
     "photo-wheel": "Photo of my front left wheel and the bumper corner",
     "receipt-wheels": "Receipt for the new wheels and tyres",
