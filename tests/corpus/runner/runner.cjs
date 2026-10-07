@@ -120,6 +120,17 @@ function trackQuestions(asked, reply) {
   return { repeated, third }
 }
 
+// Which upload input a material goes through: the requested item's own spot when the claimant
+// named one, otherwise (`null`) the chat. A named spot that is not on the screen stops the pack,
+// before or after any sign-in: the file is never sent through the chat instead, which would record
+// it under a different evidence kind (corpus standard, "Evidence kinds and the upload path").
+function uploadSpotIndex(spots, spot) {
+  if (!spot) return null
+  const index = spots.indexOf(spot)
+  if (index < 0) throw new Error(`the upload spot "${spot}" the claimant named is not on the screen; the file was not sent another way`)
+  return index
+}
+
 // In the page: the places where the claim asks for a document and offers its own upload (the
 // to-do bar, the "Still to do" list, a requested file under a reply, a Documents card). A file
 // uploaded there carries the requested item's evidence kind; the chat composer records every
@@ -421,12 +432,15 @@ async function runPack(browser, caseId, claimant, outRoot) {
         const trayLabels = () => page.locator('form.workspace-composer .composer-file-copy').evaluateAll((nodes) => nodes.map((node) => `${node.querySelector('strong')?.textContent?.trim()}: ${node.querySelector('small')?.textContent?.trim()}`))
         for (const { material, spot } of usable) {
           const resolveInput = async () => {
-            if (spot) {
-              const index = (await page.evaluate(uploadSpotsInPage)).indexOf(spot)
-              if (index >= 0) return { input: page.locator(`[data-corpus-upload="${index}"]`), via: spot }
-              log('claimant.jsonl', { at: new Date().toISOString(), upload_spot_missing: spot, material: material.id, reason: 'no such upload spot on the screen; sent through the chat' })
+            let index
+            try {
+              index = uploadSpotIndex(spot ? await page.evaluate(uploadSpotsInPage) : [], spot)
+            } catch (error) {
+              log('claimant.jsonl', { at: new Date().toISOString(), upload_spot_missing: spot, material: material.id, reason: 'no such upload spot on the screen; the pack stops' })
+              throw error
             }
-            return { input: page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])'), via: 'chat' }
+            if (index === null) return { input: page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])'), via: 'chat' }
+            return { input: page.locator(`[data-corpus-upload="${index}"]`), via: spot }
           }
           operation = 'upload'
           const via = await selectClaimantFile(page, path.join(caseDir, 'input', 'materials', material.file), resolveInput, signedIn ? null : signIn)
@@ -738,4 +752,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex }

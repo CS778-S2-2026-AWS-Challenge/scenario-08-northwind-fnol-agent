@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -170,4 +170,24 @@ test('a requested upload spot gone after sign-in stops the file instead of switc
       assert.deepEqual(selected, item.selected)
     })
   }
+})
+
+test('a named upload spot missing from the screen stops the file, signed in or before sign-in', async (t) => {
+  const SPOT = 'Still to send: Proof of ownership'
+  assert.equal(uploadSpotIndex(['Still to send: Repair quote', SPOT], SPOT), 1)
+  assert.equal(uploadSpotIndex([SPOT], ''), null, 'no spot named: the chat')
+  assert.throws(() => uploadSpotIndex(['Still to send: Repair quote'], SPOT), /"Still to send: Proof of ownership" the claimant named is not on the screen/)
+  // The runner resolves the input from what the page shows; here the requested spot is absent.
+  const absent = async () => {
+    const index = uploadSpotIndex([], SPOT)
+    return { input: { setInputFiles: async () => assert.fail('no file may be selected') }, via: index === null ? 'chat' : SPOT }
+  }
+  await t.test('signed in', async () => {
+    await assert.rejects(selectClaimantFile({ getByText: () => assert.fail('no anonymous gate') }, 'receipt.pdf', absent, null), /not on the screen/)
+  })
+  await t.test('anonymous, before sign-in', async () => {
+    let signIns = 0
+    await assert.rejects(selectClaimantFile({ getByText: () => assert.fail('the gate is never reached') }, 'receipt.pdf', absent, async () => { signIns += 1 }), /not on the screen/)
+    assert.equal(signIns, 0)
+  })
 })

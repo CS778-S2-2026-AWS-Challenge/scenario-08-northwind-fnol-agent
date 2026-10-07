@@ -130,7 +130,8 @@ Uploads follow "Evidence kinds and the upload path" in the corpus standard:
   "Still to do" list, a requested file under a reply, and the Documents cards.
 - When the claimant sends a material the claim asks for, it names the matching spot. The runner
   uploads through that item's own input, so the file carries the kind the interface sends for that
-  item.
+  item. If the spot it names is not on the screen, the pack stops as `stuck` at the upload step,
+  signed in or not: the file is never sent through the chat instead.
 - Other files go through the chat.
 - The runner never copies `evidence_kind` from the pack. Each run records which path every file
   took (`upload_paths`).
@@ -152,6 +153,7 @@ A pack is `stuck` when any of these happens:
 - after the nudge, there is still nothing to act on;
 - the claimant reaches 30 messages;
 - a file never shows Ready;
+- the claimant names an upload spot that is not on the screen;
 - a wait times out.
 
 ## Scoring
