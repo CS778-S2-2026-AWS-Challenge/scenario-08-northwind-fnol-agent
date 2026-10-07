@@ -51,7 +51,7 @@ const STEP_PRESSES = [
 // The composer's error line, where the product shows the error of most requests (`showError`).
 const COMPOSER_ERROR = 'form.workspace-composer .backend-status[role=alert]'
 // The rail's "New chat" button. The product disables it whenever a request runs (`isBusy`),
-// whichever panel is on the screen; its label reads "Saving..." while a session is paused.
+// whichever panel is on the screen; its label reads "Saving..." while a session pause is being saved.
 const APP_BUSY = '.intake-history .history-actions button[aria-label="New chat"], .intake-history .history-actions button[aria-label="Saving..."]'
 const MEDIA = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.pdf': 'application/pdf' }
 const LABELS = require('./material-labels.json')
@@ -138,8 +138,8 @@ function trackQuestions(asked, reply) {
 }
 
 // Actions a person tries once more when the product refuses them, each with its own count:
-// confirming the details ("All correct", "Looks right"), saving the payout step and submitting
-// the claim.
+// confirming the details ("All correct", "Looks right", "Right"), saving the payout step and
+// submitting the claim.
 const REFUSABLE = {
   confirmation: { field: 'confirmation_refusals', step: 'confirmation', what: 'confirmation' },
   payout: { field: 'payout_refusals', step: 'payout', what: 'payout step' },
@@ -196,9 +196,17 @@ const STEP_ANSWERS = {
 
 // Whether the product shows a request running: its "New chat" button disabled. False when the
 // rail is not on the screen.
-async function appBusy(page, pollMs) {
+async function appBusy(page, pollMs = 250) {
   const button = page.locator(APP_BUSY).first()
   return (await button.count().catch(() => 0)) > 0 && !(await button.isEnabled({ timeout: pollMs }).catch(() => true))
+}
+
+// The workspace must show the product's busy signal: without it a panel replaced mid-request would
+// read as an answer. Throws when the conversation is on the screen but the signal is not.
+async function requireBusySignal(page) {
+  if ((await page.locator(APP_BUSY).count().catch(() => 0)) > 0) return
+  if ((await page.locator('form.workspace-composer').count().catch(() => 0)) === 0) return
+  throw new Error('the product\'s busy signal (the rail\'s "New chat" button) is not on the screen')
 }
 
 // After a press that asks the product to act (`action`, a key of STEP_ANSWERS): waits, by clock
@@ -228,21 +236,25 @@ async function pressOutcome(page, action, pressed, { timeoutMs = 20000, pollMs =
 // Records the product's answer to a press of `label` by `by` (`claimant` or `runner`): a refusal is
 // counted (`recordRefusal`), and no answer by the deadline ends the pack at the press's step.
 // Returns true when the pack has to stop.
-function recordAnswer(record, action, by, label, outcome) {
+// `busyBefore`: the product already had a request running before the press, so a timeout is not
+// this press's alone, and the reason says so.
+function recordAnswer(record, action, by, label, outcome, { busyBefore = false } = {}) {
   if (outcome.timedOut) {
+    const seconds = Math.round(outcome.waitedMs / 1000)
     record.outcome = 'stuck'
-    record.stuck = { step: STEP_ANSWERS[action].step, reason: `no answer to "${label}" within ${Math.round(outcome.waitedMs / 1000)} s` }
+    record.stuck = { step: STEP_ANSWERS[action].step, reason: busyBefore ? `the product was already busy before "${label}" and still busy ${seconds} s after it` : `no answer to "${label}" within ${seconds} s` }
     return true
   }
   return outcome.alert ? recordRefusal(record, action, by, outcome.alert) : false
 }
 
 // After the claimant model's press of `label` (the tagged button `pressed`): waits for the product's
-// answer as the press's kind requires (`STEP_PRESSES`) and records it. Returns true when the pack
-// has to stop.
-async function claimantPressAnswered(page, record, label, pressed, options) {
+// answer as the press's kind requires (`STEP_PRESSES`) and records it. `busyBefore` says whether
+// the product was busy just before the press (some buttons under a reply stay enabled while it
+// is). Returns true when the pack has to stop.
+async function claimantPressAnswered(page, record, label, pressed, { busyBefore = false, ...options } = {}) {
   const action = (STEP_PRESSES.find((entry) => entry.press.test(label)) || { action: 'press' }).action
-  return recordAnswer(record, action, 'claimant', label, await pressOutcome(page, action, pressed, options))
+  return recordAnswer(record, action, 'claimant', label, await pressOutcome(page, action, pressed, options), { busyBefore })
 }
 
 // Which saved payout account to select when the form shows none selected: the first one that can
@@ -685,9 +697,10 @@ async function runPack(browser, caseId, claimant, outRoot) {
   })
   let step = 0
   const shot = async (name) => {
-    step += 1
-    const file = `${String(step).padStart(2, '0')}-${name}.png`
+    const next = step + 1
+    const file = `${String(next).padStart(2, '0')}-${name}.png`
     await page.screenshot({ path: path.join(out, 'screens', file) })
+    step = next
     record.steps.push({ step, name, file, at: new Date().toISOString() })
   }
 
@@ -718,6 +731,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
     await waitForTurn(page, 0)
     record.turn_ms.push(Date.now() - firstSent)
     record.claim_id = (page.url().match(/clm_[a-z0-9]+/) || [null])[0]
+    await requireBusySignal(page)
 
     // Types `text`, attaches `files` one after another and presses Enter, the way a person does.
     // Returns a reason when the files never became ready.
@@ -889,6 +903,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
           }
           // A button that cannot be pressed (covered, or gone after a re-render) is logged and the
           // claimant decides again from the next screen; it does not end the pack.
+          const busyBefore = await appBusy(page)
           const pressed = await button.click({ timeout: 5000 }).then(() => true, (error) => {
             log('claimant.jsonl', { at: new Date().toISOString(), press_failed: reply.press, reason: error.message.split('\n')[0] })
             return false
@@ -897,7 +912,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
           record.presses.push(reply.press)
           transcript.push({ who: 'claimant', text: `(pressed "${reply.press}")` })
           await page.waitForTimeout(2500)
-          if (await claimantPressAnswered(page, record, reply.press, button)) break
+          if (await claimantPressAnswered(page, record, reply.press, button, { busyBefore })) break
           // Pressing is the whole action for this turn: a person who presses "Review and agree"
           // does not also type in the chat, and a chat message would reopen the claim summary.
           if (text || files.length) log('claimant.jsonl', { at: new Date().toISOString(), not_sent_with_press: { message: text, upload: files.map((entry) => entry.material.id) } })
@@ -1052,4 +1067,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm }

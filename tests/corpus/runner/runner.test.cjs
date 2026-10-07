@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, pressOutcome, recordAnswer, claimantPressAnswered, requireBusySignal, submitClaim, payoutDestinationToSelect, markProcessingFailed, watchTray, mayHandOver, recordFileRetries, payoutStep, payoutAccountForm } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -629,16 +629,29 @@ test('a new payout account save waits for its answer: accepted, refused once the
   assert.equal(pending.state.saves, 1)
 })
 
+test('the workspace must show the product\'s busy signal, or the pack stops', async () => {
+  const workspace = ({ rail, composer }) => ({
+    locator: (selector) => {
+      if (selector === APP_BUSY) return { count: async () => (rail ? 1 : 0) }
+      if (selector === 'form.workspace-composer') return { count: async () => (composer ? 1 : 0) }
+      return assert.fail(`unexpected locator ${selector}`)
+    },
+  })
+  await requireBusySignal(workspace({ rail: true, composer: true }))
+  await requireBusySignal(workspace({ rail: false, composer: false }))
+  await assert.rejects(requireBusySignal(workspace({ rail: false, composer: true })), /busy signal .*"New chat".* is not on the screen/)
+})
+
 test('a claim submission is judged after "Submitting…" ends, from the submission error, and never by a timeout', async () => {
   const submitPage = (steps) => requestPage('Submitting…', [SUBMISSION_CARD, COMPOSER_LINE], steps)
   // The card's heading and message (customer/src/claimSubmissionFeedback.js), read as one line.
-  const CARD = "Your claim wasn't accepted\nThe Claim changed before it could be submitted. Please check your details and try again."
-  const READ = "Your claim wasn't accepted The Claim changed before it could be submitted. Please check your details and try again."
+  const CARD = "We're not sure it went through\nWe're not sure your claim went through. Try again — it won't create a duplicate."
+  const READ = "We're not sure it went through We're not sure your claim went through. Try again — it won't create a duplicate."
   assert.deepEqual(await pressOutcome(submitPage([{ running: true }, { running: true }, { running: false }]), 'agreement'), { alert: null })
   assert.deepEqual(await pressOutcome(submitPage([{ running: true }, { running: false, errors: { [SUBMISSION_CARD]: CARD } }]), 'agreement'), { alert: READ })
   // The read-back moved the claim on and the panel, with its card, is gone: the composer's line
   // still carries the error, so the refusal is not taken for an acceptance.
-  const COMPOSER = "We're not sure your claim went through. Try again — it won't create a duplicate."
+  const COMPOSER = 'We could not complete that request. Please try again.'
   assert.deepEqual(await pressOutcome(submitPage([{ running: true, busy: true }, { running: false, busy: true }, { running: false, busy: false, errors: { [COMPOSER_LINE]: COMPOSER } }]), 'agreement', null, { timeoutMs: 60000 }), { alert: COMPOSER })
   assert.deepEqual(await pressOutcome(submitPage([{ running: true }]), 'agreement', null, { timeoutMs: 60, pollMs: 5 }), { timedOut: true, waitedMs: 60 })
 })
@@ -657,7 +670,7 @@ function agreementPanel(answers) {
       }
       if (selector === 'button.agreement-submit') {
         return {
-          innerText: async () => (state.submissions && state.error ? 'Retry claim submission' : 'Submit claim'),
+          innerText: async () => 'Submit claim',
           click: async () => {
             assert.ok(state.boxes.every(Boolean), 'every confirmation box is ticked before the press')
             const answer = answers[state.submissions]
@@ -735,9 +748,15 @@ test('a claimant press waits for the request it started: at its step for confirm
   assert.deepEqual(submitted.stuck, { step: 'agreement', reason: 'no answer to "Retry claim submission" within 1 s' })
   // A service card's request that never ends: stuck at the press, not read as done.
   const service = pressPage([{ disabled: true, busy: true }])
-  const agreed = { retries: 0, outcome: null, stuck: null }
-  assert.equal(await claimantPressAnswered(service.page, agreed, 'Agree and continue', service.pressed, LIMITS), true)
-  assert.deepEqual(agreed.stuck, { step: 'press', reason: 'no answer to "Agree and continue" within 1 s' })
+  const declined = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await claimantPressAnswered(service.page, declined, 'Not now', service.pressed, LIMITS), true)
+  assert.deepEqual(declined.stuck, { step: 'press', reason: 'no answer to "Not now" within 1 s' })
+  // The product was already busy before the press (a button under a reply stays enabled then):
+  // the reason does not blame the press.
+  const before = pressPage([{ disabled: false, busy: true }])
+  const waited = { retries: 0, outcome: null, stuck: null }
+  assert.equal(await claimantPressAnswered(before.page, waited, 'Review and agree ›', before.pressed, { ...LIMITS, busyBefore: true }), true)
+  assert.deepEqual(waited.stuck, { step: 'press', reason: 'the product was already busy before "Review and agree ›" and still busy 1 s after it' })
   // A press that starts no request (navigation) is done at once, and its screen is the claimant's
   // to read: an error shown there is not counted by the runner.
   const navigation = pressPage([{ disabled: false, busy: false, error: 'Something the claimant reads.' }])

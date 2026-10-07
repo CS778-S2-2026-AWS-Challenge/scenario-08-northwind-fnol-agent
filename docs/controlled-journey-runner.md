@@ -149,11 +149,13 @@ recovery.
 `run.json` records the anonymous sign-in trigger, original Claim, conversation session and whether
 promotion succeeded.
 
-After every press, by the claimant model or by a fixed rule, the runner waits for the request the
-press started, if any, before it does anything else, for up to 20 seconds. A request is running
-while the product shows it: the pressed button disabled, "Saving…" or "Submitting…" on the
-button, or the product's busy signal (the rail's "New chat" button disabled), which stays on when
-a panel is replaced mid-request. Then:
+After every button the claimant model presses, and after the fixed rules' presses of the steps
+below, the runner waits for the request the press started, if any, before it does anything else,
+for up to 20 seconds. ("Retry message", "Retry response" and the login keep their own waits for the
+agent's turn and the sign-in.) A request is running while the product shows it: the pressed
+button disabled, "Saving…" or "Submitting…" on the button, or the product's busy signal (the
+rail's "New chat" button disabled), which stays on when a panel is replaced mid-request. A
+workspace without that signal stops the pack. Then:
 
 - for the steps' presses, the runner reads the product's answer:
   - confirming the details: "All correct", "Looks right" or the side panel's "Right"; an error
@@ -164,8 +166,8 @@ a panel is replaced mid-request. Then:
     submission error card, or under the composer when the panel has been replaced.
 
   No error means the product accepted the press. An error is a refusal (see below);
-- after any other press, such as a service card's "Agree and continue", the claimant reads the
-  result on the next screen;
+- after any other press, such as a service card's "Not now", the claimant reads the result on the
+  next screen;
 - a request still running after 20 seconds leaves what the product did unknown. The runner stops
   the pack at that step (`confirmation`, `payout`, `agreement`, or `press` for any other press)
   rather than guess, and presses nothing more.
@@ -213,7 +215,7 @@ A pack is `stuck` when any of these happens:
   `payout`), or the claim submission is (step `agreement`);
 - a press's request is still running after 20 seconds, at that press's step (`press` for a press
   outside the steps). The reason reads
-  `no answer to "<button>" within 20 s`;
+  `no answer to "<button>" within 20 s`, or says the product was already busy before the press;
 - the saved payout accounts are still loading after 30 seconds, "Continue to agreement" stays
   disabled for 30 seconds with the payout account and contact method chosen, or the new payout
   account form comes back after four saves;
