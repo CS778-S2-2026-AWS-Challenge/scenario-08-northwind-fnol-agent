@@ -122,9 +122,11 @@ The runner fills the payout form, the contact choice and the agreement checkboxe
 It signs in at the pack's declared entry or visible login gate, adds the pack's phone to the profile
 so SMS can be chosen, and attaches files one at a time. It presses Send only after every file shows
 Ready or "Processing failed". A file the product cannot process is the product's answer, not a
-stall: the message is still sent, and `run.json` lists the file under `processing_failed`. When the
-payout form comes back with the saved account listed but not selected, the runner selects it again
-(`payout_reselected`). Login is a mechanical prerequisite and does not count as a recovery.
+stall: the message is still sent, and `run.json` lists the file under `processing_failed`. On the
+payout form, the runner first waits for "Loading saved payout accounts" to finish
+(`payout_loading_waits`). When the saved account is listed but not selected, it selects it again
+(`payout_reselected`), then waits for "Continue to agreement" to become enabled before pressing it.
+Login is a mechanical prerequisite and does not count as a recovery.
 `run.json` records the anonymous sign-in trigger, original Claim, conversation session and whether
 promotion succeeded.
 
@@ -161,7 +163,9 @@ A pack is `stuck` when any of these happens:
 - the claimant reaches 30 messages;
 - a file shows neither Ready nor "Processing failed";
 - a confirmation is refused a second time;
-- "Continue to agreement" stays disabled after the payout account and contact method are chosen;
+- the payout form shows its own error, its saved accounts are still loading after 30 seconds, or
+  "Continue to agreement" stays disabled for 30 seconds after the payout account and contact method
+  are chosen;
 - the claimant names an upload spot that is not on the screen;
 - a wait times out.
 

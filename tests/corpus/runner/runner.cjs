@@ -375,6 +375,46 @@ async function selectClaimantFile(page, file, resolveInput, signIn) {
   return again.via
 }
 
+// The payout and contact step (fixed rules). The panel first loads the saved accounts: it shows
+// "Loading saved payout accounts…", lists no account and keeps "Continue to agreement" disabled.
+// Nothing is decided until that settles. Then the runner picks the contact method, selects the
+// saved account when none is selected, and waits for the button to become enabled, as a person
+// waits for a form to respond. Returns `continued` after pressing it, `form` when the panel asks
+// for a new payout account instead (handled by its own rule), or `stuck` with a reason when the
+// panel shows its own error, never finishes loading, or keeps the button disabled.
+async function payoutStep(page, continueButton, facts, record, { settleMs = 30000, enableMs = 30000, pollMs = 500 } = {}) {
+  const panel = page.locator('.payout-contact-panel')
+  const loading = panel.locator('.payout-contact-status', { hasText: 'Loading saved payout accounts' })
+  for (let waited = 0; await loading.isVisible().catch(() => false); waited += pollMs) {
+    if (waited >= settleMs) return { done: 'stuck', reason: `saved payout accounts were still loading after ${Math.round(settleMs / 1000)} s` }
+    record.payout_loading_waits = (record.payout_loading_waits || 0) + 1
+    await page.waitForTimeout(pollMs)
+  }
+  const error = await panel.locator('.backend-status[role=alert]').first().textContent({ timeout: 500 }).catch(() => null)
+  if (error) return { done: 'stuck', reason: `the payout panel showed an error: ${error.trim()}` }
+  if (await page.locator('#payout-bank-name').isVisible().catch(() => false)) return { done: 'form' }
+
+  const wanted = String(facts['claimant.contact_preference'] || 'email').toLowerCase()
+  const options = await page.locator('input[name=contact_preference]').evaluateAll((nodes) => nodes.map((n) => ({ value: n.value, disabled: n.disabled })))
+  const pick = options.find((o) => o.value === wanted && !o.disabled) || options.find((o) => o.value === 'email' && !o.disabled)
+  if (pick) await page.locator(`input[name=contact_preference][value="${pick.value}"]`).check()
+  record.contact_preference = pick ? pick.value : null
+  // The panel can come back with the payout account saved earlier listed but not selected; a
+  // person picks it again.
+  const destinations = page.locator('input[name=payout_destination]')
+  const select = payoutDestinationToSelect(await destinations.evaluateAll((nodes) => nodes.map((node) => ({ checked: node.checked, disabled: node.disabled }))))
+  if (select >= 0) {
+    await destinations.nth(select).check()
+    record.payout_reselected = (record.payout_reselected || 0) + 1
+  }
+  for (let waited = 0; !(await continueButton.isEnabled().catch(() => false)); waited += pollMs) {
+    if (waited >= enableMs) return { done: 'stuck', reason: `"Continue to agreement" stayed disabled for ${Math.round(enableMs / 1000)} s after the payout account and contact method were chosen` }
+    await page.waitForTimeout(pollMs)
+  }
+  await continueButton.click()
+  return { done: 'continued' }
+}
+
 // ---------- one pack ----------
 
 async function runPack(browser, caseId, claimant, outRoot) {
@@ -664,28 +704,9 @@ async function runPack(browser, caseId, claimant, outRoot) {
       const continueButton = page.getByRole('button', { name: 'Continue to agreement' })
       if (await continueButton.isVisible().catch(() => false)) {
         stalls = 0
-        const wanted = String(facts['claimant.contact_preference'] || 'email').toLowerCase()
-        const radios = page.locator('input[name=contact_preference]')
-        const options = await radios.evaluateAll((nodes) => nodes.map((n) => ({ value: n.value, disabled: n.disabled })))
-        const pick = options.find((o) => o.value === wanted && !o.disabled) || options.find((o) => o.value === 'email' && !o.disabled)
-        if (pick) await page.locator(`input[name=contact_preference][value="${pick.value}"]`).check()
-        record.contact_preference = pick ? pick.value : null
-        // The form can come back with the payout account saved earlier listed but not selected; a
-        // person picks it again. If "Continue to agreement" is still disabled after that, the pack
-        // stops with that reason instead of waiting on a button that cannot be pressed.
-        const destinations = page.locator('input[name=payout_destination]')
-        const select = payoutDestinationToSelect(await destinations.evaluateAll((nodes) => nodes.map((node) => ({ checked: node.checked, disabled: node.disabled }))))
-        if (select >= 0) {
-          await destinations.nth(select).check()
-          record.payout_reselected = (record.payout_reselected || 0) + 1
-        }
-        if (!(await continueButton.isEnabled())) {
-          record.outcome = 'stuck'
-          record.stuck = { step: 'payout', reason: '"Continue to agreement" stayed disabled after choosing the payout account and contact method' }
-          break
-        }
-        await continueButton.click()
-        await page.waitForTimeout(2500)
+        const step = await payoutStep(page, continueButton, facts, record)
+        if (step.done === 'stuck') { record.outcome = 'stuck'; record.stuck = { step: 'payout', reason: step.reason }; break }
+        if (step.done === 'continued') await page.waitForTimeout(2500)
         continue
       }
       const submit = page.locator('button.agreement-submit')
@@ -809,4 +830,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed, payoutStep }

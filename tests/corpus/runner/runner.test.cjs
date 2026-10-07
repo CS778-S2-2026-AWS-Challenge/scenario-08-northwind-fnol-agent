@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed, payoutStep } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -226,4 +226,125 @@ test('a file the product cannot process is recorded and does not stop the messag
   assert.deepEqual(failed, ['photo-watch'])
   assert.deepEqual(paths, [{ material: 'photo-watch', via: 'chat', processing: 'failed' }, { material: 'receipt-watch', via: 'Still to send: Receipt' }])
   assert.deepEqual(markProcessingFailed(usable, sentVia, []), { failed: [], paths: sentVia })
+})
+
+// A double of the payout and contact panel (customer/src/components/PayoutContactPanel.jsx):
+// while the saved accounts load it shows the loading status, lists no account and keeps
+// "Continue to agreement" disabled; the button enables once an account and a contact method are
+// selected. Each wait of the runner advances the load by one step.
+function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, accounts = [{ checked: false, disabled: false }], neverEnables = false } = {}) {
+  const state = { loadingSteps, contact: null, clicks: 0, accounts: accounts.map((account) => ({ ...account })) }
+  const loaded = () => state.loadingSteps === 0
+  const page = {
+    waitForTimeout: async () => { if (state.loadingSteps > 0) state.loadingSteps -= 1 },
+    locator: (selector, options = {}) => {
+      if (selector === '.payout-contact-panel') {
+        return {
+          locator: (inner, innerOptions = {}) => {
+            if (inner === '.payout-contact-status' && /Loading saved payout accounts/.test(innerOptions.hasText)) return { isVisible: async () => !loaded() }
+            if (inner === '.backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && error) return error; throw new Error('no alert') } }) }
+            return assert.fail(`unexpected panel locator ${inner}`)
+          },
+        }
+      }
+      if (selector === '#payout-bank-name') return { isVisible: async () => loaded() && bankForm }
+      if (selector === 'input[name=contact_preference]') return { evaluateAll: async (fn) => fn(loaded() ? [{ value: 'in_app', disabled: false }, { value: 'email', disabled: false }] : []) }
+      if (selector.startsWith('input[name=contact_preference][value=')) return { check: async () => { state.contact = selector.match(/value="([^"]+)"/)[1] } }
+      if (selector === 'input[name=payout_destination]') {
+        return {
+          evaluateAll: async (fn) => fn(loaded() ? state.accounts : []),
+          nth: (index) => ({ check: async () => { state.accounts[index].checked = true } }),
+        }
+      }
+      return assert.fail(`unexpected locator ${selector} ${JSON.stringify(options)}`)
+    },
+  }
+  const button = {
+    isEnabled: async () => !neverEnables && loaded() && Boolean(state.contact) && state.accounts.some((account) => account.checked),
+    click: async () => { state.clicks += 1 },
+  }
+  return { page, button, state }
+}
+
+test('the payout step waits for the saved accounts to load before choosing and continuing', async () => {
+  const LIMITS = { settleMs: 5000, enableMs: 5000, pollMs: 500 }
+  const facts = { 'claimant.contact_preference': 'email' }
+  // Loading to ready: the saved account appears unselected after three waits, as in CTL-C-013.
+  const slow = payoutPanel({ loadingSteps: 3 })
+  const record = {}
+  assert.deepEqual(await payoutStep(slow.page, slow.button, facts, record, LIMITS), { done: 'continued' })
+  assert.equal(slow.state.clicks, 1)
+  assert.equal(record.payout_loading_waits, 3)
+  assert.equal(record.payout_reselected, 1)
+  assert.equal(record.contact_preference, 'email')
+  // An account already selected is left as it is.
+  const preselected = payoutPanel({ accounts: [{ checked: true, disabled: false }] })
+  const kept = {}
+  assert.deepEqual(await payoutStep(preselected.page, preselected.button, facts, kept, LIMITS), { done: 'continued' })
+  assert.equal(kept.payout_reselected, undefined)
+  // No saved account: the panel shows the new-account form, which has its own rule.
+  const empty = payoutPanel({ bankForm: true, accounts: [] })
+  assert.deepEqual(await payoutStep(empty.page, empty.button, facts, {}, LIMITS), { done: 'form' })
+  assert.equal(empty.state.clicks, 0)
+})
+
+test('the payout step stops only on the panel error, an endless load or a button that never enables', async () => {
+  const LIMITS = { settleMs: 2000, enableMs: 2000, pollMs: 500 }
+  const facts = {}
+  const error = payoutPanel({ error: 'We could not load your saved payout accounts.' })
+  assert.deepEqual(await payoutStep(error.page, error.button, facts, {}, LIMITS), { done: 'stuck', reason: 'the payout panel showed an error: We could not load your saved payout accounts.' })
+  const endless = payoutPanel({ loadingSteps: Infinity })
+  assert.deepEqual(await payoutStep(endless.page, endless.button, facts, {}, LIMITS), { done: 'stuck', reason: 'saved payout accounts were still loading after 2 s' })
+  const disabled = payoutPanel({ neverEnables: true })
+  const result = await payoutStep(disabled.page, disabled.button, facts, {}, LIMITS)
+  assert.equal(result.done, 'stuck')
+  assert.match(result.reason, /stayed disabled for 2 s after the payout account and contact method were chosen/)
+  for (const panel of [error, endless, disabled]) assert.equal(panel.state.clicks, 0)
+})
+
+// The same loading-to-ready transition in a real browser, with the panel's markup and timing
+// rebuilt as a static page. Runs where Playwright can be loaded (NODE_PATH), as for the runner.
+test('in a real browser, the payout step waits through the loading panel and continues', async (t) => {
+  let chromium
+  try {
+    ({ chromium } = require('playwright'))
+  } catch {
+    t.skip('Playwright is not installed here; set NODE_PATH to a folder with playwright')
+    return
+  }
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.setContent(`
+      <section class="payout-contact-panel">
+        <p class="payout-contact-status" role="status">Loading saved payout accounts…</p>
+        <fieldset id="accounts"></fieldset>
+        <fieldset>
+          <label><input type="radio" name="contact_preference" value="in_app"> In-app</label>
+          <label><input type="radio" name="contact_preference" value="email"> Email</label>
+        </fieldset>
+        <button class="primary-button" type="button" disabled>Continue to agreement</button>
+      </section>
+      <script>
+        const button = document.querySelector('button')
+        const update = () => {
+          button.disabled = !(document.querySelector('input[name=payout_destination]:checked') && document.querySelector('input[name=contact_preference]:checked'))
+        }
+        document.addEventListener('change', update)
+        button.addEventListener('click', () => { document.body.dataset.continued = 'yes' })
+        setTimeout(() => {
+          document.querySelector('.payout-contact-status').remove()
+          document.querySelector('#accounts').innerHTML = '<label><input type="radio" name="payout_destination" value="pd_1"> cheque ****8300</label>'
+        }, 1500)
+      </script>`)
+    const button = page.getByRole('button', { name: 'Continue to agreement' })
+    const record = {}
+    const result = await payoutStep(page, button, { 'claimant.contact_preference': 'email' }, record, { settleMs: 10000, enableMs: 5000, pollMs: 250 })
+    assert.deepEqual(result, { done: 'continued' })
+    assert.ok(record.payout_loading_waits > 0, 'the runner saw the panel loading')
+    assert.equal(record.payout_reselected, 1)
+    assert.equal(await page.evaluate(() => document.body.dataset.continued), 'yes')
+  } finally {
+    await browser.close()
+  }
 })
