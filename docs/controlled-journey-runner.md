@@ -217,7 +217,9 @@ A pack is `stuck` when any of these happens:
   `payout`), or the claim submission is (step `agreement`);
 - the claim is with Northwind staff: the title bar shows "Waiting for staff", "Urgent support
   requested" or another staff state (step `handoff`). The agent does not reply until staff act, and
-  no staff act in a run; #1222 has no outcome of its own for this;
+  no staff act in a run; #1222 has no outcome of its own for this. For the packs whose oracle
+  requires an urgent handoff (CTL-M-013 to CTL-M-018) this is the expected end, and the scorer
+  judges it by their assertions; where an oracle forbids one, the handoff is the finding;
 - a press's request is still running after 20 seconds, at that press's step (`press` for a press
   outside the steps). The reason reads
   `no answer to "<button>" within 20 s`, or says the product was already busy before the press;

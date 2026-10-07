@@ -444,7 +444,7 @@ const NOT_A_HANDOFF = 'Submission needs attention'
 // the conversation on until staff act, and no staff act in a run.
 async function staffInvolvement(page) {
   for (const status of await page.locator(STAFF_STATUS).all()) {
-    const text = ((await status.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()
+    const text = ((await status.innerText({ timeout: 1000 }).catch(() => '')) || '').replace(/\s+/g, ' ').trim()
     if (text && text !== NOT_A_HANDOFF) return text
   }
   return null
@@ -695,7 +695,7 @@ async function submitClaim(page, record, shot, { answerMs = 20000, pollMs = 250,
 async function tickPermission(page, button) {
   const card = page.locator('section.conversation-action-card').filter({ has: button })
   for (const box of await card.locator('.service-consent input[type=checkbox]').all()) {
-    if (await box.isVisible() && !(await box.isChecked())) await box.check()
+    if (await box.isVisible() && !(await box.isChecked())) await box.check({ timeout: 5000 })
   }
 }
 
@@ -864,7 +864,11 @@ async function runPack(browser, caseId, claimant, outRoot) {
         record.outcome = record.retries ? 'lodged_after_retry' : 'lodged_first_time'
         break
       }
-      if (await stopIfWithStaff(page, record)) break
+      if (await stopIfWithStaff(page, record)) {
+        // The reply that came with the handoff is the last one the claimant saw.
+        if (now.reply && now.agentCount > seenAgentCount) transcript.push({ who: 'northwind', text: now.reply })
+        break
+      }
       // The payout card can require login even when the claimant has no files to send.
       const loginGate = page.getByRole('button', { name: 'Log in to continue', exact: true })
       if (!signedIn && await loginGate.isVisible().catch(() => false)) {
@@ -938,14 +942,16 @@ async function runPack(browser, caseId, claimant, outRoot) {
         if (index >= 0) {
           stalls = 0
           const button = page.locator(`[data-corpus-press="${index}"]`)
-          if (/^Agree\b/.test(reply.press)) await tickPermission(page, button)
-          // A button that cannot be pressed (covered, or gone after a re-render) is logged and the
-          // claimant decides again from the next screen; it does not end the pack.
-          const busyBefore = await appBusy(page)
-          const pressed = await button.click({ timeout: 5000 }).then(() => true, (error) => {
+          // A button that cannot be pressed (covered, or gone after a re-render), or a permission
+          // box that cannot be ticked, is logged and the claimant decides again from the next
+          // screen; it does not end the pack.
+          const pressFailed = (error) => {
             log('claimant.jsonl', { at: new Date().toISOString(), press_failed: reply.press, reason: error.message.split('\n')[0] })
             return false
-          })
+          }
+          const ticked = /^Agree\b/.test(reply.press) ? await tickPermission(page, button).then(() => true, pressFailed) : true
+          const busyBefore = await appBusy(page)
+          const pressed = ticked && await button.click({ timeout: 5000 }).then(() => true, pressFailed)
           if (!pressed) { lastAskedScreen = null; continue }
           record.presses.push(reply.press)
           transcript.push({ who: 'claimant', text: `(pressed "${reply.press}")` })

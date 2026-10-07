@@ -799,6 +799,13 @@ test('in a real browser, a permission card offers "Agree…" before its box is t
             <label class="service-consent"><input type="checkbox"> <span>I give Northwind permission.</span></label>
           </div>
         </section>
+        <section class="conversation-action-card">
+          <button class="conversation-action-trigger" type="button">Assessor · Permission needed</button>
+          <div class="conversation-action-details">
+            <label class="service-consent"><input type="checkbox" disabled> <span>I give Northwind permission.</span></label>
+            <div class="service-decision-actions"><button class="primary-button" type="button" disabled>Agree and request assessor</button></div>
+          </div>
+        </section>
         <button type="button" disabled>Request support</button>
       </aside>
       <script>
@@ -809,12 +816,13 @@ test('in a real browser, a permission card offers "Agree…" before its box is t
     assert.ok(pressable.includes('Agree and continue'), 'the claimant is offered "Agree and continue"')
     assert.ok(pressable.includes('Not now'))
     assert.ok(!pressable.includes('Request support'), 'any other disabled button is not offered')
+    assert.ok(!pressable.includes('Agree and request assessor'), 'nor an "Agree…" whose box cannot be ticked yet (the product is busy)')
     // Before the press the runner ticks that card's box, which enables the button.
     const button = page.locator(`[data-corpus-press="${pressable.indexOf('Agree and continue')}"]`)
     await tickPermission(page, button)
     assert.equal(await button.isEnabled(), true)
     const boxes = await page.locator('.service-consent input').evaluateAll((nodes) => nodes.map((node) => node.checked))
-    assert.deepEqual(boxes, [true, false], 'only the agreed card\'s permission is ticked')
+    assert.deepEqual(boxes, [true, false, false], 'only the agreed card\'s permission is ticked')
   } finally {
     await browser.close()
   }
