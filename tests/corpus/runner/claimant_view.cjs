@@ -55,16 +55,16 @@ function stringLeaves(value, out = new Set()) {
   return out
 }
 
-// Values that exist only in the oracle or the setup. A value the claimant legitimately knows (a
-// policy number in the facts, the product family) is not a leak, and neither is a word of the
-// fixed prompt template (`scaffold`), which is code and carries nothing from the pack. The
-// material labels are the runner's own text, not the pack's, so they never make a value allowed:
-// a label that repeats an oracle or setup value is caught like any other leak.
-function hiddenValues(caseDir, view, scaffold = '') {
+// Values that exist only in the oracle or the setup. `knownText` is what the claimant model
+// legitimately receives without the material labels: the system prompt and the brief exactly as
+// rendered (`claimantKnownText` in claimant_simulator.cjs). A value found there (a policy number
+// in the facts, the product family, a word of the template) is not a leak. Nothing else counts as
+// known: not the labels, which are the runner's own text, and not view fields the brief never
+// renders, such as the case id or a file name. A label repeating such a value is caught.
+function hiddenValues(caseDir, knownText) {
   const hidden = stringLeaves(readJson(path.join(caseDir, 'oracle', 'labels.json')))
   stringLeaves(readJson(path.join(caseDir, 'setup.json')), hidden)
-  const packOnly = { ...view, materials: view.materials.map(({ label, ...material }) => material) }
-  const allowed = `${JSON.stringify(packOnly)}\n${scaffold}`.toLowerCase()
+  const allowed = String(knownText).toLowerCase()
   return [...hidden].filter((value) => !allowed.includes(value.toLowerCase()))
 }
 

@@ -65,10 +65,12 @@ the journey starts; those setup reads never reach the claimant model.
 When the claimant first selects a file, the runner waits for the product's visible instruction to
 sign in. It opens the existing UI login entry, signs in as the pack's seeded customer, and lets the
 client promote the current Claim. It verifies that the UI returns to the same Claim and the seeded
-account can read it, then selects the file again through the same requested upload spot. If the
-claimant reaches the payout card first, its visible `Log in to continue` gate triggers the same
-mechanical sign-in. The runner never calls promotion directly, starts a replacement Claim, or
-resends the initial message. A failed login or promotion leaves the pack `stuck`.
+account can read it, then selects the file again through the same requested upload spot. If that
+spot is no longer on the screen after sign-in, the pack stops as `stuck` at the upload step: the
+file is never sent through the chat instead, which would record it under a different evidence
+kind. If the claimant reaches the payout card first, its visible `Log in to continue` gate triggers
+the same mechanical sign-in. The runner never calls promotion directly, starts a replacement Claim,
+or resends the initial message. A failed login or promotion leaves the pack `stuck`.
 
 ## The claimant
 
@@ -97,8 +99,10 @@ one. Where a photo is unclear or a file is cut short on purpose, the label says 
 photographed or holds.
 
 It never sees evidence kinds, generation prompts, materials marked `include: false`, `setup.json`,
-or `oracle/`. A leak check stops the run if any of those values reaches the prompt. The labels are
-the runner's own text, so a label that repeats one of those values is caught too.
+or `oracle/`. A leak check stops the run if any of those values reaches the prompt. It treats as
+known only what the model actually receives without the labels: the system prompt and the brief as
+rendered. A label that repeats an oracle or setup value is therefore caught, including a value that
+appears elsewhere only in the case id or a file name, which the brief never shows.
 
 Each turn, the claimant model gets only what the screen shows:
 

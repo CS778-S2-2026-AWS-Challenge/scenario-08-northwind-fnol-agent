@@ -32,7 +32,7 @@ const path = require('node:path')
 const { execSync, spawnSync } = require('node:child_process')
 
 const { buildClaimantView, hiddenValues, assertNoLeak } = require('./claimant_view.cjs')
-const { buildClaimantPrompt, promptScaffold, claimantFromEnvironment } = require('./claimant_simulator.cjs')
+const { buildClaimantPrompt, claimantKnownText, claimantFromEnvironment } = require('./claimant_simulator.cjs')
 const { buildBusinessSeed, packKey, seedAccount } = require('./corpus_seed.cjs')
 
 const MAX_CLAIMANT_MESSAGES = 30
@@ -310,17 +310,26 @@ async function signInAnonymousClaim(page, account, claimId) {
   return claim
 }
 
+// `resolveInput` returns `{ input, via }`: the file input to use and the upload path it belongs to
+// (a requested item's own spot, or `chat`). Returns the path the file was finally selected through.
 async function selectClaimantFile(page, file, resolveInput, signIn) {
-  await (await resolveInput()).setInputFiles(file)
-  if (signIn) {
-    // Let the real product reject the anonymous selection. This is a visible login gate,
-    // not an upload failure or a human recovery, and the selection has created no Evidence.
-    await page.getByText('Sign in before uploading a file.', { exact: false }).first().waitFor({ timeout: 10000 })
-    await signIn('upload')
-    // Promotion rerenders the UI; resolve the selected upload spot again and make a fresh
-    // authenticated selection. Neither the initial message nor the Claim is recreated.
-    await (await resolveInput()).setInputFiles(file)
+  const first = await resolveInput()
+  await first.input.setInputFiles(file)
+  if (!signIn) return first.via
+  // Let the real product reject the anonymous selection. This is a visible login gate,
+  // not an upload failure or a human recovery, and the selection has created no Evidence.
+  await page.getByText('Sign in before uploading a file.', { exact: false }).first().waitFor({ timeout: 10000 })
+  await signIn('upload')
+  // Promotion rerenders the UI; resolve the upload spot again and make a fresh authenticated
+  // selection. Neither the initial message nor the Claim is recreated. A requested item's own
+  // spot that is gone after sign-in is never swapped for the chat, which would record the file
+  // under a different evidence kind: the pack stops instead.
+  const again = await resolveInput()
+  if (first.via !== 'chat' && again.via !== first.via) {
+    throw new Error(`the upload spot "${first.via}" was not on the screen after sign-in; the file was not sent another way`)
   }
+  await again.input.setInputFiles(file)
+  return again.via
 }
 
 // ---------- one pack ----------
@@ -331,7 +340,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
   const setup = readJson(path.join(caseDir, 'setup.json'))
   const facts = readJson(path.join(caseDir, 'input', 'facts.json')).facts
   const view = buildClaimantView(caseDir, LABELS)
-  const hidden = hiddenValues(caseDir, view, promptScaffold())
+  const hidden = hiddenValues(caseDir, claimantKnownText(view))
   const out = path.join(outRoot, caseId)
   fs.mkdirSync(path.join(out, 'screens'), { recursive: true })
   const record = { case_id: caseId, claimant_session: setup.claimant_session, claimant_model: claimant.info, started_at: new Date().toISOString(), outcome: null, stuck: null, claim_id: null, claim_number: null, claimant_messages: 0, retries: 0, repeated_questions: 0, nothing_to_answer: 0, turn_ms: [], uploads: [], upload_paths: [], presses: [], steps: [], cost_usd: 0 }
@@ -375,6 +384,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
     const account = seedAccount(caseId, facts)
     await startClaimantSession(browser, page, setup.claimant_session, caseId, facts)
     const signIn = async (trigger) => {
+      const during = operation
       operation = 'sign-in'
       record.anonymous_sign_in = { trigger, claim_id: record.claim_id, started_at: new Date().toISOString(), succeeded: false }
       await shot('sign-in-required')
@@ -382,7 +392,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
       signedIn = true
       Object.assign(record.anonymous_sign_in, { succeeded: true, conversation_session_id: claim.conversation_session_id, finished_at: new Date().toISOString() })
       await shot('signed-in')
-      operation = 'runner'
+      operation = during
     }
 
     // The first message, as written.
@@ -410,20 +420,17 @@ async function runPack(browser, caseId, claimant, outRoot) {
         // the tray, carrying that item's kind, and goes with the message.
         const trayLabels = () => page.locator('form.workspace-composer .composer-file-copy').evaluateAll((nodes) => nodes.map((node) => `${node.querySelector('strong')?.textContent?.trim()}: ${node.querySelector('small')?.textContent?.trim()}`))
         for (const { material, spot } of usable) {
-          let via = 'chat'
           const resolveInput = async () => {
             if (spot) {
               const index = (await page.evaluate(uploadSpotsInPage)).indexOf(spot)
-              if (index >= 0) {
-                via = spot
-                return page.locator(`[data-corpus-upload="${index}"]`)
-              }
-              via = 'chat'
+              if (index >= 0) return { input: page.locator(`[data-corpus-upload="${index}"]`), via: spot }
               log('claimant.jsonl', { at: new Date().toISOString(), upload_spot_missing: spot, material: material.id, reason: 'no such upload spot on the screen; sent through the chat' })
             }
-            return page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])')
+            return { input: page.locator('form.workspace-composer input[type=file]:not([aria-hidden="true"])'), via: 'chat' }
           }
-          await selectClaimantFile(page, path.join(caseDir, 'input', 'materials', material.file), resolveInput, signedIn ? null : signIn)
+          operation = 'upload'
+          const via = await selectClaimantFile(page, path.join(caseDir, 'input', 'materials', material.file), resolveInput, signedIn ? null : signIn)
+          operation = 'runner'
           sentVia.push({ material: material.id, via })
           await page.locator('form.workspace-composer .composer-attachments').getByText(material.file).first().waitFor({ timeout: 30000 })
           const ready = await page.waitForFunction(() => {

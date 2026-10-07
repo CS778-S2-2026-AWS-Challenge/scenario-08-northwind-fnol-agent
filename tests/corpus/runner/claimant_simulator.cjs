@@ -99,10 +99,13 @@ function buildClaimantPrompt(view, transcript, screen) {
   return { system: SYSTEM_PROMPT, brief, user }
 }
 
-// The fixed template with an empty brief: the words the prompt always contains.
-function promptScaffold() {
-  const empty = buildClaimantPrompt({ persona: '', answer_policy: '', facts: {}, materials: [] }, [], '')
-  return `${empty.system}\n${empty.brief}`
+// What the claimant model legitimately receives apart from the material labels: the fixed system
+// prompt and the brief exactly as rendered, with every label left empty. Fields of the view that
+// are never rendered (the case id, file names) are not part of it. The leak guard treats only this
+// text as known, so a label that repeats an oracle or setup value is still caught.
+function claimantKnownText(view) {
+  const unlabelled = { ...view, materials: view.materials.map((material) => ({ ...material, label: '' })) }
+  return `${SYSTEM_PROMPT}\n${claimantBrief(unlabelled)}`
 }
 
 function claudeExecutable() {
@@ -245,7 +248,7 @@ module.exports = {
   uploadEntries,
   buildClaimantPrompt,
   claimantBrief,
-  promptScaffold,
+  claimantKnownText,
   askClaimant,
   cleanEnvironment,
 }

@@ -7,7 +7,7 @@ const path = require('node:path')
 const { test } = require('node:test')
 
 const { buildClaimantView, hiddenValues, assertNoLeak } = require('./claimant_view.cjs')
-const { buildClaimantPrompt, promptScaffold } = require('./claimant_simulator.cjs')
+const { buildClaimantPrompt, claimantKnownText } = require('./claimant_simulator.cjs')
 
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -45,7 +45,7 @@ function syntheticPack() {
   writeJson(path.join(dir, 'oracle', 'labels.json'), {
     family: 'motor',
     triage: { expected_class: 'complex', required_reasons: ['coverage_unclear'], rationale: 'The lookup carries an uncertainty marker.' },
-    design: { planted_indicators: ['receipt dated after the incident'], message_style: 'typos' },
+    design: { planted_indicators: ['receipt dated after the incident'], message_style: 'typos', planted_in: 'photo-rear.jpg' },
   })
   return dir
 }
@@ -66,7 +66,7 @@ test('the view carries claimant-visible fields only', () => {
 test('no oracle or setup value reaches the claimant prompt', () => {
   const dir = syntheticPack()
   const view = buildClaimantView(dir, LABELS)
-  const hidden = hiddenValues(dir, view, promptScaffold())
+  const hidden = hiddenValues(dir, claimantKnownText(view))
   // The policy number is in the facts as well as the setup, so it is not a hidden value.
   assert.ok(!hidden.includes('NW-SYN-MTR-100900'))
   assert.ok(hidden.includes('complex') && hidden.includes('coverage_unclear') && hidden.includes('anonymous_then_sign_in'))
@@ -79,7 +79,19 @@ test('a material label that repeats an oracle or setup value fails the guard', (
   for (const label of ['Receipt dated after the incident', 'Photo for anonymous_then_sign_in']) {
     // The runner builds the view with the labels and derives the hidden values from that view.
     const view = buildClaimantView(dir, { 'CTL-M-900': { 'photo-rear': label } })
-    const hidden = hiddenValues(dir, view, promptScaffold())
+    const hidden = hiddenValues(dir, claimantKnownText(view))
+    const prompt = buildClaimantPrompt(view, [], '')
+    assert.throws(() => assertNoLeak(prompt.system + prompt.brief, hidden), /oracle or setup value/, label)
+  }
+})
+
+test('a value known only from a view field the brief never renders still fails the guard', () => {
+  const dir = syntheticPack()
+  // The setup's case id and an oracle value equal to a file name are in the view object, but the
+  // claimant model never receives either: the brief renders neither the case id nor file names.
+  for (const label of ['Photo for CTL-M-900', 'Photo photo-rear.jpg']) {
+    const view = buildClaimantView(dir, { 'CTL-M-900': { 'photo-rear': label } })
+    const hidden = hiddenValues(dir, claimantKnownText(view))
     const prompt = buildClaimantPrompt(view, [], '')
     assert.throws(() => assertNoLeak(prompt.system + prompt.brief, hidden), /oracle or setup value/, label)
   }
@@ -88,7 +100,7 @@ test('a material label that repeats an oracle or setup value fails the guard', (
 test('a prompt that carries an oracle value fails the guard', () => {
   const dir = syntheticPack()
   const view = buildClaimantView(dir, LABELS)
-  const hidden = hiddenValues(dir, view, promptScaffold())
+  const hidden = hiddenValues(dir, claimantKnownText(view))
   const oracle = JSON.parse(fs.readFileSync(path.join(dir, 'oracle', 'labels.json'), 'utf8'))
   const leaky = buildClaimantPrompt({ ...view, persona: `${view.persona} Expected triage: ${oracle.triage.expected_class}.` }, [], '')
   assert.throws(() => assertNoLeak(leaky.system + leaky.brief, hidden), /oracle or setup value/)

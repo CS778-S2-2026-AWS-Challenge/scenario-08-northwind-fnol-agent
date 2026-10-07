@@ -108,7 +108,7 @@ test('anonymous file selection reaches the visible gate, promotes the same Claim
   let resolutions = 0
   const resolveInput = async () => {
     resolutions += 1
-    return { setInputFiles: async (file) => events.push(`select:${resolutions}:${file}`) }
+    return { input: { setInputFiles: async (file) => events.push(`select:${resolutions}:${file}`) }, via: 'chat' }
   }
   const account = seedAccount('CTL-M-001', {})
   let promoted
@@ -133,7 +133,7 @@ test('anonymous login or promotion failure prevents authenticated file selection
       const page = loginPage(events, 'journey', { loginError: boundary === 'login' ? 'Credentials were refused.' : null, claimId: boundary === 'route' ? 'clm_other' : 'clm_abc123' })
       page.getByText = () => ({ first: () => ({ waitFor: async () => { if (boundary === 'missing_gate') throw new Error('no visible sign-in gate') } }) })
       let selections = 0
-      await assert.rejects(selectClaimantFile(page, 'photo.jpg', async () => ({ setInputFiles: async () => { selections += 1 } }), () => signInAnonymousClaim(page, seedAccount('CTL-M-001', {}), 'clm_abc123')))
+      await assert.rejects(selectClaimantFile(page, 'photo.jpg', async () => ({ input: { setInputFiles: async () => { selections += 1 } }, via: 'chat' }), () => signInAnonymousClaim(page, seedAccount('CTL-M-001', {}), 'clm_abc123')))
       assert.equal(selections, 1, 'no file is selected again when the product did not complete promotion')
       assert.ok(!events.some((event) => /\/promote|\/messages|POST:\/api\/v1\/claims/.test(event)))
       if (boundary === 'missing_gate') assert.ok(!events.some((event) => event === 'journey:login'))
@@ -143,6 +143,31 @@ test('anonymous login or promotion failure prevents authenticated file selection
 
 test('authenticated file selection does not trigger another sign-in', async () => {
   const selected = []
-  await selectClaimantFile({ getByText: () => assert.fail('no anonymous gate') }, 'quote.pdf', async () => ({ setInputFiles: async (file) => selected.push(file) }), null)
+  const via = await selectClaimantFile({ getByText: () => assert.fail('no anonymous gate') }, 'quote.pdf', async () => ({ input: { setInputFiles: async (file) => selected.push(file) }, via: 'Still to send: Repair quote' }), null)
   assert.deepEqual(selected, ['quote.pdf'])
+  assert.equal(via, 'Still to send: Repair quote')
+})
+
+test('a requested upload spot gone after sign-in stops the file instead of switching to the chat', async (t) => {
+  const SPOT = 'Still to send: Repair quote'
+  const cases = [
+    { name: 'spot kept', after: SPOT, selected: ['spot', 'spot'], via: SPOT },
+    { name: 'spot gone', after: 'chat', selected: ['spot'], error: /"Still to send: Repair quote" was not on the screen after sign-in/ },
+    { name: 'chat first, spot after', before: 'chat', after: SPOT, selected: ['chat', 'spot'], via: SPOT },
+  ]
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const selected = []
+      const paths = [item.before || SPOT, item.after]
+      const resolveInput = async () => {
+        const via = paths.shift()
+        return { input: { setInputFiles: async () => selected.push(via === 'chat' ? 'chat' : 'spot') }, via }
+      }
+      const page = { getByText: () => ({ first: () => ({ waitFor: async () => {} }) }) }
+      const run = selectClaimantFile(page, 'quote.pdf', resolveInput, async () => {})
+      if (item.error) await assert.rejects(run, item.error)
+      else assert.equal(await run, item.via)
+      assert.deepEqual(selected, item.selected)
+    })
+  }
 })
