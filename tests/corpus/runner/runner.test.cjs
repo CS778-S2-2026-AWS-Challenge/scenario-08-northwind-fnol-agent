@@ -303,7 +303,7 @@ function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, account
           },
         }
       }
-      if (selector === '.payout-contact-panel .payout-contact-section .backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && state.error) return state.error; throw new Error('no alert') } }) }
+      if (selector === '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && state.error) return state.error; throw new Error('no alert') } }) }
       if (selector === '#payout-bank-name') return { isVisible: async () => loaded() && bankForm }
       if (selector === 'input[name=contact_preference]') return { evaluateAll: async (fn) => fn(loaded() ? ['in_app', 'email'].map((value) => ({ value, disabled: false, checked: state.contact === value })) : []) }
       if (selector.startsWith('input[name=contact_preference][value=')) return { check: async () => { state.contact = selector.match(/value="([^"]+)"/)[1] } }
@@ -447,7 +447,7 @@ test('a payout save is judged after "Saving…" ends, from the form\'s own error
       waitForTimeout: async () => { poll += 1 },
       getByRole: (role, { name }) => ({ count: async () => (name === 'Saving…' && now().saving ? 1 : 0) }),
       locator: (selector) => {
-        assert.equal(selector, '.payout-contact-panel .payout-contact-section .backend-status[role=alert]')
+        assert.equal(selector, '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]')
         return { first: () => ({ textContent: async () => { if (now().error) return now().error; throw new Error('no error') } }) }
       },
     }
@@ -488,6 +488,14 @@ test('in a real browser, only tray entries the uploads add or reuse are judged',
     })
     const entries = await touched()
     assert.deepEqual(entries.map((entry) => `${entry.name}: ${entry.label}`).sort(), ['photo-new.jpg: Ready', 'quote-corrupt.pdf: Processing failed'])
+    // An anonymous sign-in replaces the workspace and its composer while the first file uploads.
+    await page.setContent('<main id="workspace"><form class="workspace-composer"><ul id="tray"></ul></form></main>')
+    const afterSignIn = await watchTray(page)
+    await page.evaluate(() => {
+      document.querySelector('#workspace').outerHTML = '<main id="login"><form class="login-form"><input></form></main>'
+      document.querySelector('#login').outerHTML = '<main id="workspace"><form class="workspace-composer"><ul><li><span class="composer-file-copy"><strong>quote-corrupt.pdf</strong><small>Processing failed</small></span></li></ul></form></main>'
+    })
+    assert.deepEqual(await afterSignIn(), [{ name: 'quote-corrupt.pdf', label: 'Processing failed' }])
     const usable = [{ material: { id: 'quote-corrupt', file: 'quote-corrupt.pdf' } }, { material: { id: 'photo-new', file: 'photo-new.jpg' } }]
     const result = markProcessingFailed(usable, [{ material: 'quote-corrupt', via: 'Supporting document' }, { material: 'photo-new', via: 'chat' }], entries)
     assert.deepEqual(result.failed, ['quote-corrupt'])

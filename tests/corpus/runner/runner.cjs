@@ -39,7 +39,7 @@ const MAX_CLAIMANT_MESSAGES = 30
 // The payout panel's own error line, inside its contact form: a refused save or "Continue to
 // agreement". Each attempt clears it when it starts. A failed load of the saved accounts shows its
 // error elsewhere in the panel.
-const PAYOUT_FORM_ERROR = '.payout-contact-panel .payout-contact-section .backend-status[role=alert]'
+const PAYOUT_FORM_ERROR = '.payout-contact-panel form.payout-contact-section .backend-status[role=alert]'
 // Buttons that confirm the collected details (the review card's "All correct", a reply's "Looks right").
 const CONFIRMATION_PRESS = /^(All correct|Looks right)$/
 const MEDIA = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.pdf': 'application/pdf' }
@@ -193,27 +193,35 @@ function markProcessingFailed(usable, sentVia, touched) {
 // Watches the composer's file tray, in the page, while one message's files upload. Every file
 // entry the uploads add, or change in place (a file sent again through a requested item's own
 // upload reuses that item's entry), is recorded; entries left from earlier messages are not.
-// Returns a function that stops watching and gives those entries' names and final labels.
+// The whole page is watched, because an anonymous sign-in in the middle replaces the workspace and
+// its composer; only entries inside a composer form are kept. Returns a function that stops
+// watching and gives those entries' names and final labels.
 async function watchTray(page) {
   await page.evaluate(() => {
     window.__corpusTrayObserver?.disconnect()
     const touched = new Set()
     const own = (node) => (node && (node.nodeType === 1 ? node : node.parentElement))?.closest?.('.composer-file-copy')
     const added = (node) => (node.nodeType !== 1 ? [] : node.matches('.composer-file-copy') ? [node] : [...node.querySelectorAll('.composer-file-copy')])
-    const observer = new MutationObserver((mutations) => {
+    const record = (mutations) => {
       for (const mutation of mutations) {
         const entry = own(mutation.target)
         if (entry) touched.add(entry)
         if (mutation.type === 'childList') mutation.addedNodes.forEach((node) => added(node).forEach((copy) => touched.add(copy)))
       }
-    })
-    observer.observe(document.querySelector('form.workspace-composer') || document.body, { subtree: true, childList: true, characterData: true })
+    }
+    const observer = new MutationObserver(record)
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true })
     window.__corpusTrayObserver = observer
+    window.__corpusTrayRecord = record
     window.__corpusTrayTouched = touched
   })
   return () => page.evaluate(() => {
-    window.__corpusTrayObserver?.disconnect()
-    return [...(window.__corpusTrayTouched || [])].filter((node) => node.isConnected).map((node) => ({
+    const observer = window.__corpusTrayObserver
+    if (observer) {
+      window.__corpusTrayRecord(observer.takeRecords())
+      observer.disconnect()
+    }
+    return [...(window.__corpusTrayTouched || [])].filter((node) => node.isConnected && node.closest('form.workspace-composer')).map((node) => ({
       name: (node.querySelector('strong')?.textContent || '').trim(),
       label: (node.querySelector('small')?.textContent || '').trim(),
     }))
