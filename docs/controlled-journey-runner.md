@@ -43,7 +43,7 @@ Settings (environment):
 
 ## Seeded customers
 
-Each pack's claimant is its own customer, signed in with the pack's name and email
+Each pack's claimant is its own customer, using the pack's name and email
 (`policyholder.name`, `claimant.email`). The rest is fixed by the pack ID, so the same packs always
 give the same manifest:
 
@@ -56,6 +56,21 @@ give the same manifest:
 The seed refuses the four policy numbers #1206 uses, a policy number shared by two packs, and a
 pack listed twice. Before a pack starts, the runner checks that its customer has no Claim other
 than its seeded earlier claims. A leftover Claim means the stores were not reset.
+
+`signed_in` packs log in before the first message. `anonymous_then_sign_in` packs start in a fresh
+unsigned-in browser context and send their first message anonymously. Their customer isolation
+check and phone setup use a separate browser context whose session is revoked and closed before
+the journey starts; those setup reads never reach the claimant model.
+
+When the claimant first selects a file, the runner waits for the product's visible instruction to
+sign in. It opens the existing UI login entry, signs in as the pack's seeded customer, and lets the
+client promote the current Claim. It verifies that the UI returns to the same Claim and the seeded
+account can read it, then selects the file again through the same requested upload spot. If that
+spot is no longer on the screen after sign-in, the pack stops as `stuck` at the upload step: the
+file is never sent through the chat instead, which would record it under a different evidence
+kind. If the claimant reaches the payout card first, its visible `Log in to continue` gate triggers
+the same mechanical sign-in. The runner never calls promotion directly, starts a replacement Claim,
+or resends the initial message. A failed login or promotion leaves the pack `stuck`.
 
 ## The claimant
 
@@ -75,11 +90,20 @@ What the claimant model may see (`claimant_view.cjs`):
 - the initial message;
 - the persona and answer policy;
 - the facts;
-- the materials, under hand-written labels (`material-labels.json`, currently the ten reference
-  packs).
+- the materials, under plain-language labels (`material-labels.json`, every pack of corpus v1).
+
+The labels say what the claimant holds, the way a claimant would name it. None is written by
+hand. The ten reference packs were written one at a time with the contributor's AI assistant. The
+rest were drafted by the operator's local model from each file's content alone, without the file
+name, evidence kind, provenance, setup or oracle. Every label was then reviewed one by one. Where a
+photo is unclear or a file is cut short on purpose, the label says what the claimant photographed
+or holds.
 
 It never sees evidence kinds, generation prompts, materials marked `include: false`, `setup.json`,
-or `oracle/`. A leak check stops the run if any of those values reaches the prompt.
+or `oracle/`. A leak check stops the run if any of those values reaches the prompt. It treats as
+known only what the model actually receives without the labels: the system prompt and the brief as
+rendered. A label that repeats an oracle or setup value is therefore caught, including a value that
+appears elsewhere only in the case id or a file name, which the brief never shows.
 
 Each turn, the claimant model gets only what the screen shows:
 
@@ -95,8 +119,10 @@ message, files to upload and at most one button to press. It answers only what i
 nothing, and sends each file once. When it presses a button, it does nothing else that turn.
 
 The runner fills the payout form, the contact choice and the agreement checkboxes by fixed rules.
-It logs in, adds the pack's phone to the profile so SMS can be chosen, and attaches files one at a
-time. It presses Send only after every file shows Ready.
+It signs in at the pack's declared entry or visible login gate, adds the pack's phone to the profile
+so SMS can be chosen, and attaches files one at a time. It presses Send only after every file shows
+Ready. Login is a mechanical prerequisite and does not count as a recovery. `run.json` records
+the anonymous sign-in trigger, original Claim, conversation session and whether promotion succeeded.
 
 Uploads follow "Evidence kinds and the upload path" in the corpus standard:
 
@@ -104,7 +130,8 @@ Uploads follow "Evidence kinds and the upload path" in the corpus standard:
   "Still to do" list, a requested file under a reply, and the Documents cards.
 - When the claimant sends a material the claim asks for, it names the matching spot. The runner
   uploads through that item's own input, so the file carries the kind the interface sends for that
-  item.
+  item. If the spot it names is not on the screen, the pack stops as `stuck` at the upload step,
+  signed in or not: the file is never sent through the chat instead.
 - Other files go through the chat.
 - The runner never copies `evidence_kind` from the pack. Each run records which path every file
   took (`upload_paths`).
@@ -126,6 +153,7 @@ A pack is `stuck` when any of these happens:
 - after the nudge, there is still nothing to act on;
 - the claimant reaches 30 messages;
 - a file never shows Ready;
+- the claimant names an upload spot that is not on the screen;
 - a wait times out.
 
 ## Scoring
@@ -182,8 +210,6 @@ A summary table goes on the issue or PR.
 
 Not yet covered:
 
-- packs whose `claimant_session` is `anonymous_then_sign_in` (recorded as `runner_not_implemented`);
-- material labels for packs beyond the ten reference packs;
 - a material available only later. The claimant is told to say it will have it later, but the
   runner does not hold the file back, and every material in corpus v1 is `available_from: start`;
 - cost per pack. Standard `start-dev` does not keep the backend log, which is where model token
