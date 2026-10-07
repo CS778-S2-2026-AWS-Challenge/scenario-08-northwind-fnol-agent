@@ -121,12 +121,28 @@ nothing, and sends each file once. When it presses a button, it does nothing els
 The runner fills the payout form, the contact choice and the agreement checkboxes by fixed rules.
 It signs in at the pack's declared entry or visible login gate, adds the pack's phone to the profile
 so SMS can be chosen, and attaches files one at a time. It presses Send only after every file shows
-Ready or "Processing failed". A file the product cannot process is the product's answer, not a
-stall: the message is still sent, and `run.json` lists the file under `processing_failed`. On the
-payout form, the runner first waits for "Loading saved payout accounts" to finish
-(`payout_loading_waits`). When the saved account is listed but not selected, it selects it again
-(`payout_reselected`), then waits for "Continue to agreement" to become enabled before pressing it.
-Login is a mechanical prerequisite and does not count as a recovery.
+Ready or "Processing failed".
+
+A file the product cannot process is the product's answer, not a stall. The product leaves that
+file out of the message, so the message goes without it:
+
+- `run.json` lists the file under `processing_failed`, and its upload path is marked
+  `processing: failed, sent: false`;
+- the claimant's transcript says it could not be processed;
+- the claimant may try that file once more, as a person would. After a second failure it is not
+  sent again.
+
+On the payout form, the runner reads the panel afresh until it can act:
+
+- it waits for "Loading saved payout accounts" to finish (`payout_loading_waits`);
+- a new-account form (no saved account, or a failed load) is filled by its own rule, but only if it
+  is still there a second later, since the panel shows it briefly before loading starts;
+- otherwise it chooses the contact method and selects the saved account whenever none is selected
+  (`payout_reselected`). Selecting is a fixed rule, not a recovery;
+- it presses "Continue to agreement" once the button is enabled.
+
+A disabled "All correct" is not pressed. Login is a mechanical prerequisite and does not count as a
+recovery.
 `run.json` records the anonymous sign-in trigger, original Claim, conversation session and whether
 promotion succeeded.
 
@@ -151,8 +167,12 @@ never `lodged_first_time`. The recoveries are:
 - answering a question once more when the agent asks it again. Each question sentence is tracked
   on its own, whatever else the reply asks with it, so each repeated question counts as one retry;
 - confirming once more after the product refuses a confirmation ("All correct" or "Looks right").
-  Refusals after a press by the claimant model and by the fixed rule count together, and
-  `run.json` lists each one under `confirmation_refusals`;
+  The runner waits for the product's answer to the press, however slow. Refusals after a press by
+  the claimant model and by the fixed rule count together, and `run.json` lists each one under
+  `confirmation_refusals`;
+- pressing "Continue to agreement", or saving a new payout account, once more after the payout
+  panel shows an error for the last attempt (a failed save, a conflict). These refusals are counted
+  apart from confirmations, under `payout_refusals`;
 - after about nine seconds with nothing to act on, typing "OK.".
 
 A pack is `stuck` when any of these happens:
@@ -162,10 +182,11 @@ A pack is `stuck` when any of these happens:
 - after the nudge, there is still nothing to act on;
 - the claimant reaches 30 messages;
 - a file shows neither Ready nor "Processing failed";
-- a confirmation is refused a second time;
-- the payout form shows its own error, its saved accounts are still loading after 30 seconds, or
-  "Continue to agreement" stays disabled for 30 seconds after the payout account and contact method
-  are chosen;
+- a confirmation is refused a second time (step `confirmation`), or the payout step is (step
+  `payout`);
+- the saved payout accounts are still loading after 30 seconds, "Continue to agreement" stays
+  disabled for 30 seconds with the payout account and contact method chosen, or the new payout
+  account form comes back after four saves;
 - the claimant names an upload spot that is not on the screen;
 - a wait times out.
 
@@ -178,6 +199,10 @@ A pack is `stuck` when any of these happens:
   effort target (under five minutes and under ten questions, lodged runs only). Every question
   sentence counts as one question, a repeated one included, by the rule the runner uses to
   recognise a repeat.
+- **Files the product could not process:** each pack's `processing_failed`. In a `corrupt_file` or
+  `unsupported_format` pack, the material made for that condition is expected to fail. Any other
+  failed file is a valid file the product could not handle, and is listed in the summary as not made
+  broken by the corpus, even when the pack lodged.
 - **Completed without follow-up:** lodged, nothing owed by the claimant, and no missing-information
   triage reason (`document_outstanding`, `fact_unresolved`, `policy_not_verified`,
   `amount_unknown`).

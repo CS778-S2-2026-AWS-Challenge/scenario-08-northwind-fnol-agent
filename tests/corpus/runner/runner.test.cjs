@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed, payoutStep } = require('./runner.cjs')
+const { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, payoutStep } = require('./runner.cjs')
 const { seedAccount } = require('./corpus_seed.cjs')
 
 test('each question sentence of a reply is listed on its own, normalised', () => {
@@ -192,11 +192,11 @@ test('a named upload spot missing from the screen stops the file, signed in or b
   })
 })
 
-test('a refused confirmation is one retry, and a second refusal by either side ends the pack', () => {
+test('a refused action is one retry, and a second refusal of the same action ends the pack', () => {
   const ALERT = 'One or more fields cannot be confirmed.'
   // CTL-M-009 and CTL-M-032: refused once, then lodged. Nothing may read as stuck afterwards.
   const recovered = { retries: 0, outcome: null, stuck: null }
-  assert.equal(recordConfirmationRefusal(recovered, 'runner', ALERT, 't1'), false)
+  assert.equal(recordRefusal(recovered, 'confirmation', 'runner', ALERT, 't1'), false)
   assert.equal(recovered.retries, 1)
   assert.deepEqual(recovered.retry_kinds, [`confirmation refused: ${ALERT}`])
   assert.equal(recovered.stuck, null)
@@ -204,12 +204,20 @@ test('a refused confirmation is one retry, and a second refusal by either side e
   // The pilot CTL-M-001: the claimant model pressed "All correct" and was refused, then the fixed
   // rule was refused too. Both count, so the second refusal ends the pack.
   const twice = { retries: 0, outcome: null, stuck: null }
-  assert.equal(recordConfirmationRefusal(twice, 'claimant', ALERT, 't1'), false)
-  assert.equal(recordConfirmationRefusal(twice, 'runner', ALERT, 't2'), true)
+  assert.equal(recordRefusal(twice, 'confirmation', 'claimant', ALERT, 't1'), false)
+  assert.equal(recordRefusal(twice, 'confirmation', 'runner', ALERT, 't2'), true)
   assert.equal(twice.outcome, 'stuck')
-  assert.deepEqual(twice.stuck, { step: 'review', reason: `confirmation refused 2 times: ${ALERT}` })
+  assert.deepEqual(twice.stuck, { step: 'confirmation', reason: `confirmation refused 2 times: ${ALERT}` })
   assert.deepEqual(twice.confirmation_refusals.map((refusal) => refusal.by), ['claimant', 'runner'])
   assert.equal(twice.retries, 1)
+  // Confirmation and the payout step are counted apart: one refusal of each is two recoveries.
+  const apart = { retries: 0, outcome: null, stuck: null }
+  assert.equal(recordRefusal(apart, 'confirmation', 'runner', ALERT, 't1'), false)
+  assert.equal(recordRefusal(apart, 'payout', 'runner', 'Your report changed while this page was open.', 't2'), false)
+  assert.equal(apart.outcome, null)
+  assert.equal(apart.retries, 2)
+  assert.equal(recordRefusal(apart, 'payout', 'runner', 'Your report changed while this page was open.', 't3'), true)
+  assert.equal(apart.stuck.step, 'payout')
 })
 
 test('a payout form shown again selects the saved account only when none is selected', () => {
@@ -219,36 +227,75 @@ test('a payout form shown again selects the saved account only when none is sele
   assert.equal(payoutDestinationToSelect([]), -1)
 })
 
-test('a file the product cannot process is recorded and does not stop the message', () => {
+test('a file the product cannot process is recorded as not sent, and may be tried once more', () => {
   const usable = [{ material: { id: 'photo-watch', file: 'photo-watch.jpg' } }, { material: { id: 'receipt-watch', file: 'receipt-watch.pdf' } }]
   const sentVia = [{ material: 'photo-watch', via: 'chat' }, { material: 'receipt-watch', via: 'Still to send: Receipt' }]
-  const { failed, paths } = markProcessingFailed(usable, sentVia, ['photo-watch.jpg'])
-  assert.deepEqual(failed, ['photo-watch'])
-  assert.deepEqual(paths, [{ material: 'photo-watch', via: 'chat', processing: 'failed' }, { material: 'receipt-watch', via: 'Still to send: Receipt' }])
-  assert.deepEqual(markProcessingFailed(usable, sentVia, []), { failed: [], paths: sentVia })
+  // A file failed in an earlier message stays in the tray; only this message's files count.
+  const marked = markProcessingFailed(usable, sentVia, ['photo-watch.jpg', 'quote-old.pdf'])
+  assert.deepEqual(marked.failed, ['photo-watch'])
+  assert.deepEqual(marked.sent, ['receipt-watch'])
+  assert.deepEqual(marked.paths, [{ material: 'photo-watch', via: 'chat', processing: 'failed', sent: false }, { material: 'receipt-watch', via: 'Still to send: Receipt' }])
+  assert.deepEqual(markProcessingFailed(usable, sentVia, []), { failed: [], sent: ['photo-watch', 'receipt-watch'], paths: sentVia })
+  const record = { uploads: ['receipt-watch'], processing_failed: ['photo-watch'] }
+  assert.equal(mayHandOver(record, 'receipt-watch'), false, 'sent once already')
+  assert.equal(mayHandOver(record, 'photo-watch'), true, 'failed once: one more try')
+  record.processing_failed.push('photo-watch')
+  assert.equal(mayHandOver(record, 'photo-watch'), false, 'failed twice: not sent again')
+  assert.equal(mayHandOver(record, 'repair-quote'), true)
+})
+
+// A pressed confirmation button and the composer's error line, as the product renders them:
+// the button is disabled while the request runs, then enabled again or gone, and the error (if
+// any) appears when the answer arrives. `steps` lists the page state per poll.
+function confirmationPage(steps) {
+  let poll = 0
+  const now = () => steps[Math.min(poll, steps.length - 1)]
+  const page = {
+    waitForTimeout: async () => { poll += 1 },
+    locator: () => ({ first: () => ({ textContent: async () => { if (now().error) return now().error; throw new Error('no error line') } }) }),
+  }
+  const pressed = { count: async () => (now().button === 'gone' ? 0 : 1), isEnabled: async () => now().button === 'enabled' }
+  return { page, pressed }
+}
+
+test('a confirmation is judged on the product answer, however slow', async () => {
+  const REFUSAL = 'One or more fields cannot be confirmed.'
+  // The refusal arrives three polls after the press, while the button is still disabled.
+  const slow = confirmationPage([{ button: 'disabled' }, { button: 'disabled' }, { button: 'disabled' }, { button: 'enabled', error: REFUSAL }])
+  assert.equal(await confirmationOutcome(slow.page, slow.pressed, { timeoutMs: 60000 }), REFUSAL)
+  const accepted = confirmationPage([{ button: 'disabled' }, { button: 'gone' }])
+  assert.equal(await confirmationOutcome(accepted.page, accepted.pressed, { timeoutMs: 60000 }), null)
+  const enabledAgain = confirmationPage([{ button: 'disabled' }, { button: 'enabled' }])
+  assert.equal(await confirmationOutcome(enabledAgain.page, enabledAgain.pressed, { timeoutMs: 60000 }), null)
 })
 
 // A double of the payout and contact panel (customer/src/components/PayoutContactPanel.jsx):
 // while the saved accounts load it shows the loading status, lists no account and keeps
 // "Continue to agreement" disabled; the button enables once an account and a contact method are
-// selected. Each wait of the runner advances the load by one step.
-function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, accounts = [{ checked: false, disabled: false }], neverEnables = false } = {}) {
-  const state = { loadingSteps, contact: null, clicks: 0, accounts: accounts.map((account) => ({ ...account })) }
+// selected. Each wait of the runner advances the load by one step, and real time passes so the
+// step's clock limits apply.
+function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, accounts = [{ checked: false, disabled: false }], neverEnables = false, gone = false, remountAfterWaits = null } = {}) {
+  const state = { loadingSteps, contact: null, clicks: 0, waits: 0, accounts: accounts.map((account) => ({ ...account })) }
   const loaded = () => state.loadingSteps === 0
   const page = {
-    waitForTimeout: async () => { if (state.loadingSteps > 0) state.loadingSteps -= 1 },
+    waitForTimeout: async (ms) => {
+      state.waits += 1
+      if (state.loadingSteps > 0) state.loadingSteps -= 1
+      if (state.waits === remountAfterWaits) { state.contact = null; state.accounts.forEach((account) => { account.checked = false }) }
+      await new Promise((resolve) => setTimeout(resolve, ms))
+    },
     locator: (selector, options = {}) => {
       if (selector === '.payout-contact-panel') {
         return {
           locator: (inner, innerOptions = {}) => {
             if (inner === '.payout-contact-status' && /Loading saved payout accounts/.test(innerOptions.hasText)) return { isVisible: async () => !loaded() }
-            if (inner === '.backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && error) return error; throw new Error('no alert') } }) }
+            if (inner === '.backend-status[role=alert]') return { first: () => ({ textContent: async () => { if (loaded() && state.error) return state.error; throw new Error('no alert') } }) }
             return assert.fail(`unexpected panel locator ${inner}`)
           },
         }
       }
       if (selector === '#payout-bank-name') return { isVisible: async () => loaded() && bankForm }
-      if (selector === 'input[name=contact_preference]') return { evaluateAll: async (fn) => fn(loaded() ? [{ value: 'in_app', disabled: false }, { value: 'email', disabled: false }] : []) }
+      if (selector === 'input[name=contact_preference]') return { evaluateAll: async (fn) => fn(loaded() ? ['in_app', 'email'].map((value) => ({ value, disabled: false, checked: state.contact === value })) : []) }
       if (selector.startsWith('input[name=contact_preference][value=')) return { check: async () => { state.contact = selector.match(/value="([^"]+)"/)[1] } }
       if (selector === 'input[name=payout_destination]') {
         return {
@@ -259,47 +306,78 @@ function payoutPanel({ loadingSteps = 0, error = null, bankForm = false, account
       return assert.fail(`unexpected locator ${selector} ${JSON.stringify(options)}`)
     },
   }
+  state.error = error
   const button = {
+    count: async () => (gone ? 0 : 1),
     isEnabled: async () => !neverEnables && loaded() && Boolean(state.contact) && state.accounts.some((account) => account.checked),
     click: async () => { state.clicks += 1 },
   }
   return { page, button, state }
 }
 
+const PAYOUT_LIMITS = { settleMs: 200, enableMs: 200, pollMs: 5 }
+
 test('the payout step waits for the saved accounts to load before choosing and continuing', async () => {
-  const LIMITS = { settleMs: 5000, enableMs: 5000, pollMs: 500 }
   const facts = { 'claimant.contact_preference': 'email' }
   // Loading to ready: the saved account appears unselected after three waits, as in CTL-C-013.
   const slow = payoutPanel({ loadingSteps: 3 })
-  const record = {}
-  assert.deepEqual(await payoutStep(slow.page, slow.button, facts, record, LIMITS), { done: 'continued' })
+  const record = { retries: 0 }
+  assert.deepEqual(await payoutStep(slow.page, slow.button, facts, record, PAYOUT_LIMITS), { done: 'continued' })
   assert.equal(slow.state.clicks, 1)
   assert.equal(record.payout_loading_waits, 3)
   assert.equal(record.payout_reselected, 1)
   assert.equal(record.contact_preference, 'email')
   // An account already selected is left as it is.
   const preselected = payoutPanel({ accounts: [{ checked: true, disabled: false }] })
-  const kept = {}
-  assert.deepEqual(await payoutStep(preselected.page, preselected.button, facts, kept, LIMITS), { done: 'continued' })
+  const kept = { retries: 0 }
+  assert.deepEqual(await payoutStep(preselected.page, preselected.button, facts, kept, PAYOUT_LIMITS), { done: 'continued' })
   assert.equal(kept.payout_reselected, undefined)
-  // No saved account: the panel shows the new-account form, which has its own rule.
-  const empty = payoutPanel({ bankForm: true, accounts: [] })
-  assert.deepEqual(await payoutStep(empty.page, empty.button, facts, {}, LIMITS), { done: 'form' })
+  // No saved account, also after a failed load: the new-account form, which has its own rule.
+  const empty = payoutPanel({ bankForm: true, accounts: [], error: 'We could not load your saved payout accounts.' })
+  assert.deepEqual(await payoutStep(empty.page, empty.button, facts, { retries: 0 }, PAYOUT_LIMITS), { done: 'form' })
   assert.equal(empty.state.clicks, 0)
+  // The panel replaced, or "Saving…" shown instead of the button: the main loop reads again.
+  const gone = payoutPanel({ gone: true })
+  assert.deepEqual(await payoutStep(gone.page, gone.button, facts, { retries: 0 }, PAYOUT_LIMITS), { done: 'gone' })
 })
 
-test('the payout step stops only on the panel error, an endless load or a button that never enables', async () => {
-  const LIMITS = { settleMs: 2000, enableMs: 2000, pollMs: 500 }
-  const facts = {}
-  const error = payoutPanel({ error: 'We could not load your saved payout accounts.' })
-  assert.deepEqual(await payoutStep(error.page, error.button, facts, {}, LIMITS), { done: 'stuck', reason: 'the payout panel showed an error: We could not load your saved payout accounts.' })
-  const endless = payoutPanel({ loadingSteps: Infinity })
-  assert.deepEqual(await payoutStep(endless.page, endless.button, facts, {}, LIMITS), { done: 'stuck', reason: 'saved payout accounts were still loading after 2 s' })
-  const disabled = payoutPanel({ neverEnables: true })
-  const result = await payoutStep(disabled.page, disabled.button, facts, {}, LIMITS)
+test('the payout step chooses again after the panel is remounted, and retries a refused save once', async () => {
+  const facts = { 'claimant.contact_preference': 'email' }
+  // Loading starts again after the first choices and clears them: they are made again.
+  const remounted = payoutPanel({ loadingSteps: 0, neverEnables: false, remountAfterWaits: 1 })
+  remounted.state.loadingSteps = 0
+  const original = remounted.button.isEnabled
+  let firstCheck = true
+  remounted.button.isEnabled = async () => { if (firstCheck) { firstCheck = false; return false } return original() }
+  const record = { retries: 0 }
+  assert.deepEqual(await payoutStep(remounted.page, remounted.button, facts, record, PAYOUT_LIMITS), { done: 'continued' })
+  assert.equal(record.payout_reselected, 2)
+  // An error beside an enabled button: the product refused the last attempt. One retry, then stuck.
+  const refused = payoutPanel({ error: 'Your report changed while this page was open.' })
+  const retried = { retries: 0, outcome: null, stuck: null }
+  assert.deepEqual(await payoutStep(refused.page, refused.button, facts, retried, PAYOUT_LIMITS), { done: 'continued' })
+  assert.equal(retried.retries, 1)
+  const result = await payoutStep(refused.page, refused.button, facts, retried, PAYOUT_LIMITS)
   assert.equal(result.done, 'stuck')
-  assert.match(result.reason, /stayed disabled for 2 s after the payout account and contact method were chosen/)
-  for (const panel of [error, endless, disabled]) assert.equal(panel.state.clicks, 0)
+  assert.match(result.reason, /payout step refused 2 times: Your report changed/)
+  assert.equal(refused.state.clicks, 1)
+})
+
+test('the payout step stops on an endless load or a button that never enables, by clock time', async () => {
+  const facts = {}
+  const endless = payoutPanel({ loadingSteps: Infinity })
+  const startedEndless = Date.now()
+  const stuckLoading = await payoutStep(endless.page, endless.button, facts, { retries: 0 }, PAYOUT_LIMITS)
+  assert.equal(stuckLoading.done, 'stuck')
+  assert.match(stuckLoading.reason, /still loading/)
+  assert.ok(Date.now() - startedEndless >= PAYOUT_LIMITS.settleMs)
+  const disabled = payoutPanel({ neverEnables: true })
+  const startedDisabled = Date.now()
+  const stuckDisabled = await payoutStep(disabled.page, disabled.button, facts, { retries: 0 }, PAYOUT_LIMITS)
+  assert.equal(stuckDisabled.done, 'stuck')
+  assert.match(stuckDisabled.reason, /stayed disabled .* with the payout account and contact method chosen/)
+  assert.ok(Date.now() - startedDisabled >= PAYOUT_LIMITS.enableMs)
+  for (const panel of [endless, disabled]) assert.equal(panel.state.clicks, 0)
 })
 
 // The same loading-to-ready transition in a real browser, with the panel's markup and timing

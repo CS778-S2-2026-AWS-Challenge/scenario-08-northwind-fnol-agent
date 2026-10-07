@@ -122,19 +122,44 @@ function trackQuestions(asked, reply) {
   return { repeated, third }
 }
 
-// Records one confirmation the product refused (`by` is `claimant` or `runner`). The first refusal
-// is the pack's one recovery for it and counts as a retry; a second refusal, by either, ends the
-// pack as stuck. Returns true when the pack has to stop.
-function recordConfirmationRefusal(record, by, alert, at = new Date().toISOString()) {
-  record.confirmation_refusals = [...(record.confirmation_refusals || []), { by, alert, at }]
-  if (record.confirmation_refusals.length >= 2) {
+// Actions a person tries once more when the product refuses them, each with its own count:
+// confirming the details ("All correct", "Looks right") and saving the payout step.
+const REFUSABLE = {
+  confirmation: { field: 'confirmation_refusals', step: 'confirmation', what: 'confirmation' },
+  payout: { field: 'payout_refusals', step: 'payout', what: 'payout step' },
+}
+
+// Records one refusal shown by the product (`by` is `claimant` or `runner`). The first refusal of
+// an action is the pack's one recovery for it and counts as a retry; a second refusal of the same
+// action, by either, ends the pack as stuck. Returns true when the pack has to stop.
+function recordRefusal(record, action, by, alert, at = new Date().toISOString()) {
+  const { field, step, what } = REFUSABLE[action]
+  record[field] = [...(record[field] || []), { by, alert, at }]
+  if (record[field].length >= 2) {
     record.outcome = 'stuck'
-    record.stuck = { step: 'review', reason: `confirmation refused ${record.confirmation_refusals.length} times: ${alert}` }
+    record.stuck = { step, reason: `${what} refused ${record[field].length} times: ${alert}` }
     return true
   }
   record.retries += 1
-  record.retry_kinds = [...(record.retry_kinds || []), `confirmation refused: ${alert}`]
+  record.retry_kinds = [...(record.retry_kinds || []), `${what} refused: ${alert}`]
   return false
+}
+
+// After a press of a confirmation button: waits until the product has answered, then returns the
+// error it showed under the composer, or null. The product clears that error when the request
+// starts and keeps the button disabled while it runs, so the answer is in once the error shows,
+// or once the button is enabled again or gone. A slow refusal is not missed.
+async function confirmationOutcome(page, pressed, { timeoutMs = 20000, pollMs = 250 } = {}) {
+  const errorLine = page.locator('form.workspace-composer .backend-status[role=alert]').first()
+  const readError = async () => ((await errorLine.textContent({ timeout: pollMs }).catch(() => null)) || '').trim() || null
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const error = await readError()
+    if (error) return error
+    const settled = (await pressed.count().catch(() => 0)) === 0 || await pressed.isEnabled({ timeout: pollMs }).catch(() => false)
+    if (settled || Date.now() >= deadline) return readError()
+    await page.waitForTimeout(pollMs)
+  }
 }
 
 // Which saved payout account to select when the form shows none selected: the first one that can
@@ -144,12 +169,22 @@ function payoutDestinationToSelect(options) {
   return options.findIndex((option) => !option.disabled)
 }
 
-// The materials of one message whose file the tray shows as "Processing failed", and the upload
-// paths with those files marked.
+// The materials of one message whose file the tray shows as "Processing failed". The product
+// leaves such a file out of the message, so it is not sent: its upload path is marked
+// `processing: failed, sent: false`, and only the other files count as sent. `failedNames` may hold
+// files failed in earlier messages, which stay in the tray; only this message's files count.
 function markProcessingFailed(usable, sentVia, failedNames) {
   const failed = usable.filter((entry) => failedNames.includes(entry.material.file)).map((entry) => entry.material.id)
-  const paths = sentVia.map((entry) => (failed.includes(entry.material) ? { ...entry, processing: 'failed' } : entry))
-  return { failed, paths }
+  const paths = sentVia.map((entry) => (failed.includes(entry.material) ? { ...entry, processing: 'failed', sent: false } : entry))
+  const sent = usable.map((entry) => entry.material.id).filter((id) => !failed.includes(id))
+  return { failed, sent, paths }
+}
+
+// Whether a material may be handed over: not already sent, and not failed twice already. A file
+// the product could not process may be tried once more, as a person would; after a second
+// failure it is not sent again.
+function mayHandOver(record, material) {
+  return !record.uploads.includes(material) && (record.processing_failed || []).filter((id) => id === material).length < 2
 }
 
 // Which upload input a material goes through: the requested item's own spot when the claimant
@@ -375,44 +410,57 @@ async function selectClaimantFile(page, file, resolveInput, signIn) {
   return again.via
 }
 
-// The payout and contact step (fixed rules). The panel first loads the saved accounts: it shows
-// "Loading saved payout accounts…", lists no account and keeps "Continue to agreement" disabled.
-// Nothing is decided until that settles. Then the runner picks the contact method, selects the
-// saved account when none is selected, and waits for the button to become enabled, as a person
-// waits for a form to respond. Returns `continued` after pressing it, `form` when the panel asks
-// for a new payout account instead (handled by its own rule), or `stuck` with a reason when the
-// panel shows its own error, never finishes loading, or keeps the button disabled.
+// The payout and contact step (fixed rules), read afresh on every poll until something is decided.
+// - While the panel loads the saved accounts ("Loading saved payout accounts…"), it lists none and
+//   keeps "Continue to agreement" disabled: the runner waits, up to `settleMs` of clock time.
+// - With no saved account the panel shows the new-account form, also after a failed load: that is
+//   `form`, for its own rule.
+// - If the panel is replaced, or the button shows "Saving…", the step returns `gone` and the main
+//   loop reads the screen again.
+// - Otherwise the runner picks the contact method and the saved account whenever none is selected
+//   (the panel can come back without them), and presses the button once it is enabled. An error
+//   shown beside an enabled button is the product refusing the last attempt (a failed save, a
+//   conflict): the first is one retry, a second ends the pack.
+// - A button still disabled `enableMs` after the panel loaded ends the pack as stuck.
 async function payoutStep(page, continueButton, facts, record, { settleMs = 30000, enableMs = 30000, pollMs = 500 } = {}) {
   const panel = page.locator('.payout-contact-panel')
   const loading = panel.locator('.payout-contact-status', { hasText: 'Loading saved payout accounts' })
-  for (let waited = 0; await loading.isVisible().catch(() => false); waited += pollMs) {
-    if (waited >= settleMs) return { done: 'stuck', reason: `saved payout accounts were still loading after ${Math.round(settleMs / 1000)} s` }
-    record.payout_loading_waits = (record.payout_loading_waits || 0) + 1
-    await page.waitForTimeout(pollMs)
-  }
-  const error = await panel.locator('.backend-status[role=alert]').first().textContent({ timeout: 500 }).catch(() => null)
-  if (error) return { done: 'stuck', reason: `the payout panel showed an error: ${error.trim()}` }
-  if (await page.locator('#payout-bank-name').isVisible().catch(() => false)) return { done: 'form' }
+  const errorLine = panel.locator('.backend-status[role=alert]').first()
+  const started = Date.now()
+  let loadedAt = null
+  for (;;) {
+    if (await loading.isVisible().catch(() => false)) {
+      if (Date.now() - started >= settleMs) return { done: 'stuck', reason: `saved payout accounts were still loading after ${Math.round(settleMs / 1000)} s` }
+      record.payout_loading_waits = (record.payout_loading_waits || 0) + 1
+      loadedAt = null
+      await page.waitForTimeout(pollMs)
+      continue
+    }
+    if (await page.locator('#payout-bank-name').isVisible().catch(() => false)) return { done: 'form' }
+    if ((await continueButton.count().catch(() => 0)) === 0) return { done: 'gone' }
+    loadedAt ??= Date.now()
 
-  const wanted = String(facts['claimant.contact_preference'] || 'email').toLowerCase()
-  const options = await page.locator('input[name=contact_preference]').evaluateAll((nodes) => nodes.map((n) => ({ value: n.value, disabled: n.disabled })))
-  const pick = options.find((o) => o.value === wanted && !o.disabled) || options.find((o) => o.value === 'email' && !o.disabled)
-  if (pick) await page.locator(`input[name=contact_preference][value="${pick.value}"]`).check()
-  record.contact_preference = pick ? pick.value : null
-  // The panel can come back with the payout account saved earlier listed but not selected; a
-  // person picks it again.
-  const destinations = page.locator('input[name=payout_destination]')
-  const select = payoutDestinationToSelect(await destinations.evaluateAll((nodes) => nodes.map((node) => ({ checked: node.checked, disabled: node.disabled }))))
-  if (select >= 0) {
-    await destinations.nth(select).check()
-    record.payout_reselected = (record.payout_reselected || 0) + 1
-  }
-  for (let waited = 0; !(await continueButton.isEnabled().catch(() => false)); waited += pollMs) {
-    if (waited >= enableMs) return { done: 'stuck', reason: `"Continue to agreement" stayed disabled for ${Math.round(enableMs / 1000)} s after the payout account and contact method were chosen` }
+    const wanted = String(facts['claimant.contact_preference'] || 'email').toLowerCase()
+    const contacts = await page.locator('input[name=contact_preference]').evaluateAll((nodes) => nodes.map((n) => ({ value: n.value, disabled: n.disabled, checked: n.checked })))
+    const pick = contacts.find((o) => o.value === wanted && !o.disabled) || contacts.find((o) => o.value === 'email' && !o.disabled)
+    if (pick && !pick.checked) await page.locator(`input[name=contact_preference][value="${pick.value}"]`).check()
+    record.contact_preference = pick ? pick.value : null
+    const destinations = page.locator('input[name=payout_destination]')
+    const select = payoutDestinationToSelect(await destinations.evaluateAll((nodes) => nodes.map((node) => ({ checked: node.checked, disabled: node.disabled }))))
+    if (select >= 0) {
+      await destinations.nth(select).check()
+      record.payout_reselected = (record.payout_reselected || 0) + 1
+    }
+
+    if (await continueButton.isEnabled({ timeout: pollMs }).catch(() => false)) {
+      const error = ((await errorLine.textContent({ timeout: pollMs }).catch(() => null)) || '').trim()
+      if (error && recordRefusal(record, 'payout', 'runner', error)) return { done: 'stuck', reason: record.stuck.reason }
+      await continueButton.click()
+      return { done: 'continued' }
+    }
+    if (Date.now() - loadedAt >= enableMs) return { done: 'stuck', reason: `"Continue to agreement" stayed disabled for ${Math.round(enableMs / 1000)} s with the payout account and contact method chosen` }
     await page.waitForTimeout(pollMs)
   }
-  await continueButton.click()
-  return { done: 'continued' }
 }
 
 // ---------- one pack ----------
@@ -477,12 +525,12 @@ async function runPack(browser, caseId, claimant, outRoot) {
       await shot('signed-in')
       operation = during
     }
-    // A confirmation the product refuses shows an error under the composer. Presses of a
-    // confirmation button by the claimant model and by the fixed rule count together. Returns true
-    // when the pack has to stop.
-    const confirmationRefused = async (by) => {
-      const alert = await page.locator('form.workspace-composer .backend-status[role=alert]').first().textContent({ timeout: 500 }).catch(() => null)
-      return alert ? recordConfirmationRefusal(record, by, alert) : false
+    // A confirmation the product refuses shows an error under the composer. The runner waits for
+    // the product's answer to the press (`confirmationOutcome`). Presses of a confirmation button by
+    // the claimant model and by the fixed rule count together. Returns true when the pack stops.
+    const confirmationRefused = async (by, pressed) => {
+      const alert = await confirmationOutcome(page, pressed)
+      return alert ? recordRefusal(record, 'confirmation', by, alert) : false
     }
 
     // The first message, as written.
@@ -503,6 +551,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
     const sendAsClaimant = async (text, files, count) => {
       const usable = files.filter((entry) => MEDIA[path.extname(entry.material.file).toLowerCase()])
       const sentVia = []
+      let failedNow = []
       if (usable.length) {
         // One file per pick. A person picks the next file once the last one shows Ready in the
         // tray; any other label ("Uploading…", "Upload incomplete", "Processing") means the file
@@ -534,16 +583,18 @@ async function runPack(browser, caseId, claimant, outRoot) {
         }
         // A file the product cannot process shows "Processing failed" in the tray. That is the
         // product's answer about the file, not a stalled journey: a person sends the message
-        // anyway and the run records which files failed.
+        // anyway. The product leaves that file out of the message, so the run records it as not
+        // sent, and the claimant's transcript says so.
         const failedNames = await page.locator('form.workspace-composer .composer-file-copy')
           .evaluateAll((nodes) => nodes.filter((node) => (node.querySelector('small')?.textContent || '').trim() === 'Processing failed').map((node) => (node.querySelector('strong')?.textContent || '').trim()))
-        const { failed, paths } = markProcessingFailed(usable, sentVia, failedNames)
-        if (failedNames.length) {
-          record.processing_failed = [...(record.processing_failed || []), ...failed]
-          log('claimant.jsonl', { at: new Date().toISOString(), processing_failed: failed, shown: failedNames, reason: 'the product could not process the file; the message is sent anyway' })
+        const marked = markProcessingFailed(usable, sentVia, failedNames)
+        failedNow = marked.failed
+        if (failedNow.length) {
+          record.processing_failed = [...(record.processing_failed || []), ...failedNow]
+          log('claimant.jsonl', { at: new Date().toISOString(), processing_failed: failedNow, reason: 'the product could not process the file; it is left out of the message' })
         }
-        record.uploads.push(...usable.map((entry) => entry.material.id))
-        record.upload_paths.push(...paths)
+        record.uploads.push(...marked.sent)
+        record.upload_paths.push(...marked.paths)
         if (!text) text = 'Here you go.'
       }
       await page.locator('#workspace-incident-input').fill(text)
@@ -552,8 +603,9 @@ async function runPack(browser, caseId, claimant, outRoot) {
       const sent = Date.now()
       await page.locator('#workspace-incident-input').press('Enter')
       record.claimant_messages += 1
-      const attached = usable.map((entry) => (entry.spot ? `${entry.material.label} (to "${entry.spot}")` : entry.material.label))
-      transcript.push({ who: 'claimant', text: usable.length ? `${text} [attached: ${attached.join(', ')}]` : text })
+      const attached = usable.filter((entry) => !failedNow.includes(entry.material.id)).map((entry) => (entry.spot ? `${entry.material.label} (to "${entry.spot}")` : entry.material.label))
+      const notSent = usable.filter((entry) => failedNow.includes(entry.material.id)).map((entry) => entry.material.label)
+      transcript.push({ who: 'claimant', text: `${text}${attached.length ? ` [attached: ${attached.join(', ')}]` : ''}${notSent.length ? ` [could not be processed, not sent: ${notSent.join(', ')}]` : ''}` })
       await waitForTurn(page, count)
       record.turn_ms.push(Date.now() - sent)
       return null
@@ -632,11 +684,12 @@ async function runPack(browser, caseId, claimant, outRoot) {
         const reply = await claimant.ask(prompt)
         log('claimant.jsonl', { at: new Date().toISOString(), screen: now.screen, prompt: prompt.user, reply: reply.raw, model: reply.model, ms: reply.ms, tokens: reply.tokens, cost_usd: reply.cost_usd })
         record.cost_usd += reply.cost_usd || 0
-        // A person sends each file once; a repeat pick is dropped and logged.
-        const repeats = reply.upload.filter((entry) => record.uploads.includes(entry.material)).map((entry) => entry.material)
-        if (repeats.length) log('claimant.jsonl', { at: new Date().toISOString(), ignored_upload: repeats, reason: 'already sent' })
+        // A person sends each file once, and tries a file the product could not process once more;
+        // any other repeat pick is dropped and logged.
+        const repeats = reply.upload.filter((entry) => !mayHandOver(record, entry.material)).map((entry) => entry.material)
+        if (repeats.length) log('claimant.jsonl', { at: new Date().toISOString(), ignored_upload: repeats, reason: 'already sent, or could not be processed twice' })
         const files = reply.upload
-          .filter((entry) => !record.uploads.includes(entry.material))
+          .filter((entry) => mayHandOver(record, entry.material))
           .map((entry) => ({ material: view.materials.find((m) => m.id === entry.material), spot: entry.for }))
           .filter((entry) => entry.material)
         const text = reply.message.trim()
@@ -667,7 +720,7 @@ async function runPack(browser, caseId, claimant, outRoot) {
           record.presses.push(reply.press)
           transcript.push({ who: 'claimant', text: `(pressed "${reply.press}")` })
           await page.waitForTimeout(2500)
-          if (CONFIRMATION_PRESS.test(reply.press) && await confirmationRefused('claimant')) break
+          if (CONFIRMATION_PRESS.test(reply.press) && await confirmationRefused('claimant', page.getByRole('button', { name: reply.press, exact: true }).first())) break
           // Pressing is the whole action for this turn: a person who presses "Review and agree"
           // does not also type in the chat, and a chat message would reopen the claim summary.
           if (text || files.length) log('claimant.jsonl', { at: new Date().toISOString(), not_sent_with_press: { message: text, upload: files.map((entry) => entry.material.id) } })
@@ -683,16 +736,29 @@ async function runPack(browser, caseId, claimant, outRoot) {
       }
 
       // The pinned review-and-submit card: fixed rules.
+      // A disabled "All correct" (nothing left to check, or a request running) is not pressed.
       const allCorrect = page.getByRole('button', { name: 'All correct' })
-      if (await allCorrect.isVisible().catch(() => false)) {
+      if (await allCorrect.isVisible().catch(() => false) && await allCorrect.isEnabled().catch(() => false)) {
         stalls = 0
         await allCorrect.click()
         await page.waitForTimeout(2500)
-        if (await confirmationRefused('runner')) break
+        if (await confirmationRefused('runner', allCorrect)) break
         continue
       }
       if (await page.locator('#payout-bank-name').isVisible().catch(() => false)) {
         stalls = 0
+        // The panel shows the new-account form for a moment before it starts loading the saved
+        // accounts; only a form still there a second later is filled.
+        await page.waitForTimeout(1000)
+        if (!(await page.locator('#payout-bank-name').isVisible().catch(() => false))) continue
+        if (await page.locator('.payout-contact-panel .payout-contact-status', { hasText: 'Loading saved payout accounts' }).isVisible().catch(() => false)) continue
+        // A form back with an error after a save is the product refusing it: one retry, then
+        // stuck. A form back without one (another account asked for) is filled again, a few
+        // times at most.
+        const saveError = ((await page.locator('.payout-contact-panel .backend-status[role=alert]').first().textContent({ timeout: 500 }).catch(() => null)) || '').trim()
+        if (record.payout_account_saves && saveError && recordRefusal(record, 'payout', 'runner', saveError)) break
+        if ((record.payout_account_saves || 0) >= 4) { record.outcome = 'stuck'; record.stuck = { step: 'payout', reason: 'the new payout account form came back after four saves' }; break }
+        record.payout_account_saves = (record.payout_account_saves || 0) + 1
         await page.fill('#payout-bank-name', 'Northwind Test Bank')
         await page.fill('#payout-account-holder-name', String(facts['policyholder.name'] || 'Corpus Claimant'))
         await page.fill('#payout-account-type', 'cheque')
@@ -830,4 +896,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordConfirmationRefusal, payoutDestinationToSelect, markProcessingFailed, payoutStep }
+module.exports = { questionSentences, trackQuestions, startClaimantSession, signInAnonymousClaim, selectClaimantFile, uploadSpotIndex, recordRefusal, confirmationOutcome, payoutDestinationToSelect, markProcessingFailed, mayHandOver, payoutStep }

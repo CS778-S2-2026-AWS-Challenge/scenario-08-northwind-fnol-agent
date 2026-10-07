@@ -121,6 +121,20 @@ function globalAssertions(casesDir, family) {
   return readJson(file).assertions.map((assertion) => (assertion.value === '{pack.family}' ? { ...assertion, value: family } : assertion))
 }
 
+// Files the product could not process (`processing_failed` in run.json). A `corrupt_file` or
+// `unsupported_format` pack carries one material made for that condition (provenance transform
+// `truncate` or `to_tiff`), and that file failing is expected. Any other failed file is a valid
+// file the product or its extraction could not handle, reported as unexpected.
+const PLANTED_TRANSFORM = { corrupt_file: 'truncate', unsupported_format: 'to_tiff' }
+
+function processingFailures(casesDir, run, oracle) {
+  const failed = run.processing_failed || []
+  const transform = PLANTED_TRANSFORM[oracle.condition]
+  const provenance = readJson(path.join(casesDir, run.case_id, 'provenance.json'), { materials: [] })
+  const planted = transform ? provenance.materials.filter((entry) => entry.inputs?.transform === transform).map((entry) => entry.id) : []
+  return { processing_failed: failed, unexpected_processing_failed: [...new Set(failed.filter((id) => !planted.includes(id)))] }
+}
+
 function scorePack(packDir, casesDir) {
   const run = readJson(path.join(packDir, 'run.json'))
   const oracle = readJson(path.join(casesDir, run.case_id, 'oracle', 'labels.json'))
@@ -186,6 +200,7 @@ function scorePack(packDir, casesDir) {
     turn_ms_max: run.turn_ms && run.turn_ms.length ? Math.max(...run.turn_ms) : null,
     effort_within_target: lodged && durationMs < 5 * 60 * 1000 && questions < 10,
     uploads: run.uploads,
+    ...processingFailures(casesDir, run, oracle),
   }
 
   // Triage and review signals: main does not write them yet (corpus standard, "What the labels map to").
@@ -291,6 +306,8 @@ function summarise(allScores) {
   const lodgedRetry = count((s) => s.journey.outcome === 'lodged_after_retry')
   const scoredTriage = scores.filter((s) => ['pass', 'fail'].includes(s.triage.result))
   const reasonsPass = scoredTriage.filter((s) => s.triage.reasons && s.triage.reasons.result === 'pass').length
+  const failedFiles = scores.reduce((total, s) => total + (s.journey.processing_failed || []).length, 0)
+  const unexpectedPacks = scores.filter((s) => (s.journey.unexpected_processing_failed || []).length > 0)
   const scoredReview = scores.filter((s) => ['pass', 'fail'].includes(s.review.result))
   const controls = scores.flatMap((s) => s.innocent_controls || [])
   const controlCount = (result) => controls.filter((c) => c.result === result).length
@@ -298,6 +315,7 @@ function summarise(allScores) {
     `Evidence incomplete (kept out of every count): ${incomplete.length}${incomplete.length ? ` (${incomplete.map((s) => s.case_id).join(', ')})` : ''}.`,
     `Packs: ${scores.length}. Lodged first time: ${lodgedFirst}. Lodged after a retry: ${lodgedRetry}. Stuck: ${count((s) => s.journey.outcome === 'stuck')}. Not run: ${count((s) => s.journey.outcome === 'runner_not_implemented')}.`,
     `Completed without follow-up (lodged, nothing owed by the claimant, no missing-information triage reason): ${count((s) => s.journey.completed_without_follow_up)}/${scores.length}. Within the effort target (under 5 minutes and under 10 questions): ${count((s) => s.journey.effort_within_target)}/${scores.length}.`,
+    `Files the product could not process: ${failedFiles} in ${count((s) => (s.journey.processing_failed || []).length > 0)} packs; not made broken by the corpus: ${unexpectedPacks.length}${unexpectedPacks.length ? ` (${unexpectedPacks.map((s) => `${s.case_id}: ${s.journey.unexpected_processing_failed.join(', ')}`).join('; ')})` : ''}.`,
     `Triage scored: ${scoredTriage.length} (class pass ${scoredTriage.filter((s) => s.triage.result === 'pass').length}, reasons pass ${reasonsPass}); not implemented: ${count((s) => s.triage.result === 'not_implemented')}; not applicable (no Claim expected): ${count((s) => s.triage.result === 'not_applicable')}; not lodged: ${count((s) => s.triage.result === 'not_lodged')}.`,
     `Fraud review scored: ${scoredReview.length} (false positives ${scoredReview.filter((s) => s.review.false_positive).length}; false negatives cannot be told while none is the default); not implemented: ${count((s) => s.review.result === 'not_implemented')}; not lodged: ${count((s) => s.review.result === 'not_lodged')}. Innocent controls: ${controls.length} (flagged ${controlCount('flagged')}, not implemented ${controlCount('not_implemented')}, not lodged ${controlCount('not_lodged')}).`,
     '',
