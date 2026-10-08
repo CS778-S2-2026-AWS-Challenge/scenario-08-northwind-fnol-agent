@@ -116,13 +116,63 @@ Each turn, the claimant model gets only what the screen shows:
 
 Network traffic is recorded for evidence but never given to it. The claimant model replies with a
 message, files to upload and at most one button to press. It answers only what is asked, invents
-nothing, and sends each file once. When it presses a button, it does nothing else that turn.
+nothing, and sends each file once. When it presses a button, it does nothing else that turn. A
+service card's "Agree…" is offered while the card's permission box is still unticked; pressing it
+ticks that box first, as a person does.
 
 The runner fills the payout form, the contact choice and the agreement checkboxes by fixed rules.
 It signs in at the pack's declared entry or visible login gate, adds the pack's phone to the profile
 so SMS can be chosen, and attaches files one at a time. It presses Send only after every file shows
-Ready. Login is a mechanical prerequisite and does not count as a recovery. `run.json` records
-the anonymous sign-in trigger, original Claim, conversation session and whether promotion succeeded.
+Ready or "Processing failed".
+
+A file the product cannot process is the product's answer, not a stall. The product leaves that
+file out of the message, so the message goes without it:
+
+- `run.json` lists the file under `processing_failed`, and its upload path is marked
+  `processing: failed, sent: false`. Only the tray entries the message's uploads add or reuse are
+  read, so a file failed earlier and still in the tray does not count again;
+- the claimant's transcript says it could not be processed;
+- the claimant may try that file once more, as a person would, and that counts as a recovery.
+  After a second failure it is not sent again;
+- a message whose files all failed, with no words of the claimant's own, says the file could not be
+  processed.
+
+On the payout form, the runner reads the panel afresh until it can act:
+
+- it waits for "Loading saved payout accounts" to finish (`payout_loading_waits`);
+- a new-account form (no saved account, or a failed load) is filled by its own rule, but only if it
+  is still there a second later, since the panel shows it briefly before loading starts;
+- otherwise it chooses the contact method and selects the saved account whenever none is selected
+  (`payout_reselected`). Selecting is a fixed rule, not a recovery;
+- it presses "Continue to agreement" once the button is enabled.
+
+A disabled "All correct" is not pressed. Login is a mechanical prerequisite and does not count as a
+recovery.
+`run.json` records the anonymous sign-in trigger, original Claim, conversation session and whether
+promotion succeeded.
+
+After every button the claimant model presses, and after the fixed rules' presses of the steps
+below, the runner waits for the request the press started, if any, before it does anything else,
+for up to 20 seconds. ("Retry message", "Retry response" and the login keep their own waits for the
+agent's turn and the sign-in.) A request is running while the product shows it: the pressed
+button disabled, "Saving…" or "Submitting…" on the button, or the product's busy signal (the
+rail's "New chat" button disabled), which stays on when a panel is replaced mid-request. A
+workspace without that signal stops the pack. Then:
+
+- for the steps' presses, the runner reads the product's answer:
+  - confirming the details: "All correct", "Looks right" or the side panel's "Right"; an error
+    shows under the composer;
+  - the payout step: "Save payout account" and "Continue to agreement", pressed only by fixed
+    rules; an error shows on the contact form's own line;
+  - submitting the claim: "Submit claim" or "Retry claim submission"; an error shows in the
+    submission error card, or under the composer when the panel has been replaced.
+
+  No error means the product accepted the press. An error is a refusal (see below);
+- after any other press, such as a service card's "Not now", the claimant reads the result on the
+  next screen;
+- a request still running after 20 seconds leaves what the product did unknown. The runner stops
+  the pack at that step (`confirmation`, `payout`, `agreement`, or `press` for any other press)
+  rather than guess, and presses nothing more.
 
 Uploads follow "Evidence kinds and the upload path" in the corpus standard:
 
@@ -144,6 +194,16 @@ never `lodged_first_time`. The recoveries are:
 - pressing "Retry message" or "Retry response";
 - answering a question once more when the agent asks it again. Each question sentence is tracked
   on its own, whatever else the reply asks with it, so each repeated question counts as one retry;
+- confirming once more after the product refuses a confirmation ("All correct", "Looks right" or
+  "Right").
+  Refusals after a press by the claimant model and by the fixed rule count together, and
+  `run.json` lists each one under `confirmation_refusals`;
+- pressing "Continue to agreement", or saving a new payout account, once more after the payout
+  form's own error line shows an error for that attempt (a failed save, a conflict). These refusals
+  are counted apart from confirmations, under `payout_refusals`;
+- submitting the claim once more after the product refuses the submission. These refusals are
+  counted on their own too, under `agreement_refusals`;
+- sending a file again after the product could not process it;
 - after about nine seconds with nothing to act on, typing "OK.".
 
 A pack is `stuck` when any of these happens:
@@ -152,7 +212,20 @@ A pack is `stuck` when any of these happens:
 - the agent asks the same question a third time;
 - after the nudge, there is still nothing to act on;
 - the claimant reaches 30 messages;
-- a file never shows Ready;
+- a file shows neither Ready nor "Processing failed";
+- a confirmation is refused a second time (step `confirmation`), the payout step is (step
+  `payout`), or the claim submission is (step `agreement`);
+- the claim is with Northwind staff: the title bar shows "Waiting for staff", "Urgent support
+  requested" or another staff state (step `handoff`). The agent does not reply until staff act, and
+  no staff act in a run; #1222 has no outcome of its own for this. For the packs whose oracle
+  requires an urgent handoff (CTL-M-013 to CTL-M-018) this is the expected end, and the scorer
+  judges it by their assertions; where an oracle forbids one, the handoff is the finding;
+- a press's request is still running after 20 seconds, at that press's step (`press` for a press
+  outside the steps). The reason reads
+  `no answer to "<button>" within 20 s`, or says the product was already busy before the press;
+- the saved payout accounts are still loading after 30 seconds, "Continue to agreement" stays
+  disabled for 30 seconds with the payout account and contact method chosen, or the new payout
+  account form comes back after four saves;
 - the claimant names an upload spot that is not on the screen;
 - a wait times out.
 
@@ -165,6 +238,10 @@ A pack is `stuck` when any of these happens:
   effort target (under five minutes and under ten questions, lodged runs only). Every question
   sentence counts as one question, a repeated one included, by the rule the runner uses to
   recognise a repeat.
+- **Files the product could not process:** each pack's `processing_failed`. In a `corrupt_file` or
+  `unsupported_format` pack, the material made for that condition is expected to fail. Any other
+  failed file is a valid file the product could not handle, and is listed in the summary as not made
+  broken by the corpus, even when the pack lodged.
 - **Completed without follow-up:** lodged, nothing owed by the claimant, and no missing-information
   triage reason (`document_outstanding`, `fact_unresolved`, `policy_not_verified`,
   `amount_unknown`).
@@ -200,8 +277,8 @@ every count.
 
 Run records stay outside the repository:
 
-- screenshots of every turn, taken by the runner itself (#1222 named the capture function of #1218,
-  which was not merged);
+- screenshots of every turn and, for a stuck pack, of the screen it stopped on, taken by the runner
+  itself (#1222 named the capture function of #1218, which was not merged);
 - the claimant prompts and replies;
 - the network log (authentication bodies are not recorded; tokens and passwords are masked);
 - the claimant and staff end states.

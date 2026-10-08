@@ -14,7 +14,7 @@ function writeJson(file, value) {
 }
 
 // One synthetic pack and one run of it. `lodged` switches between a lodged and a stuck run.
-function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText], severity = 'fast_track', fraudSignal = 'none', innocentControls = [], staffOpenItems = [], expectedFraud = 'none', signals = [] } = {}) {
+function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did it happen?', agentTurns = [agentText], severity = 'fast_track', fraudSignal = 'none', innocentControls = [], staffOpenItems = [], expectedFraud = 'none', signals = [], condition = undefined, additionalConditions = undefined, provenance = [], processingFailed = undefined } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corpus-score-'))
   const casesDir = path.join(root, 'tests', 'corpus', 'controlled', 'v1', 'cases')
   writeJson(path.join(root, 'tests', 'corpus', 'tools', 'global_assertions.json'), {
@@ -27,6 +27,8 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
     case_id: 'CTL-M-900',
     family: 'motor',
     scenario_category: 'M1',
+    ...(condition ? { condition } : {}),
+    ...(additionalConditions ? { additional_conditions: additionalConditions } : {}),
     design: { innocent_controls: innocentControls },
     triage: { expected_class: 'fast_track', required_reasons: [], allowed_reasons: [] },
     review_indicators: { expected_fraud_signal: expectedFraud },
@@ -35,12 +37,14 @@ function syntheticRun({ lodged = true, urgency = 'normal', agentText = 'When did
       { id: 'F2', kind: 'forbidden', judge: 'state', path: 'staff:claim.claim_state.urgency', op: 'in', value: ['urgent', 'immediate_safety_risk'] },
     ],
   })
+  if (provenance.length) writeJson(path.join(casesDir, 'CTL-M-900', 'provenance.json'), { case_id: 'CTL-M-900', materials: provenance })
   const runDir = path.join(root, 'run', 'CTL-M-900')
   const started = '2026-10-06T01:00:00.000Z'
   writeJson(path.join(runDir, 'run.json'), {
     case_id: 'CTL-M-900', claim_id: 'clm_900', outcome: lodged ? 'lodged_first_time' : 'stuck', claim_number: lodged ? 'NWF-2026-000001' : null,
     claimant_messages: 2, retries: 0, repeated_questions: 0, nothing_to_answer: 0, turn_ms: [5000], uploads: [], stuck: null,
     started_at: started, finished_at: '2026-10-06T01:01:00.000Z',
+    ...(processingFailed ? { processing_failed: processingFailed } : {}),
   })
   writeJson(path.join(runDir, 'claimant.json'), {
     'claimant:claim': { status: 200, body: { workflow_state: 'created', form: { 'claim.product_family': { value: 'motor', status: 'confirmed' } }, open_items: [] } },
@@ -203,4 +207,29 @@ test('the incident day is read from every stored temporal form', () => {
   assert.equal(sameValue('incident.occurred_at', { date: '2026-09-05', precision: 'partial' }, '2026-09-05'), true)
   assert.equal(sameValue('incident.occurred_at', '2026-09-12 night', '2026-09-11'), false)
   assert.equal(sameValue('incident.occurred_at', 'last Friday night', '2026-09-11'), false)
+})
+
+test('files the product could not process are reported, and a valid one among them is flagged', () => {
+  const provenance = [
+    { id: 'quote-corrupt', file: 'quote.pdf', inputs: { source: 'quote-source', transform: 'truncate' } },
+    { id: 'photo-front', file: 'photo-front.jpg', inputs: {} },
+  ]
+  // The pack's planted broken quote failed twice (tried once more), and that is expected.
+  const planted = syntheticRun({ condition: 'corrupt_file', provenance, processingFailed: ['quote-corrupt', 'quote-corrupt'] })
+  const plantedScore = scorePack(planted.runDir, planted.casesDir)
+  assert.deepEqual(plantedScore.journey.processing_failed, ['quote-corrupt', 'quote-corrupt'])
+  assert.deepEqual(plantedScore.journey.unexpected_processing_failed, [])
+  // A valid photo failing is a product or extraction failure, flagged even though the pack lodged.
+  const valid = syntheticRun({ condition: 'corrupt_file', provenance, processingFailed: ['photo-front'] })
+  const validScore = scorePack(valid.runDir, valid.casesDir)
+  assert.equal(validScore.journey.outcome, 'lodged_first_time')
+  assert.deepEqual(validScore.journey.unexpected_processing_failed, ['photo-front'])
+  const summary = summarise([plantedScore, validScore])
+  assert.match(summary, /Files the product could not process: 3 in 2 packs; not made broken by the corpus: 1 \(CTL-M-900: photo-front\)\./)
+  // A condition listed among the pack's additional conditions counts the same.
+  const additional = syntheticRun({ additionalConditions: ['corrupt_file'], provenance, processingFailed: ['quote-corrupt'] })
+  assert.deepEqual(scorePack(additional.runDir, additional.casesDir).journey.unexpected_processing_failed, [])
+  // No failed file, and no provenance on disk: nothing reported.
+  const clean = syntheticRun()
+  assert.deepEqual(scorePack(clean.runDir, clean.casesDir).journey.unexpected_processing_failed, [])
 })
