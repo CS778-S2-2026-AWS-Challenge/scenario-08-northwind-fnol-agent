@@ -142,7 +142,7 @@ jobs:
     executor: python
     steps:
       - checkout
-      - run: git fetch origin main
+      - run: git fetch --depth=2147483647 origin refs/heads/main:refs/remotes/origin/main
       - install-backend
       - restore_cache:
           keys:
@@ -189,7 +189,7 @@ jobs:
     parallelism: 4
     steps:
       - checkout
-      - run: git fetch origin main
+      - run: git fetch --depth=2147483647 origin refs/heads/main:refs/remotes/origin/main
       - install-backend
       - run:
           name: Run the full backend suite (one timing-balanced shard)
@@ -226,7 +226,7 @@ jobs:
     executor: python
     steps:
       - checkout
-      - run: git fetch origin main
+      - run: git fetch --depth=2147483647 origin refs/heads/main:refs/remotes/origin/main
       - install-backend
       - attach_workspace:
           at: coverage-shards
@@ -309,7 +309,7 @@ jobs:
       - run:
           name: Lint changed markdown
           command: |
-            git fetch origin main
+            git fetch --depth=2147483647 origin refs/heads/main:refs/remotes/origin/main
             base=$(git merge-base origin/main HEAD)
             files=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.md' | tr '\n' ' ')
             if [ -z "${files// /}" ]; then
@@ -320,7 +320,7 @@ jobs:
       - run:
           name: Check docs updated with API changes
           command: |
-            git fetch origin main
+            git fetch --depth=2147483647 origin refs/heads/main:refs/remotes/origin/main
             base=$(git merge-base origin/main HEAD)
             changed=$(git diff --name-only "$base" HEAD)
             modified=$(git diff --name-only --diff-filter=M "$base" HEAD)

@@ -24,7 +24,8 @@ jobs:
       - run:
           name: Decide which quality jobs to create
           command: |
-            git fetch origin main
+            # Checkout may provide one shallow branch; materialize the merge-base history too.
+            git fetch --depth=2147483647 origin refs/heads/main:refs/remotes/origin/main
             python -m scripts.ci_plan \
               --branch "${CIRCLE_BRANCH}" \
               --scheduled << pipeline.parameters.nightly >> \

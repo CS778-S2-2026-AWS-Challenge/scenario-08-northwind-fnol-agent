@@ -20,6 +20,13 @@ def test_setup_config_plans_before_continuing() -> None:
     assert 'configuration_path: .circleci/continue_config.yml' in SETUP
 
 
+def test_jobs_fetch_main_into_the_remote_tracking_ref() -> None:
+    fetch = 'git fetch --depth=2147483647 origin refs/heads/main:refs/remotes/origin/main'
+
+    assert SETUP.count(fetch) == 1
+    assert CONTINUE.count(fetch) == 5
+
+
 def test_every_planned_and_trigger_parameter_is_declared_by_the_continuation() -> None:
     # CircleCI rejects a continuation that receives an undeclared parameter, and the
     # trigger's own parameters (such as the schedule's `nightly`) are carried over.
