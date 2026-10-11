@@ -95,7 +95,7 @@ MOTOR_SUMMARY_FIELDS = [
 ]
 
 
-def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
+def test_motor_injury_is_recorded_without_retroactive_safety_handoff(
     client: TestClient,
     repository: FixtureRepository,
     record_property: Callable[[str, object], None],
@@ -116,33 +116,15 @@ def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
     )
     assert journey.view()['form']['incident.injury_or_danger']['value'] is False
     third = journey.send('Actually my passenger has a sore neck')
-    handoff = repository.get_handoff(
-        journey.claim_id, third['handoff']['handoff_id'], 'cus_8f41a2c90d7e463b'
-    )
-    assert handoff is not None
-    assert handoff.priority.value == 'urgent'
-    assert third['decision']['customer_next_step']['status'] == 'awaiting_staff'
+    assert third['handoff'] is None
+    assert journey.view()['form']['incident.injury_or_danger']['value'] is True
     assert (
         'injury.persons_affected' in third['dynamic_form']['requirements']['missing_required_now']
     )
-    # An active handoff silences the model entirely: these two messages are
-    # only recorded, with no agent_message and no field extracted from them.
-    fourth = journey.send(
-        "Just the passenger, she says it's minor, no ambulance", expect_agent_message=False
-    )
-    assert (
-        'injury.persons_affected' in fourth['dynamic_form']['requirements']['missing_required_now']
-    )
-    journey.send("Can't drive it, can you get a tow?", expect_agent_message=False)
-    assert journey.view()['form'].get('vehicle.drivable') is None
-    journey.resolve_handoff(repository, third['handoff']['handoff_id'])
-    # Once support resolves the handoff, the model is invoked again and sees
-    # both silenced messages in its own conversation history, catching up on
-    # every fact they carried in this single turn.
-    sixth = journey.send('Yes please arrange the tow')
+    fourth = journey.send("Just the passenger, she says it's minor, no ambulance")
     assert journey.view()['form']['vehicle.drivable']['value'] is False
     assert all(
-        code not in sixth['dynamic_form']['requirements']['missing_required_now']
+        code not in fourth['dynamic_form']['requirements']['missing_required_now']
         for code in (
             'injury.persons_affected',
             'injury.severity_reported',
@@ -152,15 +134,15 @@ def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
     )
     assert any(
         action['service_identity'] == 'vehicle_recovery_request'
-        for action in sixth['agent_message']['message_actions']
+        for action in fourth['agent_message']['message_actions']
     )
-    seventh = journey.send(
+    fifth = journey.send(
         'There was another vehicle involved and the other driver admitted it was their fault.'
     )
-    assert seventh['dynamic_form']['requirements']['ready'] is True
-    seventh_text = seventh['agent_message']['content']['text']
-    assert seventh_text.startswith('Here is what I will pass to the claims team')
-    assert 'Please confirm these details' not in seventh_text
+    assert fifth['dynamic_form']['requirements']['ready'] is True
+    fifth_text = fifth['agent_message']['content']['text']
+    assert fifth_text.startswith('Here is what I will pass to the claims team')
+    assert 'Please confirm these details' not in fifth_text
     final = journey.send('Yes all correct')
     assert final['dynamic_form']['requirements']['ready'] is True
     assert final['agent_message']['content']['text'] == (
@@ -171,7 +153,9 @@ def test_motor_safety_handoff_silences_chat_then_resumes_support_and_creates(
     assert len(journey.turns) <= 9
     session = repository.get_session(journey.claim_id, journey.session_id, 'cus_8f41a2c90d7e463b')
     assert session is not None
-    assert session.repeated_question_count == 0, [
+    # The injury is recorded in a normal model turn, so the required-item
+    # counter may include the expected follow-up questions for its details.
+    assert session.repeated_question_count <= 2, [
         (
             turn['decision']['customer_next_step']['required_items'],
             turn['agent_message']['content']['text'],

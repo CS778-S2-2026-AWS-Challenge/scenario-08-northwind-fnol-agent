@@ -1,0 +1,572 @@
+{
+  "_note": "Plain-language labels the claimant simulator sees for each material, as a claimant would describe what they hold. Keyed by case_id and the material id from provenance.json. Every label is written from the file as a claimant sees it and reviewed one by one: the ten reference packs were written one at a time with the contributor's AI assistant; the rest were drafted by the operator's local model, which saw only the file content (never the file name, evidence_kind, provenance, setup or oracle). Never derived from evidence_kind (#1222).",
+  "CTL-M-002": {
+    "photo-wheel": "Photo of my front left wheel and the bumper corner",
+    "receipt-wheels": "Receipt for the new wheels and tyres",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-013": {
+    "photo-rear-corner": "Photo of the damaged rear corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-019": {
+    "photo-door": "Photo of the scraped front left door",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-034": {
+    "photo-bonnet": "Photo of the damaged front of my car",
+    "photo-slip": "Photo of the slip that came down on the car",
+    "repair-quote": "Repair quote for my car",
+    "tow-job-sheet": "The tow truck driver's job sheet",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-044": {
+    "photo-tailgate": "Photo of the dented tailgate and the spoiler",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-H-006": {
+    "photo-slider": "Photo of the ranch slider that was forced",
+    "attendance-note": "The glazier's note from the emergency call-out",
+    "glazier-quote": "The glazier's quote for a new door",
+    "police-record": "The police confirmation with my event number",
+    "policy-schedule": "My home insurance policy schedule"
+  },
+  "CTL-H-012": {
+    "photo-heat-pump": "Photo of the heat pump unit under the branch",
+    "heat-pump-quote": "Repair quote for the heat pump",
+    "receipt-reprint": "A reprint of the heat pump invoice from the shop",
+    "policy-schedule": "My home insurance policy schedule"
+  },
+  "CTL-H-029": {
+    "photo-wall": "Photo of the lounge wall where the electrician cut in",
+    "attendance-note": "The electrician's job note",
+    "repair-quote": "The builder's quote to fix the wall",
+    "policy-schedule": "My home insurance policy schedule"
+  },
+  "CTL-C-003": {
+    "photo-rug": "Photo of the stained rug",
+    "receipt-rug": "Receipt for the rug",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-020": {
+    "photo-desk": "Photo of the water-damaged desk",
+    "photo-computer": "Photo of the computer that was standing in the water",
+    "receipt-computer": "Receipt for the computer",
+    "receipt-desk": "Receipt for the desk",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-001": {
+    "photo-watch": "Photo of my damaged watch",
+    "receipt-watch-reprint": "Receipt for my watch purchase",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-002": {
+    "photo-coffee": "Photo of my damaged stainless steel appliance",
+    "receipt-coffee-reprint": "Receipt for my espresso machine",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-004": {
+    "photo-derailleur": "Photo of the rear wheel and gears of my bicycle",
+    "photo-display": "Photo of cracked screen on my bike display",
+    "receipt-ebike": "Receipt for my electric mountain bike",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-005": {
+    "photo-tablet": "Photo of my cracked tablet screen",
+    "receipt-tablet": "Receipt for my tablet purchase",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-006": {
+    "photo-table": "Photo of my outdoor dining table with the glass broken",
+    "photo-bbq": "Photo of damaged grill lid on my deck",
+    "receipt-outdoor": "Receipt for outdoor dining table and barbecue",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-007": {
+    "photo-phone": "Photo of my phone with a cracked screen",
+    "receipt-phone": "Receipt for my smartphone purchase",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-008": {
+    "photo-ring": "Photo of my diamond ring",
+    "receipt-ring": "Receipt for my diamond ring",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-009": {
+    "photo-print": "Photo of my framed canvas print",
+    "receipt-print": "Receipt for my framed canvas print",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-010": {
+    "photo-turntable": "Photo of my record player",
+    "receipt-page1": "Receipt for my audio equipment and vinyl records",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-011": {
+    "photo-dishwasher": "Photo of my broken dishwasher door",
+    "receipt-dishwasher": "Receipt for my dishwasher purchase",
+    "repair-quote": "Repair quote for my dishwasher door damage",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-012": {
+    "photo-laptop": "Photo of the cracked screen on my laptop",
+    "receipt-laptop": "Receipt for my laptop",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-013": {
+    "photo-cut-lock": "Photo of the cut bike lock",
+    "receipt-ebike": "Receipt for my electric bike",
+    "police-reference": "Police report confirmation for my stolen electric bike",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-014": {
+    "photo-back-door": "Photo of my door with broken glass",
+    "receipt-camera": "Receipt for my camera and lens",
+    "receipt-laptop": "Receipt for my laptop purchase",
+    "police-reference": "Police report confirmation for my burglary",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-015": {
+    "photo-sofa": "Photo of the burnt hole in my sofa armrest",
+    "receipt-sofa": "Receipt for my lounge sofa",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-016": {
+    "photo-slider": "Photo of the damaged frame of my sliding door",
+    "receipt-watch": "Receipt for my watch purchase",
+    "police-reference": "Police report confirmation for my burglary",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-017": {
+    "photo-garage-door": "Photo of my damaged garage door",
+    "receipt-kayak": "Receipt for my sea kayak and paddle",
+    "police-reference": "Police report confirmation for the garage burglary",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-018": {
+    "photo-fridge": "Photo of the dented door of my fridge freezer",
+    "receipt-fridge": "Receipt for my French-door fridge freezer",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-C-019": {
+    "photo-window": "Photo of the broken window in my home",
+    "receipt-laptop": "Receipt for my laptop purchase",
+    "valuation-notice": "Note about my ring valuation",
+    "police-reference": "Police report confirmation for my burglary",
+    "policy-schedule": "My contents insurance policy schedule"
+  },
+  "CTL-H-001": {
+    "photo-jamb": "Photo of damaged door frame in my house",
+    "photo-lock": "Photo of damaged door lock area",
+    "attendance-note": "Security attendance note for my back door",
+    "builder-quote": "Repair quote for my house back door",
+    "police-record": "Police report confirmation for my house burglary",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-002": {
+    "photo-window": "Photo of the broken window on my house",
+    "attendance-note": "Attendance note for my smashed laundry window",
+    "police-record": "Police report confirmation for my house burglary",
+    "policy-schedule": "My house insurance policy schedule",
+    "glass-quote": "Quote for replacing my laundry window glass"
+  },
+  "CTL-H-003": {
+    "photo-door": "Photo of damaged door lock area",
+    "builder-quote": "Repair quote for my garage side door",
+    "police-record": "Police report confirmation for my house burglary",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-004": {
+    "photo-doors": "Photo of damaged French doors in my house",
+    "attendance-note": "Attendance note for forced deck doors",
+    "quote-notice": "Pending repair quote for my French doors",
+    "police-record": "Police report confirmation for my house burglary",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-005": {
+    "photo-sidelight": "Photo of the broken glass on my front door",
+    "photo-lock": "Photo of the damaged door lock and wood",
+    "attendance-note": "Locksmith attendance note for my front door",
+    "builder-quote": "Repair quote for my front door and sidelight",
+    "police-notice": "Police event reference for my burglary report",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-007": {
+    "photo-window": "Photo of damaged window frame on my house",
+    "builder-quote": "Repair quote for my front bedroom window",
+    "police-record": "Police report confirmation for my house burglary",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-008": {
+    "photo-louvres": "Photo of my damaged louvre window",
+    "photo-blades": "Photo of the broken louvre glass blades on the ground",
+    "glass-quote": "Repair quote for my bathroom louvre window",
+    "police-record": "Police report confirmation for my house burglary",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-009": {
+    "photo-roof": "Photo of damaged roof tiles on my house",
+    "attendance-note": "Attendance note for temporary roof repair",
+    "roof-quote": "Repair quote for my house roof and ceiling",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-010": {
+    "photo-ceiling": "Photo of water damage on my ceiling corner",
+    "builder-quote": "Repair quote for my house water damage",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-011": {
+    "photo-garage-door": "Photo of my damaged garage door",
+    "door-quote": "Repair quote for my garage door",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-013": {
+    "photo-skylight": "Photo of the cracked skylight in my ceiling",
+    "attendance-note": "Note of temporary repair for cracked skylight",
+    "skylight-quote": "Repair quote for my bathroom skylight dome",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-014": {
+    "photo-laundry": "Photo of the wet, damaged floor in my laundry",
+    "attendance-note": "Plumber's attendance note for my house",
+    "builder-quote": "Repair quote for bathroom water damage",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-015": {
+    "photo-hallway": "Photo of water damage on my carpet and floorboards",
+    "attendance-note": "Plumber's attendance note for my hot water cylinder",
+    "restoration-quote": "Repair quote for hallway water damage",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-016": {
+    "photo-rangehood": "Photo of smoke damage on my kitchen ceiling and range hood",
+    "builder-quote": "Repair quote for kitchen fire and smoke damage",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-017": {
+    "photo-ceiling": "Photo of water leak and stain on my ceiling",
+    "attendance-note": "Plumber's attendance note for my house",
+    "restoration-quote": "Repair quote for water damage in my house",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-018": {
+    "photo-floor": "Photo of water damage on my floor",
+    "builder-quote": "Repair quote for my kitchen floor",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-019": {
+    "photo-door": "Photo of the shattered glass on my sliding door",
+    "attendance-note": "Attendance note for my damaged sliding door",
+    "quote-page1": "Repair quote for my house sliding door",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-020": {
+    "photo-spouting": "Photo of damaged guttering and soffit on my house",
+    "roofer-quote": "Repair quote for my house front spouting",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-021": {
+    "photo-wall": "Photo of a hole in my wall",
+    "builder-quote": "Repair quote for hallway wall and door frame",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-022": {
+    "photo-pergola": "Photo of my damaged pergola",
+    "policy-schedule": "My house insurance policy schedule",
+    "pergola-quote": "Repair quote for my pergola"
+  },
+  "CTL-H-023": {
+    "photo-heat-pump": "Photo of my damaged heat pump outdoor unit",
+    "receipt-heat-pump": "Receipt for heat pump installation",
+    "repair-quote": "Repair quote for my house heat pump and weatherboards",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-024": {
+    "photo-hallway": "Photo of water damage in my hallway",
+    "attendance-note": "Plumber's attendance note for my hot water cylinder",
+    "repair-quote": "Repair quote for water damage in my house",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-025": {
+    "photo-skylight": "Photo of my bathroom skylight from inside",
+    "attendance-note": "Skylight repair attendance note",
+    "repair-quote": "Repair quote for my bathroom skylight and ceiling",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-026": {
+    "photo-cooktop": "Photo of the cracked glass on my cooktop",
+    "quote-page1": "Repair quote for my kitchen cooktop",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-027": {
+    "photo-panel": "Photo of the cracked window in my house",
+    "photo-impact": "Photo of cracked window glass",
+    "repair-quote": "Repair quote for my house window",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-028": {
+    "photo-ceiling": "Photo of water damage on my ceiling",
+    "attendance-note": "Electrician attendance note for water damage",
+    "builder-quote": "Repair quote for my dining room water damage",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-H-030": {
+    "photo-carpet": "Photo of water damage on my carpet",
+    "repair-quote": "Repair quote for my lounge and dining carpet",
+    "policy-schedule": "My house insurance policy schedule"
+  },
+  "CTL-M-001": {
+    "photo-roof": "Photo of damaged roof box on my car",
+    "receipt-roof-box": "Receipt for my car roof box and bars",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-003": {
+    "photo-door": "Photo of scratch on my car's side panel",
+    "photo-gatepost": "Photo of the gatepost with paint marks",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-004": {
+    "photo-door": "Photo of the dented side of my car door",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-005": {
+    "photo-corner": "Photo of damaged front headlight and bumper",
+    "photo-lamp-post": "Photo of the lamp post base",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-006": {
+    "photo-left-side": "Photo of the damaged side of my red car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-007": {
+    "photo-bumper": "Photo of damaged rear bumper corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-008": {
+    "photo-rear-corner": "Photo of damaged rear corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-009": {
+    "photo-front-corner": "Photo of the damaged front corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-010": {
+    "photo-door": "Photo of the door of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-011": {
+    "photo-front-corner": "Photo of damaged front bumper and wheel of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-012": {
+    "photo-windscreen": "Photo of cracked windshield on my car",
+    "policy-schedule": "My car insurance policy schedule",
+    "quote-corrupt": "Repair quote for my windscreen"
+  },
+  "CTL-M-014": {
+    "photo-front-wheel": "Photo of the damaged front corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-015": {
+    "photo-front-corner": "Photo of the damaged front corner of my car",
+    "photo-wall": "Photo of a cracked brick wall near my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-016": {
+    "photo-rear-door": "Photo of scratches on my car's side door",
+    "photo-bike-wheel": "Photo of the bent bicycle wheel",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-017": {
+    "photo-branch-night": "Photo of a tree branch on my car",
+    "photo-roof-day": "Photo of the dented roof of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-018": {
+    "photo-passenger-side": "Photo of the damaged side doors of my car",
+    "police-reference": "Police report confirmation for my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-020": {
+    "photo-front": "Photo of the damaged front corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-021": {
+    "photo-front-right": "Photo of the damaged front corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-022": {
+    "photo-bumper": "Photo of the cracked rear bumper of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-023": {
+    "photo-door": "Photo of the damaged rear side of my car",
+    "repair-quote": "Repair quote for my car",
+    "police-pending": "Note that my police crash report is still to come",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-024": {
+    "photo-side": "Photo of the damaged side door of my car",
+    "quote-pending": "Pending repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-025": {
+    "photo-corner": "Photo of damaged front bumper of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-026": {
+    "photo-bumper": "Photo of damaged rear bumper and exhaust pipe",
+    "photo-tailgate": "Photo of the tailgate of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-027": {
+    "photo-side": "Photo of the damaged rear side of my car",
+    "repair-quote": "Repair quote for my car",
+    "police-reference": "Police report confirmation for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-028": {
+    "photo-door": "Photo of the damaged side of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-029": {
+    "photo-wheel": "Photo of my car's flat tire",
+    "photo-pothole": "Photo of a pothole on the road",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-030": {
+    "photo-undertray": "Photo of damaged undercarriage of my car",
+    "photo-rock": "Photo of a large rock on the road",
+    "assessment-report": "Assessment report for my car's engine damage",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-031": {
+    "photo-wheel": "Photo of my car's flat front tire",
+    "photo-kerb": "Photo of red paint on the curb",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-032": {
+    "photo-roof": "Photo of a tree branch on my car roof",
+    "photo-rear-window": "Photo of my car's shattered rear window",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-033": {
+    "photo-engine": "Photo of debris in my car's engine air intake",
+    "photo-footwell": "Photo of water damage on my car's floor mat",
+    "assessment-report": "Assessment report for my car's flood damage",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-035": {
+    "photo-night": "Photo of the damaged front of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-036": {
+    "photo-rear": "Photo of the damaged rear bumper of my vehicle",
+    "photo-driveway": "Photo of damaged brick pillar near driveway",
+    "quote-page1": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-037": {
+    "photo-footwell": "Photo of my car's footwell floor mat",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-038": {
+    "photo-front": "Photo of the damaged front corner of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-039": {
+    "photo-roof": "Photo of the debris on my car roof and windscreen",
+    "photo-carport": "Photo of my collapsed carport in the snow",
+    "policy-schedule": "My car insurance policy schedule",
+    "repair-quote": "Repair quote for my car"
+  },
+  "CTL-M-040": {
+    "photo-front": "Photo of the damaged front of my car",
+    "photo-airbags": "Photo of deployed airbags in my car",
+    "repair-quote": "Repair quote for my car",
+    "tow-job-sheet": "Towing attendance note for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-041": {
+    "photo-left-side": "Photo of the damaged side of my red car",
+    "photo-pillar": "Photo of red paint on a parking garage pillar",
+    "repair-quote": "Repair quote for my car",
+    "vehicle-invoice": "Receipt for my used car purchase",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-042": {
+    "photo-wheel": "Photo of my damaged car wheel and tire",
+    "repair-quote": "Repair quote for my car",
+    "wheel-receipt": "Receipt for new alloy wheels and fitting",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-043": {
+    "photo-branch": "Photo of tree branch crushing my car roof box",
+    "photo-roof": "Photo of damaged roof box on my car",
+    "repair-quote": "Repair quote for my car",
+    "roof-receipt": "Receipt for car roof rack and cargo box",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-045": {
+    "photo-front-corner": "Photo of the damaged front corner of my car",
+    "quote-page1": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-046": {
+    "photo-rear-door": "Photo of the damaged side of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-047": {
+    "photo-front": "Photo of damaged front bumper and fog light",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-048": {
+    "photo-bonnet": "Photo of hail damage on my car's hood",
+    "photo-roof": "Photo of water droplets on my car roof",
+    "repair-quote": "Repair quote for hail damage to my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-049": {
+    "photo-door": "Photo of the damaged side door of my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  },
+  "CTL-M-050": {
+    "photo-rear-corner": "Photo of cracked rear bumper on my car",
+    "repair-quote": "Repair quote for my car",
+    "policy-schedule": "My car insurance policy schedule"
+  }
+}

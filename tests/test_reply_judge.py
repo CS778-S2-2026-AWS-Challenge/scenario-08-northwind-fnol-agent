@@ -161,3 +161,31 @@ def test_the_review_runs_however_long_the_turn_took() -> None:
     review = agent._review(_turn('Which road were you on?'), context)
     assert review.words_reviewed
     assert len(gateway.requests) == 1
+
+
+def test_saying_the_report_already_reached_the_claims_team_is_sent_back() -> None:
+    gateway = _Gateway(
+        {
+            'problems': [
+                {
+                    'kind': 'claims_report_already_sent',
+                    'detail': 'Your claim details are complete and have been sent for review.',
+                }
+            ]
+        }
+    )
+    review = review_reply(
+        _turn(
+            'Your claim details are complete and have been sent for review.',
+            action='summarize',
+            summary_fields=('incident.description',),
+            turn_ending='summary',
+        ),
+        ReplyJudge(lambda: gateway),
+    )
+
+    assert [item.kind for item in review.inconsistencies] == ['claims_report_already_sent']
+    # Sent back once; a rewrite that still has it does not fail the claimant's turn.
+    assert review.truthful
+    instruction = gateway.requests[0].messages[0].content or ''
+    assert 'claims_report_already_sent' in instruction

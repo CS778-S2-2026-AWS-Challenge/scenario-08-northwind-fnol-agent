@@ -76,6 +76,8 @@ them:
 - [Scenario regression fixtures](../tests/fixtures/scenarios/README.md) — test-only AT snapshots;
   runtime cases use the configured business seed.
 - [Controlled Test Corpus Standard](controlled-test-corpus.md)
+- [Controlled Journey Runner](controlled-journey-runner.md) — plays and scores corpus packs on
+  start-dev; not part of CI.
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [VP Field and Branch Mapping](vp-field-branch-mapping.md)
 - [Identity and Developer-Mode Contract](identity-and-developer-mode.md)

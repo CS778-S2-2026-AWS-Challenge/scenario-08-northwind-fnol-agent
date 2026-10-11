@@ -58,6 +58,7 @@ def _repository() -> tuple[MongoDBRepository, WorkingClaim, SessionRecord]:
         session_id='ses_mongo_immutable',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         context_revision=1,
         started_at=FIXED_TIME,
         last_active_at=FIXED_TIME,

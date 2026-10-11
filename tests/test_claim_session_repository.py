@@ -40,6 +40,7 @@ def make_paused_claim() -> tuple[WorkingClaim, SessionRecord]:
         session_id='ses_original',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         status=SessionStatus.PAUSED,
         summary='Saved incident context.',
         unresolved_questions=['Is the police report ready?'],
@@ -60,6 +61,7 @@ def make_resume_mutation(
         session_id='ses_resumed',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         summary='Saved incident context.',
         unresolved_questions=['Is the police report ready?'],
         pending_items=['Police report pending.'],
@@ -388,7 +390,7 @@ def test_resume_keeps_persisted_model_profile_for_a_fresh_client(
     original_session_id = created.json()['session']['session_id']
     _, paused_session = pause_created_claim(repository, claim_id, original_session_id)
     repository.save_session(
-        paused_session.model_copy(update={'model_profile_id': 'openrouter-gpt4o-mini'})
+        paused_session.model_copy(update={'model_profile_id': 'openrouter-gpt-4o'})
     )
 
     resumed = client.post(
@@ -398,14 +400,14 @@ def test_resume_keeps_persisted_model_profile_for_a_fresh_client(
     )
 
     assert resumed.status_code == 201
-    assert resumed.json()['model_profile_id'] == 'openrouter-gpt4o-mini'
+    assert resumed.json()['model_profile_id'] == 'openrouter-gpt-4o'
     resumed_session = repository.get_session(
         claim_id,
         resumed.json()['session_id'],
         'cus_8f41a2c90d7e463b',
     )
     assert resumed_session is not None
-    assert resumed_session.model_profile_id == 'openrouter-gpt4o-mini'
+    assert resumed_session.model_profile_id == 'openrouter-gpt-4o'
 
 
 def test_resume_rejects_explicit_model_profile_conflict(
@@ -423,7 +425,7 @@ def test_resume_rejects_explicit_model_profile_conflict(
     original_session_id = created.json()['session']['session_id']
     _, paused_session = pause_created_claim(repository, claim_id, original_session_id)
     repository.save_session(
-        paused_session.model_copy(update={'model_profile_id': 'openrouter-gpt4o-mini'})
+        paused_session.model_copy(update={'model_profile_id': 'openrouter-gpt-4o'})
     )
 
     resumed = client.post(

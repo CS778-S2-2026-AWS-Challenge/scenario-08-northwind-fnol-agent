@@ -2601,9 +2601,9 @@ def model_gateway_settings(protocol: str) -> Settings:
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_profile_id='openrouter-gpt-4o',
+        model_provider='openrouter',
         model_protocol_adapter=protocol,
-        model_profile_id='synthetic-model',
-        model_provider='synthetic-provider',
         model_base_url='https://model.example.test/v1',
         model_identifier='northwind-test-model',
     )
@@ -2794,9 +2794,9 @@ def test_custom_protocol_registration_composes_without_route_changes() -> None:
     settings = Settings(
         business_seed_path='config/business-seed.json',
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_profile_id='openrouter-gpt-4o',
+        model_provider='openrouter',
         model_protocol_adapter='custom_test',
-        model_profile_id='synthetic-model',
-        model_provider='synthetic-provider',
         model_base_url='https://custom.example/model',
         model_identifier='custom-model',
     )
@@ -2828,10 +2828,10 @@ def test_published_model_cannot_override_runtime_authority(
     settings = Settings(
         business_seed_path='config/business-seed.json',
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_profile_id='openrouter-gpt-4o',
+        model_provider='openrouter',
         model_protocol_adapter='openai_compatible',
         model_base_url='https://approved-model.example/v1',
-        model_profile_id='synthetic-model',
-        model_provider='synthetic-provider',
         model_identifier='approved-model',
         model_api_key_env='NORTHWIND_MODEL_API_KEY',
     )
@@ -3018,10 +3018,10 @@ def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
         Settings(
             business_seed_path='config/business-seed.json',
             agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            model_profile_id='openrouter-gpt-4o',
+            model_provider='openrouter',
             model_protocol_adapter='openai_compatible',
             model_base_url='https://model.example.test/v1',
-            model_profile_id='synthetic-model',
-            model_provider='synthetic-provider',
             model_identifier='northwind-test-model',
         ),
         ConfigurationRepository(),
@@ -3111,7 +3111,7 @@ def test_explicit_unpublished_profile_fails_closed_instead_of_falling_back() -> 
     )
 
     with pytest.raises(ModelGatewayError) as captured:
-        gateway.complete(ModelRequest(model_profile_id='openrouter-gpt4o-mini', messages=[]))
+        gateway.complete(ModelRequest(model_profile_id='openrouter-gpt-4o', messages=[]))
 
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
     assert constructed == []
@@ -3126,9 +3126,9 @@ def test_gateway_agent_requires_structured_output_at_composition() -> None:
     settings = Settings(
         business_seed_path='config/business-seed.json',
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_profile_id='openrouter-gpt-4o',
+        model_provider='openrouter',
         model_protocol_adapter='no_structured_output',
-        model_profile_id='synthetic-model',
-        model_provider='synthetic-provider',
         model_base_url='https://custom.example/model',
         model_identifier='custom-model',
         model_supports_structured_output=False,

@@ -10,7 +10,12 @@ from backend.domain.models import (
     ResponsibleParty,
     WorkingClaim,
 )
-from scripts.migrate_record_shapes import MIGRATION_ID, migrate_record_shapes
+from scripts.migrate_record_shapes import (
+    MIGRATION_ID,
+    PROFILE_RENAME_ID,
+    migrate_record_shapes,
+    rename_model_profile,
+)
 
 
 def _claim(claim_id: str) -> WorkingClaim:
@@ -165,3 +170,28 @@ def test_apply_refuses_while_an_unfinished_claim_creation_covers_an_old_kind() -
     ]
     assert 'Retry the claim creation' in report['resolution']
     assert list(collection.find({})) == before
+
+
+def test_profile_rename_rewrites_old_profile_ids_once() -> None:
+    collection: Any = mongomock.MongoClient()['northwind']['northwind_records']
+    collection.insert_many(
+        [
+            {
+                '_id': 'session:a',
+                'record_type': 'session',
+                'model_profile_id': 'openrouter-gpt4o-mini',
+            },
+            {'_id': 'session:b', 'record_type': 'session', 'model_profile_id': 'qwen-local'},
+        ]
+    )
+
+    planned = rename_model_profile(collection)
+    assert planned['renamed_records'] == 1
+    assert collection.find_one({'_id': 'session:a'})['model_profile_id'] == 'openrouter-gpt4o-mini'
+
+    applied = rename_model_profile(collection, apply=True)
+    assert applied['status'] == 'applied'
+    assert collection.find_one({'_id': 'session:a'})['model_profile_id'] == 'openrouter-gpt-4o'
+    assert collection.find_one({'_id': 'session:b'})['model_profile_id'] == 'qwen-local'
+    assert collection.find_one({'_id': PROFILE_RENAME_ID}) is not None
+    assert rename_model_profile(collection, apply=True)['status'] == 'already_applied'

@@ -197,7 +197,7 @@ def test_model_binding_manifest_selects_qwen_without_exposing_a_secret(
     assert settings.model_reasoning_mode == 'disabled'
     assert [item.profile_id for item in settings.model_runtime_bindings] == [
         'qwen-local',
-        'openrouter-gpt4o-mini',
+        'openrouter-gpt-4o',
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
     ]

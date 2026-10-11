@@ -129,6 +129,7 @@ def test_staff_reply_rejects_message_from_another_session(
         session_id='ses_old_reply_target',
         claim_id=claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         status=SessionStatus.CLOSED,
         context_revision=accepted_revision,
         started_at=now,

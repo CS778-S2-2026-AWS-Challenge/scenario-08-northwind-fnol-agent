@@ -75,6 +75,7 @@ def _session(claim: WorkingClaim) -> SessionRecord:
         session_id='ses_result_001',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         context_revision=claim.revision,
         started_at=claim.created_at,
         last_active_at=claim.created_at,

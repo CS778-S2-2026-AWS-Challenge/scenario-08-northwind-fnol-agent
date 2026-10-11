@@ -142,6 +142,7 @@
       "session_id": "ses_fixture_at15",
       "claim_id": "clm_fixture_at15",
       "customer_id": "cus_8f41a2c90d7e463b",
+      "model_profile_id": "openrouter-gpt-4o",
       "status": "active",
       "summary": "Home water damage with an unresolved cause and policy applicability.",
       "unresolved_questions": ["resolve:incident.cause", "confirm:property.habitable"],

@@ -93,6 +93,7 @@ def _checkpoint(
         session_id='ses_p17_execution',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         status=SessionStatus.ACTIVE,
         context_revision=claim.revision,
         started_at=interrupted_at,

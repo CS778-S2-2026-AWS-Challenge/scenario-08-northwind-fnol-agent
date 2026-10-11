@@ -54,6 +54,7 @@ def _seed_claim(repository: PersistenceRepository) -> WorkingClaim:
         session_id='ses_recovery_work_item',
         claim_id=claim.claim_id,
         customer_id=claim.customer_id,
+        model_profile_id='openrouter-gpt-4o',
         context_revision=claim.revision,
         started_at=NOW,
         last_active_at=NOW,

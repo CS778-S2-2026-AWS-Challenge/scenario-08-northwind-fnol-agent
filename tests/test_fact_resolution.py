@@ -227,6 +227,7 @@ def test_provenance_retrieval_uses_full_messages_only_for_unresolved_fields() ->
         session_id='ses_fact',
         claim_id='clm_fact',
         customer_id='cus_fact',
+        model_profile_id='openrouter-gpt-4o',
         started_at=NOW,
         last_active_at=NOW,
     )
@@ -312,6 +313,7 @@ def test_question_budget_counts_repetition_and_stops_the_tenth_question(family: 
         session_id=f'ses_{family}',
         claim_id=f'clm_{family}',
         customer_id='cus_fact',
+        model_profile_id='openrouter-gpt-4o',
         question_budget=1,
         started_at=NOW,
         last_active_at=NOW,
@@ -346,6 +348,7 @@ def test_exhausted_budget_keeps_the_next_step_once_requirements_are_ready() -> N
         session_id='ses_ready',
         claim_id='clm_ready',
         customer_id='cus_fact',
+        model_profile_id='openrouter-gpt-4o',
         question_budget=1,
         question_turn_count=1,
         started_at=NOW,
@@ -379,6 +382,7 @@ def test_question_accounting_marks_repeated_requested_fact() -> None:
         session_id='ses_questions',
         claim_id='clm_questions',
         customer_id='cus_fact',
+        model_profile_id='openrouter-gpt-4o',
         started_at=NOW,
         last_active_at=NOW,
     )

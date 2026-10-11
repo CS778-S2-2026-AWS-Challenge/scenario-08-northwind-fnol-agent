@@ -174,6 +174,7 @@ def _case_scenario(case: SeedDemoCase) -> ClaimSeedGraph:
                     'session_id': session_id,
                     'claim_id': claim_id,
                     'customer_id': case.customer_id,
+                    'model_profile_id': 'openrouter-gpt-4o',
                     'started_at': timestamp,
                     'last_active_at': timestamp,
                 }

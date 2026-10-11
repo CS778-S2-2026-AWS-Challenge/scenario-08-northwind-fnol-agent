@@ -74,7 +74,7 @@ _BINDINGS = (
     _BINDING,
     _BINDING.model_copy(
         update={
-            'profile_id': 'openrouter-gpt4o-mini',
+            'profile_id': 'openrouter-gpt-4o',
             'provider': 'openrouter',
             'model_identifier': 'openai/gpt-4o-mini',
             'base_url': 'https://openrouter.ai/api/v1',
@@ -574,7 +574,7 @@ def test_message_turn_persists_exact_release_and_configuration_versions() -> Non
         'agent_rule',
         'feature',
         'model:qwen-local',
-        'model:openrouter-gpt4o-mini',
+        'model:openrouter-gpt-4o',
     }
     assert all(reference.revision == 1 for reference in provenance.configurations.values())
 
