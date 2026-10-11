@@ -140,7 +140,7 @@ across all 105 records.
 | 1. Completed without follow-up (target 80% or more) | `not_measured` | Cites `docs/model-gateway.md`: a rule-driven Agent produces no judgement of its own to rate |
 | 2. Blind severity classification | `not_measured` | Cites `docs/model-gateway.md`: with no configured model transport, no severity signal exists |
 | 3. Fraud flag precision, no false positives | `not_measured` | Same limitation as metric 2 |
-| 4. Claimant effort, under 5 minutes and under 10 questions | `partly_measured` | 1 to 7 claimant messages and 0 to 3 Agent question turns per run, none of them repeated, plus confirmations, uploads, and consents. The question turns are the claimant session's own count of accepted Agent turns that asked for a registered fact, which is the message count #733 defines (#968, #970). By family: motor 0 or 3, home 2, contents 2, and the failure journeys 0. Elapsed claimant time has no served source; the documented metrics endpoint is not served (#953) |
+| 4. Claimant effort, under 5 minutes and under 10 questions | `partly_measured` | 1 to 7 claimant messages and 0 to 3 Agent question turns per run, none of them repeated, plus confirmations, uploads, and consents. The question turns are the claimant session's own count of accepted Agent turns that asked for a registered fact, which is the message count #733 defines (#968, #970). By family: motor 0 or 3, home 2, contents 2, and the failure journeys 0. Elapsed claimant time remains unmeasured because no persisted record or served aggregate defines it (#953) |
 | 5. Claim number, expected timeline, final state, evidence chain | `measured` | 52 of 105 records carry a claim number and expected timeline: all 17 AT-01 runs, all 30 home runs, and all 5 failure journeys. Every record carries its final state, next step, owner, and evidence count |
 
 ## Failure classification
@@ -193,7 +193,7 @@ above supersedes implementation-status statements that changed after PR #977 and
 | --- | --- | --- | --- |
 | The journey environment has no model credential, so every run is on the controlled runtime | Metrics 1 to 3 and real effort figures stay unmeasured; contents stays `unavailable` | #962, which stays open for the first model-backed batch; the profile switch merged in #988 | @Ysoseri1224 for model access; @bdfa123 for the batch |
 | Contents item capture needs the model-backed runtime | All 20 contents runs stop before claim creation | #962; Discussion #847 records that contents behaviour is model-backed, so contents is rerun on `model_gateway` | @Ysoseri1224 for model access; @bdfa123 for the batch |
-| No served source for elapsed claimant time | Metric 4 stays `partly_measured` | #953 | @Ysoseri1224 |
+| No served source for elapsed claimant time | Metric 4 stays `partly_measured`; `docs/api.md` records the persistence and API boundary | #953 | @Ysoseri1224 |
 | Real AWS access and calls | Definition of Done item 4 has no evidence | #786 | @liyang6620 |
 | An `unknown_outcome` missing-information item names `external_party` while its lifecycle names `claims_professional` | One Workbench projection disagrees for the unknown-outcome case | Raised on #945 | @liyang6620 |
 | Red tests on `main`: the two `tests/test_backend_quality_profiles.py` coverage-profile cases | Full-suite runs cannot be fully green | Reported on #903. The `tests/test_demo_reset.py` case reported on #915 was fixed in #966 and is green on this head | @Ysoseri1224 |

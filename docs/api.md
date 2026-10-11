@@ -882,6 +882,11 @@ the internal `question_history`. The authorised Workbench session projection inc
 for effort and repetition review. Starting a new session for the same Claim carries the counters
 and history forward so a restart cannot reset the claimant-effort boundary.
 
+Question effort is available only through these per-Claim Session counters. The application does
+not serve an aggregate claimant-effort endpoint, and no persisted record defines elapsed claimant
+time. Journey evidence must report elapsed claimant time as not measured rather than derive it from
+`last_active_at` or message timestamps.
+
 #### Session Lifecycle
 
 A session has one of three states:
@@ -2889,7 +2894,6 @@ item, signal, or external task exists.
 | `POST` | `/workbench/agent/sessions/{session_id}/messages` | Ask the Staff Agent with an explicit Claim scope |
 | `POST` | `/workbench/agent/sessions/{session_id}/messages/{message_id}/drafts/{draft_id}/execute` | Confirm one saved Staff Agent draft and run its registered Workbench action |
 | `GET` | `/workbench/conversations` | List accessible Claim conversations and owned Staff Agent sessions |
-| `GET` | `/operations/metrics` | Read aggregate operational metrics |
 
 ### Staff Agent sessions
 
@@ -3880,48 +3884,6 @@ Request:
 ### `GET /api/v1/workbench/claims/{claim_id}/events`
 
 Returns authorised append-only claim events with standard pagination. Filters: `event_type`, `actor_type`, `occurred_after`, and `occurred_before`.
-
-### `GET /api/v1/operations/metrics`
-
-Required query: `from`, `to`. Optional filters: `incident_type`, `route`, `workflow_state`, and `handoff_reason`.
-
-Response groups aggregate metrics only:
-
-```json
-{
-  "period": {
-    "from": "2026-08-10T00:00:00Z",
-    "to": "2026-08-11T00:00:00Z"
-  },
-  "claims": {
-    "started": 20,
-    "created": 12,
-    "handed_off": 5
-  },
-  "claimant_effort": {
-    "questions": 84,
-    "corrections": 11,
-    "repeated_questions": 1,
-    "median_time_to_next_action_seconds": 410
-  },
-  "agent_effort": {
-    "input_tokens": 120000,
-    "output_tokens": 28000,
-    "retrieval_calls": 32,
-    "tool_calls": 48,
-    "errors": 2,
-    "retries": 3
-  },
-  "staff_effort": {
-    "handoffs": 5,
-    "staff_actions": 8,
-    "median_time_to_accept_seconds": 320,
-    "handoff_completeness_rate": 0.8
-  }
-}
-```
-
-Prototype metrics validate observability, not Northwind production performance. Small groups MUST not expose identifiable claim or staff behaviour.
 
 ## Internal Orchestration and Adapter API
 

@@ -38,9 +38,9 @@ MODEL_PROFILE_AUTHORITY = (
     'signal exists to rate.'
 )
 CLAIMANT_TIME_AUTHORITY = (
-    'docs/api.md documents "median_time_to_next_action_seconds" on an aggregate metrics endpoint '
-    'the application does not serve, so elapsed claimant time has no source here. The question '
-    'count is the session count of "Accepted Agent turns that asked for a registered fact".'
+    'docs/api.md: "The application does not serve an aggregate claimant-effort endpoint, and no '
+    'persisted record defines elapsed claimant time." The question count is the session count of '
+    '"Accepted Agent turns that asked for a registered fact".'
 )
 
 
