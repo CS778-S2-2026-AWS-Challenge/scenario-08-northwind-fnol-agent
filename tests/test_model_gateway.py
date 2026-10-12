@@ -2300,6 +2300,7 @@ def test_knowledge_grounded_lookup_selects_full_clauses_and_records_trace(
     )
     proposal = agent.propose_turn(context)
     assert len(gateway.requests) == 2
+    assert gateway.requests[0].required_tool_name == 'context.resolve'
     initial = json.dumps([message.content for message in gateway.requests[0].messages])
     assert 'policy_clause_directory' in initial
     assert 'Hire car and rental car' in initial

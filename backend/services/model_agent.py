@@ -407,7 +407,11 @@ class GatewayAgent:
             tools=tools,
             required_tool_name=(
                 'context.resolve'
-                if tools and plan.request_profile.requires_tool_continuation
+                if tools
+                and (
+                    plan.request_profile.requires_tool_continuation
+                    or 'policy_lookup' in plan.route.intents
+                )
                 else None
             ),
             max_output_tokens=plan.request_profile.output_limit,
