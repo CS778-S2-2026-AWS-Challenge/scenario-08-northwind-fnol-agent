@@ -1060,6 +1060,52 @@ def test_policy_directory_is_inline_for_resolved_product_on_any_turn(
     assert 'capability.policy-search@v2' in plan.fragment_refs
 
 
+def test_bedrock_resolved_product_continues_intake_without_policy_lookup() -> None:
+    from unittest.mock import Mock
+
+    context = _context('My car was rear-ended this morning.')
+    assert context.runtime_configuration_snapshot is not None
+    current = context.runtime_configuration_snapshot.model('qwen-local')
+    assert current is not None
+    values = {
+        **current.values,
+        'protocol': 'bedrock_converse',
+        'provider': 'aws-bedrock',
+        'base_url': 'https://bedrock-runtime.example.test',
+        'tools': False,
+    }
+    record = current.model_copy(update={'values': values})
+    snapshot = replace(
+        context.runtime_configuration_snapshot,
+        configurations=MappingProxyType({'model:qwen-local': record}),
+    )
+    policy = _runtime_policy(snapshot)
+    directory_loader = Mock()
+    lookup_loader = Mock()
+    context = replace(
+        context,
+        runtime_configuration_snapshot=snapshot,
+        runtime_policy=policy,
+        knowledge_clause_directory_loader=directory_loader,
+        knowledge_context_loader=lookup_loader,
+    )
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.request_profile.profile_id == 'claimant.turn.v1'
+    assert plan.request_profile.tool_names == []
+    directory_loader.assert_not_called()
+    lookup_loader.assert_not_called()
+    assert not any(ref.resource_type == 'policy_version' for ref in plan.context_plan.references)
+    assert plan.context_payload['policy_clause_directory'] == []
+    assert plan.context_payload['policy_clause_directory_status'] == 'unavailable'
+    assert plan.context_payload['policy_clause_directory_limitations'] == [
+        'The selected model provider cannot continue a policy lookup tool result.'
+    ]
+    assert 'capability.policy-search@v2' in plan.fragment_refs
+
+
 def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
     context = _context('My car was rear-ended this morning.')
     assert context.runtime_policy is not None

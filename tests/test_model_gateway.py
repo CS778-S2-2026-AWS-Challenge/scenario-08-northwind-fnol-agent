@@ -2442,6 +2442,74 @@ def test_knowledge_grounded_lookup_fits_three_longest_current_clauses_with_sched
     assert proposal.runtime_trace.tool_output['returned_clause_ids'] == clause_ids
 
 
+def test_policy_clause_omitted_by_result_budget_cannot_be_cited() -> None:
+    context = _context('Will my policy pay for a rental car while mine is repaired?')
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+    )
+    first = replace(
+        _knowledge_chunk(),
+        chunk_id='nw-policy-motor-standard#MTR-BEN-01',
+        version='2026.2',
+        section_path='MTR-BEN-01 - First benefit',
+        text='First complete clause. ' * 35,
+    )
+    omitted = replace(
+        _knowledge_chunk(),
+        chunk_id='nw-policy-motor-standard#MTR-BEN-02',
+        version='2026.2',
+        section_path='MTR-BEN-02 - Second benefit',
+        text='Second complete clause. ' * 35,
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_budgeted_clauses',
+                        name='context.resolve',
+                        arguments={
+                            'ref': 'ctxref:ses_v7:policy.current',
+                            'selector': 'matching_facts_and_guidance',
+                            'max_tokens': 400,
+                            'clause_ids': ['MTR-BEN-01', 'MTR-BEN-02'],
+                        },
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='Staff can confirm the policy terms.')
+                | {'cited_sources': [omitted.chunk_id]},
+            ),
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway),
+        FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((first, omitted))),
+    ).propose_turn(context)
+
+    assert proposal.validated_turn is not None
+    assert proposal.validated_turn.cited_clauses == ()
+    assert [source['chunk_id'] for source in proposal.validated_turn.policy_judgment_sources] == [
+        first.chunk_id
+    ]
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == ['MTR-BEN-01']
+    assert proposal.runtime_trace.tool_output['not_included'] == [
+        {
+            'clause_id': 'MTR-BEN-02',
+            'reason': 'too long for this turn, request it on its own',
+        }
+    ]
+
+
 @pytest.mark.parametrize('failure', ['manifest', 'store', 'disabled', 'unresolved'])
 def test_knowledge_grounded_lookup_unavailable_has_no_citable_chunks(
     monkeypatch: pytest.MonkeyPatch,

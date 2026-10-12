@@ -1855,19 +1855,25 @@ confirmation.
 
 On the v7 Runtime path, Runtime builds the current Claim projection before transport. A
 resolved product family selects the claimant lookup profile on ordinary v8 turns, even without
-policy keywords. It offers one turn-scoped `context.resolve` reference; the model may answer
-without calling it or resolve once and make one continuation call. The continuation exposes no
-tools. Other profiles retain their existing routing and tool behavior.
+policy keywords, when the selected provider supports the required tool-result continuation. It
+offers one turn-scoped `context.resolve` reference; the model may answer without calling it or
+resolve once and make one continuation call. The continuation exposes no tools. When the provider
+cannot continue a tool result, Runtime keeps the ordinary intake or media profile, exposes no
+policy reference, and records the policy directory as unavailable with the provider-capability
+limitation. Other profiles retain their existing routing and tool behavior.
 Policy/RAG, claimant-owned Claim history, claimant-scoped Evidence history, and older messages use
 separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one isolated,
 mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
 rejected before Claim State mutation.
 
-For any v8 turn with a resolved product family, `policy_clause_directory` lists clause IDs and
-headings from the validated, scope-matching ingested policy. Its status and limitations are
-explicit when the source is unavailable. The turn pins the product, selected version and effective
-instant for both listing and fetching. A release-selected version remains authoritative; without
-one, the manifest must provide exactly one approved product version.
+For any v8 turn with a resolved product family and a compatible lookup profile,
+`policy_clause_directory` lists clause IDs and headings from the validated, scope-matching
+ingested policy. Its status and limitations are explicit when the source is unavailable. A
+provider without the required tool continuation receives an empty directory with status
+`unavailable`; the model must not answer from clause titles or its own policy knowledge. The turn
+pins the product, selected version and effective instant for both listing and fetching. A
+release-selected version remains authoritative; without one, the manifest must provide exactly
+one approved product version.
 
 `context.resolve` accepts optional `clause_ids` (at most three strings) for the policy selector
 `matching_facts_and_guidance`. The policy reference allows at most 2,500 tokens. Runtime returns

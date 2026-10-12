@@ -787,6 +787,7 @@ class GatewayAgent:
         # Capture only guidance actually fetched through the server-authorized
         # context loader in this turn, never model-supplied tool/source strings.
         judgment_sources: list[dict[str, object]] = []
+        judgment_source_candidates: dict[str, dict[str, object]] = {}
         knowledge_loader = context.knowledge_context_loader
         if knowledge_loader is not None:
 
@@ -796,7 +797,9 @@ class GatewayAgent:
                 result = knowledge_loader(max_tokens, clause_ids)
                 chunks = result.get('chunks')
                 if result.get('status') == 'evidence_found' and isinstance(chunks, list):
-                    judgment_sources.extend(dict(item) for item in chunks if isinstance(item, dict))
+                    for item in chunks:
+                        if isinstance(item, dict) and isinstance(item.get('chunk_id'), str):
+                            judgment_source_candidates[item['chunk_id']] = dict(item)
                     # Citation provenance stays server-side; the model needs the
                     # selected clause identity and its complete wording.
                     return {
@@ -1027,6 +1030,16 @@ class GatewayAgent:
                 if isinstance(resolved.content, dict):
                     guidance = resolved.content.get('approved_guidance')
                     if isinstance(guidance, dict):
+                        returned_chunks = guidance.get('chunks')
+                        if isinstance(returned_chunks, list):
+                            judgment_sources.clear()
+                            judgment_sources.extend(
+                                judgment_source_candidates[item['chunk_id']]
+                                for item in returned_chunks
+                                if isinstance(item, dict)
+                                and isinstance(item.get('chunk_id'), str)
+                                and item['chunk_id'] in judgment_source_candidates
+                            )
                         if 'clause_ids' in tool_arguments:
                             tool_output['requested_clause_ids'] = tool_arguments['clause_ids']
                         for key in (
