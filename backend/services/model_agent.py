@@ -1007,14 +1007,19 @@ class GatewayAgent:
                     ]
                     if len(policy_references) == 1:
                         policy_reference = policy_references[0]
-                        tool_arguments.setdefault('ref', policy_reference.ref)
+                        tool_arguments['ref'] = policy_reference.ref
                         if len(policy_reference.available_selectors) == 1:
-                            tool_arguments.setdefault(
-                                'selector', policy_reference.available_selectors[0]
-                            )
+                            tool_arguments['selector'] = policy_reference.available_selectors[0]
                         # The complete-clause budget is a server safety boundary. A model-selected
                         # lower value can omit the final exclusions or schedule condition.
                         tool_arguments['max_tokens'] = policy_reference.max_resolve_tokens
+                        clause_ids = tool_arguments.get('clause_ids', [])
+                        if (
+                            not isinstance(clause_ids, list | tuple)
+                            or len(clause_ids) > 3
+                            or any(not isinstance(item, str) for item in clause_ids)
+                        ):
+                            tool_arguments['clause_ids'] = []
                 try:
                     if context.progress_reporter is not None:
                         context.progress_reporter(

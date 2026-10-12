@@ -2444,7 +2444,25 @@ def test_knowledge_grounded_lookup_fits_three_longest_current_clauses_with_sched
     assert proposal.runtime_trace.tool_output['returned_clause_ids'] == clause_ids
 
 
-def test_policy_lookup_binds_missing_reference_arguments_server_side() -> None:
+@pytest.mark.parametrize(
+    ('arguments', 'expected_clause_ids'),
+    [
+        ({'clause_ids': ['MTR-BEN-03']}, ['MTR-BEN-03']),
+        (
+            {
+                'ref': 'ctxref:not-authorized',
+                'selector': 'not-authorized',
+                'max_tokens': 0,
+                'clause_ids': ['MTR-BEN-03'],
+            },
+            ['MTR-BEN-03'],
+        ),
+        ({'clause_ids': 'MTR-BEN-03'}, []),
+    ],
+)
+def test_policy_lookup_binds_reference_arguments_server_side(
+    arguments: dict[str, object], expected_clause_ids: list[str]
+) -> None:
     context = _context('What does my policy say about rental cars?')
     assert context.runtime_configuration_snapshot is not None
     context = replace(
@@ -2468,7 +2486,7 @@ def test_policy_lookup_binds_missing_reference_arguments_server_side() -> None:
                     ModelToolCall(
                         call_id='call_missing_policy_reference',
                         name='context.resolve',
-                        arguments={'clause_ids': ['MTR-BEN-03']},
+                        arguments=arguments,
                     )
                 ],
             ),
@@ -2485,12 +2503,12 @@ def test_policy_lookup_binds_missing_reference_arguments_server_side() -> None:
 
     assert proposal.runtime_trace is not None
     assert proposal.runtime_trace.tool_arguments == {
-        'clause_ids': ['MTR-BEN-03'],
+        'clause_ids': expected_clause_ids,
         'ref': 'ctxref:ses_v7:policy.current',
         'selector': 'matching_facts_and_guidance',
         'max_tokens': 2500,
     }
-    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == ['MTR-BEN-03']
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == expected_clause_ids
 
 
 def test_policy_clause_omitted_by_result_budget_cannot_be_cited() -> None:
