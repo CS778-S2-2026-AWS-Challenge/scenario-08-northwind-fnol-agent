@@ -102,6 +102,12 @@ def _initial_fragment_ids(
         fragment_id = f'capability.{capability_id}'
         definition = definitions.get(fragment_id)
         if (
+            definition is not None
+            and definition.applies_when.product_family
+            and route.product_family not in definition.applies_when.product_family
+        ):
+            continue
+        if (
             route.task.value == 'evidence_history'
             and definition is not None
             and definition.load_mode == ContextLoadMode.AUTO_CANDIDATE

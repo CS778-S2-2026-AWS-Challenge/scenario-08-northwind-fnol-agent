@@ -264,6 +264,31 @@ def test_rear_end_words_are_only_hints_until_model_proposes_family(message: str)
     assert claim.form == {}
 
 
+def test_policy_keyword_before_family_resolution_does_not_load_family_fragment() -> None:
+    message = (
+        'This is a motor insurance claim. My policy number is NW-MTR-204518. '
+        'Nobody is hurt or in danger.'
+    )
+    context = v8_context(message)
+    claim = context.claim.model_copy(update={'incident_type': None, 'form': {}})
+    assert context.runtime_policy is not None
+    context = replace(
+        context,
+        claim=claim,
+        branch_evaluation=context.runtime_policy.branch_evaluator().evaluate(
+            claim, latest_message=message, recomputation_reason='test_v8'
+        ),
+    )
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.route.product_family is None
+    assert 'policy-search' in plan.route.capability_ids
+    assert 'capability.policy-search@v2' not in plan.fragment_refs
+    assert any(ref.startswith('family.unresolved-family@') for ref in plan.fragment_refs)
+
+
 def test_ordinary_ended_word_does_not_select_motor_family() -> None:
     context = v8_context('The appointment ended yesterday.')
     claim = context.claim.model_copy(update={'incident_type': None, 'form': {}})
