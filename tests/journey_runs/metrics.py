@@ -5,9 +5,10 @@ model's behaviour: whether the journey finished without follow-up, whether a sev
 classification survives blind rating, and whether fraud flags are precise. On this runtime the
 Agent is the rule-driven `ControlledAgent`, so a rate measured here would describe the rules
 rather than the Agent, and no severity or fraud judgement is produced to rate at all. Claimant
-effort is measured in part: the run counts what the claimant did and reads the Agent question
-turns the Runtime itself counted for the session, while the elapsed minutes have no served
-source.
+effort is measured in part: this legacy journey record counts what the claimant did and reads the
+Agent question turns the Runtime itself counted for the session. It does not carry the independent
+controlled-corpus runner's start and finish timestamps, so elapsed minutes remain unmeasured in
+this record.
 
 Each shortfall names the document that establishes it, so the record states a boundary rather
 than an opinion, and the suite fails if the quoted passage leaves that document.
@@ -38,9 +39,10 @@ MODEL_PROFILE_AUTHORITY = (
     'signal exists to rate.'
 )
 CLAIMANT_TIME_AUTHORITY = (
-    'docs/api.md: "The application does not serve an aggregate claimant-effort endpoint, and no '
-    'persisted record defines elapsed claimant time." The question count is the session count of '
-    '"Accepted Agent turns that asked for a registered fact".'
+    'docs/api.md: "The application does not persist or serve aggregate elapsed claimant time." '
+    'This legacy journey record uses the session count of "Accepted Agent turns that asked for a '
+    'registered fact" and has no controlled-corpus runner start and finish timestamps, so elapsed '
+    'time remains unmeasured here.'
 )
 
 

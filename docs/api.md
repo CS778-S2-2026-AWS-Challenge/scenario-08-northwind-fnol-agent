@@ -882,10 +882,15 @@ the internal `question_history`. The authorised Workbench session projection inc
 for effort and repetition review. Starting a new session for the same Claim carries the counters
 and history forward so a restart cannot reset the claimant-effort boundary.
 
-Question effort is available only through these per-Claim Session counters. The application does
-not serve an aggregate claimant-effort endpoint, and no persisted record defines elapsed claimant
-time. Journey evidence must report elapsed claimant time as not measured rather than derive it from
-`last_active_at` or message timestamps.
+Application question effort is available through these per-Claim Session counters. The application
+does not persist or serve aggregate elapsed claimant time. Application telemetry and API evidence
+must not derive elapsed claimant time from `last_active_at` or message timestamps.
+
+The controlled-corpus runner described in `docs/controlled-journey-runner.md` is an independent
+evidence source. For each controlled run it measures completion without follow-up, elapsed duration
+from the runner's own start and finish timestamps, and question count using its question-sentence
+rule. Those measurements are runner evidence, not persisted application telemetry or a served
+application aggregate.
 
 #### Session Lifecycle
 
