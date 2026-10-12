@@ -968,14 +968,30 @@ class GatewayAgent:
                 and plan.schema_id != 'claimant.turn.v1'
                 and not response.tool_calls
             ):
-                raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                raise ModelGatewayError(
+                    ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                    diagnostic_code='initial_tool_call_required',
+                    diagnostic_path='tool_calls',
+                )
             if response.tool_calls:
-                if (
-                    len(response.tool_calls) != 1
-                    or response.tool_calls[0].name != 'context.resolve'
-                    or plan.request_profile.max_model_invocations != 2
-                ):
-                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                if len(response.tool_calls) != 1:
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                        diagnostic_code='initial_tool_call_count',
+                        diagnostic_path='tool_calls',
+                    )
+                if response.tool_calls[0].name != 'context.resolve':
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                        diagnostic_code='initial_tool_name',
+                        diagnostic_path='tool_calls.0.name',
+                    )
+                if plan.request_profile.max_model_invocations != 2:
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                        diagnostic_code='request_profile_invocation_limit',
+                        diagnostic_path='request_profile.max_model_invocations',
+                    )
                 tool_call = response.tool_calls[0]
                 tool_call_id = tool_call.call_id
                 tool_arguments = dict(tool_call.arguments)
@@ -1106,7 +1122,11 @@ class GatewayAgent:
                     _runtime_invocation_trace(2, response, observations[-1].latency_ms)
                 )
                 if response.tool_calls:
-                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                        diagnostic_code='continuation_tool_call',
+                        diagnostic_path='tool_calls',
+                    )
             if response.completion_status is ModelCompletionStatus.INCOMPLETE:
                 raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
             if response.completion_status is ModelCompletionStatus.REFUSED:

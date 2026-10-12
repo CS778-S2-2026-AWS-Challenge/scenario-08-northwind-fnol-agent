@@ -1189,6 +1189,9 @@ def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
         GatewayAgent(_RecordingGateway([response])).propose_turn(context)
 
     assert error.value.code is expected_code
+    if case == 'unsupported_tool':
+        assert error.value.diagnostic_code == 'initial_tool_name'
+        assert error.value.diagnostic_path == 'tool_calls.0.name'
 
 
 def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
@@ -1301,6 +1304,8 @@ def test_v7_lookup_rejects_a_recursive_tool_call() -> None:
             _context('What is the status of my claim?', conversation_messages=_messages(6))
         )
     assert error.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    assert error.value.diagnostic_code == 'continuation_tool_call'
+    assert error.value.diagnostic_path == 'tool_calls'
 
 
 def test_v7_multi_evidence_review_uses_one_isolated_read_only_request() -> None:
