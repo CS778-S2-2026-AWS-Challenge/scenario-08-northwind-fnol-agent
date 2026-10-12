@@ -999,15 +999,31 @@ class GatewayAgent:
                 tool_call = response.tool_calls[0]
                 tool_call_id = tool_call.call_id
                 tool_arguments = dict(tool_call.arguments)
+                if 'policy_lookup' in plan.route.intents:
+                    policy_references = [
+                        item
+                        for item in plan.context_plan.references
+                        if item.resource_type == 'policy_version'
+                    ]
+                    if len(policy_references) == 1:
+                        policy_reference = policy_references[0]
+                        tool_arguments.setdefault('ref', policy_reference.ref)
+                        if len(policy_reference.available_selectors) == 1:
+                            tool_arguments.setdefault(
+                                'selector', policy_reference.available_selectors[0]
+                            )
+                        # The complete-clause budget is a server safety boundary. A model-selected
+                        # lower value can omit the final exclusions or schedule condition.
+                        tool_arguments['max_tokens'] = policy_reference.max_resolve_tokens
                 try:
                     if context.progress_reporter is not None:
                         context.progress_reporter(
                             AgentTurnProgressStage.TOOL_RUNNING,
                             'context.resolve',
                         )
-                    ref = str(tool_call.arguments['ref'])
-                    selector = str(tool_call.arguments['selector'])
-                    raw_max_tokens = tool_call.arguments['max_tokens']
+                    ref = str(tool_arguments['ref'])
+                    selector = str(tool_arguments['selector'])
+                    raw_max_tokens = tool_arguments['max_tokens']
                     if isinstance(raw_max_tokens, bool) or not isinstance(
                         raw_max_tokens, str | int
                     ):
@@ -1017,7 +1033,7 @@ class GatewayAgent:
                         ref,
                         selector,
                         max_tokens,
-                        clause_ids=cast(Sequence[str], tool_call.arguments.get('clause_ids', [])),
+                        clause_ids=cast(Sequence[str], tool_arguments.get('clause_ids', [])),
                     )
                 except ContextResultBudgetExceeded:
                     raise ModelGatewayError(

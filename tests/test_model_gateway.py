@@ -2433,14 +2433,64 @@ def test_knowledge_grounded_lookup_fits_three_longest_current_clauses_with_sched
         message for message in gateway.requests[1].messages if message.role is ModelRole.TOOL
     )
     resolved = json.loads(str(tool_message.content))
-    assert resolved['actual_tokens'] <= 1200
+    assert resolved['actual_tokens'] <= 2500
     guidance = resolved['content']['approved_guidance']
     assert guidance['returned_clause_ids'] == clause_ids
     assert [item['text'] for item in guidance['chunks']] == [
         item.group().strip() for item in selected
     ]
     assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_arguments['max_tokens'] == 2500
     assert proposal.runtime_trace.tool_output['returned_clause_ids'] == clause_ids
+
+
+def test_policy_lookup_binds_missing_reference_arguments_server_side() -> None:
+    context = _context('What does my policy say about rental cars?')
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+    )
+    chunk = replace(
+        _knowledge_chunk(),
+        chunk_id='nw-policy-motor-standard#MTR-BEN-03',
+        version='2026.2',
+        section_path='MTR-BEN-03 - Hire car and rental car',
+        text='A complete rental benefit with its schedule condition.',
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_missing_policy_reference',
+                        name='context.resolve',
+                        arguments={'clause_ids': ['MTR-BEN-03']},
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='Staff can confirm the policy terms.'),
+            ),
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((chunk,)))
+    ).propose_turn(context)
+
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_arguments == {
+        'clause_ids': ['MTR-BEN-03'],
+        'ref': 'ctxref:ses_v7:policy.current',
+        'selector': 'matching_facts_and_guidance',
+        'max_tokens': 2500,
+    }
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == ['MTR-BEN-03']
 
 
 def test_policy_clause_omitted_by_result_budget_cannot_be_cited() -> None:
@@ -2457,14 +2507,14 @@ def test_policy_clause_omitted_by_result_budget_cannot_be_cited() -> None:
         chunk_id='nw-policy-motor-standard#MTR-BEN-01',
         version='2026.2',
         section_path='MTR-BEN-01 - First benefit',
-        text='First complete clause. ' * 35,
+        text='First complete clause. ' * 300,
     )
     omitted = replace(
         _knowledge_chunk(),
         chunk_id='nw-policy-motor-standard#MTR-BEN-02',
         version='2026.2',
         section_path='MTR-BEN-02 - Second benefit',
-        text='Second complete clause. ' * 35,
+        text='Second complete clause. ' * 300,
     )
     gateway = _RecordingGateway(
         [
