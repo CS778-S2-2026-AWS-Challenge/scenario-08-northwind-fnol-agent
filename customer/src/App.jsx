@@ -3136,8 +3136,7 @@ function App() {
   }
 
   function continueReportFromClaimHistory(claimId) {
-    // Claim history can be open as a workspace utility view; leave it for the conversation
-    // before taking the same resume path as conversation history.
+    // Leave the standalone Claim history page for the existing conversation-resume path.
     setWorkspaceView('chat')
     setSelectedHistoryClaimId(null)
     resumeHomepageConversation(claimId)
@@ -3260,12 +3259,19 @@ function App() {
     invalidateSessionPause()
     setSelectedHistoryClaimId(null)
     if (isWorkspaceActive) {
-      setWorkspaceView('history')
+      claimHistoryReturnRoute.current = {
+        page: 'workspace',
+        profileSection: null,
+        claimId: claim?.claim_id || null,
+        draftWorkspace: draftWorkspaceActive,
+      }
+      setWorkspaceView('chat')
       setMobileView('chat')
+      setWorkspaceActive(false)
     } else {
       claimHistoryReturnRoute.current = { page: 'home', profileSection: null }
-      setPage('claim-history')
     }
+    setPage('claim-history')
     if (account) loadSavedReports().catch(() => {})
   }
 
@@ -3277,6 +3283,25 @@ function App() {
       const nextPath = profilePathForSection(returnRoute.profileSection)
       if (globalThis.location?.pathname !== nextPath) {
         globalThis.history?.pushState({ northwindRoute: 'account' }, '', nextPath)
+      }
+      return
+    }
+    if (
+      returnRoute.page === 'workspace'
+      && (
+        (returnRoute.claimId && claim?.claim_id === returnRoute.claimId)
+        || returnRoute.draftWorkspace
+      )
+    ) {
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      setWorkspaceActive(true)
+      setPageState('home')
+      const nextPath = returnRoute.claimId
+        ? `/claims/${encodeURIComponent(returnRoute.claimId)}`
+        : '/claims/new'
+      if (globalThis.location?.pathname !== nextPath) {
+        globalThis.history?.pushState({ northwindRoute: 'home' }, '', nextPath)
       }
       return
     }
