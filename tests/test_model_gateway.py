@@ -2300,7 +2300,7 @@ def test_knowledge_grounded_lookup_selects_full_clauses_and_records_trace(
     )
     proposal = agent.propose_turn(context)
     assert len(gateway.requests) == 2
-    assert gateway.requests[0].required_tool_name == 'context.resolve'
+    assert gateway.requests[0].required_tool_name is None
     initial = json.dumps([message.content for message in gateway.requests[0].messages])
     assert 'policy_clause_directory' in initial
     assert 'Hire car and rental car' in initial
@@ -2329,6 +2329,35 @@ def test_knowledge_grounded_lookup_selects_full_clauses_and_records_trace(
     assert proposal.runtime_trace.tool_output['policy_clause_directory'] == [
         {'clause_id': 'MTR-BEN-03', 'title': 'Hire car and rental car'}
     ]
+
+
+@pytest.mark.parametrize(
+    'message',
+    [
+        'My policy number is NW-MTR-204518.',
+        'I covered the hole with a tarp.',
+    ],
+)
+def test_policy_keywords_do_not_force_a_context_lookup(message: str) -> None:
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='I have recorded that detail.'),
+            )
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway),
+        FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((_knowledge_chunk(),))),
+    ).propose_turn(_context(message))
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0].tools
+    assert gateway.requests[0].required_tool_name is None
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_name is None
 
 
 @pytest.mark.parametrize('product', ['motor', 'home', 'contents'])

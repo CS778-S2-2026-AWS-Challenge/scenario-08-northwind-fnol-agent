@@ -285,7 +285,11 @@ def test_policy_keyword_before_family_resolution_does_not_load_family_fragment()
     assert plan is not None
     assert plan.route.product_family is None
     assert 'policy-search' in plan.route.capability_ids
+    assert 'policy_lookup' not in plan.route.intents
+    assert plan.request_profile.profile_id == 'claimant.turn.v1'
+    assert plan.request_profile.tool_names == []
     assert 'capability.policy-search@v2' not in plan.fragment_refs
+    assert not any(ref.resource_type == 'policy_version' for ref in plan.context_plan.references)
     assert any(ref.startswith('family.unresolved-family@') for ref in plan.fragment_refs)
 
 

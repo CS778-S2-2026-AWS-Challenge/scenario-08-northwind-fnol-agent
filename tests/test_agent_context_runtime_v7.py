@@ -1060,10 +1060,19 @@ def test_policy_directory_is_inline_for_resolved_product_on_any_turn(
     assert 'capability.policy-search@v2' in plan.fragment_refs
 
 
-def test_bedrock_resolved_product_continues_intake_without_policy_lookup() -> None:
+@pytest.mark.parametrize(
+    'message',
+    [
+        'My car was rear-ended this morning.',
+        'What does my policy cover after this collision?',
+    ],
+)
+def test_bedrock_resolved_product_continues_intake_without_policy_lookup(
+    message: str,
+) -> None:
     from unittest.mock import Mock
 
-    context = _context('My car was rear-ended this morning.')
+    context = _context(message)
     assert context.runtime_configuration_snapshot is not None
     current = context.runtime_configuration_snapshot.model('qwen-local')
     assert current is not None

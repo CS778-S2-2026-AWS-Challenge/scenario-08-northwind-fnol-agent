@@ -224,16 +224,13 @@ def plan_model_turn(
     needs_lookup = provider_supports_lookup and (
         (route.product_family is not None and has_lookup_source)
         or (
+            context.claim_history_context_loader is not None
+            and 'claim-history' in route.capability_ids
+        )
+        or (
             route.task is not None
-            and (
-                (
-                    bool({'policy-search', 'claim-history'} & set(route.capability_ids))
-                    and has_lookup_source
-                )
-                or (
-                    route.task.value == 'status_question' and len(context.conversation_messages) > 4
-                )
-            )
+            and route.task.value == 'status_question'
+            and len(context.conversation_messages) > 4
         )
     )
     if model_configuration.prompt_version != CLAIMANT_V8_PROMPT_ID:

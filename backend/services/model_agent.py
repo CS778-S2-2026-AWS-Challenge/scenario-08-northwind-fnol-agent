@@ -407,11 +407,7 @@ class GatewayAgent:
             tools=tools,
             required_tool_name=(
                 'context.resolve'
-                if tools
-                and (
-                    plan.request_profile.requires_tool_continuation
-                    or 'policy_lookup' in plan.route.intents
-                )
+                if tools and plan.request_profile.requires_tool_continuation
                 else None
             ),
             max_output_tokens=plan.request_profile.output_limit,
@@ -999,14 +995,17 @@ class GatewayAgent:
                 tool_call = response.tool_calls[0]
                 tool_call_id = tool_call.call_id
                 tool_arguments = dict(tool_call.arguments)
-                if 'policy_lookup' in plan.route.intents:
-                    policy_references = [
-                        item
-                        for item in plan.context_plan.references
-                        if item.resource_type == 'policy_version'
-                    ]
-                    if len(policy_references) == 1:
-                        policy_reference = policy_references[0]
+                policy_references = [
+                    item
+                    for item in plan.context_plan.references
+                    if item.resource_type == 'policy_version'
+                ]
+                if len(policy_references) == 1:
+                    policy_reference = policy_references[0]
+                    if (
+                        'clause_ids' in tool_arguments
+                        or tool_arguments.get('ref') == policy_reference.ref
+                    ):
                         tool_arguments['ref'] = policy_reference.ref
                         if len(policy_reference.available_selectors) == 1:
                             tool_arguments['selector'] = policy_reference.available_selectors[0]
