@@ -1471,6 +1471,31 @@ describe('claimant intake projection', () => {
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
+  it('prompts an anonymous Claim workspace claimant to sign in and returns to the conversation', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockResolvedValue(initialTurn())
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText(agentMessage.content.text)
+
+    await user.click(screen.getAllByRole('button', { name: 'My claims' })[0])
+
+    expect(screen.getByRole('heading', { name: 'Claim history' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Sign in to view Claim history' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/account/claims')
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    expect(screen.getByText(agentMessage.content.text)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^Home claim · started \d{2}:\d{2}$/ })).toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
+    expect(api.createClaim).toHaveBeenCalledTimes(1)
+    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+  })
+
   it('keeps the conversation rail toggle compact and stateful', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(initialTurn())

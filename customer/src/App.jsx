@@ -3978,8 +3978,23 @@ function App() {
                 showEmptyStartAction={false}
               />
             </section>
-          ) : (
+          ) : hasClaimantAccessToken() ? (
             <p className="claim-history-page-checking" role="status">Checking your account…</p>
+          ) : (
+            <section className="claim-history-page-content" aria-labelledby="claim-history-page-title">
+              <header className="claim-history-hero">
+                <div className="claim-history-hero-copy">
+                  <p className="claim-history-eyebrow">Your claims</p>
+                  <h1 id="claim-history-page-title">Claim history</h1>
+                  <p>Sign in to review the Claims saved to your account.</p>
+                </div>
+              </header>
+              <div className="claim-history-state">
+                <h2>Sign in to view Claim history</h2>
+                <p>Your current Claim remains available. Sign in to review the Claims saved to your account.</p>
+                <button className="secondary-button" type="button" onClick={() => setPage('login')}>Log in</button>
+              </div>
+            </section>
           )}
         </main>
       ) : !isWorkspaceActive && ['claim-features', 'claim-messages', 'claim-evidence'].includes(page) ? (
