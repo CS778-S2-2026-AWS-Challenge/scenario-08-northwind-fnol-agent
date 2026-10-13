@@ -95,7 +95,7 @@
   .intake-page:has(.intake-history.is-rail-open).details-open {
     grid-template-columns: var(--claimant-workspace-nav-max) minmax(0, 1fr) var(--claimant-details-panel-width);
   }
-  .intake-details-panel {
+  .intake-page.details-open > .intake-details-panel {
     position: relative;
     inset: auto;
     right: auto;
