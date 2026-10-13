@@ -14,11 +14,14 @@ from backend.core.config import (
     Settings,
 )
 from backend.domain.configuration import ModelRuntimeBinding
+from backend.domain.knowledge_admin import KnowledgeVersionState
 from backend.domain.release import ConfigurationReference, ReleaseSetRecord, ReleaseSetState
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.initial_runtime_release import install_initial_runtime_release
+from backend.services.knowledge_admin import record_from_source
+from backend.services.knowledge_manifest import load_approved_sources
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -130,8 +133,16 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         'model:bedrock-nova2-lite',
         'model:google-gemini35-flash-lite',
     }
+    assert set(first.knowledge_refs) == {'motor', 'home', 'contents'}
     assert len(releases.list_release_sets('test', 'fixture')) == 1
     assert len(configurations.list_configurations()) == 8
+    assert {
+        (record.product, record.version, record.state) for record in knowledge.list(limit=100)
+    } == {
+        ('motor', '2026.2', KnowledgeVersionState.PUBLISHED),
+        ('home', '2026.2', KnowledgeVersionState.PUBLISHED),
+        ('contents', '2026.2', KnowledgeVersionState.PUBLISHED),
+    }
     serialized = json.dumps(
         [record.model_dump(mode='json') for record in configurations.list_configurations()]
     )
@@ -141,6 +152,7 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         RuntimeConfigurationResolver(
             configurations,
             releases,
+            knowledge,
             environment='test',
             runtime_profile='fixture',
         )
@@ -193,6 +205,17 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
     assert policy.controlled_rules.context_budget_policy is not None
     assert policy.features.verified_rolling_summary is True
     assert policy.features.isolated_execution is True
+    snapshot = RuntimeConfigurationResolver(
+        configurations,
+        releases,
+        environment='test',
+        runtime_profile='fixture',
+        knowledge_repository=knowledge,
+    ).snapshot()
+    assert {
+        product: snapshot.knowledge_for_product(product).version
+        for product in ('motor', 'home', 'contents')
+    } == {'motor': '2026.2', 'home': '2026.2', 'contents': '2026.2'}
 
 
 def test_existing_release_history_is_never_repaired_or_overwritten() -> None:
@@ -231,13 +254,16 @@ def test_fresh_v8_release_publishes_atomic_prompt_schema_and_default_model() -> 
     settings = replace(settings, model_runtime_bindings=bindings)
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
-    release = install_initial_runtime_release(
-        settings, configurations, releases, KnowledgeAdminRepository()
-    )
+    knowledge = KnowledgeAdminRepository()
+    release = install_initial_runtime_release(settings, configurations, releases, knowledge)
     assert release is not None
     policy = RuntimeAgentPolicyResolver(
         RuntimeConfigurationResolver(
-            configurations, releases, environment='test', runtime_profile='fixture'
+            configurations,
+            releases,
+            knowledge,
+            environment='test',
+            runtime_profile='fixture',
         )
     ).resolve_for_turn()
     assert policy is not None
@@ -311,6 +337,7 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
             RuntimeConfigurationResolver(
                 configurations,
                 releases,
+                knowledge,
                 environment='test',
                 runtime_profile='fixture',
             )
@@ -333,6 +360,7 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
         RuntimeConfigurationResolver(
             configurations,
             releases,
+            knowledge,
             environment='test',
             runtime_profile='fixture',
         )
@@ -344,6 +372,55 @@ def test_repository_managed_v7_release_upgrades_to_current_catalogue() -> None:
         'bedrock-nova2-lite',
         'google-gemini35-flash-lite',
     }
+
+
+def test_repository_managed_release_adds_missing_approved_knowledge_refs() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    original = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+    assert original is not None
+    legacy = original.model_copy(
+        update={
+            'revision': original.revision + 1,
+            'knowledge_refs': {},
+            'updated_at': original.updated_at + timedelta(seconds=1),
+        }
+    )
+    releases.save(legacy, original.revision)
+
+    upgraded = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+    repeated = install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+
+    assert upgraded is not None
+    assert repeated is not None
+    assert upgraded.release_set_id != original.release_set_id
+    assert repeated.release_set_id == upgraded.release_set_id
+    assert set(upgraded.knowledge_refs) == {'motor', 'home', 'contents'}
+    superseded = releases.get(original.release_set_id)
+    assert superseded is not None
+    assert superseded.state is ReleaseSetState.SUPERSEDED
+
+
+def test_initial_release_rejects_mismatched_manifest_knowledge_record() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
+    source = next(
+        source for source in load_approved_sources().values() if source.product == 'motor'
+    )
+    record = record_from_source(knowledge, source, 'operator', content=None).model_copy(
+        update={
+            'title': 'Different published wording',
+            'state': KnowledgeVersionState.PUBLISHED,
+        }
+    )
+    knowledge.create(record)
+
+    with pytest.raises(ValueError, match='does not match the repository-approved manifest'):
+        install_initial_runtime_release(_settings(), configurations, releases, knowledge)
+
+    assert releases.list_release_sets() == []
 
 
 def test_operator_owned_active_release_is_not_replaced() -> None:
@@ -452,6 +529,7 @@ def test_incomplete_v7_release_set_is_rejected_at_runtime_resolution() -> None:
         RuntimeConfigurationResolver(
             configurations,
             releases,
+            knowledge,
             environment='test',
             runtime_profile='fixture',
         )
@@ -521,6 +599,7 @@ def test_v7_release_rejects_versioned_registry_drift(
         RuntimeConfigurationResolver(
             configurations,
             releases,
+            knowledge,
             environment='test',
             runtime_profile='fixture',
         )
@@ -547,17 +626,19 @@ def test_v7_atomic_release_rejects_each_incomplete_published_component(
 ) -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
     valid = install_initial_runtime_release(
         _settings(),
         configurations,
         releases,
-        KnowledgeAdminRepository(),
+        knowledge,
     )
     assert valid is not None
     policy = RuntimeAgentPolicyResolver(
         RuntimeConfigurationResolver(
             configurations,
             releases,
+            knowledge,
             environment='test',
             runtime_profile='fixture',
         )
@@ -604,11 +685,12 @@ def test_v7_atomic_release_rejects_each_incomplete_published_component(
 def test_published_prompt_content_is_runtime_authority_not_a_container_file_mirror() -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
+    knowledge = KnowledgeAdminRepository()
     valid = install_initial_runtime_release(
         _settings(),
         configurations,
         releases,
-        KnowledgeAdminRepository(),
+        knowledge,
     )
     assert valid is not None
     instruction_reference = valid.configuration_refs['agent_instruction']
@@ -656,6 +738,7 @@ def test_published_prompt_content_is_runtime_authority_not_a_container_file_mirr
         RuntimeConfigurationResolver(
             configurations,
             releases,
+            knowledge,
             environment='test',
             runtime_profile='fixture',
         )
