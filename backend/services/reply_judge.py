@@ -30,7 +30,7 @@ from backend.domain.model_gateway import (
 logger = logging.getLogger(__name__)
 
 REPLY_REVIEW_PURPOSE = 'reply_review'
-REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v3'
+REPLY_REVIEW_PROMPT_VERSION = 'northwind-reply-review-v4'
 # Longest a review call may take; it runs after the turn's own model calls.
 REPLY_JUDGE_TIMEOUT_SECONDS = 20.0
 
@@ -43,6 +43,7 @@ PROBLEM_KINDS = (
     'promises_answer_without_question',
     'claims_documents_block_lodging',
     'claims_report_already_sent',
+    'unsupported_policy_conclusion',
 )
 
 JUDGE_INSTRUCTION = """You check one reply from Northwind's claims assistant against the ledger of \
@@ -67,6 +68,11 @@ saying it helps, is fine.
 sent, logged or lodged, or that the claims team already has it or is reviewing it. Nothing \
 reaches the claims team until the claimant submits the report themselves. Saying the claims \
 team will handle something after the claimant submits is fine.
+- unsupported_policy_conclusion: the reply says a particular cost, loss, benefit, or event is \
+covered, not covered, payable, or excluded, but policy_sources is empty or the returned text does \
+not directly support that conclusion about the same subject. Conditional wording is supported only \
+when the returned text states that condition. Saying the wording could not be checked, or that no \
+matching clause was found, is fine and is not a coverage conclusion.
 
 Return {"problems": []} when the reply is fine. Each detail quotes the words at fault."""
 
@@ -110,6 +116,13 @@ def turn_ledger(validated: Any) -> dict[str, object]:
             *getattr(validated, 'earlier_open_questions', ()),
         ],
         'summary_fields': list(validated.summary_fields),
+        'policy_sources': [
+            {
+                'section_path': str(source.get('section_path', ''))[:300],
+                'text': str(source.get('text', ''))[:3000],
+            }
+            for source in validated.policy_judgment_sources
+        ],
         'next_question': (
             validated.next_question.wording if validated.next_question is not None else None
         ),

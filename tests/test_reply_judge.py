@@ -18,7 +18,13 @@ from backend.domain.model_gateway import (
 from backend.services.agent import AgentTurnContext
 from backend.services.model_agent import GatewayAgent
 from backend.services.reply_consistency import review_reply
-from backend.services.reply_judge import REPLY_REVIEW_PURPOSE, ReplyJudge, turn_ledger
+from backend.services.reply_judge import (
+    JUDGE_INSTRUCTION,
+    REPLY_REVIEW_PROMPT_VERSION,
+    REPLY_REVIEW_PURPOSE,
+    ReplyJudge,
+    turn_ledger,
+)
 from backend.services.turn_proposal_validation import ValidatedTurn
 
 
@@ -72,6 +78,61 @@ def test_the_judge_reads_the_reply_with_the_turn_ledger() -> None:
     assert request.purpose == REPLY_REVIEW_PURPOSE
     assert 'run it past your provider' in (request.messages[-1].content or '')
     assert turn_ledger(turn)['declared_ending'] == 'question'
+
+
+def test_policy_sources_are_available_to_the_versioned_reply_review() -> None:
+    turn = _turn(
+        'This cost is not covered. Anything else?',
+        policy_judgment_sources=(
+            {
+                'section_path': 'MTR-BEN-03 - Hire car',
+                'text': 'A rental benefit may apply only when the schedule lists it.',
+            },
+        ),
+    )
+    gateway = _Gateway(
+        {
+            'problems': [
+                {
+                    'kind': 'unsupported_policy_conclusion',
+                    'detail': 'not covered',
+                }
+            ]
+        }
+    )
+
+    review = review_reply(turn, ReplyJudge(lambda: gateway))
+
+    assert REPLY_REVIEW_PROMPT_VERSION == 'northwind-reply-review-v4'
+    assert 'unsupported_policy_conclusion' in JUDGE_INSTRUCTION
+    assert not review.truthful
+    assert turn_ledger(turn)['policy_sources'] == [
+        {
+            'section_path': 'MTR-BEN-03 - Hire car',
+            'text': 'A rental benefit may apply only when the schedule lists it.',
+        }
+    ]
+    assert 'MTR-BEN-03 - Hire car' in (gateway.requests[0].messages[-1].content or '')
+
+
+@pytest.mark.parametrize(
+    ('reply', 'states_decision'),
+    [
+        ('This policy does not cover pet tuition.', True),
+        ('This claim is covered.', True),
+        ('This expense is excluded.', True),
+        ('This benefit is payable.', True),
+        ('No matching clause was found.', False),
+        ('This benefit may apply if the schedule lists it.', False),
+    ],
+)
+def test_explicit_policy_decisions_are_rejected_without_blocking_safe_uncertainty(
+    reply: str, states_decision: bool
+) -> None:
+    review = review_reply(_turn(reply, action='answer_only', turn_ending='nothing_needed'))
+
+    kinds = [item.kind for item in review.inconsistencies]
+    assert ('states_policy_decision' in kinds) is states_decision
 
 
 def test_a_clean_judgement_is_final() -> None:

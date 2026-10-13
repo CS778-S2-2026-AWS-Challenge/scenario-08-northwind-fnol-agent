@@ -212,10 +212,12 @@ def test_initial_release_is_complete_idempotent_and_contains_no_provider_secret(
         runtime_profile='fixture',
         knowledge_repository=knowledge,
     ).snapshot()
-    assert {
-        product: snapshot.knowledge_for_product(product).version
-        for product in ('motor', 'home', 'contents')
-    } == {'motor': '2026.2', 'home': '2026.2', 'contents': '2026.2'}
+    selected_versions: dict[str, str] = {}
+    for product in ('motor', 'home', 'contents'):
+        source = snapshot.knowledge_for_product(product)
+        assert source is not None
+        selected_versions[product] = source.version
+    assert selected_versions == {'motor': '2026.2', 'home': '2026.2', 'contents': '2026.2'}
 
 
 def test_existing_release_history_is_never_repaired_or_overwritten() -> None:

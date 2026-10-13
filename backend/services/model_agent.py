@@ -104,6 +104,33 @@ _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
 
 
+def _coalesce_context_resolve_calls(response: ModelResponse) -> tuple[ModelResponse, int]:
+    """Merge parallel policy clause selections into one bounded resolver call."""
+
+    calls = response.tool_calls
+    if len(calls) <= 1:
+        return response, len(calls)
+    if any(call.name != 'context.resolve' for call in calls):
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+            diagnostic_code='initial_tool_call_count',
+            diagnostic_path='tool_calls',
+        )
+    clause_ids: list[str] = []
+    for call in calls:
+        selected = call.arguments.get('clause_ids')
+        if not isinstance(selected, list | tuple):
+            continue
+        for clause_id in selected:
+            if isinstance(clause_id, str) and clause_id not in clause_ids:
+                clause_ids.append(clause_id)
+    arguments = dict(calls[0].arguments)
+    if clause_ids:
+        arguments['clause_ids'] = clause_ids[:3]
+    normalized = calls[0].model_copy(update={'arguments': arguments})
+    return response.model_copy(update={'tool_calls': [normalized]}), len(calls)
+
+
 def _merge_field_contract_repair(
     original: dict[str, object],
     repaired: dict[str, object],
@@ -960,6 +987,9 @@ class GatewayAgent:
                 exchange_completion,
             )
             invocations.append(_runtime_invocation_trace(1, response, observations[-1].latency_ms))
+            response, selected_tool_call_count = _coalesce_context_resolve_calls(response)
+            if selected_tool_call_count > 1:
+                tool_output['coalesced_tool_call_count'] = selected_tool_call_count
             # Ordinary claimant turns offer read-only references; the model may
             # answer without consulting them. Evidence-action envelopes still
             # require their source lookup before proposing reuse or removal.
@@ -974,12 +1004,6 @@ class GatewayAgent:
                     diagnostic_path='tool_calls',
                 )
             if response.tool_calls:
-                if len(response.tool_calls) != 1:
-                    raise ModelGatewayError(
-                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
-                        diagnostic_code='initial_tool_call_count',
-                        diagnostic_path='tool_calls',
-                    )
                 if response.tool_calls[0].name != 'context.resolve':
                     raise ModelGatewayError(
                         ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,

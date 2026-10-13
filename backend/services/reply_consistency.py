@@ -4,18 +4,20 @@ Runtime does not edit the model's words. When the words contradict the ledger,
 the whole turn goes back to the model once with the ruling attached so it can
 say the same thing truthfully.
 
-Two kinds of check run. Structural checks compare the turn's own parts (a
-summary with no fields, a declared ending the reply does not match). Whether
-the words say something the ledger does not back -- a refused service named, an
-arrangement or escalation claimed, a service asked about in words, the claimant
-sent to "their insurer", an answer promised that no question passed on backs --
-is a judgement about meaning, made only by the review model (``reply_judge``).
-When the review model is not configured or its call fails, no rule stands in
-for it: the reply is shown and the turn is recorded as not reviewed.
+Two kinds of check run. Deterministic checks compare the turn's own parts (a
+summary with no fields, a declared ending the reply does not match) and reject
+the narrow class of explicit coverage decisions the Agent may never make.
+Whether other words say something the ledger does not back -- a refused service
+named, an arrangement or escalation claimed, a service asked about in words,
+the claimant sent to "their insurer", an answer promised that no question
+passed on backs -- is a judgement about meaning, made only by the review model
+(``reply_judge``). When the review model is not configured or its call fails,
+those semantic claims are not checked and the turn is recorded as not reviewed.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from backend.services.reply_judge import ReplyJudge
@@ -40,6 +42,15 @@ SOFT_PROBLEMS = frozenset(
         'claims_documents_block_lodging',
         'claims_report_already_sent',
     }
+)
+
+_POLICY_DECISION = re.compile(
+    r'\b(?:the\s+|this\s+|your\s+)?policy\s+'
+    r"(?:(?:does(?:\s+not|n't)?\s+)?cover(?:s|ed)?|excludes?|pays?(?:\s+for)?)\b"
+    r'|\b(?:this\s+|the\s+|your\s+)?'
+    r'(?:claim|loss|cost|benefit|event|damage|item|expense|expenses)\s+'
+    r"(?:is|are|isn't|aren't)\s+(?:(?:not\s+)?(?:covered|payable)|excluded)\b",
+    re.IGNORECASE,
 )
 
 
@@ -78,17 +89,27 @@ class ConsistencyReview:
                     "never by asking in words. Northwind is the claimant's insurer: a question "
                     'you cannot answer goes into northwind_questions before the reply says the '
                     'claims team will handle it. Leave the claimant one clear thing to answer or '
-                    'do, or say what happens next. Keep every accepted fact and question. Return '
-                    'the full envelope again.'
+                    'do, or say what happens next. Do not state that a cost, loss, benefit or '
+                    'event is covered, not covered, payable or excluded when the policy sources '
+                    'do not directly support that conclusion; say what could not be checked '
+                    'instead. Keep every accepted fact and question. Return the full envelope '
+                    'again.'
                 ),
             }
         }
 
 
 def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
-    """Checks on the turn's own parts; no wording is read."""
+    """Check the envelope structure and explicit prohibited decisions."""
 
     problems: list[ReplyInconsistency] = []
+    if _POLICY_DECISION.search(validated.reply):
+        problems.append(
+            ReplyInconsistency(
+                kind='states_policy_decision',
+                detail='the reply states a cover or no-cover decision',
+            )
+        )
     if validated.action == 'summarize' and not validated.summary_fields:
         problems.append(
             ReplyInconsistency(

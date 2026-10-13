@@ -2360,6 +2360,83 @@ def test_policy_keywords_do_not_force_a_context_lookup(message: str) -> None:
     assert proposal.runtime_trace.tool_name is None
 
 
+def test_parallel_policy_clause_calls_are_coalesced_into_one_lookup() -> None:
+    context = _context('What do the rental-car and claim-reporting clauses say?')
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+    )
+    chunks = tuple(
+        replace(
+            _knowledge_chunk(),
+            chunk_id=f'nw-policy-motor-standard#{clause_id}',
+            version='2026.2',
+            section_path=f'{clause_id} - {title}',
+            text=text,
+        )
+        for clause_id, title, text in (
+            ('MTR-BEN-03', 'Hire car', 'Rental cover may apply when the schedule lists it.'),
+            ('MTR-CLM-01', 'Reporting', 'Report the incident promptly.'),
+            ('MTR-EXC-01', 'Excess', 'The schedule states the applicable excess.'),
+        )
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_rental',
+                        name='context.resolve',
+                        arguments={'clause_ids': ['MTR-BEN-03']},
+                    ),
+                    ModelToolCall(
+                        call_id='call_reporting',
+                        name='context.resolve',
+                        arguments={
+                            'clause_ids': [
+                                'MTR-BEN-03',
+                                'MTR-CLM-01',
+                                'MTR-EXC-01',
+                                'MTR-COV-99',
+                            ]
+                        },
+                    ),
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='The returned wording is conditional.'),
+            ),
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore(chunks))
+    ).propose_turn(context)
+
+    assert len(gateway.requests) == 2
+    assistant = next(
+        message for message in gateway.requests[1].messages if message.role is ModelRole.ASSISTANT
+    )
+    assert len(assistant.tool_calls) == 1
+    assert assistant.tool_calls[0].arguments['clause_ids'] == [
+        'MTR-BEN-03',
+        'MTR-CLM-01',
+        'MTR-EXC-01',
+    ]
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_output['coalesced_tool_call_count'] == 2
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == [
+        'MTR-BEN-03',
+        'MTR-CLM-01',
+        'MTR-EXC-01',
+    ]
+
+
 @pytest.mark.parametrize('product', ['motor', 'home', 'contents'])
 def test_knowledge_grounded_lookup_fits_three_longest_current_clauses_with_schedule(
     product: str,
