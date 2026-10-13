@@ -82,7 +82,10 @@ function CapturedInformationCard({ facts, fieldInputs, busy, onConfirm, onSave }
   const detailsId = useId()
   const [expanded, setExpanded] = useState(false)
   const [editingCode, setEditingCode] = useState(null)
-  const toCheck = facts.filter((fact) => fact.toCheck)
+  const confirmationFieldCodes = [...new Set(facts.flatMap((fact) => (
+    fact.confirmationFieldCodes
+      ?? (fact.toCheck ? [fact.fieldCode] : [])
+  )))]
   const detailLabel = `${facts.length} ${facts.length === 1 ? 'detail' : 'details'}`
   return (
     <section className="captured-information-card" aria-labelledby={titleId}>
@@ -103,12 +106,12 @@ function CapturedInformationCard({ facts, fieldInputs, busy, onConfirm, onSave }
             <span>{expanded ? 'Hide' : 'Review'}</span>
             <DisclosureIcon />
           </button>
-          {toCheck.length > 0 && (
+          {confirmationFieldCodes.length > 0 && (
             <button
               className="captured-information-confirm"
               type="button"
               disabled={busy}
-              onClick={() => onConfirm?.(toCheck.map((fact) => fact.fieldCode))}
+              onClick={() => onConfirm?.(confirmationFieldCodes)}
             >
               Looks right
             </button>

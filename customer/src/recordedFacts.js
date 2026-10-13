@@ -17,21 +17,34 @@ function hasValue(field) {
   return !(Array.isArray(value) && value.length === 0)
 }
 
-function fact(fieldCode, field) {
+function fact(fieldCode, field, representedFields = [[fieldCode, field]]) {
+  const confirmationFieldCodes = representedFields
+    .filter(([, representedField]) => representedField.status === 'proposed')
+    .map(([representedCode]) => representedCode)
   return {
     fieldCode,
     field,
     label: fieldLabel(fieldCode),
     value: fieldValueText(field),
-    toCheck: field.status === 'proposed',
+    toCheck: confirmationFieldCodes.length > 0,
+    confirmationFieldCodes,
   }
 }
 
-function isRepeatedDerivedLoss(fieldCode, form) {
-  if (fieldCode !== 'loss.description') return false
+function isCardField(field) {
+  return Boolean(field && CARD_STATUSES.has(field.status) && hasValue(field))
+}
+
+function repeatsVehicleDamageInTurn(recordedCodes, form, placed) {
+  if (!recordedCodes.has('vehicle.damage_description')
+    || !recordedCodes.has('loss.description')
+    || placed.has('vehicle.damage_description')
+    || placed.has('loss.description')) {
+    return false
+  }
   const loss = form?.['loss.description']
   const vehicleDamage = form?.['vehicle.damage_description']
-  if (!hasValue(loss) || !hasValue(vehicleDamage)) return false
+  if (!isCardField(loss) || !isCardField(vehicleDamage)) return false
   return fieldValueText(loss).trim() === fieldValueText(vehicleDamage).trim()
 }
 
@@ -47,17 +60,30 @@ export function factCardsByAgentMessage(messages, form) {
   for (let index = agentMessages.length - 1; index >= 0; index -= 1) {
     const message = agentMessages[index]
     const facts = []
-    for (const item of turnRecord(message)?.recorded_facts || []) {
+    const recordedFacts = turnRecord(message)?.recorded_facts || []
+    const recordedCodes = new Set(recordedFacts.map((item) => item?.field_code).filter(Boolean))
+    const collapseRepeatedLoss = repeatsVehicleDamageInTurn(recordedCodes, form, placed)
+    for (const item of recordedFacts) {
       const field = form?.[item.field_code]
       if (placed.has(item.field_code)
-        || !field
-        || !CARD_STATUSES.has(field.status)
-        || !hasValue(field)
-        || isRepeatedDerivedLoss(item.field_code, form)) {
+        || !isCardField(field)) {
+        continue
+      }
+      if (collapseRepeatedLoss && item.field_code === 'loss.description') {
+        placed.add(item.field_code)
         continue
       }
       placed.add(item.field_code)
-      facts.push(fact(item.field_code, field))
+      if (collapseRepeatedLoss && item.field_code === 'vehicle.damage_description') {
+        const loss = form['loss.description']
+        placed.add('loss.description')
+        facts.push(fact(item.field_code, field, [
+          [item.field_code, field],
+          ['loss.description', loss],
+        ]))
+      } else {
+        facts.push(fact(item.field_code, field))
+      }
     }
     if (facts.length > 0) cards.set(message.message_id, facts)
   }

@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
+import { factCardsByAgentMessage } from '../recordedFacts.js'
 import TurnAttachments from './TurnAttachments.jsx'
 
 const fact = (fieldCode, label, value, toCheck) => ({
@@ -74,6 +75,48 @@ describe('TurnAttachments', () => {
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Claim type' }), 'home')
     await user.click(within(card).getByRole('button', { name: 'Save' }))
     expect(onSaveFact).toHaveBeenCalledWith(expect.objectContaining({ fieldCode: 'claim.product_family' }), 'home')
+  })
+
+  it('confirms every proposed field represented by one de-duplicated row', async () => {
+    const user = userEvent.setup()
+    const onConfirmFacts = vi.fn()
+    const facts = factCardsByAgentMessage(
+      [{
+        message_id: 'agent-turn',
+        actor: 'agent',
+        content: {
+          turn_record: {
+            recorded_facts: [
+              { field_code: 'vehicle.damage_description' },
+              { field_code: 'loss.description' },
+            ],
+          },
+        },
+      }],
+      {
+        'vehicle.damage_description': {
+          value: 'The rear bumper is dented',
+          status: 'proposed',
+        },
+        'loss.description': {
+          value: 'The rear bumper is dented',
+          status: 'proposed',
+        },
+      },
+    ).get('agent-turn')
+    render(
+      <TurnAttachments
+        facts={facts}
+        onConfirmFacts={onConfirmFacts}
+      />,
+    )
+
+    expect(screen.getByText('Noted 1 detail')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Looks right' }))
+    expect(onConfirmFacts).toHaveBeenCalledWith([
+      'vehicle.damage_description',
+      'loss.description',
+    ])
   })
 
   it('marks what the claimant owes and lets them upload from the chip', () => {

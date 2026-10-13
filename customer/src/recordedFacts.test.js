@@ -68,6 +68,10 @@ describe('Just noted cards', () => {
     )
 
     expect(codes(cards, 'a1')).toEqual(['vehicle.damage_description'])
+    expect(cards.get('a1')[0].confirmationFieldCodes).toEqual([
+      'vehicle.damage_description',
+      'loss.description',
+    ])
 
     form['loss.description'] = field('The rear bumper is dented and the tail light is cracked')
     const distinctCards = factCardsByAgentMessage(
@@ -75,6 +79,23 @@ describe('Just noted cards', () => {
       form,
     )
     expect(codes(distinctCards, 'a1')).toEqual(['vehicle.damage_description', 'loss.description'])
+  })
+
+  it('keeps an equal loss description when a separate later turn recorded it', () => {
+    const cards = factCardsByAgentMessage(
+      [
+        reply('a1', ['vehicle.damage_description']),
+        reply('a2', ['loss.description']),
+      ],
+      {
+        'vehicle.damage_description': field('The rear bumper is dented'),
+        'loss.description': field('The rear bumper is dented'),
+      },
+    )
+
+    expect(codes(cards, 'a1')).toEqual(['vehicle.damage_description'])
+    expect(codes(cards, 'a2')).toEqual(['loss.description'])
+    expect(cards.get('a2')[0].confirmationFieldCodes).toEqual(['loss.description'])
   })
 
   it('leaves out conflicting, empty and superseded facts, and replies with no record', () => {
