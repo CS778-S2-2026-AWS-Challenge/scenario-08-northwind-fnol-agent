@@ -3136,8 +3136,7 @@ function App() {
   }
 
   function continueReportFromClaimHistory(claimId) {
-    // Claim history can be open as a workspace utility view; leave it for the conversation
-    // before taking the same resume path as conversation history.
+    // Leave the standalone Claim history page for the existing conversation-resume path.
     setWorkspaceView('chat')
     setSelectedHistoryClaimId(null)
     resumeHomepageConversation(claimId)
@@ -3260,12 +3259,19 @@ function App() {
     invalidateSessionPause()
     setSelectedHistoryClaimId(null)
     if (isWorkspaceActive) {
-      setWorkspaceView('history')
+      claimHistoryReturnRoute.current = {
+        page: 'workspace',
+        profileSection: null,
+        claimId: claim?.claim_id || null,
+        draftWorkspace: draftWorkspaceActive,
+      }
+      setWorkspaceView('chat')
       setMobileView('chat')
+      setWorkspaceActive(false)
     } else {
       claimHistoryReturnRoute.current = { page: 'home', profileSection: null }
-      setPage('claim-history')
     }
+    setPage('claim-history')
     if (account) loadSavedReports().catch(() => {})
   }
 
@@ -3277,6 +3283,25 @@ function App() {
       const nextPath = profilePathForSection(returnRoute.profileSection)
       if (globalThis.location?.pathname !== nextPath) {
         globalThis.history?.pushState({ northwindRoute: 'account' }, '', nextPath)
+      }
+      return
+    }
+    if (
+      returnRoute.page === 'workspace'
+      && (
+        (returnRoute.claimId && claim?.claim_id === returnRoute.claimId)
+        || returnRoute.draftWorkspace
+      )
+    ) {
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      setWorkspaceActive(true)
+      setPageState('home')
+      const nextPath = returnRoute.claimId
+        ? `/claims/${encodeURIComponent(returnRoute.claimId)}`
+        : '/claims/new'
+      if (globalThis.location?.pathname !== nextPath) {
+        globalThis.history?.pushState({ northwindRoute: 'home' }, '', nextPath)
       }
       return
     }
@@ -3953,8 +3978,23 @@ function App() {
                 showEmptyStartAction={false}
               />
             </section>
-          ) : (
+          ) : hasClaimantAccessToken() ? (
             <p className="claim-history-page-checking" role="status">Checking your account…</p>
+          ) : (
+            <section className="claim-history-page-content" aria-labelledby="claim-history-page-title">
+              <header className="claim-history-hero">
+                <div className="claim-history-hero-copy">
+                  <p className="claim-history-eyebrow">Your claims</p>
+                  <h1 id="claim-history-page-title">Claim history</h1>
+                  <p>Sign in to review the Claims saved to your account.</p>
+                </div>
+              </header>
+              <div className="claim-history-state">
+                <h2>Sign in to view Claim history</h2>
+                <p>Your current Claim remains available. Sign in to review the Claims saved to your account.</p>
+                <button className="secondary-button" type="button" onClick={() => setPage('login')}>Log in</button>
+              </div>
+            </section>
           )}
         </main>
       ) : !isWorkspaceActive && ['claim-features', 'claim-messages', 'claim-evidence'].includes(page) ? (
