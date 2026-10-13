@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const styles = readFileSync('src/styles/claimant-tidy.css', 'utf8')
+const casePanelStyles = readFileSync('src/styles/case-panel.css', 'utf8')
 
 describe('desktop claimant workspace height', () => {
   it('allocates the visible header before the workspace fills the viewport', () => {
@@ -33,5 +34,27 @@ describe('desktop claimant workspace height', () => {
     // content height and the workspace background shows under the composer.
     expect(pageBody).toContain('grid-template-rows: minmax(0, 1fr);')
     expect(styles).toContain('.intake-page.details-closed { grid-template-columns: var(--claimant-rail-width) minmax(0, 1fr) 0; }')
+  })
+
+  it('only docks the open claim panel at medium widths', () => {
+    const overlayMedia = '@media (max-width: 1439px) and (min-width: 641px)'
+    const overlayMediaStart = casePanelStyles.indexOf(overlayMedia)
+    const overlayPanelStart = casePanelStyles.indexOf('.intake-details-panel {', overlayMediaStart)
+    const overlayPanelBody = casePanelStyles.slice(
+      overlayPanelStart,
+      casePanelStyles.indexOf('}', overlayPanelStart),
+    )
+    const openPanelSelector = '.intake-page.details-open > .intake-details-panel'
+    const openPanelStart = styles.indexOf(`${openPanelSelector} {`)
+    const openPanelBody = styles.slice(openPanelStart, styles.indexOf('}', openPanelStart))
+
+    expect(overlayMediaStart).toBeGreaterThan(-1)
+    expect(overlayPanelStart).toBeGreaterThan(overlayMediaStart)
+    expect(overlayPanelBody).toContain('position: absolute;')
+    expect(openPanelStart).toBeGreaterThan(-1)
+    expect(openPanelBody).toContain('position: relative;')
+    expect(openPanelBody).toContain('inset: auto;')
+    expect(openPanelBody).toContain('width: 100%;')
+    expect(styles).not.toContain('@media (max-width: 1439px) and (min-width: 981px) {\n  .intake-details-panel {')
   })
 })
