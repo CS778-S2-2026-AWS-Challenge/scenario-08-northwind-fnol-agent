@@ -4557,14 +4557,18 @@ describe('claimant intake projection', () => {
 
     const card = await screen.findByRole('region', { name: 'Captured information' })
     expect(card.closest('.msg-agent')).toHaveTextContent(agentMessage.content.text)
-    expect(card).toHaveTextContent('Recorded')
-    expect(card).toHaveTextContent('Incident location')
-    expect(card).toHaveTextContent('Queen Street lights')
-    expect(card).toHaveTextContent('Vehicle safe to drive')
-    expect(card).toHaveTextContent('No')
+    expect(within(card).getByText('Noted 2 details')).toBeVisible()
+    expect(within(card).getByText('Incident location')).not.toBeVisible()
+    expect(within(card).getByRole('button', { name: 'Looks right' })).toBeVisible()
     // Progress lives once, in the title bar.
     expect(document.querySelector('.case-status')).toHaveTextContent('Noted 2/5')
     expect(screen.queryByRole('button', { name: 'Check your details' })).not.toBeInTheDocument()
+
+    await user.click(within(card).getByRole('button', { name: 'Review' }))
+    expect(within(card).getByText('Incident location')).toBeVisible()
+    expect(within(card).getByText('Queen Street lights')).toBeVisible()
+    expect(within(card).getByText('Vehicle safe to drive')).toBeVisible()
+    expect(within(card).getByText('No')).toBeVisible()
 
     await user.click(within(card).getByRole('button', { name: 'Looks right' }))
 
@@ -4639,6 +4643,7 @@ describe('claimant intake projection', () => {
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), claimantMessage.content.text)
     await user.click(screen.getByRole('button', { name: 'Start claim' }))
     const card = await screen.findByRole('region', { name: 'Captured information' })
+    await user.click(within(card).getByRole('button', { name: 'Review' }))
     await user.click(within(card).getByRole('button', { name: 'Edit Vehicle safe to drive in captured information' }))
     await user.selectOptions(within(card).getByRole('combobox', { name: 'Vehicle safe to drive' }), 'Yes')
     await user.click(within(card).getByRole('button', { name: 'Save' }))
