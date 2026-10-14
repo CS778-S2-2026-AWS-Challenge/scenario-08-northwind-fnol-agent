@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import ClaimWorkspace from './ClaimWorkspace.jsx'
-import { formatDateTime } from '../format.js'
+import { formatClaimFieldValue, formatDateTime } from '../format.js'
 
 const detail = {
   claim_id: 'clm_1',
@@ -160,7 +160,8 @@ describe('ClaimWorkspace navigation', () => {
     expect(onSection).toHaveBeenCalledWith('waiting')
   })
 
-  it('renders paged field resources instead of expecting fields on Claim detail', () => {
+  it('renders paged field resources with provenance hidden behind an accessible disclosure', async () => {
+    const user = userEvent.setup()
     render(<ClaimWorkspace
       {...props}
       section="fields"
@@ -172,8 +173,145 @@ describe('ClaimWorkspace navigation', () => {
       }}
     />)
 
-    expect(screen.getByText('Queen Street')).toBeInTheDocument()
-    expect(screen.getByText(/confirmed.*claimant.*current action/i)).toBeInTheDocument()
+    const incidentSection = screen.getByRole('region', { name: 'Incident' })
+    expect(within(incidentSection).getByText('Queen Street')).toBeInTheDocument()
+    expect(within(incidentSection).getByText('Confirmed')).toBeInTheDocument()
+    const detailsButton = within(incidentSection).getByLabelText('View details for Location')
+    expect(detailsButton).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('dialog', { name: 'Review guidance for Location' })).not.toBeInTheDocument()
+
+    await user.click(detailsButton)
+
+    const dialog = screen.getByRole('dialog', { name: 'Review guidance for Location' })
+    expect(detailsButton).toHaveAttribute('aria-expanded', 'true')
+    expect(within(dialog).getByText('This value has been confirmed and can be used in the current review.')).toBeVisible()
+    expect(within(dialog).getByText('Provided directly by the claimant.')).toBeVisible()
+    expect(within(dialog).getByText('Needed for the current review step.')).toBeVisible()
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('dialog', { name: 'Review guidance for Location' })).not.toBeInTheDocument()
+    expect(detailsButton).toHaveFocus()
+  })
+
+  it('groups arbitrary field namespaces, hides absent values, and preserves false and zero', () => {
+    render(<ClaimWorkspace
+      {...props}
+      section="fields"
+      resources={{
+        fields: {
+          status: 'available',
+          items: [
+            { code: 'claimant.contact_preference', field: { value: 'email', status: 'confirmed', source: 'claimant', needed_for: 'current_action' } },
+            { code: 'incident.description', field: { value: 'Water entered through the ceiling and damaged the living room.', status: 'confirmed', source: 'claimant', needed_for: 'current_action' } },
+            { code: 'vehicle.drivable', field: { value: false, status: 'confirmed', source: 'claimant', needed_for: 'current_action' } },
+            { code: 'loss.estimated_amount', field: { value: 0, status: 'proposed', source: 'document', needed_for: 'later_action' } },
+            { code: 'property.address', field: { value: '   ', status: 'missing', source: 'claimant', needed_for: 'current_action' } },
+            { code: 'property.affected_areas', field: { value: [], status: 'missing', source: 'claimant', needed_for: 'current_action' } },
+            { code: 'custom.review_code', field: { value: 'needs_follow_up', status: 'proposed', source: 'inference', needed_for: 'later_action' } },
+          ],
+        },
+      }}
+    />)
+
+    expect(screen.getByRole('region', { name: 'Claimant' })).toBeVisible()
+    expect(screen.getByRole('region', { name: 'Incident' })).toBeVisible()
+    expect(screen.getByRole('region', { name: 'Vehicle' })).toHaveTextContent('No')
+    expect(screen.getByRole('region', { name: 'Loss' })).toHaveTextContent(formatClaimFieldValue('loss.estimated_amount', 0))
+    expect(screen.getByRole('region', { name: 'Custom' })).toHaveTextContent('Needs Follow Up')
+    expect(screen.queryByRole('region', { name: 'Property' })).not.toBeInTheDocument()
+    expect(screen.getAllByText('5 fields')).toHaveLength(1)
+    expect(screen.queryByText('1 field')).not.toBeInTheDocument()
+    expect(formatClaimFieldValue('claimant.first_name', 'sam')).toBe('sam')
+    expect(formatClaimFieldValue('claimant.contact_preference', 'email')).toBe('Email')
+    expect(formatClaimFieldValue('claimant.role', 'policyholder')).toBe('Policyholder')
+  })
+
+  it('formats values, spans descriptions, and keeps complete provenance in a compact disclosure', async () => {
+    const user = userEvent.setup()
+    const clipboardWrite = vi.spyOn(navigator.clipboard, 'writeText')
+    const occurredAt = '2026-09-03T01:00:00Z'
+    const updatedAt = '2026-09-03T02:00:00Z'
+    render(<ClaimWorkspace
+      {...props}
+      section="fields"
+      resources={{
+        fields: {
+          status: 'available',
+          items: [
+            {
+              code: 'incident.occurred_at',
+              field: {
+                value: occurredAt,
+                status: 'confirmed',
+                source: 'claimant',
+                needed_for: 'current_action',
+              },
+            },
+            {
+              code: 'incident.location',
+              field: {
+                value: { city: 'Auckland', postcode: '1010' },
+                status: 'proposed',
+                source: 'document',
+                needed_for: 'later_action',
+                source_refs: ['msg_1', 'evd_1'],
+                updated_at: updatedAt,
+              },
+            },
+            {
+              code: 'incident.description',
+              field: {
+                value: 'A detailed description.',
+                status: 'confirmed',
+                source: 'claimant',
+                needed_for: 'current_action',
+              },
+            },
+          ],
+        },
+      }}
+    />)
+
+    const incidentSection = screen.getByRole('region', { name: 'Incident' })
+    const incidentTable = within(incidentSection).getByRole('table', { name: 'Incident — Claim information' })
+    expect(within(incidentTable).getByRole('columnheader', { name: 'Field' })).toBeVisible()
+    expect(within(incidentTable).getByRole('columnheader', { name: 'Value' })).toBeVisible()
+    expect(within(incidentTable).getByRole('columnheader', { name: 'Status' })).toBeVisible()
+    expect(within(incidentSection).getByText(formatDateTime(occurredAt))).toBeVisible()
+
+    const locationField = incidentSection.querySelector('[data-field-code="incident.location"]')
+    expect(locationField).toHaveClass('claim-field--wide')
+    expect(within(locationField).getByText(/City: Auckland/)).toBeVisible()
+    expect(within(locationField).getByText('Proposed')).toBeVisible()
+    const metadata = locationField.querySelector('.claim-field__metadata')
+    const detailsButton = within(metadata).getByLabelText('View details for Location')
+    expect(within(metadata).getByText('Proposed')).toBeVisible()
+    expect(metadata.querySelector('.claim-field__metadata-inner')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Review guidance for Location' })).not.toBeInTheDocument()
+
+    await user.click(detailsButton)
+
+    const dialog = screen.getByRole('dialog', { name: 'Review guidance for Location' })
+    expect(within(dialog).getByText('This value is proposed. Verify it against the Claim record before relying on it.')).toBeVisible()
+    expect(within(dialog).getByText('Taken from supporting evidence.')).toBeVisible()
+    expect(within(dialog).getByText('Useful for a later Claim step.')).toBeVisible()
+    expect(within(dialog).getByText(formatDateTime(updatedAt))).toHaveAttribute('datetime', updatedAt)
+    expect(within(dialog).getByText('msg_1')).not.toBeVisible()
+
+    await user.click(within(dialog).getByText('Technical sources'))
+
+    expect(within(dialog).getByText('msg_1')).toBeVisible()
+    expect(within(dialog).getByText('msg_1')).toHaveAttribute('title', 'msg_1')
+    expect(within(dialog).getByText('evd_1')).toHaveAttribute('title', 'evd_1')
+
+    await user.click(within(dialog).getByLabelText('Copy source reference: msg_1'))
+
+    expect(clipboardWrite).toHaveBeenCalledWith('msg_1')
+    expect(within(dialog).getByLabelText('Copied source reference: msg_1')).toBeVisible()
+
+    expect(incidentSection.querySelector('[data-field-code="incident.description"]')).toHaveClass('claim-field--wide')
+    expect(incidentSection.querySelector('[data-field-code="incident.occurred_at"]')).not.toHaveClass('claim-field--wide')
   })
 
   it('uses section summaries instead of rendering full resource records on the overview', async () => {
