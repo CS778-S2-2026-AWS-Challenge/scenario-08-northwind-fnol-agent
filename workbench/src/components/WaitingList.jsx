@@ -1,7 +1,9 @@
+import { Inbox } from 'lucide-react'
 import { useState } from 'react'
 import { translate as t } from '../i18n.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import { waitingListItems } from '../waiting-list.js'
+import ResourceEmptyState, { ResourcePageHeader } from './ResourceEmptyState.jsx'
 
 // The claim's waiting list: what the assistant could not settle while the
 // report was being collected. A question carries the claimant's words and the
@@ -96,16 +98,19 @@ export default function WaitingList({ items = [], actions = [], readOnly = false
   const waiting = waitingListItems(items)
   const openCount = waiting.filter((item) => item.state === 'open').length
   return (
-    <section className="detail-section waiting-list" aria-labelledby="waiting-list-title">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">{t('Before the usual Claim work')}</p>
-          <h2 id="waiting-list-title">{t('Waiting list')}</h2>
-        </div>
-        <span className="count-badge">{openCount}</span>
-      </div>
+    <section className="resource-view waiting-list" aria-labelledby="waiting-list-title">
+      <ResourcePageHeader
+        title="Waiting list"
+        subtitle="Questions and contact requests that need a claims-team response."
+        countLabel={t('{count} open', { count: openCount })}
+        titleId="waiting-list-title"
+      />
       {waiting.length === 0 ? (
-        <p className="record-meta">{t('Nothing is waiting for the claims team on this Claim.')}</p>
+        <ResourceEmptyState
+          icon={Inbox}
+          title="No waiting items"
+          description="New claimant questions and contact requests will appear here when staff attention is needed."
+        />
       ) : (
         <ul className="open-item-records">
           {waiting.map((item) => {

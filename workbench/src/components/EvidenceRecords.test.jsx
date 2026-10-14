@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import EvidenceRecords from './EvidenceRecords.jsx'
@@ -18,6 +18,19 @@ const evidence = {
 }
 
 describe('EvidenceRecords', () => {
+  it('uses the shared true-empty presentation without the record-list border', () => {
+    const { container } = render(<EvidenceRecords claimId="clm_1" records={[]} onLoadEvidence={vi.fn()} />)
+
+    const region = screen.getByRole('region', { name: 'Evidence' })
+    expect(within(region).getByText('Files and source-linked records for this Claim.')).toBeVisible()
+    expect(within(region).getByText('0 records')).toBeVisible()
+    const emptyState = within(region).getByRole('status')
+    expect(within(emptyState).getByRole('heading', { name: 'No evidence records', level: 3 })).toBeVisible()
+    expect(within(emptyState).getByText('Uploaded files and source-linked material will appear here once they are recorded.')).toBeVisible()
+    expect(emptyState.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(container.querySelector('.record-list')).not.toBeInTheDocument()
+  })
+
   it('loads protected evidence only after an explicit staff action', async () => {
     const onLoadEvidence = vi.fn().mockResolvedValue({
       filename: 'rear-damage.png',

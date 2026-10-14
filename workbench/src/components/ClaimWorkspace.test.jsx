@@ -160,6 +160,23 @@ describe('ClaimWorkspace navigation', () => {
     expect(onSection).toHaveBeenCalledWith('waiting')
   })
 
+  it('uses the shared true-empty presentation for available Signals', () => {
+    const { container } = render(<ClaimWorkspace
+      {...props}
+      section="signals"
+      resources={{ signals: { status: 'available', items: [] } }}
+    />)
+
+    const region = screen.getByRole('region', { name: 'Signals' })
+    expect(within(region).getByText('Source-linked review signals for professional assessment.')).toBeVisible()
+    expect(within(region).getByText('0 records')).toBeVisible()
+    const emptyState = within(region).getByRole('status')
+    expect(within(emptyState).getByRole('heading', { name: 'No review signals', level: 3 })).toBeVisible()
+    expect(within(emptyState).getByText('Source-linked signals will appear here when professional review is required.')).toBeVisible()
+    expect(emptyState.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(container.querySelector('.record-list')).not.toBeInTheDocument()
+  })
+
   it('renders paged field resources with provenance hidden behind an accessible disclosure', async () => {
     const user = userEvent.setup()
     render(<ClaimWorkspace
