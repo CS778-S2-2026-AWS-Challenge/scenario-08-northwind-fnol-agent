@@ -467,7 +467,7 @@ p { line-height: 1.55; }
 .claim-field__status::before { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-round); background: currentcolor; content: ''; }
 .claim-field__status--confirmed { color: var(--color-accent-strong); }
 .claim-field__status--proposed, .claim-field__status--pending_generation { color: var(--color-warning); }
-.claim-field__status--disputed, .claim-field__status--missing, .claim-field__status--unavailable { color: var(--color-danger); }
+.claim-field__status--disputed, .claim-field__status--missing, .claim-field__status--unavailable, .claim-field__status--superseded { color: var(--color-danger); }
 .claim-field__details-trigger { display: inline-grid; width: var(--space-6); height: var(--space-6); flex: 0 0 auto; padding: 0; place-items: center; border: 0; border-radius: var(--radius-round); background: transparent; color: var(--color-text-muted); }
 .claim-field__details-trigger:hover, .claim-field__details-trigger[aria-expanded='true'] { background: var(--color-panel); color: var(--color-text-secondary); }
 .claim-field__details-trigger:focus-visible { outline: var(--border-focus); outline-offset: var(--space-1); }
@@ -483,7 +483,7 @@ p { line-height: 1.55; }
 .claim-field-popover__guidance p { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-micro); line-height: var(--line-height-body); }
 .claim-field-popover__guidance--confirmed { background: var(--color-accent-soft); }
 .claim-field-popover__guidance--proposed, .claim-field-popover__guidance--pending_generation { background: var(--color-warning-soft); }
-.claim-field-popover__guidance--disputed, .claim-field-popover__guidance--missing, .claim-field-popover__guidance--unavailable { background: var(--color-danger-soft); }
+.claim-field-popover__guidance--disputed, .claim-field-popover__guidance--missing, .claim-field-popover__guidance--unavailable, .claim-field-popover__guidance--superseded { background: var(--color-danger-soft); }
 .claim-field-popover__facts { display: grid; margin: 0; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2) var(--space-3); }
 .claim-field-popover__facts dt { color: var(--color-text-muted); }
 .claim-field-popover__facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--color-text-secondary); }

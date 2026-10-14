@@ -211,6 +211,44 @@ describe('ClaimWorkspace navigation', () => {
     expect(detailsButton).toHaveFocus()
   })
 
+  it('marks a value-bearing superseded field as obsolete while preserving its sources', async () => {
+    const user = userEvent.setup()
+    render(<ClaimWorkspace
+      {...props}
+      section="fields"
+      resources={{
+        fields: {
+          status: 'available',
+          items: [{
+            code: 'incident.description',
+            field: {
+              value: 'The vehicle was parked when the damage occurred.',
+              status: 'superseded',
+              source: 'claimant',
+              needed_for: 'current_action',
+              source_refs: ['msg_superseded'],
+            },
+          }],
+        },
+      }}
+    />)
+
+    const incidentSection = screen.getByRole('region', { name: 'Incident' })
+    const supersededField = incidentSection.querySelector('[data-field-code="incident.description"]')
+    expect(within(supersededField).getByText('The vehicle was parked when the damage occurred.')).toBeVisible()
+    expect(within(supersededField).getByText('Superseded')).toHaveClass('claim-field__status--superseded')
+
+    await user.click(within(supersededField).getByLabelText('View details for Description'))
+
+    const dialog = screen.getByRole('dialog', { name: 'Review guidance for Description' })
+    expect(dialog.querySelector('.claim-field-popover__guidance')).toHaveClass('claim-field-popover__guidance--superseded')
+    expect(within(dialog).getByText('This value has been superseded by a newer value. Do not rely on it as the current Claim fact.')).toBeVisible()
+    expect(within(dialog).getByText('Provided directly by the claimant.')).toBeVisible()
+
+    await user.click(within(dialog).getByText('Technical sources'))
+    expect(within(dialog).getByText('msg_superseded')).toBeVisible()
+  })
+
   it('groups arbitrary field namespaces, hides absent values, and preserves false and zero', () => {
     render(<ClaimWorkspace
       {...props}

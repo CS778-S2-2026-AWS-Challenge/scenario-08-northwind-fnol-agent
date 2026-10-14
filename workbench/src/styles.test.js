@@ -68,6 +68,13 @@ describe('Workbench density tokens', () => {
     expect(styles).toMatch(/\.resource-empty-state__icon \{[^}]*color: var\(--color-text-faint\);/)
   })
 
+  it('distinguishes superseded Claim fields with existing danger tokens', () => {
+    const styles = readFileSync('src/styles.css', 'utf8')
+
+    expect(styles).toMatch(/\.claim-field__status--superseded[^{]*\{[^}]*color: var\(--color-danger\);/)
+    expect(styles).toMatch(/\.claim-field-popover__guidance--superseded[^{]*\{[^}]*background: var\(--color-danger-soft\);/)
+  })
+
   it('keeps the draggable Staff Agent trigger visible in dark mode', () => {
     const styles = readFileSync('src/styles.css', 'utf8')
     const tokens = readFileSync('../frontend/shared/design-tokens.css', 'utf8')

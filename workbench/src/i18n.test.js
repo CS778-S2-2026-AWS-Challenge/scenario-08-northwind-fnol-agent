@@ -11,6 +11,7 @@ describe('Workbench localisation', () => {
     expect(getLanguage()).toBe('zh-CN')
     expect(document.documentElement).toHaveAttribute('lang', 'zh-CN')
     expect(translate('Account menu for {name}', { name: 'Alex' })).toBe('Alex 的账户菜单')
+    expect(translate('This value has been superseded by a newer value. Do not rely on it as the current Claim fact.')).toBe('此信息已被更新内容替代，请勿将其作为当前案件事实使用。')
     expect(formatDateTime('2026-09-27T05:08:00Z')).toMatch(/2026/)
     expect(words('standard')).toBe('Standard')
   })

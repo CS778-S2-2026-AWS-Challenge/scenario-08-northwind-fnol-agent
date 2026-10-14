@@ -286,6 +286,7 @@ const ZH_CN = {
   'This value is disputed. Resolve the discrepancy before relying on it.': '此信息存在争议，请先解决差异再使用。',
   'This value is missing. Collect it before completing the relevant action.': '此信息尚未收集，请在完成相关操作前补充。',
   'This value is unavailable. Check supporting records or request it if required.': '此信息当前不可用，请检查支持记录，必要时重新获取。',
+  'This value has been superseded by a newer value. Do not rely on it as the current Claim fact.': '此信息已被更新内容替代，请勿将其作为当前案件事实使用。',
   'Review this value and its supporting context before relying on it.': '使用此信息前，请检查其内容和支持依据。',
   'Provided directly by the claimant.': '由报案人直接提供。',
   'Taken from supporting evidence.': '提取自支持材料。',

@@ -476,6 +476,7 @@ function fieldStatusGuidance(status) {
     disputed: 'This value is disputed. Resolve the discrepancy before relying on it.',
     missing: 'This value is missing. Collect it before completing the relevant action.',
     unavailable: 'This value is unavailable. Check supporting records or request it if required.',
+    superseded: 'This value has been superseded by a newer value. Do not rely on it as the current Claim fact.',
   }
   return t(guidance[status] || 'Review this value and its supporting context before relying on it.')
 }
