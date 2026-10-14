@@ -1,4 +1,4 @@
-import { CheckCircle2, ShieldAlert } from 'lucide-react'
+import { CheckCircle2, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 import {
@@ -7,6 +7,7 @@ import {
 } from './ProjectedAction.jsx'
 import { canSubmitProjectedAction, findProjectedAction, isProjectedInputRequired } from '../projected-action.js'
 import { translate as t } from '../i18n.js'
+import ResourceEmptyState, { ResourcePageHeader } from './ResourceEmptyState.jsx'
 
 export function HandoffResolution({
   handoff,
@@ -76,11 +77,24 @@ export function HandoffResolution({
 
 export function SignalReviews({ signals, allowedActions = [], onDecision }) {
   return (
-    <section className="resource-view">
-      <header className="content-header"><div><p className="eyebrow">{t('Internal review only')}</p><h2>{t('Signals')}</h2></div><span>{t('{count} records', { count: signals.length })}</span></header>
-      <div className="record-list">
-        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} allowedAction={findProjectedAction(allowedActions, 'signal.record_decision', signal.signal_id || signal.code)} onDecision={onDecision} />) : <p className="empty-note">{t('No review signals are recorded for this Claim.')}</p>}
-      </div>
+    <section className="resource-view" aria-labelledby="signals-title">
+      <ResourcePageHeader
+        title="Signals"
+        subtitle="Source-linked review signals for professional assessment."
+        countLabel={t('{count} records', { count: signals.length })}
+        titleId="signals-title"
+      />
+      {signals.length ? (
+        <div className="record-list">
+          {signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} allowedAction={findProjectedAction(allowedActions, 'signal.record_decision', signal.signal_id || signal.code)} onDecision={onDecision} />)}
+        </div>
+      ) : (
+        <ResourceEmptyState
+          icon={ShieldCheck}
+          title="No review signals"
+          description="Source-linked signals will appear here when professional review is required."
+        />
+      )}
     </section>
   )
 }

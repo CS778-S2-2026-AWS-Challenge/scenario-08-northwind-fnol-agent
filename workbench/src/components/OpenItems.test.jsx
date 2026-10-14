@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import OpenItems from './OpenItems.jsx'
@@ -56,6 +56,19 @@ describe('Open items', () => {
 })
 
 describe('Waiting list', () => {
+  it('uses the shared true-empty presentation with a concise page header', () => {
+    const { container } = render(<WaitingList items={[quote]} />)
+
+    const region = screen.getByRole('region', { name: 'Waiting list' })
+    expect(within(region).getByText('Questions and contact requests that need a claims-team response.')).toBeVisible()
+    expect(within(region).getByText('0 open')).toBeVisible()
+    const emptyState = within(region).getByRole('status')
+    expect(within(emptyState).getByRole('heading', { name: 'No waiting items', level: 3 })).toBeVisible()
+    expect(within(emptyState).getByText('New claimant questions and contact requests will appear here when staff attention is needed.')).toBeVisible()
+    expect(emptyState.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(container.querySelector('.detail-section')).not.toBeInTheDocument()
+  })
+
   it('approves the proposed answer, edits it, or marks a contact request', async () => {
     const user = userEvent.setup()
     const onDecide = vi.fn().mockResolvedValue(undefined)

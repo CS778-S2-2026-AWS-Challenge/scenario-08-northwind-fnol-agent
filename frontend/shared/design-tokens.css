@@ -99,6 +99,7 @@
 
   /* Workbench density tokens: the staff client may be denser, but component spacing
      remains semantic and shared instead of being tuned with local magic numbers. */
+  --density-workbench-font-label: 13px;
   --density-workbench-font-meta: 14px;
   --density-workbench-font-body: 15px;
   --density-workbench-font-control: 15px;
@@ -117,6 +118,8 @@
   --density-workbench-agent-width: 400px;
   --density-workbench-agent-height: 600px;
   --density-workbench-record-label-width: 160px;
+  --density-workbench-record-status-width: 128px;
+  --measure-workbench-claim-information: 1120px;
   --measure-workbench-settings: 720px;
   --density-workbench-list-max-height: 70vh;
   --measure-reading: 75ch;
