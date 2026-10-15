@@ -1,5 +1,17 @@
 # RAG Knowledge Ingestion
 
+The current registered synthetic motor, home and contents corpus is version `2026.2`, with
+stable document IDs `nw-policy-{product}-standard`. Upload and ingest the three current requests
+for both fresh stores and stores containing older objects. Superseded source files and a withdrawn
+historical manifest are under `docs/archive/knowledge/`; they are not runtime registrations.
+Do not delete historical objects or stored citations as an upgrade prerequisite. The retriever
+reads only approved manifest identities and cannot use retired objects as a fallback.
+
+The same validated chunks supply the claimant clause directory and exact selected-clause reads.
+The keyword index continues to serve internal search and Admin evaluation. Successful ingestion
+does not prove claimant model selection accuracy; see the inventory and measurement requirements
+in [Knowledge Source Coverage](knowledge-source-coverage.md).
+
 ## Scope
 
 The first ingestion pipeline imports approved UTF-8 policy or guidance documents from an
@@ -47,7 +59,7 @@ dates accept only `null` or non-empty, timezone-aware ISO 8601 strings. Other JS
 or malformed date strings fail as bounded manifest errors.
 
 ```json
-{"document_id": "nw-policy-motor-standard-mvp-2026-1", "version": "MVP-2026.1"}
+{"document_id": "nw-policy-motor-standard", "version": "2026.2"}
 ```
 
 The CLI resolves every authoritative field from the manifest. Extra caller-supplied metadata is
@@ -72,5 +84,5 @@ traceability but are never interpreted by ingestion as Agent authority or execut
 
 The generated keyword index is the deterministic MVP ingestion output. Filtered applicability,
 ranking, citations, empty-result limitations, and retrieval-provider failure behaviour belong to
-issue #255. End-to-end upload, ingestion, retrieval, and citation verification belongs to issue
-#265.
+issue #255. End-to-end upload, ingestion, retrieval, and citation verification belongs to
+issue #265.

@@ -1139,6 +1139,13 @@ Evidence record or protected object.
 - Tool requests and results retain tool version, purpose, actor and Claim scope, argument
   summary, required authority, disclosure manifest, idempotency, outcome, and diagnostic
   reference. Credentials and unnecessary raw provider payloads are not retained.
+- A policy `context.resolve` trace retains the model's `clause_ids` in `tool_arguments` and
+  `requested_clause_ids`, `returned_clause_ids`, `not_found`, and `guidance_status` in
+  `tool_output`. The trace also retains the exact `policy_clause_directory` supplied to the
+  lookup model, allowing selection misses to be reviewed against the titles actually seen.
+  These are selection/fetch evidence, not coverage decisions. Full policy text
+  is not duplicated into trace output; the existing `turn_record.cited_clauses` retains only
+  authorized sources actually cited in the answer. No new record group or database seed is needed.
 - The final role projection is derived after execution. It cannot claim that a proposed,
   requested, queued, failed, or unknown action succeeded.
 

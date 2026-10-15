@@ -86,8 +86,6 @@ def route_turn(context: AgentTurnContext) -> TurnRoute:
     intents: set[TurnIntent] = {'intake'}
     if set(capabilities) & {'assessor', 'repair', 'emergency', 'police'}:
         intents.add('external')
-    if 'policy-search' in capabilities:
-        intents.add('policy_lookup')
     if _CORRECTION.search(message):
         intents.add('correction')
     if _CONFIRMATION.search(message):

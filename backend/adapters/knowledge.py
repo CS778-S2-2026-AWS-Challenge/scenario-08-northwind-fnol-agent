@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 
 from backend.domain.knowledge import (
     KnowledgeChunk,
@@ -56,6 +57,8 @@ def _applicable(chunk: KnowledgeChunk, request: KnowledgeSearch) -> bool:
         return False
     if chunk.jurisdiction != request.jurisdiction or chunk.visibility != request.visibility:
         return False
+    if request.document_id is not None and chunk.document_id != request.document_id:
+        return False
     if chunk.authority != request.authority or chunk.version != request.version:
         return False
     if chunk.insurer != request.insurer or chunk.product != request.product:
@@ -73,6 +76,42 @@ class FixtureKnowledgeRetriever(KnowledgeRetriever):
 
     def connection_status(self) -> str:
         return 'using_fixture'
+
+    def list_clauses(self, scope: KnowledgeSearch) -> list[KnowledgeChunk]:
+        """List synthetic clauses using metadata applicability only.
+
+        Args:
+            scope: Exact metadata filters; text and limit are ignored.
+
+        Returns:
+            Applicable full chunks in fixture order.
+        """
+        return [
+            chunk
+            for chunk in self._store.chunks()
+            if chunk.clause_id is not None and _applicable(chunk, scope)
+        ]
+
+    def get_clauses(
+        self, scope: KnowledgeSearch, clause_ids: Sequence[str]
+    ) -> list[KnowledgeChunk]:
+        """Read exact synthetic clause IDs inside the supplied scope.
+
+        Args:
+            scope: Exact metadata filters; text and limit are ignored.
+            clause_ids: Chunk ID suffixes after '#', in requested order.
+
+        Returns:
+            Full chunks in requested order without duplicate or unknown IDs.
+        """
+        if not clause_ids:
+            return []
+        chunks_by_clause = {chunk.clause_id: chunk for chunk in self.list_clauses(scope)}
+        return [
+            chunks_by_clause[clause_id]
+            for clause_id in dict.fromkeys(clause_ids)
+            if clause_id in chunks_by_clause and clause_id != ''
+        ]
 
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         normalized = request.text.strip().casefold()

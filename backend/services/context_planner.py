@@ -204,6 +204,8 @@ def _catalogue(
     context: AgentTurnContext,
     route: TurnRoute,
     summary: VerifiedConversationSummary | None,
+    *,
+    include_policy_reference: bool = True,
 ) -> tuple[list[ContextCatalogueEntry], dict[str, object], bool]:
     claim_scope = f'claim:{context.claim.claim_id}:revision:{context.claim.revision}'
     values: dict[str, object] = {
@@ -357,8 +359,13 @@ def _catalogue(
                 cache_segment='service-registry',
             )
         )
-    if 'policy-search' in route.capability_ids and (
-        context.policy_context_loader is not None or context.knowledge_context_loader is not None
+    if (
+        include_policy_reference
+        and route.product_family is not None
+        and (
+            context.policy_context_loader is not None
+            or context.knowledge_context_loader is not None
+        )
     ):
         entries.append(
             ContextCatalogueEntry(
@@ -413,8 +420,15 @@ def plan_context(
     reserved_tokens: int,
     summary: VerifiedConversationSummary | None = None,
     field_contract: TurnFieldContract | None = None,
+    include_policy_clause_directory: bool = False,
+    policy_lookup_unavailable: bool = False,
 ) -> ContextPlan:
-    catalogue, resource_values, summary_state_mismatch = _catalogue(context, route, summary)
+    catalogue, resource_values, summary_state_mismatch = _catalogue(
+        context,
+        route,
+        summary,
+        include_policy_reference=not policy_lookup_unavailable,
+    )
     available = max(0, budget_limit - reserved_tokens)
     turn_focus = {
         # The model has no clock: "20 minutes ago" is resolved against this.
@@ -431,6 +445,21 @@ def plan_context(
         ),
     }
     inline: dict[str, Any] = {'turn_focus': turn_focus}
+    if (
+        include_policy_clause_directory
+        and route.product_family is not None
+        and context.knowledge_clause_directory_loader is not None
+    ):
+        directory = context.knowledge_clause_directory_loader()
+        inline['policy_clause_directory'] = directory['policy_clause_directory']
+        inline['policy_clause_directory_status'] = directory['guidance_status']
+        inline['policy_clause_directory_limitations'] = directory['limitations']
+    elif policy_lookup_unavailable and route.product_family is not None:
+        inline['policy_clause_directory'] = []
+        inline['policy_clause_directory_status'] = 'unavailable'
+        inline['policy_clause_directory_limitations'] = [
+            'The selected model provider cannot continue a policy lookup tool result.'
+        ]
     if field_contract is not None:
         # The provider answer sheet is fixed per registry version, so this is
         # where the model learns which fields this turn takes and each enum's
@@ -497,7 +526,7 @@ def plan_context(
                 summary=f'Bounded {entry.resource_id} context is available on demand.',
                 available_selectors=entry.selectors or ['current'],
                 max_resolve_tokens=min(
-                    600,
+                    2500 if resource_type == 'policy_version' else 600,
                     max(1, available - estimate_json_tokens(inline)),
                 ),
             )

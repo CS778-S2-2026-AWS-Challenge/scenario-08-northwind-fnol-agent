@@ -96,7 +96,7 @@ KNOWN_ISSUERS = {b for names in BUSINESSES.values() for b in names} | {
 # expired must stay valid until RUN_WINDOW_END, so a run with a live clock before then still sees
 # it as valid and does not add evidence_outstanding that the labels do not expect.
 REFERENCE_DAY = date(2026, 10, 1)
-WORDING_EFFECTIVE_FROM = '2026-01-01'  # config/knowledge-source-corpus/*-mvp-2026.1.md on main
+WORDING_EFFECTIVE_FROM = '2026-01-01'  # config/knowledge-source-corpus/*-2026.2.md
 AMOUNT_THRESHOLD = 5000  # NZD; exactly 5,000 is still fast_track
 BROKEN_OR_BLURRED = {'blur', 'truncate', 'to_tiff'}
 CONDITION_MATERIAL = {
@@ -410,7 +410,7 @@ def check_pack(
             ' is required'
         )
     for policy in setup.get('policies_in_system', []):
-        # The schedules name wording MVP-2026.1, effective from WORDING_EFFECTIVE_FROM; the wording
+        # The schedules name wording 2026.2, effective from WORDING_EFFECTIVE_FROM; the wording
         # is not to be applied when the schedule's period does not match it.
         if policy.get('effective_from', '') < WORDING_EFFECTIVE_FROM:
             problems.append(

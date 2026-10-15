@@ -4,14 +4,14 @@ Runtime does not edit the model's words. When the words contradict the ledger,
 the whole turn goes back to the model once with the ruling attached so it can
 say the same thing truthfully.
 
-Two kinds of check run. Structural checks compare the turn's own parts (a
-summary with no fields, a declared ending the reply does not match). Whether
-the words say something the ledger does not back -- a refused service named, an
-arrangement or escalation claimed, a service asked about in words, the claimant
-sent to "their insurer", an answer promised that no question passed on backs --
-is a judgement about meaning, made only by the review model (``reply_judge``).
-When the review model is not configured or its call fails, no rule stands in
-for it: the reply is shown and the turn is recorded as not reviewed.
+Two kinds of check run. Deterministic checks compare the turn's own parts (a
+summary with no fields, a declared ending the reply does not match).
+Whether words say something the ledger does not back -- a policy conclusion,
+a refused service named, an arrangement or escalation claimed, a service asked about in words,
+the claimant sent to "their insurer", an answer promised that no question
+passed on backs -- is a judgement about meaning, made only by the review model
+(``reply_judge``). When the review model is not configured or its call fails,
+those semantic claims are not checked and the turn is recorded as not reviewed.
 """
 
 from __future__ import annotations
@@ -78,15 +78,18 @@ class ConsistencyReview:
                     "never by asking in words. Northwind is the claimant's insurer: a question "
                     'you cannot answer goes into northwind_questions before the reply says the '
                     'claims team will handle it. Leave the claimant one clear thing to answer or '
-                    'do, or say what happens next. Keep every accepted fact and question. Return '
-                    'the full envelope again.'
+                    'do, or say what happens next. Do not state that a cost, loss, benefit or '
+                    'event is covered, not covered, payable or excluded when the policy sources '
+                    'do not directly support that conclusion; say what could not be checked '
+                    'instead. Keep every accepted fact and question. Return the full envelope '
+                    'again.'
                 ),
             }
         }
 
 
 def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
-    """Checks on the turn's own parts; no wording is read."""
+    """Check the envelope structure; the judge reviews policy meaning with sources."""
 
     problems: list[ReplyInconsistency] = []
     if validated.action == 'summarize' and not validated.summary_fields:

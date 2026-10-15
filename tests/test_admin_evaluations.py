@@ -31,12 +31,12 @@ def _payload() -> dict[str, object]:
     return {
         'purpose': 'claimant_motor_intake',
         'model_version': 'model-profile-v4',
-        'knowledge_version': 'motor-policy-MVP-2026.1',
+        'knowledge_version': 'motor-policy-fixture-v1',
         'rule_version': 'agent-rule-v3',
         'dataset_id': 'northwind-fnol-regression',
         'dataset_version': '2026-09-06',
         'fixture_version': 'presentation-v2',
-        'source_versions': ['policy:motor:MVP-2026.1'],
+        'source_versions': ['policy:motor:fixture-v1'],
         'scenario_results': [
             {
                 'scenario_id': 'motor-rear-end-handoff',

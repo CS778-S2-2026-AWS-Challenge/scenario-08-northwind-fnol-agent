@@ -18,6 +18,11 @@ time-bound commitments belong in `sprint/`.
 Historical records must not override the current specification, API, data contracts, authority
 rules, or sprint commitments.
 
+Retired synthetic policies and their withdrawn historical manifest are preserved in
+[archive/knowledge/](archive/knowledge/README.md). Only the current corpus is registered
+in `config/knowledge-sources.json`; [Knowledge Source Coverage](knowledge-source-coverage.md)
+records its question inventory and measurement boundary.
+
 ## Current Sprint Planning
 
 The current time-bound direction and weekly execution records are maintained under `sprint/`:

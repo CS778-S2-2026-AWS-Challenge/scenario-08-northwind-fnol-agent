@@ -1,6 +1,7 @@
 """Install the repository-defined initial Agent Runtime release."""
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 
 from backend.core.config import Settings
 from backend.domain.agent_action_registry import registered_actions
@@ -18,8 +19,10 @@ from backend.domain.configuration import (
     ValidationRequest,
     ValidationScenarioResult,
 )
+from backend.domain.knowledge_admin import KnowledgeSourceRecord, KnowledgeVersionState
 from backend.domain.release import (
     ConfigurationReference,
+    KnowledgeReference,
     ReleaseSetCreate,
     ReleaseSetRecord,
     ReleaseSetValidationRequest,
@@ -30,6 +33,7 @@ from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.repositories.release_set import ReleaseSetRepository
 from backend.services import configuration as configuration_service
 from backend.services import release_sets as release_set_service
+from backend.services.knowledge_manifest import load_approved_sources
 from backend.services.prompt_composer import (
     load_fragment_contents,
     load_prompt_manifest,
@@ -48,6 +52,87 @@ _VALIDATION_EVIDENCE = (
     'Repository-defined initial Runtime release passed structural and binding validation.'
 )
 _MODEL_TIMEOUT_CEILING_SECONDS = 180.0
+
+
+def _repository_knowledge_refs(
+    repository: KnowledgeAdminRepository,
+) -> dict[str, KnowledgeReference]:
+    """Publish repository-approved manifest records for the initial Release Set."""
+
+    references: dict[str, KnowledgeReference] = {}
+    for source in load_approved_sources().values():
+        if source.product is None:
+            continue
+        existing = next(
+            (
+                record
+                for record in repository.list(document_id=source.document_id, limit=100)
+                if record.version == source.version
+            ),
+            None,
+        )
+        if existing is None:
+            existing = repository.create(
+                KnowledgeSourceRecord(
+                    knowledge_id=repository.new_knowledge_id(),
+                    document_id=source.document_id,
+                    version=source.version,
+                    source_key=source.source_key,
+                    title=source.title,
+                    document_type=source.document_type,
+                    source_uri=source.source_uri,
+                    jurisdiction=source.jurisdiction,
+                    insurer=source.insurer,
+                    product=source.product,
+                    effective_from=source.effective_from,
+                    effective_to=source.effective_to,
+                    authority=source.authority,
+                    visibility=source.visibility,
+                    expected_checksum=source.expected_checksum,
+                    state=KnowledgeVersionState.PUBLISHED,
+                    revision=1,
+                    author=_AUTHOR,
+                    validation_evidence={
+                        'source': 'repository-approved-manifest',
+                        'result': 'passed',
+                        'expected_checksum': source.expected_checksum,
+                    },
+                    updated_at=datetime.now(UTC),
+                )
+            )
+        if existing.state is not KnowledgeVersionState.PUBLISHED:
+            raise ValueError(
+                'The repository-approved initial knowledge version already exists but is not '
+                f'published: {source.document_id}@{source.version}.'
+            )
+        source_fields = (
+            'source_key',
+            'title',
+            'document_type',
+            'source_uri',
+            'jurisdiction',
+            'insurer',
+            'product',
+            'effective_from',
+            'effective_to',
+            'authority',
+            'visibility',
+            'expected_checksum',
+        )
+        if any(getattr(existing, field) != getattr(source, field) for field in source_fields):
+            raise ValueError(
+                'The published initial knowledge version does not match the repository-approved '
+                f'manifest: {source.document_id}@{source.version}.'
+            )
+        if source.product in references:
+            raise ValueError(
+                f'The repository-approved manifest has multiple versions for {source.product}.'
+            )
+        references[source.product] = KnowledgeReference(
+            knowledge_id=existing.knowledge_id,
+            revision=existing.revision,
+        )
+    return references
 
 
 def _model_values(
@@ -300,7 +385,16 @@ def install_initial_runtime_release(
         )
         for slot, record in records.items()
     }
-    if active_release is not None and active_release.configuration_refs == configuration_refs:
+    knowledge_refs = (
+        active_release.knowledge_refs
+        if active_release is not None and active_release.knowledge_refs
+        else _repository_knowledge_refs(knowledge)
+    )
+    if (
+        active_release is not None
+        and active_release.configuration_refs == configuration_refs
+        and active_release.knowledge_refs == knowledge_refs
+    ):
         return active_release
 
     created = release_set_service.create(
@@ -312,7 +406,7 @@ def install_initial_runtime_release(
             runtime_profile=settings.data_runtime_profile.value,
             configuration_refs=configuration_refs,
             integration_refs=(active_release.integration_refs if active_release else {}),
-            knowledge_refs=(active_release.knowledge_refs if active_release else {}),
+            knowledge_refs=knowledge_refs,
             reason='Install the repository-defined initial Agent Runtime release.',
         ),
         _AUTHOR,

@@ -154,6 +154,20 @@ Options: `-BackendOnly` starts only MongoDB/MinIO/backend and skips all three fr
 `-BackendPort` / `-CustomerPort` / `-WorkbenchPort` / `-AdminPort` move a process.
 `-ReadyTimeoutSeconds` extends the readiness wait on a slow machine.
 
+The local policy adapter supplies the following synthetic schedules for knowledge checks:
+
+| Policy number | Product | Schedule distinction |
+| --- | --- | --- |
+| `NW-MTR-204518` | Motor | Includes `alternative_transport`; NZD 500 excess |
+| `NW-MTR-204519` | Motor | Does not include `alternative_transport`; NZD 500 excess |
+| `NW-HOM-204518` | Home | Building damage, emergency repairs and temporary accommodation |
+| `NW-CON-204518` | Contents | Accidental damage, theft and temporary storage |
+
+All four schedules run from 2026-01-01 to 2027-01-01 and are test data, not real
+insurance contracts. Enter the number in the claimant conversation. Unknown numbers remain
+`no_evidence`; the Agent cannot infer a schedule from the policy wording. These knowledge
+fixtures are separate from triage and policy-provider failure-switch scenarios.
+
 Workbench accounts: one per team member, `<GitHub name>@northwind.test` with the password
 `Northwind`, listed in `config/staff-seed.json`. The backend provisions them at every start and
 prints them; the launcher repeats them in its final report. The former
@@ -208,7 +222,10 @@ ignored by git). The backend only publishes the checked-in model catalogue into 
 Plane; a database left over from an earlier checkout keeps its old catalogue, so you would see an
 old default model or profiles that no longer exist and nothing would tell you why. Claims,
 sessions and accounts are in separate databases and are kept. Pass `-KeepControlPlane` if you
-have published a release locally through the Admin console and want to keep it.
+have published a release locally through the Admin console and want to keep it. The optional
+`-ControlPlaneDbPath` parameter selects the file used for this reset. Without
+`-KeepControlPlane`, the launcher deletes that selected database and its SQLite sidecars before
+startup, so verify a custom path before running the command.
 
 Nobody keeps a private `.env` or a local credential store any more. Which model the team talks to
 is decided by `config/model-runtime-bindings.json`; when that file is loaded the backend ignores
@@ -284,6 +301,22 @@ stub. Both exist for CI and the test suite only and are not a way to run the app
 
 Deployment environments inject the same variable names through their secret and configuration
 mechanisms; they must not package a local `.env` file.
+
+To measure the 2026.2 claimant clause directory against a running `local_mvp` stack, use the
+same local MongoDB settings as that backend and run:
+
+```powershell
+py -3.12 scripts/measure_claimant_knowledge.py --base-url http://127.0.0.1:8000 --output var/knowledge-measurement --scenario inventory
+py -3.12 scripts/measure_claimant_knowledge.py --base-url http://127.0.0.1:8000 --output var/knowledge-included --scenario included --repeats 5
+```
+
+Repeat the second command with `--scenario excluded`, `no-clause`, and `unavailable`, each with
+its own output directory. The unavailable run requires an independently isolated knowledge store;
+do not interrupt a shared local service. Use `--model-profile-id` to select a published, ready
+claimant model. The script refuses a controlled runtime, writes synthetic API responses and
+read-only Runtime evidence to `results.json`, and summarizes misses in `report.md`. A failed setup
+that has not confirmed product and policy number is not a clause-selection sample. The JSON report
+may contain synthetic claim data and remains untracked under `var/`.
 
 ### Run the P17 recovery worker
 

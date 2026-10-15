@@ -69,7 +69,7 @@ def main() -> None:
         jurisdiction='NZ',
         visibility='customer_and_staff',
         authority='northwind_synthetic_demo',
-        version='MVP-2026.1',
+        version='2026.2',
         insurer='Northwind Insurance',
         product='motor',
         effective_at=datetime(2026, 8, 27, tzinfo=UTC),

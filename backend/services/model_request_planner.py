@@ -57,7 +57,16 @@ _CONTEXT_RESOLVE_TOOL = ModelTool(
         'properties': {
             'ref': {'type': 'string'},
             'selector': {'type': 'string'},
-            'max_tokens': {'type': 'integer', 'minimum': 1, 'maximum': 600},
+            'max_tokens': {'type': 'integer', 'minimum': 128, 'maximum': 2500},
+            'clause_ids': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'maxItems': 3,
+                'description': (
+                    'Policy clause IDs selected from policy_clause_directory; '
+                    'policy references only.'
+                ),
+            },
         },
     },
 )
@@ -195,16 +204,34 @@ def plan_model_turn(
     published_profiles = (
         runtime_policy.tool_policy.request_profiles if runtime_policy is not None else None
     )
-    needs_lookup = route.task is not None and (
-        (
-            bool({'policy-search', 'claim-history'} & set(route.capability_ids))
-            and (
-                context.policy_context_loader is not None
-                or context.knowledge_context_loader is not None
-                or context.claim_history_context_loader is not None
-            )
+    capability = (
+        runtime_policy.tool_policy.provider_capabilities[model_profile_id]
+        if runtime_policy is not None
+        else provider_capability(model_configuration)
+    )
+    validate_capability_binding(model_configuration, capability)
+    provider_supports_lookup = (
+        capability.tool_call_support and capability.tool_result_continuation is not None
+    )
+    has_lookup_source = any(
+        loader is not None
+        for loader in (
+            context.policy_context_loader,
+            context.knowledge_context_loader,
+            context.claim_history_context_loader,
         )
-        or (route.task.value == 'status_question' and len(context.conversation_messages) > 4)
+    )
+    needs_lookup = provider_supports_lookup and (
+        (route.product_family is not None and has_lookup_source)
+        or (
+            context.claim_history_context_loader is not None
+            and 'claim-history' in route.capability_ids
+        )
+        or (
+            route.task is not None
+            and route.task.value == 'status_question'
+            and len(context.conversation_messages) > 4
+        )
     )
     if model_configuration.prompt_version != CLAIMANT_V8_PROMPT_ID:
         raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
@@ -215,12 +242,6 @@ def plan_model_turn(
         needs_lookup=needs_lookup,
         profiles=published_profiles,
     )
-    capability = (
-        runtime_policy.tool_policy.provider_capabilities[model_profile_id]
-        if runtime_policy is not None
-        else provider_capability(model_configuration)
-    )
-    validate_capability_binding(model_configuration, capability)
     validate_profile_compatibility(profile, capability)
     field_contract = None
     if runtime_policy is not None:
@@ -304,6 +325,17 @@ def plan_model_turn(
         reserved_tokens=reserved,
         summary=summary or context.rolling_summary,
         field_contract=field_contract,
+        include_policy_clause_directory=(
+            route.product_family is not None and provider_supports_lookup
+        ),
+        policy_lookup_unavailable=(
+            route.product_family is not None
+            and not provider_supports_lookup
+            and (
+                context.policy_context_loader is not None
+                or context.knowledge_context_loader is not None
+            )
+        ),
     )
     recent_history_tokens = next(
         (

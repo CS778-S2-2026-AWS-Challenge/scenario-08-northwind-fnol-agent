@@ -70,6 +70,34 @@ def _provider(*proposals: dict[str, Any], review: ReplyJudge | None = None) -> V
     return provider
 
 
+@pytest.mark.parametrize(
+    'reply',
+    [
+        'I cannot confirm whether this loss is covered.',
+        'If this loss is covered, the schedule excess may apply.',
+        'The returned wording does not establish whether your policy covers this event.',
+    ],
+)
+def test_safe_policy_uncertainty_accepted_by_judge_does_not_rewrite_or_recover(
+    app: FastAPI, client: TestClient, repository: FixtureRepository, reply: str
+) -> None:
+    # Synthetic clean verdict isolates Runtime's handling, not model judgement quality.
+    proposal = {**envelope(reply=reply), 'action': 'answer_only', 'turn_ending': 'nothing_needed'}
+    provider = _provider(proposal, review=_Verdicts([]))
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'motor', 'safe-policy-uncertainty')
+
+    turn = journey.send('Can you check whether my loss is covered?')
+
+    assert len(provider.gateway.requests) == 1
+    assert turn['agent_message']['content']['text'] == reply
+    assert turn.get('recovery') is None
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
+    )
+    assert trace is not None and trace.failure_diagnostic is None
+
+
 def test_inconsistent_reply_is_sent_back_once_and_the_rewrite_is_shown(
     app: FastAPI, client: TestClient, repository: FixtureRepository
 ) -> None:
@@ -131,7 +159,25 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
     )
     assert trace is not None and trace.failure_diagnostic is not None
     assert trace.failure_diagnostic.code == 'consistency_recall_truthfulness'
-    assert trace.failure_diagnostic.path is None
+    assert trace.failure_diagnostic.path == 'reply.names_rejected_service'
+
+
+def test_initial_schema_failure_persists_safe_field_path(
+    app: FastAPI, client: TestClient, repository: FixtureRepository
+) -> None:
+    provider = _provider({**HONEST_REWRITE, 'reply': []})
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'home', 'initial-schema-diagnostic')
+    turn = journey.send('Water is dripping through the ceiling.', expect_agent_message=False)
+
+    assert turn['recovery']['rule_id'] == 'claimant_turn.model_invalid_response'
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
+    )
+    assert trace is not None and trace.failure_diagnostic is not None
+    assert trace.failure_diagnostic.code == 'initial_output_schema_validation'
+    assert trace.failure_diagnostic.path == 'reply'
+    assert 'Water is dripping' not in trace.model_dump_json()
 
 
 @pytest.mark.parametrize(
@@ -159,8 +205,8 @@ def test_twice_inconsistent_reply_enters_recovery_with_the_message_saved(
         (
             {**HONEST_REWRITE, 'reply': '   '},
             ModelCompletionStatus.COMPLETE,
-            'consistency_recall_proposal_validation',
-            None,
+            'consistency_recall_proposal_blank_reply',
+            'reply',
         ),
     ],
 )
@@ -389,8 +435,11 @@ class _LookupThenRecall(GatewayAgent):
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         context = replace(
             context,
-            knowledge_context_loader=lambda _limit: {
+            knowledge_context_loader=lambda _limit, _clause_ids: {
                 'status': 'evidence_found',
+                'guidance_status': 'evidence_found',
+                'returned_clause_ids': ['MTR-BEN-04'],
+                'not_found': [],
                 'chunks': [POLICY_CHUNK],
             },
         )
@@ -410,6 +459,7 @@ class _LookupThenRecall(GatewayAgent):
                                 'ref': reference.ref,
                                 'selector': 'matching_facts_and_guidance',
                                 'max_tokens': 600,
+                                'clause_ids': ['MTR-BEN-04'],
                             },
                         )
                     ],
@@ -434,7 +484,7 @@ POLICY_CHUNK = {
     'title': 'Synthetic motor policy wording',
     'section_path': 'MTR-BEN-04',
     'source_uri': 'fixture://hire-car',
-    'version': 'MVP-2026.1',
+    'version': '2026.2',
     'checksum': 'synthetic-hire-car-checksum',
     'text': 'Hire car cover depends on the optional benefits shown on the schedule.',
 }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -310,7 +310,8 @@ class AgentTurnContext:
     conversation_messages: tuple[MessageRecord, ...] = ()
     older_message_loader: Callable[[int], tuple[MessageRecord, ...]] | None = None
     policy_context_loader: Callable[[int], dict[str, object]] | None = None
-    knowledge_context_loader: Callable[[int], dict[str, object]] | None = None
+    knowledge_context_loader: Callable[[int, Sequence[str]], dict[str, object]] | None = None
+    knowledge_clause_directory_loader: Callable[[], dict[str, object]] | None = None
     claim_history_context_loader: Callable[[int], dict[str, object]] | None = None
     evidence_history_context_loader: Callable[[int], dict[str, object]] | None = None
     rolling_summary: VerifiedConversationSummary | None = None

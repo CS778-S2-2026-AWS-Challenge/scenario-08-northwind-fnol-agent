@@ -35,6 +35,7 @@ param(
     [int]$AdminPort = 5175,
     [switch]$BackendOnly,
     [switch]$KeepControlPlane,
+    [string]$ControlPlaneDbPath = 'var/dev/control-plane.sqlite3',
     [int]$ReadyTimeoutSeconds = 60
 )
 
@@ -278,7 +279,7 @@ finally {
 #    since been removed) and nothing warns you. Claims, sessions and identity live in other
 #    databases and are not touched. Pass -KeepControlPlane to preserve operator-published
 #    releases you have made locally.
-$controlPlaneDb = 'var/dev/control-plane.sqlite3'
+$controlPlaneDb = $ControlPlaneDbPath
 New-Item -ItemType Directory -Force -Path (Split-Path $controlPlaneDb) | Out-Null
 if (-not $KeepControlPlane) {
     Remove-Item -Force -ErrorAction SilentlyContinue "$controlPlaneDb", "$controlPlaneDb-shm", "$controlPlaneDb-wal"

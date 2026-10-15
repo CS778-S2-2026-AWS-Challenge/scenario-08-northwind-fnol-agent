@@ -96,9 +96,17 @@ def _initial_fragment_ids(
         fragment_ids.add(task_fragment)
     elif 'task.turn' in definitions:
         fragment_ids.add('task.turn')
+    if route.product_family is not None and 'capability.policy-search' in definitions:
+        fragment_ids.add('capability.policy-search')
     for capability_id in route.capability_ids:
         fragment_id = f'capability.{capability_id}'
         definition = definitions.get(fragment_id)
+        if (
+            definition is not None
+            and definition.applies_when.product_family
+            and route.product_family not in definition.applies_when.product_family
+        ):
+            continue
         if (
             route.task.value == 'evidence_history'
             and definition is not None

@@ -1,15 +1,18 @@
 import base64
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.knowledge import FixtureKnowledgeDocumentStore, FixtureKnowledgeRetriever
 from backend.adapters.model_gateway import (
     BedrockConverseModelGateway,
     GoogleGenerateContentModelGateway,
@@ -22,6 +25,7 @@ from backend.adapters.model_gateway import (
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, IdentityMode, Settings
 from backend.core.model_gateway import ConfigurationBackedModelGateway
+from backend.domain.agent_context_runtime import ContextReference
 from backend.domain.configuration import (
     ConfigurationImpact,
     ConfigurationRecord,
@@ -30,6 +34,7 @@ from backend.domain.configuration import (
 )
 from backend.domain.knowledge import (
     KnowledgeChunk,
+    KnowledgeRetrievalUnavailable,
     KnowledgeSearch,
 )
 from backend.domain.model_gateway import (
@@ -67,11 +72,14 @@ from backend.prompts import load_staff_assistant_prompt
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.release_set import ReleaseSetRepository
+from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.prompt_composer import load_response_schemas
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolver,
     RuntimeConfigurationSnapshot,
 )
+from tests.journey_v8_support import envelope
+from tests.test_agent_context_runtime_v7 import _context, _knowledge_chunk, _RecordingGateway
 
 
 def gateway_config(
@@ -2213,6 +2221,651 @@ class StaticKnowledgeRetriever:
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         self.requests.append(request)
         return self.chunks
+
+
+@pytest.mark.parametrize('clause_ids', [['MTR-BEN-03', 'UNKNOWN'], [], ['UNKNOWN']])
+@pytest.mark.parametrize(
+    ('schedule_sections', 'readable_sections'),
+    [
+        (['alternative_transport'], ['alternative transport']),
+        (
+            ['accidental_damage', 'third_party_liability'],
+            ['accidental damage', 'third party liability'],
+        ),
+    ],
+)
+def test_knowledge_grounded_lookup_selects_full_clauses_and_records_trace(
+    clause_ids: list[str],
+    schedule_sections: list[str],
+    readable_sections: list[str],
+) -> None:
+    context = _context('Will my policy pay for a rental car while mine is repaired?')
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+        claim=context.claim.model_copy(
+            update={
+                'form': {
+                    'claim.product_family': StructuredFormField(
+                        value='motor',
+                        source=FormSource.CLAIMANT,
+                        status=FormStatus.CONFIRMED,
+                        needed_for=NeededFor.CURRENT_ACTION,
+                        updated_at=datetime.now(UTC),
+                        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_v7'),
+                    ),
+                }
+            }
+        ),
+        policy_context_loader=lambda _limit: {
+            'status': 'evidence_found',
+            'facts': {'coverage_sections': schedule_sections},
+        },
+    )
+    text = 'A complete synthetic rental benefit. ' * 24 + 'Only if the schedule includes it.'
+    chunk = replace(
+        _knowledge_chunk(),
+        chunk_id='nw-policy-motor-standard#MTR-BEN-03',
+        version='2026.2',
+        section_path='MTR-BEN-03 - Hire car and rental car',
+        text=text,
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_selected_clauses',
+                        name='context.resolve',
+                        arguments={
+                            'ref': 'ctxref:ses_v7:policy.current',
+                            'selector': 'matching_facts_and_guidance',
+                            'max_tokens': 1200,
+                            'clause_ids': clause_ids,
+                        },
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='Staff can confirm the policy terms.'),
+            ),
+        ]
+    )
+    agent = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((chunk,)))
+    )
+    proposal = agent.propose_turn(context)
+    assert len(gateway.requests) == 2
+    assert gateway.requests[0].required_tool_name is None
+    initial = json.dumps([message.content for message in gateway.requests[0].messages])
+    assert 'policy_clause_directory' in initial
+    assert 'Hire car and rental car' in initial
+    tool_message = next(
+        message for message in gateway.requests[1].messages if message.role is ModelRole.TOOL
+    )
+    result = json.loads(str(tool_message.content))['content']
+    guidance = result['approved_guidance']
+    expected = ['MTR-BEN-03'] if 'MTR-BEN-03' in clause_ids else []
+    assert guidance['returned_clause_ids'] == expected
+    assert guidance['not_found'] == (['UNKNOWN'] if 'UNKNOWN' in clause_ids else [])
+    assert result['policy']['facts']['coverage_sections'] == readable_sections
+    if expected:
+        assert guidance['chunks'][0]['text'] == text
+        assert len(text) > 600
+        assert set(guidance['chunks'][0]) == {'chunk_id', 'text'}
+    else:
+        assert guidance['chunks'] == []
+    if not clause_ids:
+        assert guidance['guidance_status'] == 'no_clause_selected'
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_arguments['clause_ids'] == clause_ids
+    if clause_ids:
+        assert proposal.runtime_trace.tool_output['requested_clause_ids'] == clause_ids
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == expected
+    assert proposal.runtime_trace.tool_output['policy_clause_directory'] == [
+        {'clause_id': 'MTR-BEN-03', 'title': 'Hire car and rental car'}
+    ]
+
+
+@pytest.mark.parametrize(
+    'message',
+    [
+        'My policy number is NW-MTR-204518.',
+        'I covered the hole with a tarp.',
+    ],
+)
+def test_policy_keywords_do_not_force_a_context_lookup(message: str) -> None:
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='I have recorded that detail.'),
+            )
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway),
+        FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((_knowledge_chunk(),))),
+    ).propose_turn(_context(message))
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0].tools
+    assert gateway.requests[0].required_tool_name is None
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_name is None
+
+
+@pytest.mark.parametrize('history_first', [True, False])
+def test_mixed_history_and_policy_calls_are_rejected_without_replacing_resources(
+    history_first: bool,
+) -> None:
+    from backend.services.model_agent import _coalesce_context_resolve_calls
+
+    references = [
+        ContextReference(
+            ref='ctxref:history',
+            resource_type='claim_history',
+            version='1',
+            summary='Authorised history',
+            available_selectors=['summary'],
+            max_resolve_tokens=800,
+        ),
+        ContextReference(
+            ref='ctxref:policy',
+            resource_type='policy_version',
+            version='1',
+            summary='Authorised policy',
+            available_selectors=['matching_facts_and_guidance'],
+            max_resolve_tokens=2500,
+        ),
+    ]
+    calls = [
+        ModelToolCall(
+            call_id='history',
+            name='context.resolve',
+            arguments={
+                'ref': 'ctxref:history',
+                'selector': 'summary',
+                'max_tokens': 800,
+            },
+        ),
+        ModelToolCall(
+            call_id='policy',
+            name='context.resolve',
+            arguments={
+                'clause_ids': ['MTR-BEN-03'],
+            },
+        ),
+    ]
+    if not history_first:
+        calls.reverse()
+    response = ModelResponse(tool_calls=calls)
+    with pytest.raises(ModelGatewayError) as error:
+        _coalesce_context_resolve_calls(response, references)
+    assert error.value.diagnostic_code == 'context_resolution_multiple_resources'
+    assert response.tool_calls == calls
+    assert (
+        next(call for call in calls if call.call_id == 'history').arguments['ref']
+        == 'ctxref:history'
+    )
+
+
+@pytest.mark.parametrize(
+    'arguments',
+    [
+        {'ref': 'ctxref:unknown', 'clause_ids': ['MTR-BEN-03']},
+        {'ref': 'ctxref:policy', 'selector': 'unknown', 'clause_ids': ['MTR-BEN-03']},
+        {'ref': 'ctxref:history', 'selector': 'summary', 'clause_ids': ['MTR-BEN-03']},
+    ],
+)
+def test_clause_ids_do_not_override_explicit_resource_authority(
+    arguments: dict[str, object],
+) -> None:
+    from backend.services.model_agent import _coalesce_context_resolve_calls
+
+    references = [
+        ContextReference(
+            ref='ctxref:policy',
+            resource_type='policy_version',
+            version='1',
+            summary='Authorised policy',
+            available_selectors=['matching_facts_and_guidance'],
+            max_resolve_tokens=2500,
+        ),
+        ContextReference(
+            ref='ctxref:history',
+            resource_type='claim_history',
+            version='1',
+            summary='Authorised history',
+            available_selectors=['summary'],
+            max_resolve_tokens=800,
+        ),
+    ]
+    response = ModelResponse(
+        tool_calls=[
+            ModelToolCall(
+                call_id='lookup',
+                name='context.resolve',
+                arguments=arguments,
+            )
+        ]
+    )
+    with pytest.raises(ModelGatewayError) as error:
+        _coalesce_context_resolve_calls(response, references)
+    assert error.value.diagnostic_code == 'context_resolution_invalid'
+
+
+def test_parallel_policy_clause_calls_are_coalesced_into_one_lookup() -> None:
+    context = _context('What do the rental-car and claim-reporting clauses say?')
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+    )
+    chunks = tuple(
+        replace(
+            _knowledge_chunk(),
+            chunk_id=f'nw-policy-motor-standard#{clause_id}',
+            version='2026.2',
+            section_path=f'{clause_id} - {title}',
+            text=text,
+        )
+        for clause_id, title, text in (
+            ('MTR-BEN-03', 'Hire car', 'Rental cover may apply when the schedule lists it.'),
+            ('MTR-CLM-01', 'Reporting', 'Report the incident promptly.'),
+            ('MTR-EXC-01', 'Excess', 'The schedule states the applicable excess.'),
+        )
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_rental',
+                        name='context.resolve',
+                        arguments={'clause_ids': ['MTR-BEN-03']},
+                    ),
+                    ModelToolCall(
+                        call_id='call_reporting',
+                        name='context.resolve',
+                        arguments={
+                            'clause_ids': [
+                                'MTR-BEN-03',
+                                'MTR-CLM-01',
+                                'MTR-EXC-01',
+                                'MTR-COV-99',
+                            ]
+                        },
+                    ),
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='The returned wording is conditional.'),
+            ),
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore(chunks))
+    ).propose_turn(context)
+
+    assert len(gateway.requests) == 2
+    assistant = next(
+        message for message in gateway.requests[1].messages if message.role is ModelRole.ASSISTANT
+    )
+    assert len(assistant.tool_calls) == 1
+    assert assistant.tool_calls[0].arguments['clause_ids'] == [
+        'MTR-BEN-03',
+        'MTR-CLM-01',
+        'MTR-EXC-01',
+    ]
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_output['coalesced_tool_call_count'] == 2
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == [
+        'MTR-BEN-03',
+        'MTR-CLM-01',
+        'MTR-EXC-01',
+    ]
+
+
+@pytest.mark.parametrize('product', ['motor', 'home', 'contents'])
+def test_knowledge_grounded_lookup_fits_three_longest_current_clauses_with_schedule(
+    product: str,
+) -> None:
+    corpus = (
+        Path(__file__).resolve().parents[1]
+        / 'config'
+        / 'knowledge-source-corpus'
+        / f'northwind-{product}-standard-policy-2026.2.md'
+    ).read_text(encoding='utf-8')
+    sections = sorted(
+        re.finditer(r'(?ms)^## ([A-Z]{3}-[A-Z]+-\d+) - ([^\n]+)\n.*?(?=^## |\Z)', corpus),
+        key=lambda item: len(item.group()),
+        reverse=True,
+    )
+    assert len(sections) >= 3
+    selected = sections[:3]
+    clause_ids = [item.group(1) for item in selected]
+    context = _context('What does my policy say about this damage?', incident_type=product)
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+        claim=context.claim.model_copy(
+            update={
+                'form': {
+                    'claim.product_family': StructuredFormField(
+                        value=product,
+                        source=FormSource.CLAIMANT,
+                        status=FormStatus.CONFIRMED,
+                        needed_for=NeededFor.CURRENT_ACTION,
+                        updated_at=datetime.now(UTC),
+                        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_v7'),
+                    ),
+                }
+            }
+        ),
+        policy_context_loader=lambda _limit: {
+            'status': 'evidence_found',
+            'source_refs': ['ret_synthetic_policy'],
+            'facts': {
+                'policy_reference': 'NW-MTR-204518',
+                'product': product,
+                'status': 'active',
+                'effective_from': '2026-01-01T00:00:00Z',
+                'effective_to': '2027-01-01T00:00:00Z',
+                'excess_amount': 500,
+                'currency': 'NZD',
+                'coverage_sections': [
+                    'accidental_damage',
+                    'third_party_liability',
+                    'alternative_transport',
+                ],
+            },
+            'uncertainty': [],
+            'limitations': [],
+        },
+    )
+    chunks = tuple(
+        replace(
+            _knowledge_chunk(),
+            document_id=f'nw-policy-{product}-standard',
+            chunk_id=f'nw-policy-{product}-standard#{item.group(1)}',
+            product=product,
+            version='2026.2',
+            section_path=f'{item.group(1)} - {item.group(2)}',
+            text=item.group().strip(),
+        )
+        for item in selected
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_three_clauses',
+                        name='context.resolve',
+                        arguments={
+                            'ref': 'ctxref:ses_v7:policy.current',
+                            'selector': 'matching_facts_and_guidance',
+                            'max_tokens': 1200,
+                            'clause_ids': clause_ids,
+                        },
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='Staff can confirm the policy terms.'),
+            ),
+        ]
+    )
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore(chunks))
+    ).propose_turn(context)
+    tool_message = next(
+        message for message in gateway.requests[1].messages if message.role is ModelRole.TOOL
+    )
+    resolved = json.loads(str(tool_message.content))
+    assert resolved['actual_tokens'] <= 2500
+    guidance = resolved['content']['approved_guidance']
+    assert guidance['returned_clause_ids'] == clause_ids
+    assert [item['text'] for item in guidance['chunks']] == [
+        item.group().strip() for item in selected
+    ]
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_arguments['max_tokens'] == 2500
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == clause_ids
+
+
+@pytest.mark.parametrize(
+    ('arguments', 'expected_clause_ids'),
+    [
+        ({'clause_ids': ['MTR-BEN-03']}, ['MTR-BEN-03']),
+        ({'clause_ids': 'MTR-BEN-03'}, []),
+    ],
+)
+def test_policy_lookup_binds_reference_arguments_server_side(
+    arguments: dict[str, object], expected_clause_ids: list[str]
+) -> None:
+    context = _context('What does my policy say about rental cars?')
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+    )
+    chunk = replace(
+        _knowledge_chunk(),
+        chunk_id='nw-policy-motor-standard#MTR-BEN-03',
+        version='2026.2',
+        section_path='MTR-BEN-03 - Hire car and rental car',
+        text='A complete rental benefit with its schedule condition.',
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_missing_policy_reference',
+                        name='context.resolve',
+                        arguments=arguments,
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='Staff can confirm the policy terms.'),
+            ),
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((chunk,)))
+    ).propose_turn(context)
+
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_arguments == {
+        'clause_ids': expected_clause_ids,
+        'ref': 'ctxref:ses_v7:policy.current',
+        'selector': 'matching_facts_and_guidance',
+        'max_tokens': 2500,
+    }
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == expected_clause_ids
+
+
+def test_policy_clause_omitted_by_result_budget_cannot_be_cited() -> None:
+    context = _context('Will my policy pay for a rental car while mine is repaired?')
+    assert context.runtime_configuration_snapshot is not None
+    context = replace(
+        context,
+        runtime_configuration_snapshot=replace(
+            context.runtime_configuration_snapshot, release_set_id=None
+        ),
+    )
+    first = replace(
+        _knowledge_chunk(),
+        chunk_id='nw-policy-motor-standard#MTR-BEN-01',
+        version='2026.2',
+        section_path='MTR-BEN-01 - First benefit',
+        text='First complete clause. ' * 300,
+    )
+    omitted = replace(
+        _knowledge_chunk(),
+        chunk_id='nw-policy-motor-standard#MTR-BEN-02',
+        version='2026.2',
+        section_path='MTR-BEN-02 - Second benefit',
+        text='Second complete clause. ' * 300,
+    )
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_budgeted_clauses',
+                        name='context.resolve',
+                        arguments={
+                            'ref': 'ctxref:ses_v7:policy.current',
+                            'selector': 'matching_facts_and_guidance',
+                            'max_tokens': 400,
+                            'clause_ids': ['MTR-BEN-01', 'MTR-BEN-02'],
+                        },
+                    )
+                ],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output=envelope(reply='Staff can confirm the policy terms.')
+                | {'cited_sources': [omitted.chunk_id]},
+            ),
+        ]
+    )
+
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway),
+        FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((first, omitted))),
+    ).propose_turn(context)
+
+    assert proposal.validated_turn is not None
+    assert proposal.validated_turn.cited_clauses == ()
+    assert [source['chunk_id'] for source in proposal.validated_turn.policy_judgment_sources] == [
+        first.chunk_id
+    ]
+    assert proposal.runtime_trace is not None
+    assert proposal.runtime_trace.tool_output['returned_clause_ids'] == ['MTR-BEN-01']
+    assert proposal.runtime_trace.tool_output['not_included'] == [
+        {
+            'clause_id': 'MTR-BEN-02',
+            'reason': 'too long for this turn, request it on its own',
+        }
+    ]
+
+
+@pytest.mark.parametrize('failure', ['manifest', 'store', 'disabled', 'unresolved'])
+def test_knowledge_grounded_lookup_unavailable_has_no_citable_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    context = _context('What does my policy say?')
+    context = replace(context, runtime_configuration_snapshot=None)
+    if failure != 'unresolved':
+        context = replace(
+            context,
+            claim=context.claim.model_copy(
+                update={
+                    'form': {
+                        'claim.product_family': StructuredFormField(
+                            value='motor',
+                            source=FormSource.CLAIMANT,
+                            status=FormStatus.CONFIRMED,
+                            needed_for=NeededFor.CURRENT_ACTION,
+                            updated_at=datetime.now(UTC),
+                            updated_by=ActorReference(
+                                actor_type=ActorType.CLAIMANT, actor_id='cus_v7'
+                            ),
+                        ),
+                    }
+                }
+            ),
+        )
+    retriever = FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore())
+    if failure == 'manifest':
+        monkeypatch.setattr(
+            'backend.services.model_agent.approved_version_for_product', lambda _: None
+        )
+    elif failure == 'store':
+
+        def unavailable(_scope: KnowledgeSearch) -> list[KnowledgeChunk]:
+            raise KnowledgeRetrievalUnavailable('Synthetic outage')
+
+        monkeypatch.setattr(retriever, 'list_clauses', unavailable)
+        monkeypatch.setattr(retriever, 'get_clauses', lambda scope, _ids: unavailable(scope))
+    elif failure == 'disabled':
+        assert context.runtime_policy is not None
+        context = replace(
+            context,
+            runtime_policy=replace(
+                context.runtime_policy,
+                features=context.runtime_policy.features.model_copy(
+                    update={'knowledge_retrieval': False}
+                ),
+            ),
+        )
+    else:
+        context = replace(context, claim=context.claim.model_copy(update={'incident_type': None}))
+    agent = KnowledgeGroundedAgent(GatewayAgent(_RecordingGateway([])), retriever)
+    scope = agent._knowledge_scope(context)
+    directory = agent._clause_directory(scope)
+    result = agent._v7_knowledge_context(scope, 1200, ['MTR-BEN-03'])
+    assert directory['policy_clause_directory'] == []
+    assert result['chunks'] == []
+    assert result['returned_clause_ids'] == []
+    assert result['status'] == ('no_evidence' if failure == 'unresolved' else 'unavailable')
+
+
+def test_knowledge_scope_uses_recorded_unconfirmed_product_family() -> None:
+    context = _context('Will you pay for a rental car?', incident_type=None)
+    context = replace(
+        context,
+        runtime_configuration_snapshot=None,
+        claim=context.claim.model_copy(
+            update={
+                'form': {
+                    'claim.product_family': StructuredFormField(
+                        value='motor',
+                        source=FormSource.CLAIMANT,
+                        status=FormStatus.PROPOSED,
+                        needed_for=NeededFor.CURRENT_ACTION,
+                        updated_at=datetime.now(UTC),
+                        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_v7'),
+                    )
+                }
+            }
+        ),
+    )
+    agent = KnowledgeGroundedAgent(
+        GatewayAgent(_RecordingGateway([])),
+        FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore()),
+    )
+    scope = agent._knowledge_scope(context)
+    assert isinstance(scope, KnowledgeSearch)
+    assert scope.product == 'motor'
 
 
 def model_turn_output(

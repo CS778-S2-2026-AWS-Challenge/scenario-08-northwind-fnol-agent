@@ -1,8 +1,7 @@
 """Least-privilege execution for large, read-only Agent context tasks."""
 
 import json
-import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -34,31 +33,9 @@ from backend.domain.model_gateway import (
 from backend.services.agent import AgentTurnContext, published_prompt_version
 from backend.services.context_budget import build_request_budget
 from backend.services.context_resolver import resolver_for_turn
+from backend.services.validation_diagnostic import validation_path
 
 _SUMMARY_ADAPTER = TypeAdapter(V7SourcedSummaryProposal)
-
-
-def _validation_path(errors: Iterable[object]) -> str | None:
-    """Return only a bounded structural path, never provider validation text."""
-
-    first = next(iter(errors), None)
-    if not isinstance(first, dict):
-        return None
-    location = first.get('loc')
-    if not isinstance(location, tuple | list):
-        return None
-    if first.get('type') == 'extra_forbidden':
-        location = location[:-1]
-    parts: list[str] = []
-    for item in location:
-        if isinstance(item, int):
-            parts.append(f'[{item}]')
-        elif isinstance(item, str) and re.fullmatch(r'[A-Za-z0-9_-]+', item):
-            parts.append(item)
-        else:
-            return None
-    path = '.'.join(parts)
-    return path if 0 < len(path) <= 120 else None
 
 
 _ISOLATED_INSTRUCTION = (
@@ -191,7 +168,7 @@ def execute_isolated_context_plan(
         raise ModelGatewayError(
             ModelGatewayErrorCode.MALFORMED_RESPONSE,
             diagnostic_code='output_schema_validation',
-            diagnostic_path=_validation_path(error.errors()),
+            diagnostic_path=validation_path(error.errors()),
         ) from None
     allowed_refs = {item.ref for item in task.input_refs}
     if not set(parsed.source_refs).issubset(allowed_refs):

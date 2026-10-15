@@ -1863,13 +1863,51 @@ structured form fact or contents item attributed to an attachment must name that
 ID. It is persisted with `image` or `document` provenance and remains `proposed` for claimant
 confirmation.
 
-On the v7 Runtime path, Runtime builds the current Claim projection before transport. Ordinary
-profiles make one tool-free call. A lookup profile can resolve one published turn-scoped
-`context.resolve` reference and make one continuation call; the continuation exposes no tools.
+On the v7 Runtime path, Runtime builds the current Claim projection before transport. A
+resolved product family selects the claimant lookup profile on ordinary v8 turns, even without
+policy keywords, when the selected provider supports the required tool-result continuation. It
+offers one turn-scoped `context.resolve` reference; the model may answer without calling it or
+resolve once and make one continuation call. The continuation exposes no tools. When the provider
+cannot continue a tool result, Runtime keeps the ordinary intake or media profile, exposes no
+policy reference, and records the policy directory as unavailable with the provider-capability
+limitation. Other profiles retain their existing routing and tool behavior.
 Policy/RAG, claimant-owned Claim history, claimant-scoped Evidence history, and older messages use
 separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one isolated,
 mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
 rejected before Claim State mutation.
+
+Parallel `context.resolve` selections are combined only when every call identifies the same
+authorised policy reference and selector. Runtime deduplicates clause IDs and keeps at most three.
+An omitted reference can be bound to the sole authorised policy reference when clause IDs are
+provided; an explicit reference or selector is never replaced by a different resource.
+Mixed-resource parallel calls are rejected before resolution with
+`context_resolution_multiple_resources`; the single-lookup budget does not silently discard reads.
+
+For any v8 turn with a resolved product family and a compatible lookup profile,
+`policy_clause_directory` lists clause IDs and headings from the validated, scope-matching
+ingested policy. Its status and limitations are explicit when the source is unavailable. A
+provider without the required tool continuation receives an empty directory with status
+`unavailable`; the model must not answer from clause titles or its own policy knowledge. The turn
+pins the product, selected version and effective instant for both listing and fetching. A
+release-selected version remains authoritative; without one, the manifest must provide exactly
+one approved product version.
+
+`context.resolve` accepts optional `clause_ids` (at most three strings) for the policy selector
+`matching_facts_and_guidance`. The policy reference allows at most 2,500 tokens. Runtime returns
+as many selected clauses as fit in full alongside the separately retrieved schedule; it never
+substitutes a keyword hit for an unknown ID or truncates an exclusion.
+`approved_guidance.not_included` lists a clause that was too long for this turn and directs the
+model to request it on its own. `approved_guidance.not_found` lists unknown or out-of-scope IDs.
+Empty selection returns `status: no_evidence`,
+`guidance_status: no_clause_selected`, and no chunks. Unavailable sources remain unavailable.
+An oversized policy selection remains a successful, resumable lookup rather than failing the turn.
+The model-visible chunk contains its `chunk_id` and complete `text`; Runtime retains the full
+document, version, source URI, checksum, and section provenance server-side for citation checks.
+Empty schedule metadata arrays are omitted from the bounded result. Schedule coverage-section codes
+are rendered as readable names in the model-facing tool result; stored facts retain their codes.
+Runtime trace records requested and returned clause IDs separately. Only chunks actually returned
+during this turn authorize citations or advisory policy judgments.
+The internal search endpoint and its keyword ranking retain their existing contract.
 For an intake proposal, Runtime compiles one `TurnFieldContract` from the exact branch evaluation
 and Field Registry snapshot used by that turn. Its contract identity, registry version, branch
 revision, allowed field codes, value types, and enum values drive the prompt projection, provider
@@ -4022,9 +4060,9 @@ Request:
   "question": "How much excess do I have to pay?",
   "jurisdiction": "NZ",
   "visibility": "customer_and_staff",
-  "document_id": "nw-policy-motor-standard-mvp-2026-1",
+  "document_id": "nw-policy-motor-standard",
   "authority": "northwind_synthetic_demo",
-  "version": "MVP-2026.1",
+  "version": "2026.2",
   "insurer": "Northwind Insurance",
   "product": "motor",
   "effective_at": "2026-08-25T00:00:00Z",
@@ -4054,13 +4092,13 @@ Response excerpt:
   "errors": [],
   "results": [
     {
-      "document_id": "nw-policy-motor-standard-mvp-2026-1",
-      "chunk_id": "nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01",
+      "document_id": "nw-policy-motor-standard",
+      "chunk_id": "nw-policy-motor-standard#MTR-EXC-01",
       "title": "Northwind Motor Standard Policy",
-      "section_path": "MTR-EXC-01 - Excesses",
-      "source_uri": "northwind://synthetic-policy/motor/MVP-2026.1",
-      "version": "MVP-2026.1",
-      "checksum": "a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989",
+      "section_path": "MTR-EXC-01 - Excess amounts and not-at-fault claims",
+      "source_uri": "northwind://synthetic-policy/motor/2026.2",
+      "version": "2026.2",
+      "checksum": "efde65a968727e1c71fd8ae116e011afff694f549b3577e45fcf5dd99d9b8cd5",
       "text": "The base excess and any driver, age, use, or other additional excess come only from the matching policy schedule."
     }
   ],

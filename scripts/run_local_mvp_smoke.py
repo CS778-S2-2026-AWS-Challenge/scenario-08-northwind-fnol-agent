@@ -129,7 +129,7 @@ def _first_process(run_id: str) -> tuple[str, str, str, int, list[str], str]:
                     'jurisdiction': 'NZ',
                     'visibility': 'customer_and_staff',
                     'authority': 'northwind_synthetic_demo',
-                    'version': 'MVP-2026.1',
+                    'version': '2026.2',
                     'insurer': 'Northwind Insurance',
                     'product': 'motor',
                     'effective_at': datetime.now(UTC).isoformat(),

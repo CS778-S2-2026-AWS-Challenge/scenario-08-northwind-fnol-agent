@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from hashlib import sha256
 
@@ -207,6 +207,68 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
             ) from error
         scored.sort(key=lambda item: (-item[1], -item[0], item[2].chunk_id))
         return [chunk for _, _, chunk in scored[: request.limit]]
+
+    def list_clauses(self, scope: KnowledgeSearch) -> list[KnowledgeChunk]:
+        """List applicable clauses after validating their governed ingestion state.
+
+        Args:
+            scope: Exact metadata filters; text and limit are ignored.
+
+        Returns:
+            Applicable full chunks in catalogue and index order.
+
+        Raises:
+            KnowledgeRetrievalUnavailable: An applicable index cannot be read safely.
+        """
+        if (
+            scope.authority is None
+            or scope.version is None
+            or scope.insurer is None
+            or scope.product is None
+            or scope.effective_at is None
+        ):
+            return []
+        chunks: list[KnowledgeChunk] = []
+        try:
+            for source in self._sources:
+                if not self._source_is_applicable(source, scope):
+                    continue
+                chunks.extend(
+                    chunk
+                    for chunk in self._validated_chunks(source)
+                    if chunk.clause_id is not None and self._applicable(chunk, scope)
+                )
+        except KnowledgeObjectStoreUnavailable as error:
+            raise KnowledgeRetrievalUnavailable('The knowledge service is unavailable.') from error
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            raise KnowledgeRetrievalUnavailable(
+                'The knowledge index is invalid or unavailable.'
+            ) from error
+        return chunks
+
+    def get_clauses(
+        self, scope: KnowledgeSearch, clause_ids: Sequence[str]
+    ) -> list[KnowledgeChunk]:
+        """Read selected full clauses without bypassing scope or ingestion checks.
+
+        Args:
+            scope: Exact metadata filters; text and limit are ignored.
+            clause_ids: Chunk ID suffixes after '#', in requested order.
+
+        Returns:
+            Full chunks in requested order without duplicate or unknown IDs.
+
+        Raises:
+            KnowledgeRetrievalUnavailable: An applicable index cannot be read safely.
+        """
+        if not clause_ids:
+            return []
+        chunks_by_clause = {chunk.clause_id: chunk for chunk in self.list_clauses(scope)}
+        return [
+            chunks_by_clause[clause_id]
+            for clause_id in dict.fromkeys(clause_ids)
+            if clause_id in chunks_by_clause and clause_id != ''
+        ]
 
     def _validated_chunks(self, source: KnowledgeSource) -> list[KnowledgeChunk]:
         payload = self._store.read(self._chunks_key(source))

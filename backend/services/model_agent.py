@@ -1,6 +1,6 @@
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from time import perf_counter
@@ -10,6 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from backend.domain.agent_context_runtime import (
     ContextBudgetPolicy,
+    ContextReference,
     ModelRequestBudget,
     PlannedModelTurn,
     TurnTask,
@@ -67,11 +68,8 @@ from backend.services.agent import (
 )
 from backend.services.context_budget import build_request_budget
 from backend.services.context_planner import ContextBudgetExceeded
-from backend.services.context_resolver import resolver_for_turn
-from backend.services.isolated_context_executor import (
-    _validation_path,
-    execute_isolated_context_plan,
-)
+from backend.services.context_resolver import ContextResultBudgetExceeded, resolver_for_turn
+from backend.services.isolated_context_executor import execute_isolated_context_plan
 from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.model_request_planner import (
@@ -91,6 +89,7 @@ from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
     RuntimeConfigurationResolver,
 )
+from backend.services.turn_family_resolution import resolve_turn_family
 from backend.services.turn_field_contract import bind_provider_schema
 from backend.services.turn_proposal_validation import (
     ValidatedTurn,
@@ -98,11 +97,78 @@ from backend.services.turn_proposal_validation import (
     truthful_reply,
     validate_turn_proposal,
 )
+from backend.services.validation_diagnostic import validation_path
 
 logger = logging.getLogger(__name__)
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
+
+
+def _coalesce_context_resolve_calls(
+    response: ModelResponse, references: Sequence[ContextReference]
+) -> tuple[ModelResponse, int]:
+    """Merge parallel policy clause selections into one bounded resolver call."""
+
+    calls = response.tool_calls
+    if not calls:
+        return response, 0
+    if any(call.name != 'context.resolve' for call in calls):
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+            diagnostic_code='initial_tool_name' if len(calls) == 1 else 'initial_tool_call_count',
+            diagnostic_path='tool_calls.0.name' if len(calls) == 1 else 'tool_calls',
+        )
+    authorised = {item.ref: item for item in references}
+    policy_references = [item for item in references if item.resource_type == 'policy_version']
+    normalized_calls = []
+    resources = []
+    for call in calls:
+        arguments = dict(call.arguments)
+        ref = arguments.get('ref')
+        if ref is None and 'clause_ids' in arguments and len(policy_references) == 1:
+            ref = policy_references[0].ref
+        reference = authorised.get(ref) if isinstance(ref, str) else None
+        selector = arguments.get('selector')
+        if reference is not None and selector is None and len(reference.available_selectors) == 1:
+            selector = reference.available_selectors[0]
+        if reference is None or selector not in reference.available_selectors:
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                diagnostic_code='context_resolution_invalid',
+                diagnostic_path='context.resolve.arguments',
+            )
+        if 'clause_ids' in arguments and reference.resource_type != 'policy_version':
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                diagnostic_code='context_resolution_invalid',
+                diagnostic_path='context.resolve.arguments',
+            )
+        arguments['ref'] = ref
+        arguments['selector'] = selector
+        normalized_calls.append(call.model_copy(update={'arguments': arguments}))
+        resources.append((reference.resource_type, ref, selector))
+    if len(calls) == 1:
+        return response.model_copy(update={'tool_calls': normalized_calls}), 1
+    if resources[0][0] != 'policy_version' or any(item != resources[0] for item in resources):
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+            diagnostic_code='context_resolution_multiple_resources',
+            diagnostic_path='tool_calls',
+        )
+    clause_ids: list[str] = []
+    for call in normalized_calls:
+        selected = call.arguments.get('clause_ids')
+        if not isinstance(selected, list | tuple):
+            continue
+        for clause_id in selected:
+            if isinstance(clause_id, str) and clause_id not in clause_ids:
+                clause_ids.append(clause_id)
+    arguments = dict(normalized_calls[0].arguments)
+    if clause_ids:
+        arguments['clause_ids'] = clause_ids[:3]
+    normalized = calls[0].model_copy(update={'arguments': arguments})
+    return response.model_copy(update={'tool_calls': [normalized]}), len(calls)
 
 
 def _merge_field_contract_repair(
@@ -407,7 +473,9 @@ class GatewayAgent:
             response_schema=plan.response_schema,
             tools=tools,
             required_tool_name=(
-                'context.resolve' if tools and plan.schema_id != 'claimant.turn.v1' else None
+                'context.resolve'
+                if tools and plan.request_profile.requires_tool_continuation
+                else None
             ),
             max_output_tokens=plan.request_profile.output_limit,
         )
@@ -428,7 +496,7 @@ class GatewayAgent:
         repair_outcome: RepairOutcome | None = None,
         field_contract_violations: list[dict[str, str]] | None = None,
         authorized_policy_sources: list[dict[str, object]] | None = None,
-        diagnostic_stage: str | None = None,
+        diagnostic_stage: str = 'initial',
     ) -> AgentProposal:
         if response.structured_output is None:
             logger.warning(
@@ -445,11 +513,7 @@ class GatewayAgent:
             )
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
-                diagnostic_code=(
-                    'consistency_recall_output_missing'
-                    if diagnostic_stage == 'consistency_recall'
-                    else None
-                ),
+                diagnostic_code=f'{diagnostic_stage}_output_missing',
             )
         raw_output = dict(response.structured_output)
         try:
@@ -482,12 +546,8 @@ class GatewayAgent:
             )
             raise ModelGatewayError(
                 ModelGatewayErrorCode.MALFORMED_RESPONSE,
-                diagnostic_code=(
-                    'consistency_recall_output_schema_validation'
-                    if diagnostic_stage == 'consistency_recall'
-                    else None
-                ),
-                diagnostic_path=_validation_path(error.errors()) if diagnostic_stage else None,
+                diagnostic_code=f'{diagnostic_stage}_output_schema_validation',
+                diagnostic_path=validation_path(error.errors()),
             ) from None
 
         if isinstance(parsed, V8TurnProposal):
@@ -794,14 +854,31 @@ class GatewayAgent:
         # Capture only guidance actually fetched through the server-authorized
         # context loader in this turn, never model-supplied tool/source strings.
         judgment_sources: list[dict[str, object]] = []
+        judgment_source_candidates: dict[str, dict[str, object]] = {}
         knowledge_loader = context.knowledge_context_loader
         if knowledge_loader is not None:
 
-            def load_judgment_guidance(max_tokens: int) -> dict[str, object]:
-                result = knowledge_loader(max_tokens)
+            def load_judgment_guidance(
+                max_tokens: int, clause_ids: Sequence[str]
+            ) -> dict[str, object]:
+                result = knowledge_loader(max_tokens, clause_ids)
                 chunks = result.get('chunks')
                 if result.get('status') == 'evidence_found' and isinstance(chunks, list):
-                    judgment_sources.extend(dict(item) for item in chunks if isinstance(item, dict))
+                    for item in chunks:
+                        if isinstance(item, dict) and isinstance(item.get('chunk_id'), str):
+                            judgment_source_candidates[item['chunk_id']] = dict(item)
+                    # Citation provenance stays server-side; the model needs the
+                    # selected clause identity and its complete wording.
+                    return {
+                        'guidance_status': result['guidance_status'],
+                        'returned_clause_ids': result['returned_clause_ids'],
+                        'not_found': result['not_found'],
+                        'chunks': [
+                            {'chunk_id': item['chunk_id'], 'text': item['text']}
+                            for item in chunks
+                            if isinstance(item, dict)
+                        ],
+                    }
                 return result
 
             context = replace(context, knowledge_context_loader=load_judgment_guidance)
@@ -924,11 +1001,16 @@ class GatewayAgent:
         tool_call_id: str | None = None
         tool_arguments: dict[str, object] = {}
         tool_output: dict[str, object] = {}
+        if 'policy_clause_directory' in plan.context_plan.inline_context:
+            tool_output['policy_clause_directory'] = plan.context_plan.inline_context[
+                'policy_clause_directory'
+            ]
         response: ModelResponse | None = None
         request_budgets = [plan.request_budget]
         context_sizes = _model_context_size_metrics(context, context_json)
         recall_started = False
         recall_response_received = False
+        response_stage = 'initial'
         try:
             request = self._v7_request(
                 plan,
@@ -945,6 +1027,11 @@ class GatewayAgent:
                 exchange_completion,
             )
             invocations.append(_runtime_invocation_trace(1, response, observations[-1].latency_ms))
+            response, selected_tool_call_count = _coalesce_context_resolve_calls(
+                response, plan.context_plan.references
+            )
+            if selected_tool_call_count > 1:
+                tool_output['coalesced_tool_call_count'] = selected_tool_call_count
             # Ordinary claimant turns offer read-only references; the model may
             # answer without consulting them. Evidence-action envelopes still
             # require their source lookup before proposing reuse or removal.
@@ -953,26 +1040,57 @@ class GatewayAgent:
                 and plan.schema_id != 'claimant.turn.v1'
                 and not response.tool_calls
             ):
-                raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                raise ModelGatewayError(
+                    ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                    diagnostic_code='initial_tool_call_required',
+                    diagnostic_path='tool_calls',
+                )
             if response.tool_calls:
-                if (
-                    len(response.tool_calls) != 1
-                    or response.tool_calls[0].name != 'context.resolve'
-                    or plan.request_profile.max_model_invocations != 2
-                ):
-                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                if response.tool_calls[0].name != 'context.resolve':
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                        diagnostic_code='initial_tool_name',
+                        diagnostic_path='tool_calls.0.name',
+                    )
+                if plan.request_profile.max_model_invocations != 2:
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                        diagnostic_code='request_profile_invocation_limit',
+                        diagnostic_path='request_profile.max_model_invocations',
+                    )
                 tool_call = response.tool_calls[0]
                 tool_call_id = tool_call.call_id
                 tool_arguments = dict(tool_call.arguments)
+                policy_references = [
+                    item
+                    for item in plan.context_plan.references
+                    if item.resource_type == 'policy_version'
+                ]
+                if len(policy_references) == 1:
+                    policy_reference = policy_references[0]
+                    if tool_arguments.get('ref') == policy_reference.ref:
+                        tool_arguments['ref'] = policy_reference.ref
+                        if len(policy_reference.available_selectors) == 1:
+                            tool_arguments['selector'] = policy_reference.available_selectors[0]
+                        # The complete-clause budget is a server safety boundary. A model-selected
+                        # lower value can omit the final exclusions or schedule condition.
+                        tool_arguments['max_tokens'] = policy_reference.max_resolve_tokens
+                        clause_ids = tool_arguments.get('clause_ids', [])
+                        if (
+                            not isinstance(clause_ids, list | tuple)
+                            or len(clause_ids) > 3
+                            or any(not isinstance(item, str) for item in clause_ids)
+                        ):
+                            tool_arguments['clause_ids'] = []
                 try:
                     if context.progress_reporter is not None:
                         context.progress_reporter(
                             AgentTurnProgressStage.TOOL_RUNNING,
                             'context.resolve',
                         )
-                    ref = str(tool_call.arguments['ref'])
-                    selector = str(tool_call.arguments['selector'])
-                    raw_max_tokens = tool_call.arguments['max_tokens']
+                    ref = str(tool_arguments['ref'])
+                    selector = str(tool_arguments['selector'])
+                    raw_max_tokens = tool_arguments['max_tokens']
                     if isinstance(raw_max_tokens, bool) or not isinstance(
                         raw_max_tokens, str | int
                     ):
@@ -982,9 +1100,20 @@ class GatewayAgent:
                         ref,
                         selector,
                         max_tokens,
+                        clause_ids=cast(Sequence[str], tool_arguments.get('clause_ids', [])),
                     )
-                except (KeyError, TypeError, ValueError) as error:
-                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from error
+                except ContextResultBudgetExceeded:
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                        diagnostic_code='context_result_budget_exceeded',
+                        diagnostic_path='context.resolve.max_tokens',
+                    ) from None
+                except (KeyError, TypeError, ValueError):
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                        diagnostic_code='context_resolution_invalid',
+                        diagnostic_path='context.resolve.arguments',
+                    ) from None
                 continuation_tool_output = {
                     'ref': resolved.ref,
                     'selector': resolved.selector,
@@ -994,10 +1123,36 @@ class GatewayAgent:
                     'actual_tokens': resolved.actual_tokens,
                 }
                 tool_output = {
-                    key: value
-                    for key, value in continuation_tool_output.items()
-                    if key != 'content'
+                    **tool_output,
+                    **{
+                        key: value
+                        for key, value in continuation_tool_output.items()
+                        if key != 'content'
+                    },
                 }
+                if isinstance(resolved.content, dict):
+                    guidance = resolved.content.get('approved_guidance')
+                    if isinstance(guidance, dict):
+                        returned_chunks = guidance.get('chunks')
+                        if isinstance(returned_chunks, list):
+                            judgment_sources.clear()
+                            judgment_sources.extend(
+                                judgment_source_candidates[item['chunk_id']]
+                                for item in returned_chunks
+                                if isinstance(item, dict)
+                                and isinstance(item.get('chunk_id'), str)
+                                and item['chunk_id'] in judgment_source_candidates
+                            )
+                        if 'clause_ids' in tool_arguments:
+                            tool_output['requested_clause_ids'] = tool_arguments['clause_ids']
+                        for key in (
+                            'returned_clause_ids',
+                            'not_found',
+                            'not_included',
+                            'guidance_status',
+                        ):
+                            if key in guidance:
+                                tool_output[key] = guidance[key]
                 continuation_messages = [
                     *messages,
                     ModelMessage(
@@ -1049,11 +1204,16 @@ class GatewayAgent:
                     observations,
                     exchange_completion,
                 )
+                response_stage = 'continuation'
                 invocations.append(
                     _runtime_invocation_trace(2, response, observations[-1].latency_ms)
                 )
                 if response.tool_calls:
-                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+                        diagnostic_code='continuation_tool_call',
+                        diagnostic_path='tool_calls',
+                    )
             if response.completion_status is ModelCompletionStatus.INCOMPLETE:
                 raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
             if response.completion_status is ModelCompletionStatus.REFUSED:
@@ -1084,6 +1244,7 @@ class GatewayAgent:
                     tool_output=tool_output,
                     started_at=started_at,
                     request_budgets=request_budgets,
+                    diagnostic_stage=response_stage,
                 )
                 validated_turn = result.validated_turn
                 review = (
@@ -1201,6 +1362,11 @@ class GatewayAgent:
                         raise ModelGatewayError(
                             ModelGatewayErrorCode.MALFORMED_RESPONSE,
                             diagnostic_code='consistency_recall_truthfulness',
+                            diagnostic_path=(
+                                'reply.' + second_review.inconsistencies[0].kind
+                                if second_review.inconsistencies
+                                else 'reply'
+                            ),
                         )
             except TurnFieldContractViolation as contract_error:
                 if plan.schema_id == 'claimant.turn.v1':
@@ -1218,7 +1384,13 @@ class GatewayAgent:
                     # noise: fail through persist-first recovery rather than
                     # spend another model call on a repair.
                     raise ModelGatewayError(
-                        ModelGatewayErrorCode.MALFORMED_RESPONSE
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                        diagnostic_code=f'{response_stage}_field_contract_violation',
+                        diagnostic_path=(
+                            f'field_changes.{contract_error.violations[0].field_code}'
+                            if contract_error.violations
+                            else 'field_changes'
+                        ),
                     ) from contract_error
                 violations = [item.model_dump(mode='json') for item in contract_error.violations]
                 logger.info(
@@ -1386,6 +1558,7 @@ class GatewayAgent:
                         repair_attempted=True,
                         repair_outcome='corrected',
                         field_contract_violations=violations,
+                        diagnostic_stage='field_contract_repair',
                     )
                 except TurnFieldContractViolation:
                     logger.info(
@@ -1401,6 +1574,9 @@ class GatewayAgent:
                     )
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
         except ModelGatewayError as error:
+            if error.diagnostic_code is not None and error.diagnostic_code.startswith('proposal_'):
+                stage = 'consistency_recall' if recall_started else response_stage
+                error.diagnostic_code = f'{stage}_{error.diagnostic_code}'
             if recall_started and error.diagnostic_code is None:
                 if recall_response_received:
                     error.diagnostic_code = 'consistency_recall_proposal_validation'
@@ -1408,6 +1584,11 @@ class GatewayAgent:
                     error.diagnostic_code = 'consistency_recall_provider_output_invalid'
                 else:
                     error.diagnostic_code = 'consistency_recall_gateway_failure'
+            elif (
+                error.diagnostic_code is None
+                and error.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+            ):
+                error.diagnostic_code = f'{response_stage}_response_validation'
             self._record_observations(observations, context_sizes, error)
             raise
         self._record_observations(observations, context_sizes)
@@ -1456,11 +1637,7 @@ class KnowledgeGroundedAgent:
         self._knowledge_catalog = knowledge_catalog
         self._runtime_configuration_resolver = runtime_configuration_resolver
 
-    def _v7_knowledge_context(
-        self,
-        context: AgentTurnContext,
-        max_tokens: int,
-    ) -> dict[str, object]:
+    def _knowledge_scope(self, context: AgentTurnContext) -> KnowledgeSearch | dict[str, object]:
         if (
             context.runtime_policy is not None
             and not context.runtime_policy.features.knowledge_retrieval
@@ -1470,12 +1647,18 @@ class KnowledgeGroundedAgent:
                 'chunks': [],
                 'limitations': ['Knowledge retrieval is disabled by published configuration.'],
             }
-        product = _knowledge_product(context.claim.incident_type)
+        resolution = context.turn_family_resolution or resolve_turn_family(
+            context.claim,
+            context.branch_evaluation,
+            context.message_text,
+            model_family_judgment=True,
+        )
+        product = _knowledge_product(resolution.product_family)
         if product is None:
             return {
                 'status': 'no_evidence',
                 'chunks': [],
-                'limitations': ['A confirmed product family is required for scoped search.'],
+                'limitations': ['A resolved product family is required for scoped search.'],
             }
         resolution_error = False
         if (
@@ -1519,37 +1702,87 @@ class KnowledgeGroundedAgent:
                     f'The approved knowledge manifest has no single version for {product}.'
                 ],
             }
+        return KnowledgeSearch(
+            text='',
+            jurisdiction='NZ',
+            visibility='customer_and_staff',
+            authority='northwind_synthetic_demo',
+            version=knowledge_version,
+            insurer='Northwind Insurance',
+            product=product,
+            effective_at=datetime.now(UTC),
+            limit=3,
+        )
+
+    def _clause_directory(self, scope: KnowledgeSearch | dict[str, object]) -> dict[str, object]:
+        if isinstance(scope, dict):
+            return {
+                'policy_clause_directory': [],
+                'guidance_status': scope['status'],
+                'limitations': scope['limitations'],
+            }
         try:
-            chunks = self._retriever.search(
-                KnowledgeSearch(
-                    text=(context.message_text or '').strip(),
-                    jurisdiction='NZ',
-                    visibility='customer_and_staff',
-                    authority='northwind_synthetic_demo',
-                    version=knowledge_version,
-                    insurer='Northwind Insurance',
-                    product=product,
-                    effective_at=datetime.now(UTC),
-                    limit=3,
-                )
-            )
+            chunks = self._retriever.list_clauses(scope)
         except KnowledgeRetrievalUnavailable:
             return {
+                'policy_clause_directory': [],
+                'guidance_status': 'unavailable',
+                'limitations': ['Approved knowledge retrieval is temporarily unavailable.'],
+            }
+        return {
+            'policy_clause_directory': [
+                {
+                    'clause_id': chunk.clause_id,
+                    'title': chunk.section_path.partition(' - ')[2],
+                }
+                for chunk in chunks
+            ],
+            'guidance_status': 'available' if chunks else 'no_evidence',
+            'limitations': [],
+        }
+
+    def _v7_knowledge_context(
+        self,
+        scope: KnowledgeSearch | dict[str, object],
+        max_tokens: int,
+        clause_ids: Sequence[str],
+    ) -> dict[str, object]:
+        # The resolver enforces the complete structured-result budget. Never cut
+        # a clause: its final sentence can carry an exclusion or schedule condition.
+        del max_tokens
+        requested = list(dict.fromkeys(clause_ids))
+        trace: dict[str, object] = {
+            'requested_clause_ids': requested,
+            'returned_clause_ids': [],
+            'not_found': [],
+        }
+        if isinstance(scope, dict):
+            return {**scope, **trace, 'guidance_status': scope['status']}
+        if not requested:
+            return {
+                **trace,
+                'status': 'no_evidence',
+                'guidance_status': 'no_clause_selected',
+                'chunks': [],
+                'limitations': [],
+            }
+        try:
+            chunks = self._retriever.get_clauses(scope, requested)
+        except KnowledgeRetrievalUnavailable:
+            return {
+                **trace,
                 'status': 'unavailable',
+                'guidance_status': 'unavailable',
                 'chunks': [],
                 'limitations': ['Approved knowledge retrieval is temporarily unavailable.'],
             }
-        if not chunks:
-            return {
-                'status': 'no_evidence',
-                'chunks': [],
-                'limitations': [
-                    'No applicable approved knowledge was found for the supplied scope and date.'
-                ],
-            }
-        max_chars_per_chunk = max(120, max_tokens * 3 // len(chunks))
+        returned = [chunk.clause_id for chunk in chunks]
         return {
-            'status': 'evidence_found',
+            'status': 'evidence_found' if chunks else 'no_evidence',
+            'guidance_status': 'evidence_found' if chunks else 'no_evidence',
+            'requested_clause_ids': requested,
+            'returned_clause_ids': returned,
+            'not_found': [clause_id for clause_id in requested if clause_id not in returned],
             'chunks': [
                 {
                     'document_id': chunk.document_id,
@@ -1559,7 +1792,7 @@ class KnowledgeGroundedAgent:
                     'source_uri': chunk.source_uri,
                     'version': chunk.version,
                     'checksum': chunk.checksum,
-                    'text': chunk.text[:max_chars_per_chunk],
+                    'text': chunk.text,
                 }
                 for chunk in chunks
             ],
@@ -1572,11 +1805,21 @@ class KnowledgeGroundedAgent:
             and context.runtime_policy.instruction.prompt_version == CLAIMANT_V8_PROMPT_ID
         ):
             source_context = context
+            scope: KnowledgeSearch | dict[str, object] | None = None
+
+            def turn_scope() -> KnowledgeSearch | dict[str, object]:
+                nonlocal scope
+                if scope is None:
+                    scope = self._knowledge_scope(source_context)
+                return scope
+
             context = replace(
                 context,
-                knowledge_context_loader=lambda max_tokens: self._v7_knowledge_context(
-                    source_context,
+                knowledge_clause_directory_loader=lambda: self._clause_directory(turn_scope()),
+                knowledge_context_loader=lambda max_tokens, clause_ids: self._v7_knowledge_context(
+                    turn_scope(),
                     max_tokens,
+                    clause_ids,
                 ),
             )
         return self._provider.propose_turn(context)

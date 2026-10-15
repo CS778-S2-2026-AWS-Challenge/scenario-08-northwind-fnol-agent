@@ -266,20 +266,20 @@ def test_no_business_seed_cannot_load_builtin_accounts_or_policies(
         (
             'motor',
             'The base excess',
-            'nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01',
-            'a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989',
+            'nw-policy-motor-standard#MTR-EXC-01',
+            'efde65a968727e1c71fd8ae116e011afff694f549b3577e45fcf5dd99d9b8cd5',
         ),
         (
             'home',
             'Gradual damage is generally excluded',
-            'nw-policy-home-standard-mvp-2026-1#HOM-BEN-03',
-            '1240612470e1ea03800e87fe6f48b24aa895559f9498daaeffd3d3be13c4eea7',
+            'nw-policy-home-standard#HOM-BEN-03',
+            '0648f1199100b63c78e95d0abc401e9dac4a7fb202f6187a8d637b49a28025b1',
         ),
         (
             'contents',
             'The claimant should first protect people',
-            'nw-policy-contents-standard-mvp-2026-1#CON-CLM-01',
-            '041fd8fbf9eafaa2cd1ff13e2998c57ee725f5e32bf61c429abfe4272b87cf40',
+            'nw-policy-contents-standard#CON-CLM-01',
+            'd94ef0d9bd9870aec8cb7147ebfc9310395fdbcdaf1cc48ca4d40276b811ac21',
         ),
     ],
 )
@@ -297,7 +297,7 @@ def test_fixture_profile_returns_approved_citation_cases(
             jurisdiction='NZ',
             visibility='customer_and_staff',
             authority='northwind_synthetic_demo',
-            version='MVP-2026.1',
+            version='2026.2',
             insurer='Northwind Insurance',
             product=product,
             effective_at=datetime(2026, 8, 27, tzinfo=UTC),
@@ -311,7 +311,7 @@ def test_fixture_profile_returns_approved_citation_cases(
     assert citation.chunk_id == chunk_id
     assert citation.document_id == chunk_id.split('#', 1)[0]
     assert citation.source_uri.startswith('northwind://synthetic-policy/')
-    assert citation.version == 'MVP-2026.1'
+    assert citation.version == '2026.2'
     assert citation.checksum == checksum
     assert citation.section_path
     assert citation.text

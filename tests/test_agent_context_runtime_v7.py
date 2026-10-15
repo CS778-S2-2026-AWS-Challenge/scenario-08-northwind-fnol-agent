@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -62,8 +63,7 @@ from backend.domain.prompt_pack import (
 from backend.services.agent import AgentEvidenceReference, AgentTurnContext
 from backend.services.context_budget import estimate_json_tokens
 from backend.services.context_planner import ContextBudgetExceeded, plan_context
-from backend.services.context_resolver import TurnContextResolver
-from backend.services.isolated_context_executor import _validation_path
+from backend.services.context_resolver import TurnContextResolver, resolver_for_turn
 from backend.services.model_agent import GatewayAgent
 from backend.services.model_request_planner import plan_model_turn
 from backend.services.prompt_composer import (
@@ -87,6 +87,7 @@ from backend.services.runtime_agent_policy import (
 )
 from backend.services.runtime_configuration import RuntimeConfigurationSnapshot
 from backend.services.turn_router import route_turn
+from backend.services.validation_diagnostic import validation_path
 
 
 def _claim(*, incident_type: str | None = 'motor') -> WorkingClaim:
@@ -879,6 +880,240 @@ def test_context_reference_resolver_enforces_manifest_selector_and_limit() -> No
     with pytest.raises(ValueError, match='stale'):
         stale.resolve(reference.ref, 'page', 8)
 
+    unavailable = TurnContextResolver([reference], {})
+    with pytest.raises(ValueError, match='unavailable'):
+        unavailable.resolve(reference.ref, 'page', 8)
+
+
+@pytest.mark.parametrize('clause_ids', [['a', 'b', 'c', 'd'], [1], 'MOTOR-001', None])
+def test_policy_resolver_rejects_malformed_clause_selection(clause_ids: object) -> None:
+    reference = ContextReference(
+        ref='ctxref:policy',
+        resource_type='policy_version',
+        version='v1',
+        summary='Policy',
+        available_selectors=['clauses'],
+        max_resolve_tokens=2500,
+    )
+    resolver = TurnContextResolver([reference], {(reference.ref, 'clauses'): {}})
+    with pytest.raises(ValueError, match='at most three strings'):
+        resolver.resolve(reference.ref, 'clauses', 2500, clause_ids)  # type: ignore[arg-type]
+
+
+def test_policy_clause_selection_cannot_be_used_on_history_reference() -> None:
+    reference = ContextReference(
+        ref='ctxref:history',
+        resource_type='message_range',
+        version='v1',
+        summary='History',
+        available_selectors=['page'],
+        max_resolve_tokens=600,
+    )
+    resolver = TurnContextResolver([reference], {(reference.ref, 'page'): {}})
+    with pytest.raises(ValueError, match='not permitted'):
+        resolver.resolve(reference.ref, 'page', 600, ['MOTOR-001'])
+
+
+@pytest.mark.parametrize('selected', [[], ['MOTOR-001', 'MOTOR-002']])
+def test_policy_resolver_passes_selection_and_bounded_limit_without_truncation(
+    selected: list[str],
+) -> None:
+    from unittest.mock import Mock
+
+    full_clause = 'A complete policy clause. ' * 80
+    loader = Mock(return_value={'chunks': [{'chunk_id': 'doc#MOTOR-001', 'text': full_clause}]})
+    context = replace(_context('What does my policy say?'), knowledge_context_loader=loader)
+    plan = plan_model_turn(context)
+    assert plan is not None
+    reference = next(
+        ref for ref in plan.context_plan.references if ref.resource_type == 'policy_version'
+    )
+    assert reference.max_resolve_tokens == 2500
+    result = resolver_for_turn(context, plan.context_plan).resolve(
+        reference.ref,
+        'matching_facts_and_guidance',
+        2500,
+        selected,
+    )
+    loader.assert_called_once_with(2500, selected)
+    assert result.content == {
+        'approved_guidance': {
+            'chunks': [{'chunk_id': 'doc#MOTOR-001', 'text': full_clause}],
+            'returned_clause_ids': ['MOTOR-001'],
+            'not_included': [],
+        }
+    }
+    assert not result.truncated
+
+
+def test_policy_result_budget_returns_whole_clauses_and_allows_follow_up() -> None:
+    clauses = {
+        'MTR-BEN-01': 'First complete clause. ' * 35,
+        'MTR-BEN-02': 'Second complete clause. ' * 35,
+    }
+
+    def load(_limit: int, clause_ids: Sequence[str]) -> dict[str, object]:
+        return {
+            'chunks': [
+                {'chunk_id': f'doc#{clause_id}', 'text': clauses[clause_id]}
+                for clause_id in clause_ids
+            ]
+        }
+
+    context = replace(
+        _context('Will my policy pay for a rental car?'),
+        knowledge_context_loader=load,
+    )
+    plan = plan_model_turn(context)
+    assert plan is not None
+    reference = next(
+        ref for ref in plan.context_plan.references if ref.resource_type == 'policy_version'
+    )
+    resolver = resolver_for_turn(context, plan.context_plan)
+    first = resolver.resolve(
+        reference.ref,
+        'matching_facts_and_guidance',
+        400,
+        ['MTR-BEN-01', 'MTR-BEN-02'],
+    )
+    assert isinstance(first.content, dict)
+    guidance = first.content['approved_guidance']
+    assert isinstance(guidance, dict)
+    assert guidance['returned_clause_ids'] == ['MTR-BEN-01']
+    assert guidance['not_included'] == [
+        {
+            'clause_id': 'MTR-BEN-02',
+            'reason': 'too long for this turn, request it on its own',
+        }
+    ]
+    assert first.truncated
+    assert clauses['MTR-BEN-01'] == guidance['chunks'][0]['text']
+
+    follow_up = resolver.resolve(
+        reference.ref,
+        'matching_facts_and_guidance',
+        400,
+        ['MTR-BEN-02'],
+    )
+    assert isinstance(follow_up.content, dict)
+    follow_up_guidance = follow_up.content['approved_guidance']
+    assert isinstance(follow_up_guidance, dict)
+    assert follow_up_guidance['returned_clause_ids'] == ['MTR-BEN-02']
+    assert follow_up_guidance['not_included'] == []
+    assert not follow_up.truncated
+
+
+@pytest.mark.parametrize(
+    ('lookup', 'status', 'directory_status'),
+    [
+        (True, FormStatus.CONFIRMED, 'available'),
+        (True, FormStatus.CONFIRMED, 'unavailable'),
+        (True, FormStatus.PROPOSED, 'available'),
+        (False, FormStatus.CONFIRMED, 'available'),
+    ],
+)
+def test_policy_directory_is_inline_for_resolved_product_on_any_turn(
+    lookup: bool,
+    status: FormStatus,
+    directory_status: str,
+) -> None:
+    from unittest.mock import Mock
+
+    context = _context(
+        'What does my policy say?' if lookup else 'My car was rear-ended.',
+        incident_type=None if status is FormStatus.PROPOSED else 'motor',
+    )
+    product = StructuredFormField(
+        value='motor',
+        source=FormSource.CLAIMANT,
+        status=status,
+        needed_for=NeededFor.CURRENT_ACTION,
+        updated_at=datetime.now(UTC),
+        updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_v7'),
+    )
+    directory = [{'clause_id': 'MOTOR-001', 'title': 'Accidental damage'}]
+    limitations = ['No approved corpus is available.'] if directory_status == 'unavailable' else []
+    loader = Mock(
+        return_value={
+            'policy_clause_directory': directory if directory_status == 'available' else [],
+            'guidance_status': directory_status,
+            'limitations': limitations,
+        }
+    )
+    context = replace(
+        context,
+        claim=context.claim.model_copy(update={'form': {'claim.product_family': product}}),
+        knowledge_clause_directory_loader=loader,
+        knowledge_context_loader=lambda _limit, _ids: {},
+    )
+    plan = plan_model_turn(context)
+    assert plan is not None
+    assert plan.request_profile.profile_id == 'claimant.lookup.v1'
+    loader.assert_called_once_with()
+    assert (
+        plan.context_payload['policy_clause_directory']
+        == loader.return_value['policy_clause_directory']
+    )
+    assert plan.context_payload['policy_clause_directory_status'] == directory_status
+    assert plan.context_payload['policy_clause_directory_limitations'] == limitations
+    assert any(ref.resource_type == 'policy_version' for ref in plan.context_plan.references)
+    assert 'capability.policy-search@v2' in plan.fragment_refs
+
+
+@pytest.mark.parametrize(
+    'message',
+    [
+        'My car was rear-ended this morning.',
+        'What does my policy cover after this collision?',
+    ],
+)
+def test_bedrock_resolved_product_continues_intake_without_policy_lookup(
+    message: str,
+) -> None:
+    from unittest.mock import Mock
+
+    context = _context(message)
+    assert context.runtime_configuration_snapshot is not None
+    current = context.runtime_configuration_snapshot.model('qwen-local')
+    assert current is not None
+    values = {
+        **current.values,
+        'protocol': 'bedrock_converse',
+        'provider': 'aws-bedrock',
+        'base_url': 'https://bedrock-runtime.example.test',
+        'tools': False,
+    }
+    record = current.model_copy(update={'values': values})
+    snapshot = replace(
+        context.runtime_configuration_snapshot,
+        configurations=MappingProxyType({'model:qwen-local': record}),
+    )
+    policy = _runtime_policy(snapshot)
+    directory_loader = Mock()
+    lookup_loader = Mock()
+    context = replace(
+        context,
+        runtime_configuration_snapshot=snapshot,
+        runtime_policy=policy,
+        knowledge_clause_directory_loader=directory_loader,
+        knowledge_context_loader=lookup_loader,
+    )
+
+    plan = plan_model_turn(context)
+
+    assert plan is not None
+    assert plan.request_profile.profile_id == 'claimant.turn.v1'
+    assert plan.request_profile.tool_names == []
+    directory_loader.assert_not_called()
+    lookup_loader.assert_not_called()
+    assert not any(ref.resource_type == 'policy_version' for ref in plan.context_plan.references)
+    assert plan.context_payload['policy_clause_directory'] == []
+    assert plan.context_payload['policy_clause_directory_status'] == 'unavailable'
+    assert plan.context_payload['policy_clause_directory_limitations'] == [
+        'The selected model provider cannot continue a policy lookup tool result.'
+    ]
+    assert 'capability.policy-search@v2' in plan.fragment_refs
+
 
 def test_intake_field_contract_uses_the_runtime_policy_registry() -> None:
     context = _context('My car was rear-ended this morning.')
@@ -963,6 +1198,9 @@ def test_v7_provider_failures_do_not_escape_the_published_turn_contract(
         GatewayAgent(_RecordingGateway([response])).propose_turn(context)
 
     assert error.value.code is expected_code
+    if case == 'unsupported_tool':
+        assert error.value.diagnostic_code == 'initial_tool_name'
+        assert error.value.diagnostic_path == 'tool_calls.0.name'
 
 
 def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
@@ -977,24 +1215,77 @@ def test_v7_timeout_stops_after_one_request_and_returns_no_proposal() -> None:
     assert len(gateway.requests) == 1
 
 
-def test_evidence_action_rejects_a_missing_required_context_continuation() -> None:
+def test_v7_lookup_allows_an_answer_without_context_continuation() -> None:
+    from tests.journey_v8_support import envelope
+
     response = ModelResponse(
-        structured_output=_answer_output(),
+        structured_output=envelope(reply='Your claim is still being reviewed.'),
         completion_status=ModelCompletionStatus.COMPLETE,
     )
     gateway = _RecordingGateway([response])
+    GatewayAgent(gateway).propose_turn(
+        _context('What is the status of my claim?', conversation_messages=_messages(6))
+    )
+    assert gateway.requests[0].required_tool_name is None
+    assert len(gateway.requests) == 1
+
+
+@pytest.mark.parametrize('stage', ['initial', 'continuation'])
+def test_v7_lookup_schema_failure_identifies_stage_and_field(stage: str) -> None:
+    invalid = ModelResponse(
+        structured_output={'reply': []},
+        completion_status=ModelCompletionStatus.COMPLETE,
+    )
+    responses = [invalid]
+    context = _context('What is the status of my claim?', conversation_messages=_messages(6))
+    if stage == 'continuation':
+        context = replace(
+            _context('Show my previous uploads.'),
+            evidence_history_context_loader=lambda _: {'status': 'empty'},
+        )
+        responses.insert(
+            0,
+            ModelResponse(
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call_history',
+                        name='context.resolve',
+                        arguments={
+                            'ref': 'ctxref:ses_v7:evidence.history',
+                            'selector': 'history',
+                            'max_tokens': 120,
+                        },
+                    )
+                ],
+                completion_status=ModelCompletionStatus.COMPLETE,
+            ),
+        )
+    gateway = _RecordingGateway(responses)
 
     with pytest.raises(ModelGatewayError) as error:
-        GatewayAgent(gateway).propose_turn(
-            replace(
-                _context('Show my previous uploads.'),
-                evidence_history_context_loader=lambda _: {'status': 'empty'},
-            )
-        )
+        GatewayAgent(gateway).propose_turn(context)
 
-    assert error.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
-    assert len(gateway.requests) == 1
-    assert gateway.requests[0].required_tool_name == 'context.resolve'
+    assert error.value.diagnostic_code == f'{stage}_output_schema_validation'
+    assert error.value.diagnostic_path == 'reply'
+    assert len(gateway.requests) == (2 if stage == 'continuation' else 1)
+
+
+def test_v7_proposal_validation_failure_is_prefixed_with_response_stage() -> None:
+    from tests.journey_v8_support import envelope
+
+    gateway = _RecordingGateway(
+        [
+            ModelResponse(
+                structured_output=envelope(reply='   '),
+                completion_status=ModelCompletionStatus.COMPLETE,
+            )
+        ]
+    )
+    with pytest.raises(ModelGatewayError) as error:
+        GatewayAgent(gateway).propose_turn(_context('What is the status of my claim?'))
+
+    assert error.value.diagnostic_code == 'initial_proposal_blank_reply'
+    assert error.value.diagnostic_path == 'reply'
 
 
 def test_v7_lookup_rejects_a_recursive_tool_call() -> None:
@@ -1022,6 +1313,8 @@ def test_v7_lookup_rejects_a_recursive_tool_call() -> None:
             _context('What is the status of my claim?', conversation_messages=_messages(6))
         )
     assert error.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    assert error.value.diagnostic_code == 'continuation_tool_call'
+    assert error.value.diagnostic_path == 'tool_calls'
 
 
 def test_v7_multi_evidence_review_uses_one_isolated_read_only_request() -> None:
@@ -1193,7 +1486,7 @@ def test_v7_isolated_review_rejects_an_unscoped_source_reference() -> None:
 def test_validation_path_is_bounded_for_untrusted_error_shapes(
     errors: list[object], expected: str | None
 ) -> None:
-    assert _validation_path(errors) == expected
+    assert validation_path(errors) == expected
 
 
 @pytest.mark.parametrize(

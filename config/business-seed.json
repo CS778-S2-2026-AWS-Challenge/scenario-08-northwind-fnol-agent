@@ -27,6 +27,50 @@
       "status": "active",
       "coverage_sections": ["accidental_damage"],
       "uncertainty": ["COVERAGE_SECTION_INCOMPLETE"]
+    },
+    {
+      "policy_number": "NW-MTR-204518",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "motor",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 500,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "third_party_liability", "alternative_transport"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "NW-MTR-204519",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "motor",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 500,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "third_party_liability"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "NW-HOM-204518",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "home",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 750,
+      "status": "active",
+      "coverage_sections": ["building_damage", "emergency_repairs", "temporary_accommodation"],
+      "uncertainty": []
+    },
+    {
+      "policy_number": "NW-CON-204518",
+      "customer_id": "cus_8f41a2c90d7e463b",
+      "family": "contents",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "excess_nzd": 400,
+      "status": "active",
+      "coverage_sections": ["accidental_damage", "theft", "temporary_storage"],
+      "uncertainty": []
     }
   ],
   "demo_cases": [

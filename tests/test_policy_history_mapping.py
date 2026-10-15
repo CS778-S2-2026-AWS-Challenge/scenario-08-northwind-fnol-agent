@@ -3,10 +3,67 @@ import json
 
 import pytest
 
+from backend.adapters.policy_history import MockPolicyHistoryAdapter, map_policy_provider_payload
 from backend.domain.claim_history import LodgedClaimHistory
-from backend.domain.retrieval import ClaimHistorySearchRequest
+from backend.domain.retrieval import ClaimHistorySearchRequest, PolicySearchRequest
 
 RETRIEVED_AT = datetime.datetime(2026, 8, 17, 0, 15, tzinfo=datetime.UTC)
+
+
+def _seed_policy_adapter() -> MockPolicyHistoryAdapter:
+    from backend.repositories.fixture import FixtureRepository
+    from backend.services.business_seed import (
+        BUSINESS_SEED_PATH,
+        load_business_seed,
+        provision_business_claims,
+        provision_business_policies,
+    )
+
+    repository = FixtureRepository()
+    seed = load_business_seed(BUSINESS_SEED_PATH)
+    provision_business_claims(repository, seed)
+    provision_business_policies(repository, seed)
+    return MockPolicyHistoryAdapter(repository)
+
+
+@pytest.mark.parametrize(
+    ('number', 'product', 'alternative_transport'),
+    [
+        ('NW-MTR-204518', 'motor', True),
+        ('NW-MTR-204519', 'motor', False),
+        ('NW-HOM-204518', 'home', False),
+        ('NW-CON-204518', 'contents', False),
+    ],
+)
+def test_knowledge_schedules_keep_product_and_optional_benefit_distinct(
+    number: str,
+    product: str,
+    alternative_transport: bool,
+) -> None:
+    envelope = _seed_policy_adapter().search_policy(
+        PolicySearchRequest(
+            claim_id='clm_6d9231ab40e85fc7',
+            policy_reference=number,
+        )
+    )
+    result = map_policy_provider_payload(
+        retrieval_id='ret_schedule',
+        claim_id='clm_6d9231ab40e85fc7',
+        envelope=envelope,
+    )
+    assert result.facts.product == product
+    assert ('alternative_transport' in result.facts.coverage_sections) is alternative_transport
+    assert result.uncertainty == []
+
+
+def test_unknown_schedule_does_not_substitute_a_knowledge_fixture() -> None:
+    with pytest.raises(LookupError):
+        _seed_policy_adapter().search_policy(
+            PolicySearchRequest(
+                claim_id='clm_6d9231ab40e85fc7',
+                policy_reference='NW-UNKNOWN-204518',
+            )
+        )
 
 
 def collect_keys(value: object) -> set[str]:

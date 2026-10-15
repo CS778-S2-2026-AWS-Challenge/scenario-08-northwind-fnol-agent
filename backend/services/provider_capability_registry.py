@@ -61,7 +61,7 @@ def validate_profile_compatibility(
 ) -> None:
     if profile.tool_names and not capability.tool_call_support:
         raise ValueError('The provider does not support the selected profile tool manifest.')
-    if profile.requires_tool_continuation and capability.tool_result_continuation is None:
+    if profile.tool_names and capability.tool_result_continuation is None:
         raise ValueError('The provider does not support the selected profile continuation.')
     if profile.requires_media_types and not set(profile.requires_media_types).intersection(
         capability.supported_media_types

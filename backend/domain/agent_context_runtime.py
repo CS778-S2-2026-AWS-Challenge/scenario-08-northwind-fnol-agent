@@ -127,7 +127,7 @@ class ContextReference(ContractModel):
     version: str = Field(min_length=1, max_length=120)
     summary: str = Field(min_length=1, max_length=500)
     available_selectors: list[str] = Field(min_length=1, max_length=20)
-    max_resolve_tokens: int = Field(ge=1, le=1200)
+    max_resolve_tokens: int = Field(ge=1, le=2500)
     expires_with_turn: bool = True
 
 

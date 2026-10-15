@@ -150,7 +150,7 @@ def _create_session(client: TestClient, model_profile_id: str | None = None) -> 
 def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> None:
     repository = FixtureRepository()
     provider = RecordingStaffAgent()
-    with _client(repository, provider) as client:
+    with _model_catalog_client(repository, provider) as client:
         response = client.post(
             '/api/v1/workbench/agent/sessions',
             headers=STAFF_HEADERS,
@@ -214,17 +214,21 @@ def test_staff_agent_reuses_empty_session_until_first_turn_is_persisted() -> Non
     assert message.json()['session']['model_profile_id'] == 'openrouter-gpt-4o'
 
 
-def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
+def _model_catalog_client(
+    repository: FixtureRepository,
+    provider: StaffAgentTurnProvider | None = None,
+) -> TestClient:
     settings = Settings(
         business_seed_path='config/business-seed.json',
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter='openai_compatible',
-        model_provider='openrouter',
         model_profile_id='qwen-local',
+        model_provider='test-provider',
         model_base_url='http://model.example.test/v1',
         model_identifier='qwen3.8-27b',
+        model_timeout_seconds=30,
     )
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
@@ -283,14 +287,19 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
             updated_at=datetime.now(UTC),
         )
     )
-    with TestClient(
+    return TestClient(
         create_app(
             settings,
-            repository=FixtureRepository(),
+            repository=repository,
             configuration_repository=configurations,
             release_set_repository=releases,
+            staff_agent_turn_provider=provider,
         )
-    ) as client:
+    )
+
+
+def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
+    with _model_catalog_client(FixtureRepository()) as client:
         response = client.get(
             '/api/v1/workbench/agent/capabilities',
             headers=STAFF_HEADERS,
@@ -551,10 +560,10 @@ def test_staff_agent_context_includes_claim_operational_records_and_limitations(
     } <= set(claim_context)
     assert context.references == ()
     assert context.knowledge_status == 'evidence_found'
-    assert context.knowledge[0]['document_id'] == 'nw-policy-motor-standard-mvp-2026-1'
+    assert context.knowledge[0]['document_id'] == 'nw-policy-motor-standard'
     assert context.knowledge[0]['chunk_id'].endswith('#MTR-EXC-01')
     assert context.knowledge[0]['checksum'] == (
-        'a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989'
+        'efde65a968727e1c71fd8ae116e011afff694f549b3577e45fcf5dd99d9b8cd5'
     )
     assert context.review_signals == ()
     assert context.handoffs == ()

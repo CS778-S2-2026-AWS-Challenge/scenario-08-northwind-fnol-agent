@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from unittest.mock import ANY
 
@@ -36,6 +37,14 @@ class ControlledRetriever:
     def connection_status(self) -> str:
         return self.connection_state
 
+    def list_clauses(self, scope: KnowledgeSearch) -> list[KnowledgeChunk]:
+        raise AssertionError('The search API must use search, not the clause directory.')
+
+    def get_clauses(
+        self, scope: KnowledgeSearch, clause_ids: Sequence[str]
+    ) -> list[KnowledgeChunk]:
+        raise AssertionError('The search API must use search, not exact clause lookup.')
+
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         self.last_request = request
         if self.failure_code is not None:
@@ -61,14 +70,14 @@ class MalformedChunkRetriever(ControlledRetriever):
 
 def citation_chunk() -> KnowledgeChunk:
     return KnowledgeChunk(
-        document_id='nw-policy-motor-standard-mvp-2026-1',
-        chunk_id='nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01',
+        document_id='nw-policy-motor-standard',
+        chunk_id='nw-policy-motor-standard#MTR-EXC-01',
         title='Northwind Motor Standard Policy',
         document_type='synthetic_policy_wording',
-        version='MVP-2026.1',
+        version='2026.2',
         section_path='MTR-EXC-01 - Excesses',
         page=None,
-        source_uri='northwind://synthetic-policy/motor/MVP-2026.1',
+        source_uri='northwind://synthetic-policy/motor/2026.2',
         jurisdiction='NZ',
         insurer='Northwind Insurance',
         product='motor',
@@ -106,9 +115,9 @@ def request_payload(**changes: object) -> dict[str, object]:
         'question': 'How much excess do I pay?',
         'jurisdiction': 'NZ',
         'visibility': 'customer_and_staff',
-        'document_id': 'nw-policy-motor-standard-mvp-2026-1',
+        'document_id': 'nw-policy-motor-standard',
         'authority': 'northwind_synthetic_demo',
-        'version': 'MVP-2026.1',
+        'version': '2026.2',
         'insurer': 'Northwind Insurance',
         'product': 'motor',
         'effective_at': '2026-08-25T00:00:00Z',
@@ -145,7 +154,7 @@ def test_knowledge_search_returns_exact_citation_and_passes_full_scope() -> None
     assert started_at <= retrieved_at(body) <= completed_at
     assert retrieved_at(body) != citation_chunk().ingested_at
     assert retriever.last_request is not None
-    assert retriever.last_request.document_id == 'nw-policy-motor-standard-mvp-2026-1'
+    assert retriever.last_request.document_id == 'nw-policy-motor-standard'
     assert retriever.last_request.insurer == 'Northwind Insurance'
     assert retriever.last_request.effective_at == datetime(2026, 8, 25, tzinfo=UTC)
 
