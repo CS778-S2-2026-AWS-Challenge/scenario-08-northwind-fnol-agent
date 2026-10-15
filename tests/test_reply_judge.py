@@ -116,23 +116,24 @@ def test_policy_sources_are_available_to_the_versioned_reply_review() -> None:
 
 
 @pytest.mark.parametrize(
-    ('reply', 'states_decision'),
+    'reply',
     [
-        ('This policy does not cover pet tuition.', True),
-        ('This claim is covered.', True),
-        ('This expense is excluded.', True),
-        ('This benefit is payable.', True),
-        ('No matching clause was found.', False),
-        ('This benefit may apply if the schedule lists it.', False),
+        'This policy does not cover pet tuition.',
+        'This claim is covered.',
+        'This expense is excluded.',
+        'This benefit is payable.',
     ],
 )
-def test_explicit_policy_decisions_are_rejected_without_blocking_safe_uncertainty(
-    reply: str, states_decision: bool
-) -> None:
-    review = review_reply(_turn(reply, action='answer_only', turn_ending='nothing_needed'))
+def test_unsupported_policy_conclusions_are_rejected_by_the_review_model(reply: str) -> None:
+    gateway = _Gateway({'problems': [{'kind': 'unsupported_policy_conclusion', 'detail': reply}]})
+    turn = _turn(reply, action='answer_only', turn_ending='nothing_needed')
+    review = review_reply(turn, ReplyJudge(lambda: gateway))
 
-    kinds = [item.kind for item in review.inconsistencies]
-    assert ('states_policy_decision' in kinds) is states_decision
+    assert review.words_reviewed
+    assert not review.consistent and not review.truthful
+    assert [item.kind for item in review.inconsistencies] == ['unsupported_policy_conclusion']
+    assert turn_ledger(turn)['policy_sources'] == []
+    assert len(gateway.requests) == 1
 
 
 def test_a_clean_judgement_is_final() -> None:

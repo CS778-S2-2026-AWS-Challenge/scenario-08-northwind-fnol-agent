@@ -25,6 +25,7 @@ from backend.adapters.model_gateway import (
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, IdentityMode, Settings
 from backend.core.model_gateway import ConfigurationBackedModelGateway
+from backend.domain.agent_context_runtime import ContextReference
 from backend.domain.configuration import (
     ConfigurationImpact,
     ConfigurationRecord,
@@ -2360,6 +2361,106 @@ def test_policy_keywords_do_not_force_a_context_lookup(message: str) -> None:
     assert proposal.runtime_trace.tool_name is None
 
 
+@pytest.mark.parametrize('history_first', [True, False])
+def test_mixed_history_and_policy_calls_are_rejected_without_replacing_resources(
+    history_first: bool,
+) -> None:
+    from backend.services.model_agent import _coalesce_context_resolve_calls
+
+    references = [
+        ContextReference(
+            ref='ctxref:history',
+            resource_type='claim_history',
+            version='1',
+            summary='Authorised history',
+            available_selectors=['summary'],
+            max_resolve_tokens=800,
+        ),
+        ContextReference(
+            ref='ctxref:policy',
+            resource_type='policy_version',
+            version='1',
+            summary='Authorised policy',
+            available_selectors=['matching_facts_and_guidance'],
+            max_resolve_tokens=2500,
+        ),
+    ]
+    calls = [
+        ModelToolCall(
+            call_id='history',
+            name='context.resolve',
+            arguments={
+                'ref': 'ctxref:history',
+                'selector': 'summary',
+                'max_tokens': 800,
+            },
+        ),
+        ModelToolCall(
+            call_id='policy',
+            name='context.resolve',
+            arguments={
+                'clause_ids': ['MTR-BEN-03'],
+            },
+        ),
+    ]
+    if not history_first:
+        calls.reverse()
+    response = ModelResponse(tool_calls=calls)
+    with pytest.raises(ModelGatewayError) as error:
+        _coalesce_context_resolve_calls(response, references)
+    assert error.value.diagnostic_code == 'context_resolution_multiple_resources'
+    assert response.tool_calls == calls
+    assert (
+        next(call for call in calls if call.call_id == 'history').arguments['ref']
+        == 'ctxref:history'
+    )
+
+
+@pytest.mark.parametrize(
+    'arguments',
+    [
+        {'ref': 'ctxref:unknown', 'clause_ids': ['MTR-BEN-03']},
+        {'ref': 'ctxref:policy', 'selector': 'unknown', 'clause_ids': ['MTR-BEN-03']},
+        {'ref': 'ctxref:history', 'selector': 'summary', 'clause_ids': ['MTR-BEN-03']},
+    ],
+)
+def test_clause_ids_do_not_override_explicit_resource_authority(
+    arguments: dict[str, object],
+) -> None:
+    from backend.services.model_agent import _coalesce_context_resolve_calls
+
+    references = [
+        ContextReference(
+            ref='ctxref:policy',
+            resource_type='policy_version',
+            version='1',
+            summary='Authorised policy',
+            available_selectors=['matching_facts_and_guidance'],
+            max_resolve_tokens=2500,
+        ),
+        ContextReference(
+            ref='ctxref:history',
+            resource_type='claim_history',
+            version='1',
+            summary='Authorised history',
+            available_selectors=['summary'],
+            max_resolve_tokens=800,
+        ),
+    ]
+    response = ModelResponse(
+        tool_calls=[
+            ModelToolCall(
+                call_id='lookup',
+                name='context.resolve',
+                arguments=arguments,
+            )
+        ]
+    )
+    with pytest.raises(ModelGatewayError) as error:
+        _coalesce_context_resolve_calls(response, references)
+    assert error.value.diagnostic_code == 'context_resolution_invalid'
+
+
 def test_parallel_policy_clause_calls_are_coalesced_into_one_lookup() -> None:
     context = _context('What do the rental-car and claim-reporting clauses say?')
     assert context.runtime_configuration_snapshot is not None
@@ -2554,15 +2655,6 @@ def test_knowledge_grounded_lookup_fits_three_longest_current_clauses_with_sched
     ('arguments', 'expected_clause_ids'),
     [
         ({'clause_ids': ['MTR-BEN-03']}, ['MTR-BEN-03']),
-        (
-            {
-                'ref': 'ctxref:not-authorized',
-                'selector': 'not-authorized',
-                'max_tokens': 0,
-                'clause_ids': ['MTR-BEN-03'],
-            },
-            ['MTR-BEN-03'],
-        ),
         ({'clause_ids': 'MTR-BEN-03'}, []),
     ],
 )

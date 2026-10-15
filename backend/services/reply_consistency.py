@@ -5,10 +5,9 @@ the whole turn goes back to the model once with the ruling attached so it can
 say the same thing truthfully.
 
 Two kinds of check run. Deterministic checks compare the turn's own parts (a
-summary with no fields, a declared ending the reply does not match) and reject
-the narrow class of explicit coverage decisions the Agent may never make.
-Whether other words say something the ledger does not back -- a refused service
-named, an arrangement or escalation claimed, a service asked about in words,
+summary with no fields, a declared ending the reply does not match).
+Whether words say something the ledger does not back -- a policy conclusion,
+a refused service named, an arrangement or escalation claimed, a service asked about in words,
 the claimant sent to "their insurer", an answer promised that no question
 passed on backs -- is a judgement about meaning, made only by the review model
 (``reply_judge``). When the review model is not configured or its call fails,
@@ -17,7 +16,6 @@ those semantic claims are not checked and the turn is recorded as not reviewed.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from backend.services.reply_judge import ReplyJudge
@@ -42,15 +40,6 @@ SOFT_PROBLEMS = frozenset(
         'claims_documents_block_lodging',
         'claims_report_already_sent',
     }
-)
-
-_POLICY_DECISION = re.compile(
-    r'\b(?:the\s+|this\s+|your\s+)?policy\s+'
-    r"(?:(?:does(?:\s+not|n't)?\s+)?cover(?:s|ed)?|excludes?|pays?(?:\s+for)?)\b"
-    r'|\b(?:this\s+|the\s+|your\s+)?'
-    r'(?:claim|loss|cost|benefit|event|damage|item|expense|expenses)\s+'
-    r"(?:is|are|isn't|aren't)\s+(?:(?:not\s+)?(?:covered|payable)|excluded)\b",
-    re.IGNORECASE,
 )
 
 
@@ -100,16 +89,9 @@ class ConsistencyReview:
 
 
 def _structural_problems(validated: ValidatedTurn) -> list[ReplyInconsistency]:
-    """Check the envelope structure and explicit prohibited decisions."""
+    """Check the envelope structure; the judge reviews policy meaning with sources."""
 
     problems: list[ReplyInconsistency] = []
-    if _POLICY_DECISION.search(validated.reply):
-        problems.append(
-            ReplyInconsistency(
-                kind='states_policy_decision',
-                detail='the reply states a cover or no-cover decision',
-            )
-        )
     if validated.action == 'summarize' and not validated.summary_fields:
         problems.append(
             ReplyInconsistency(

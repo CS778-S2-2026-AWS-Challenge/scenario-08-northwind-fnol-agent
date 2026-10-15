@@ -1876,6 +1876,13 @@ separate bounded selectors. PDF, multi-Evidence, and cross-Claim review use one 
 mutation-incapable request. Unknown, stale, cross-scope, recursive, or malformed references are
 rejected before Claim State mutation.
 
+Parallel `context.resolve` selections are combined only when every call identifies the same
+authorised policy reference and selector. Runtime deduplicates clause IDs and keeps at most three.
+An omitted reference can be bound to the sole authorised policy reference when clause IDs are
+provided; an explicit reference or selector is never replaced by a different resource.
+Mixed-resource parallel calls are rejected before resolution with
+`context_resolution_multiple_resources`; the single-lookup budget does not silently discard reads.
+
 For any v8 turn with a resolved product family and a compatible lookup profile,
 `policy_clause_directory` lists clause IDs and headings from the validated, scope-matching
 ingested policy. Its status and limitations are explicit when the source is unavailable. A

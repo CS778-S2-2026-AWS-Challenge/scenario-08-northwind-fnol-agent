@@ -70,6 +70,34 @@ def _provider(*proposals: dict[str, Any], review: ReplyJudge | None = None) -> V
     return provider
 
 
+@pytest.mark.parametrize(
+    'reply',
+    [
+        'I cannot confirm whether this loss is covered.',
+        'If this loss is covered, the schedule excess may apply.',
+        'The returned wording does not establish whether your policy covers this event.',
+    ],
+)
+def test_safe_policy_uncertainty_accepted_by_judge_does_not_rewrite_or_recover(
+    app: FastAPI, client: TestClient, repository: FixtureRepository, reply: str
+) -> None:
+    # Synthetic clean verdict isolates Runtime's handling, not model judgement quality.
+    proposal = {**envelope(reply=reply), 'action': 'answer_only', 'turn_ending': 'nothing_needed'}
+    provider = _provider(proposal, review=_Verdicts([]))
+    app.state.agent_turn_provider = InvariantGuardedAgent(provider)
+    journey = Journey(client, 'motor', 'safe-policy-uncertainty')
+
+    turn = journey.send('Can you check whether my loss is covered?')
+
+    assert len(provider.gateway.requests) == 1
+    assert turn['agent_message']['content']['text'] == reply
+    assert turn.get('recovery') is None
+    trace = repository.find_runtime_trace_for_trigger(
+        journey.claim_id, turn['claimant_message']['message_id'], 'cus_8f41a2c90d7e463b'
+    )
+    assert trace is not None and trace.failure_diagnostic is None
+
+
 def test_inconsistent_reply_is_sent_back_once_and_the_rewrite_is_shown(
     app: FastAPI, client: TestClient, repository: FixtureRepository
 ) -> None:

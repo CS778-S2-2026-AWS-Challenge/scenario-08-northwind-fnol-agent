@@ -10,6 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from backend.domain.agent_context_runtime import (
     ContextBudgetPolicy,
+    ContextReference,
     ModelRequestBudget,
     PlannedModelTurn,
     TurnTask,
@@ -104,27 +105,66 @@ _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
 
 
-def _coalesce_context_resolve_calls(response: ModelResponse) -> tuple[ModelResponse, int]:
+def _coalesce_context_resolve_calls(
+    response: ModelResponse, references: Sequence[ContextReference]
+) -> tuple[ModelResponse, int]:
     """Merge parallel policy clause selections into one bounded resolver call."""
 
     calls = response.tool_calls
-    if len(calls) <= 1:
-        return response, len(calls)
+    if not calls:
+        return response, 0
     if any(call.name != 'context.resolve' for call in calls):
         raise ModelGatewayError(
             ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
-            diagnostic_code='initial_tool_call_count',
+            diagnostic_code='initial_tool_name' if len(calls) == 1 else 'initial_tool_call_count',
+            diagnostic_path='tool_calls.0.name' if len(calls) == 1 else 'tool_calls',
+        )
+    authorised = {item.ref: item for item in references}
+    policy_references = [item for item in references if item.resource_type == 'policy_version']
+    normalized_calls = []
+    resources = []
+    for call in calls:
+        arguments = dict(call.arguments)
+        ref = arguments.get('ref')
+        if ref is None and 'clause_ids' in arguments and len(policy_references) == 1:
+            ref = policy_references[0].ref
+        reference = authorised.get(ref) if isinstance(ref, str) else None
+        selector = arguments.get('selector')
+        if reference is not None and selector is None and len(reference.available_selectors) == 1:
+            selector = reference.available_selectors[0]
+        if reference is None or selector not in reference.available_selectors:
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                diagnostic_code='context_resolution_invalid',
+                diagnostic_path='context.resolve.arguments',
+            )
+        if 'clause_ids' in arguments and reference.resource_type != 'policy_version':
+            raise ModelGatewayError(
+                ModelGatewayErrorCode.MALFORMED_RESPONSE,
+                diagnostic_code='context_resolution_invalid',
+                diagnostic_path='context.resolve.arguments',
+            )
+        arguments['ref'] = ref
+        arguments['selector'] = selector
+        normalized_calls.append(call.model_copy(update={'arguments': arguments}))
+        resources.append((reference.resource_type, ref, selector))
+    if len(calls) == 1:
+        return response.model_copy(update={'tool_calls': normalized_calls}), 1
+    if resources[0][0] != 'policy_version' or any(item != resources[0] for item in resources):
+        raise ModelGatewayError(
+            ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+            diagnostic_code='context_resolution_multiple_resources',
             diagnostic_path='tool_calls',
         )
     clause_ids: list[str] = []
-    for call in calls:
+    for call in normalized_calls:
         selected = call.arguments.get('clause_ids')
         if not isinstance(selected, list | tuple):
             continue
         for clause_id in selected:
             if isinstance(clause_id, str) and clause_id not in clause_ids:
                 clause_ids.append(clause_id)
-    arguments = dict(calls[0].arguments)
+    arguments = dict(normalized_calls[0].arguments)
     if clause_ids:
         arguments['clause_ids'] = clause_ids[:3]
     normalized = calls[0].model_copy(update={'arguments': arguments})
@@ -987,7 +1027,9 @@ class GatewayAgent:
                 exchange_completion,
             )
             invocations.append(_runtime_invocation_trace(1, response, observations[-1].latency_ms))
-            response, selected_tool_call_count = _coalesce_context_resolve_calls(response)
+            response, selected_tool_call_count = _coalesce_context_resolve_calls(
+                response, plan.context_plan.references
+            )
             if selected_tool_call_count > 1:
                 tool_output['coalesced_tool_call_count'] = selected_tool_call_count
             # Ordinary claimant turns offer read-only references; the model may
@@ -1026,10 +1068,7 @@ class GatewayAgent:
                 ]
                 if len(policy_references) == 1:
                     policy_reference = policy_references[0]
-                    if (
-                        'clause_ids' in tool_arguments
-                        or tool_arguments.get('ref') == policy_reference.ref
-                    ):
+                    if tool_arguments.get('ref') == policy_reference.ref:
                         tool_arguments['ref'] = policy_reference.ref
                         if len(policy_reference.available_selectors) == 1:
                             tool_arguments['selector'] = policy_reference.available_selectors[0]
