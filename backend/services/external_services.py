@@ -31,6 +31,7 @@ from backend.domain.external_services import (
     continuation_for_failed_task,
     external_task_requires_reconciliation,
 )
+from backend.domain.intake import next_requirement_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -64,7 +65,10 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
-from backend.services.branching import build_applied_branch_evaluation
+from backend.services.branching import (
+    build_applied_branch_evaluation,
+    latest_applied_branch_evaluation,
+)
 from backend.services.claimant_action_projection import project_claimant_primary_action
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.integrations import (
@@ -470,11 +474,11 @@ def claimant_next_step(
 ) -> CustomerNextStep:
     """Say what the claimant does next, without contradicting the record beside it.
 
-    Each correction applies when the stored next step contradicts the operation's
-    current ownership. A retryable failure with an offered retry belongs to the claimant,
-    even if Claim creation previously stored system ownership. Every correction is
-    derived here rather than written, so AT-10's empty
-    `claim_state_effects.failure_may_change` still holds.
+    Each correction applies when the stored next step contradicts either the latest
+    applied requirements or the operation's current ownership. A retryable failure with
+    an offered retry belongs to the claimant, even if Claim creation previously stored
+    system ownership. Every correction is derived here rather than written, so AT-10's
+    empty `claim_state_effects.failure_may_change` still holds.
 
     Args:
         repository: Persistence boundary used to read the recorded external results.
@@ -486,10 +490,15 @@ def claimant_next_step(
     """
 
     if action is None:
-        if claim.customer_next_step.status == 'ready_to_create' and payout_contact_is_complete(
+        next_step = claim.customer_next_step
+        if next_step.status == 'more_information_needed':
+            evaluation = latest_applied_branch_evaluation(repository, claim)
+            if evaluation is not None and evaluation.requirements.ready:
+                next_step = next_requirement_step(evaluation.requirements)
+        if next_step.status == 'ready_to_create' and payout_contact_is_complete(
             repository, claim, identity_repository
         ):
-            return claim.customer_next_step.model_copy(
+            return next_step.model_copy(
                 update={
                     'status': 'agreement_required',
                     'summary': (
@@ -501,7 +510,7 @@ def claimant_next_step(
                     'required_items': [],
                 }
             )
-        return claim.customer_next_step
+        return next_step
     if action.status is ClaimantExternalServiceStatus.RETRYABLE_FAILURE and action.can_request:
         # Claim creation may have ended with a system-owned next step. The
         # separate assessor operation now offers a claimant-owned retry; its

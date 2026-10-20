@@ -1566,9 +1566,38 @@ describe('claimant intake projection', () => {
     expect(api.resumeClaimSession).not.toHaveBeenCalled()
   })
 
-  it('returns to the start page from the Claim header without dropping the conversation', async () => {
+  it('starts a new Claim after returning to the start page from an existing Claim', async () => {
     const user = userEvent.setup()
-    api.submitClaimMessage.mockResolvedValue(initialTurn())
+    const secondClaimCreation = deferredRequest()
+    const secondClaim = {
+      ...initialClaim,
+      claim_id: 'clm_second_conversation',
+      created_at: '2026-09-14T02:00:00Z',
+      updated_at: '2026-09-14T02:00:00Z',
+    }
+    const secondClaimantMessage = {
+      ...claimantMessage,
+      message_id: 'msg_second_claimant',
+      content: { type: 'text', text: 'A window was damaged in the storm.' },
+    }
+    const secondAgentMessage = {
+      ...agentMessage,
+      message_id: 'msg_second_agent',
+      content: { type: 'text', text: 'Thanks. I will start a separate Claim for the window.' },
+    }
+    api.createClaim
+      .mockResolvedValueOnce({
+        claim: initialClaim,
+        session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+      })
+      .mockReturnValueOnce(secondClaimCreation.promise)
+    api.submitClaimMessage
+      .mockResolvedValueOnce(initialTurn())
+      .mockResolvedValueOnce({
+        ...initialTurn(),
+        claimant_message: secondClaimantMessage,
+        agent_message: secondAgentMessage,
+      })
 
     render(<App />)
     await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
@@ -1585,16 +1614,35 @@ describe('claimant intake projection', () => {
     expect(screen.getByText(/Understand insurance/)).not.toHaveRole('heading')
     expect(globalThis.location.pathname).toBe('/')
     expect(screen.queryByText(agentMessage.content.text)).not.toBeInTheDocument()
+    expect(api.pauseClaimSession).toHaveBeenCalledWith(expect.objectContaining({
+      claimId: initialClaim.claim_id,
+      sessionId: 'ses_ui_vp',
+    }))
 
-    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
-    const activeConversation = screen.getByRole('button', { name: /Open Home claim/ })
-    expect(activeConversation).toHaveAttribute('aria-current', 'page')
-    await user.click(activeConversation)
+    await user.type(
+      screen.getByPlaceholderText('Tell us what happened…'),
+      secondClaimantMessage.content.text,
+    )
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
 
-    expect(await screen.findByText(agentMessage.content.text)).toBeVisible()
-    expect(globalThis.location.pathname).toBe(`/claims/${initialClaim.claim_id}`)
-    expect(api.createClaim).toHaveBeenCalledTimes(1)
-    expect(api.resumeClaimSession).not.toHaveBeenCalled()
+    expect(await screen.findByLabelText('Message sending'))
+      .toHaveTextContent(secondClaimantMessage.content.text)
+    expect(globalThis.location.pathname).toBe('/claims/new')
+    expect(api.createClaim).toHaveBeenCalledTimes(2)
+    expect(api.submitClaimMessage).toHaveBeenCalledTimes(1)
+
+    await act(async () => secondClaimCreation.resolve({
+      claim: secondClaim,
+      session: { session_id: 'ses_second_conversation', model_profile_id: 'qwen-local' },
+    }))
+
+    expect(await screen.findByText(secondAgentMessage.content.text)).toBeVisible()
+    expect(globalThis.location.pathname).toBe(`/claims/${secondClaim.claim_id}`)
+    expect(api.submitClaimMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      claimId: secondClaim.claim_id,
+      sessionId: 'ses_second_conversation',
+      text: secondClaimantMessage.content.text,
+    }))
   })
 
   it('confirms before leaving a claim with an unsent composer draft', async () => {
