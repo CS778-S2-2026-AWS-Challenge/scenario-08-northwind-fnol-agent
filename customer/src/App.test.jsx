@@ -1663,6 +1663,57 @@ describe('claimant intake projection', () => {
     confirm.mockRestore()
   })
 
+  it('leaves for home while a reply is on its way and keeps that reply off the home screen', async () => {
+    const user = userEvent.setup()
+    let releaseTurn
+    api.submitClaimMessage.mockImplementationOnce(() => new Promise((resolve) => { releaseTurn = resolve }))
+    const confirm = vi.spyOn(globalThis, 'confirm')
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { level: 1, name: 'Start your insurance claim' })).toBeVisible()
+    expect(globalThis.location.pathname).toBe('/')
+    expect(api.pauseClaimSession).not.toHaveBeenCalled()
+
+    await act(async () => releaseTurn(initialTurn()))
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Start your insurance claim' })).toBeVisible()
+    expect(screen.queryByText(agentMessage.content.text)).not.toBeInTheDocument()
+    expect(globalThis.location.pathname).toBe('/')
+    confirm.mockRestore()
+  })
+
+  it('waits for a new claim to be created before leaving for home', async () => {
+    const user = userEvent.setup()
+    let releaseClaim
+    const createdClaim = await api.createClaim()
+    api.createClaim.mockClear()
+    api.createClaim.mockImplementationOnce(() => new Promise((resolve) => { releaseClaim = resolve }))
+    api.submitClaimMessage.mockImplementationOnce(() => new Promise(() => {}))
+
+    render(<App />)
+    await user.type(screen.getByPlaceholderText('Tell us what happened…'), 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(api.createClaim).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Back to start' }))
+
+    // The claim is still being created, so the claimant stays with the message.
+    expect(screen.getByLabelText('Message sending')).toHaveTextContent('A pipe burst in the kitchen.')
+
+    await act(async () => releaseClaim(createdClaim))
+
+    await waitFor(() => expect(api.submitClaimMessage).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('heading', { level: 1, name: 'Start your insurance claim' })).toBeVisible()
+    expect(globalThis.location.pathname).toBe('/')
+  })
+
   it('returns from the Privacy utility view to the conversation with the persistent header', async () => {
     const user = userEvent.setup()
     api.submitClaimMessage.mockResolvedValue(initialTurn())

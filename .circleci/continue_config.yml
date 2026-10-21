@@ -262,6 +262,10 @@ jobs:
     steps:
       - frontend-quality:
           package: customer
+      - run:
+          name: Check claimant quality ratchets
+          working_directory: customer
+          command: npm run check:ratchets
 
   workbench-quality:
     executor: node

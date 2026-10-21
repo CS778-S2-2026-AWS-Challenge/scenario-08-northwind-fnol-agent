@@ -38,6 +38,15 @@ import './styles/frontend-refactor.css'
 import MessageComposer from './components/MessageComposer.jsx'
 import { developerModeEnabled } from './runtimeConfig.js'
 import {
+  TurnEvent,
+  TurnPhase,
+  initialSendFlow,
+  startTurn,
+  transitionTurn,
+  turnOwnsView,
+  viewTurnPhase,
+} from './claimantFlow.js'
+import {
   AgentMessageRow,
   ClaimantMessageAttachments,
   ClaimantMessageRow,
@@ -473,6 +482,9 @@ function App() {
   const evidenceHasLocalMutation = useRef(false)
   const evidenceClaimId = useRef(null)
   const evidenceUploadControllers = useRef(new Map())
+  // Partial state model: which in-flight message may still change the screen.
+  // See claimantFlow.js for what it covers and what is still to do.
+  const sendFlow = useRef(initialSendFlow())
   // Each upload advances the claim revision, so uploads run one at a time and
   // each starts from the revision the previous one left.
   const evidenceUploadQueue = useRef(Promise.resolve())
@@ -2220,6 +2232,9 @@ function App() {
     }
     setStatus(activeClaim ? 'sending' : 'starting')
     let messageWasSubmitted = Boolean(activeClaim)
+    const flowTurnId = operation.clientMessageId
+    sendFlow.current = startTurn(sendFlow.current, flowTurnId)
+    const ownsView = () => turnOwnsView(sendFlow.current, flowTurnId)
     try {
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
@@ -2334,6 +2349,9 @@ function App() {
       })
 
       messageWasSubmitted = true
+      const leaveWasDeferred = sendFlow.current.turns[flowTurnId] === TurnPhase.LEAVE_REQUESTED
+      sendFlow.current = transitionTurn(sendFlow.current, flowTurnId, TurnEvent.SUBMITTED)
+      if (leaveWasDeferred) leaveConversationForHome()
       const turn = await submitClaimMessage({
         claimId: activeClaim.claim_id,
         sessionId: activeSessionId,
@@ -2346,6 +2364,17 @@ function App() {
       })
       const currentRevision = currentTurnRevision(turn)
       const historicalTurn = turn.current_claim && currentRevision > turn.claim_revision
+      if (!ownsView()) {
+        // The claimant left this claim while the reply was on its way. Keep the
+        // claim list current, but never write this reply into the screen they are on.
+        rememberClaimInHistory(turn.current_claim || {
+          ...activeClaim,
+          revision: currentRevision,
+          customer_next_step: turn.decision?.customer_next_step || activeClaim.customer_next_step,
+          updated_at: turn.claimant_message?.created_at || activeClaim.updated_at,
+        })
+        return
+      }
       // Historical actions are evidence, not permission to act on today's offer.
       const responseAgentMessage = historicalTurn && turn.agent_message
         ? { ...turn.agent_message, message_actions: [] }
@@ -2421,6 +2450,10 @@ function App() {
       }
       setStatus('idle')
     } catch (requestError) {
+      if (!ownsView()) {
+        setError('A message you sent before leaving a claim could not be confirmed. Open that claim from your claims to check it and send it again if needed.')
+        return
+      }
       if (isAssistanceReply) setAssistanceReplyReview(null)
       activeTurnProgressRef.current = null
       setActiveTurnProgress(null)
@@ -2462,6 +2495,8 @@ function App() {
       } else {
         showError(requestError)
       }
+    } finally {
+      sendFlow.current = transitionTurn(sendFlow.current, flowTurnId, TurnEvent.SETTLED)
     }
   }
 
@@ -3486,20 +3521,45 @@ function App() {
   }
 
   function returnToLanding() {
-    const hasUnsentComposerState = Boolean(
-      draft.trim()
-      || queuedText.trim()
-      || attachments.length > 0
-      || failedMessage?.text
-      || failedMessage?.attachments?.length > 0
-      || pendingMessage?.text
-      || pendingMessage?.attachments?.length > 0,
-    )
+    const sendPhase = viewTurnPhase(sendFlow.current)
+    // A message that is being sent is not discarded by leaving, so only a new draft
+    // counts as unsent while one is in flight.
+    const hasUnsentComposerState = sendPhase
+      ? Boolean(draft.trim() || queuedText.trim())
+      : Boolean(
+        draft.trim()
+        || queuedText.trim()
+        || attachments.length > 0
+        || failedMessage?.text
+        || failedMessage?.attachments?.length > 0
+        || pendingMessage?.text
+        || pendingMessage?.attachments?.length > 0,
+      )
     if (
       hasUnsentComposerState
       && typeof globalThis.confirm === 'function'
       && !globalThis.confirm('You have an unsent message or selected files. Leave this claim and discard them?')
     ) return
+    if (sendPhase === TurnPhase.PREPARING) {
+      // The claim or its files are still being prepared; leave once the message is
+      // submitted so neither is dropped half-way.
+      sendFlow.current = transitionTurn(
+        sendFlow.current,
+        sendFlow.current.viewTurnId,
+        TurnEvent.LEAVE_REQUESTED,
+      )
+      return
+    }
+    if (sendPhase === TurnPhase.LEAVE_REQUESTED) return
+    if (sendPhase === TurnPhase.SUBMITTED) {
+      sendFlow.current = transitionTurn(
+        sendFlow.current,
+        sendFlow.current.viewTurnId,
+        TurnEvent.LEFT_FOR_HOME,
+      )
+      leaveConversationForHome()
+      return
+    }
     clearComposerAttachments()
     pendingSubmission.current = null
     setDraft('')
@@ -3510,6 +3570,12 @@ function App() {
     setWorkspaceView('chat')
     setMobileView('chat')
     startNewChat()
+  }
+
+  function leaveConversationForHome() {
+    // The session still has a turn in flight, so it is not paused here; see
+    // claimantFlow.js for the open session-pause decision.
+    resetForNewChat(false)
   }
 
   function openProfileSection(section) {
@@ -3851,7 +3917,8 @@ function App() {
                 ? 'Back to Claim details'
                 : workspaceView === 'chat' ? 'Back to start' : 'Back to previous page'}
               onClick={handleWorkspaceHeaderBack}
-              disabled={isBusy}
+              // Sending is the one busy state the send flow lets the claimant leave.
+              disabled={isBusy && !['sending', 'starting'].includes(status)}
             >
               <span aria-hidden="true">←</span>
               <span>Back</span>
