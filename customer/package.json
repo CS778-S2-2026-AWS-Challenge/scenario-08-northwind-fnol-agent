@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:ratchets": "node scripts/check-ratchets.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

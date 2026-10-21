@@ -1,0 +1,16 @@
+{
+  "appJsxLines": 4905,
+  "appJsxUseState": 59,
+  "componentsImportingApi": [
+    "components/ClaimAutoFillPanel.jsx",
+    "components/EvidenceHistory.jsx"
+  ],
+  "hardCodedColours": {
+    "App.css": 272,
+    "App.jsx": 1,
+    "components/ClaimHistory.jsx": 1,
+    "components/ClaimReviewPanel.css": 5,
+    "externalServiceCopy.js": 1,
+    "styles/claimant-tidy.css": 1
+  }
+}
