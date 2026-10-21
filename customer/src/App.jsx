@@ -3509,11 +3509,7 @@ function App() {
     setPendingMessage(null)
     setWorkspaceView('chat')
     setMobileView('chat')
-    setWorkspaceActive(false)
-    setPageState('home')
-    if (globalThis.location?.pathname !== '/') {
-      globalThis.history?.pushState({ northwindRoute: 'home' }, '', '/')
-    }
+    startNewChat()
   }
 
   function openProfileSection(section) {

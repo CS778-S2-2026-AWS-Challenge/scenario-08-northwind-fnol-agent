@@ -376,12 +376,16 @@ export function ClaimNextStepsPanel({
     <div className="next-steps-panel">
       {!requirements.available ? (
         <p className="next-steps-empty">Your next steps will appear here as the Agent understands your claim.</p>
+      ) : tasks.length === 0 && !requirements.ready ? (
+        <p className="next-steps-empty" role="status">
+          Northwind is checking which claim details are still needed.
+        </p>
       ) : tasks.length === 0 ? (
         <div className="next-steps-complete" role="status">
           <span aria-hidden="true">✓</span>
           <div>
-            <strong>All required details are complete.</strong>
-            <p>There is nothing else to add right now.</p>
+            <strong>Required claim details for this stage are complete.</strong>
+            <p>Continue with the next step above.</p>
           </div>
         </div>
       ) : (

@@ -495,7 +495,17 @@ def recompute_progress(
     state = (
         WorkflowState.READY_FOR_NEXT if evaluation.requirements.ready else WorkflowState.COLLECTING
     )
-    return state, proposed_next_step or next_requirement_step(evaluation.requirements)
+    next_step = proposed_next_step
+    if (
+        evaluation.requirements.ready
+        and next_step is not None
+        and next_step.status == 'more_information_needed'
+    ):
+        # A model question is proposed against the pre-turn requirements. Facts
+        # applied by that same turn can satisfy the question before progress is
+        # persisted, so the post-turn requirement ledger must win.
+        next_step = None
+    return state, next_step or next_requirement_step(evaluation.requirements)
 
 
 def model_turn_next_step(requirements: Any, *, action: str) -> CustomerNextStep:

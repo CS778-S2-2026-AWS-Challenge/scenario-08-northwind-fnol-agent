@@ -5,7 +5,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.domain.models import CustomerNextStep, ResponsibleParty
 from backend.repositories.fixture import FixtureRepository
+from backend.services.external_services import claimant_current_action_projection
 from tests.journey_v8_support import Journey, V8JourneyProvider, envelope, fact
 
 STILL_HELPING = 'I still need help.'
@@ -69,9 +71,43 @@ def test_model_turn_after_the_budget_gets_the_same_next_step_as_with_budget_left
 
     assert len(agent_turn_provider.gateway.requests) == 11
     assert after_budget['dynamic_form']['requirements']['ready'] is True
+    assert after_budget['decision']['customer_next_step'] == {
+        'status': 'ready_to_create',
+        'summary': 'Your confirmed report is ready for claim creation.',
+        'responsible_party': 'claimant',
+        'expected_by': None,
+        'can_resume': True,
+        'required_items': [],
+    }
     assert after_budget['decision']['customer_next_step']['status'] != 'question_budget_reached'
     assert after_budget['agent_message']['content']['text'] == FOLLOW_UP
     assert _outcome(spent, after_budget) == _outcome(baseline, with_budget_left)
+    assert spent.view()['primary_action']['action_code'] == 'claimant.review_payout_contact'
+    assert spent.view()['primary_action']['available'] is True
     stored = repository.get_session(spent.claim_id, spent.session_id, 'cus_8f41a2c90d7e463b')
     assert stored is not None
     assert stored.post_session_follow_up_required is False
+
+    claim = repository.get_claim(spent.claim_id, 'cus_8f41a2c90d7e463b')
+    assert claim is not None
+    stale_claim = claim.model_copy(
+        update={
+            'customer_next_step': CustomerNextStep(
+                status='more_information_needed',
+                summary='What is the registration number, if you have it?',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=['vehicle.registration'],
+            )
+        }
+    )
+
+    _external_action, recovered_step, recovered_action = claimant_current_action_projection(
+        repository,
+        stale_claim,
+        agreement_accepted=False,
+    )
+
+    assert recovered_step.status == 'ready_to_create'
+    assert recovered_step.required_items == []
+    assert recovered_action.action_code == 'claimant.review_payout_contact'
+    assert recovered_action.available is True

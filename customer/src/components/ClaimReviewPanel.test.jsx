@@ -234,7 +234,7 @@ describe('ClaimNextStepsPanel', () => {
     expect(props.beginEdit).toHaveBeenCalledWith('incident.occurred_at', undefined)
   })
 
-  it('says when nothing is still needed, without repeating what is known', () => {
+  it('marks only the current Claim-details stage complete when requirements are ready', () => {
     const props = panelProps({
       form: {
         'claim.product_family': { value: 'motor', status: 'confirmed', source: 'claimant' },
@@ -249,9 +249,27 @@ describe('ClaimNextStepsPanel', () => {
     })
     render(<ClaimNextStepsPanel {...props} />)
 
-    expect(screen.getByText('All required details are complete.')).toBeVisible()
+    expect(screen.getByText('Required claim details for this stage are complete.')).toBeVisible()
+    expect(screen.getByText('Continue with the next step above.')).toBeVisible()
     expect(screen.queryByText('Completed')).not.toBeInTheDocument()
     expect(screen.queryByText('Claim type')).not.toBeInTheDocument()
+  })
+
+  it('does not claim completion when no tasks are projected but requirements are not ready', () => {
+    const props = panelProps({
+      dynamicForm: {
+        requirements: {
+          ready: false,
+          missing_required_now: [],
+          pending_later: [],
+        },
+      },
+    })
+    render(<ClaimNextStepsPanel {...props} />)
+
+    expect(screen.getByRole('status'))
+      .toHaveTextContent('Northwind is checking which claim details are still needed.')
+    expect(screen.queryByText(/details.*complete/i)).not.toBeInTheDocument()
   })
 })
 
